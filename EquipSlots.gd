@@ -1,51 +1,46 @@
 extends RefCounted
-## 槽位 / 物品内在 tag 的单一数据源——授权侧（物品编辑器）用；运行时装备资格(can_equip)待模型敲定+盾/副手机制要做时再接。
-## 关键区分（用户校准 2026-06-30）：
-##  · 槽位 = 放置位置（main_hand/off_hand/helmet/armor/accessory_1/2），**不是物品 tag**。
-##    main_hand/off_hand 都能放任意单手武器；双手武器同时占两个；off_hand 还能放盾。
-##  · 物品内在 tag = 它“是什么”：武器→持握(one_handed/two_handed，天生武器无)+类型(weapon_spear…)+innate；
-##    防具→helmet/armor；饰品→accessory。
-##  · main_hand/off_hand **不作物品 tag**（旧设计失误）。“强化副手武器/副手削弱”等按【槽位占用】判
-##    （读 equipment["off_hand"]），不靠物品 tag——内在属性用 tag、位置相关查槽位。
+## 槽位 / 物品内在 tag 的单一数据源——授权侧（物品编辑器）+ 运行时装备资格(Unit.can_equip/equip)共用。
+## 关键区分（用户校准）：
+##  · 槽位/部位 = 放置位置（main_hand/off_hand/head/body/accessory_1/2），**不是物品 tag**。
+##    部位用「身体部位」命名(head/body)，与 stat「armor/armor_max」(护甲值)区分开。
+##  · 物品内在 tag = 它“是什么”：武器→持握(one/two_handed，天生无)+类型/种类；防具→head/body(部位)；饰品→accessory。
+##  · main_hand/off_hand 等 **不作物品 tag**；位置类效果(强化副手)按【槽位占用】判，不靠物品 tag。
 ## 用法：const EquipSlots := preload("res://EquipSlots.gd")。纯静态、无状态。
 
-const SLOTS := ["main_hand", "off_hand", "helmet", "armor", "accessory_1", "accessory_2"]
+const SLOTS := ["main_hand", "off_hand", "head", "body", "accessory_1", "accessory_2"]
 const SLOT_CN := {
-	"main_hand": "主手", "off_hand": "副手", "helmet": "头盔", "armor": "身甲",
+	"main_hand": "主手", "off_hand": "副手", "head": "头部", "body": "身体",
 	"accessory_1": "饰品1", "accessory_2": "饰品2",
 }
-# 类别（物品编辑器按类别给槽下拉）→ 该类可选的具体槽。
-# 武器的“槽”= 默认放置位置（单手实际可装主手/副手任一；双手占两个）；防具/饰品的槽即其归属。
+# 类别（kind，物品编辑器按类别给槽下拉）→ 该类可选的具体槽/部位。
 const SLOTS_BY_KIND := {
 	"weapon": ["main_hand", "off_hand"],
-	"armor": ["helmet", "armor"],
+	"armor": ["head", "body"],
 	"accessory": ["accessory_1", "accessory_2"],
 }
-# 编辑器自动管理、不放进自由标签的 tag（由 类别/双手/天生 控件派生）。
-# 含旧失误的 main_hand/off_hand：若物品 tag 里残留则剥离、不再加回。
-const MANAGED_TAGS := ["one_handed", "two_handed", "helmet", "armor", "accessory", "main_hand", "off_hand"]
+# 编辑器自动管理、不进自由标签的 tag（含旧失误的 main_hand/off_hand）。
+const MANAGED_TAGS := ["one_handed", "two_handed", "head", "body", "accessory", "main_hand", "off_hand"]
 
-# 物品的「内在 tag」（编辑器按 类别/双手/天生 自动写入 tags）。
-# 武器 → 持握：天生=无 / 双手=two_handed / 单手=one_handed；防具 → 槽(helmet/armor)；饰品 → accessory。
+# 物品内在 tag（编辑器按 类别/双手/天生 派生）。武器→持握；防具→部位(head/body)；饰品→accessory。
 static func intrinsic_tag(kind: String, slot: String, two_handed: bool, innate: bool) -> String:
 	match kind:
 		"weapon":
 			if innate:
-				return ""   # 天生武器无单/双手词条
+				return ""
 			return "two_handed" if two_handed else "one_handed"
 		"armor":
-			return slot     # "helmet" / "armor"
+			return slot     # "head" / "body"
 		"accessory":
 			return "accessory"
 	return ""
 
-# 装备资格相关的内在 tag（判定物品够格进哪个槽）。
-const ELIGIBILITY_TAGS := ["one_handed", "two_handed", "shield", "helmet", "armor", "accessory"]
+# 装备资格相关的内在 tag。
+const ELIGIBILITY_TAGS := ["one_handed", "two_handed", "shield", "head", "body", "accessory"]
 
 # 物品（按内在 tag）能否进某槽——tag 驱动装备资格。
-#  · innate 天生武器：豁免 tag 资格（按其 slot 字段放置、永不卸下）。
-#  · 无任何资格 tag 的旧物品（未迁移）：回退比 slot 字段（双手字段也认）。
-#  · 否则严格判：main_hand=单/双手；off_hand=单手/盾（双手经主手连带占，不直接放副手）；helmet/armor/accessory=对应 tag。
+#  · innate 天生：豁免 tag 资格（按其 slot 字段放置、永不卸下）。
+#  · 无任何资格 tag 的旧物品：回退比 slot 字段。
+#  · 否则严格判：main_hand=单/双手；off_hand=单手/盾；head/body/accessory=对应部位 tag。
 static func accepts(slot: String, item: Dictionary) -> bool:
 	if item.get("innate", false):
 		return true
@@ -60,8 +55,8 @@ static func accepts(slot: String, item: Dictionary) -> bool:
 	match slot:
 		"main_hand": return tags.has("one_handed") or tags.has("two_handed")
 		"off_hand": return tags.has("one_handed") or tags.has("shield")
-		"helmet": return tags.has("helmet")
-		"armor": return tags.has("armor")
+		"head": return tags.has("head")
+		"body": return tags.has("body")
 		"accessory_1", "accessory_2": return tags.has("accessory")
 	return false
 

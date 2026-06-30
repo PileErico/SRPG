@@ -2,23 +2,46 @@
   {
     "icon": "res://icons/Items/Armors/Special_Desmond_1.png",
     "id": "Desmond_Head",
-    "mods": [
-      {
-        "op": "flat",
-        "stat": "atk",
-        "value": 0
-      }
-    ],
-    "name": "狼人（头）",
+    "mods": [],
+    "name": "狼人的头",
     "requires": [
       "char_desmond"
     ],
-    "slot": "helmet",
+    "slot": "head",
     "tags": [
       "special",
-      "helmet",
-      "armor",
-      "innate"
+      "head",
+      "innate_body"
+    ]
+  },
+  {
+    "icon": "res://icons/Items/Armors/Special_Desmond_2.png",
+    "id": "Desmond_Body",
+    "mods": [
+      {
+        "op": "pct",
+        "stat": "HP_max",
+        "value": 200.0
+      },
+      {
+        "op": "pct",
+        "stat": "res_phys",
+        "value": 25.0
+      },
+      {
+        "op": "pct",
+        "stat": "res_fire",
+        "value": -25.0
+      }
+    ],
+    "name": "狼人的身体",
+    "requires": [],
+    "slot": "body",
+    "tags": [
+      "special",
+      "body",
+      "innate_body",
+      "char_desmond"
     ]
   }
 ]

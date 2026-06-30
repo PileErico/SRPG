@@ -52,7 +52,7 @@ static func kind_of(item) -> String:
 		slot = str(item.get("slot", ""))
 	match slot:
 		"main_hand", "off_hand": return "weapon"
-		"helmet", "armor": return "armor"
+		"head", "body": return "armor"
 		"accessory_1", "accessory_2": return "accessory"
 	return "weapon"
 

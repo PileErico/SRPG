@@ -76,8 +76,8 @@
 
   {"id": "bleeding", "cn": "流血类", "cat": "effect", "status": "in_use", "desc": "回合末按最大生命%掉血；可被清流血类技能整批移除"},
 
-  {"id": "helmet", "cn": "头盔", "cat": "gear_type", "status": "in_use"},
-  {"id": "armor", "cn": "身甲", "cat": "gear_type", "status": "in_use", "desc": "身体护甲（与 KIND_CN「防具」区分；这是部位/槽位）"},
+  {"id": "head", "cn": "头部", "cat": "gear_type", "status": "in_use", "desc": "部位：头（戴头盔等）"},
+  {"id": "body", "cn": "身体", "cat": "gear_type", "status": "in_use", "desc": "部位：身体（穿身甲等；与 stat armor/armor_max 区分）"},
   {"id": "accessory", "cn": "饰品", "cat": "gear_type", "status": "in_use"},
 
   {"id": "light_armor", "cn": "轻甲", "cat": "armor_weight", "status": "planned"},

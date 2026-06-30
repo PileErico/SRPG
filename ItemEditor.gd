@@ -41,6 +41,7 @@ var _current_kind: String = ""
 var _is_new: bool = false
 var _free_tags: Array = []
 var _atk_tags: Array = []
+var _requires: Array = []   # 装备需求 tag（装备者须全部具备，如 char_desmond）
 
 # —— 控件 ——
 var _list: ItemList
@@ -260,8 +261,8 @@ func _skeleton(kind: String) -> Dictionary:
 				"attack": {"name": "普通攻击", "icon": "", "coeff": 1.0, "range": 1,
 					"ap_cost": 1, "damage_kind": "physical", "tags": ["single_target"]}}
 		"armor":
-			return {"id": "", "name": "新防具", "slot": "armor", "icon": "",
-				"tags": ["common", "armor", "medium_armor"], "requires": [],
+			return {"id": "", "name": "新防具", "slot": "body", "icon": "",
+				"tags": ["common", "body", "medium_armor"], "requires": [],
 				"mods": [{"stat": "armor_max", "op": "flat", "value": 10}]}
 		_:
 			return {"id": "", "name": "新饰品", "slot": "accessory_1", "icon": "",
@@ -274,6 +275,7 @@ func _clear_form() -> void:
 	_mod_rows.clear()
 	_free_tags = []
 	_atk_tags = []
+	_requires = []
 
 
 func _build_form() -> void:
@@ -296,6 +298,11 @@ func _build_form() -> void:
 		_select_meta(_w_gear, _tag_in_cat(_current.get("tags", []), "gear_type"))
 		_w_weight = _cat_dropdown_inline("防具种类", "armor_weight", true)
 		_select_meta(_w_weight, _tag_in_cat(_current.get("tags", []), "armor_weight"))
+	# 装备需求 requires（所有类别；装备者须全部具备，如 char_desmond）
+	_requires = []
+	for r in _current.get("requires", []):
+		_requires.append(str(r))
+	_build_free_tag_ui("装备需求 requires", _requires)
 	# 其他标签（自由）
 	_free_tags = _collect_free_from(_current.get("tags", []))
 	_build_free_tag_ui("其他标签", _free_tags)
@@ -695,7 +702,7 @@ func _collect() -> Dictionary:
 				tags.append(g)
 				slot = g
 			else:
-				slot = "armor"
+				slot = "body"
 			var wt: String = str(_w_weight.get_selected_metadata())
 			if wt != "":
 				tags.append(wt)
@@ -708,6 +715,7 @@ func _collect() -> Dictionary:
 			tags.append(t)
 	out["tags"] = tags
 	out["slot"] = slot
+	out["requires"] = _requires.duplicate()
 
 	var mods := []
 	for e in _mod_rows:

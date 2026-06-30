@@ -848,10 +848,10 @@ func _build_stats(right: VBoxContainer, u) -> void:
 # id 用 set_meta 存着，将来绑真实装备直接按 slot_id 取。
 const EQUIP_SLOTS := [
 	{"id": "main_hand", "label": "主手"},
-	{"id": "helmet", "label": "头盔"},
+	{"id": "head", "label": "头部"},
 	{"id": "accessory_1", "label": "饰品"},
 	{"id": "off_hand", "label": "副手"},
-	{"id": "armor", "label": "防具"},
+	{"id": "body", "label": "身体"},
 	{"id": "accessory_2", "label": "饰品"},
 ]
 
