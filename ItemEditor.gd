@@ -299,14 +299,6 @@ func _build_form() -> void:
 	_w_id = _add_line(_form, "id（唯一主键）", str(_current.get("id", "")))
 	_w_name = _add_line(_form, "名字", str(_current.get("name", "")))
 	_build_icon_row()
-	# 稀有度
-	_w_rarity = OptionButton.new()
-	for r in _rarities:
-		_w_rarity.add_item("%s（%s）" % [TagDB.cn(r), r])
-		_w_rarity.set_item_metadata(_w_rarity.item_count - 1, r)
-	_select_meta(_w_rarity, _rarity_of(_current))
-	_w_rarity.item_selected.connect(func(_i): _refresh_preview())
-	_form.add_child(_field_row("稀有度", _w_rarity))
 
 	# 武器：天生勾选 + 天生槽位 + 攻击
 	if _current_kind == "weapon":
@@ -323,7 +315,18 @@ func _build_form() -> void:
 		_w_innate.toggled.connect(func(_v): _on_innate_toggled())
 		_build_attack_form()
 
-	# 修正 mods
+	# 标签区（稀有度本身也是 tag → 作为本区块第一行；类型下拉 + 其他标签）
+	_form.add_child(_section_label("标签"))
+	_w_rarity = OptionButton.new()
+	for r in _rarities:
+		_w_rarity.add_item("%s（%s）" % [TagDB.cn(r), r])
+		_w_rarity.set_item_metadata(_w_rarity.item_count - 1, r)
+	_select_meta(_w_rarity, _rarity_of(_current))
+	_w_rarity.item_selected.connect(func(_i): _refresh_preview())
+	_form.add_child(_field_row("稀有度", _w_rarity))
+	_build_tag_rows()
+
+	# 修正 mods（放在「标签」之后）
 	_form.add_child(_section_label("修正 mods（每条加在装备者属性上）"))
 	_mods_box = VBoxContainer.new()
 	_mods_box.add_theme_constant_override("separation", 4)
@@ -337,10 +340,6 @@ func _build_form() -> void:
 		_add_mod_row("atk", "flat", 0.0)
 		_refresh_preview())
 	_form.add_child(addmod)
-
-	# 标签区（统一放底部）
-	_form.add_child(_section_label("标签"))
-	_build_tag_rows()
 
 	_on_innate_toggled()   # 按天生状态显隐 握持/天生槽位
 	_refresh_preview()
