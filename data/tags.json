@@ -19,11 +19,11 @@
   {"id": "blocks_sight", "cn": "阻挡视线", "cat": "terrain", "status": "in_use"},
   {"id": "deep", "cn": "深水", "cat": "terrain", "status": "in_use"},
 
-  {"id": "one_handed", "cn": "单手", "cat": "weapon_hold", "status": "in_use"},
-  {"id": "two_handed", "cn": "双手", "cat": "weapon_hold", "status": "in_use", "desc": "同时占用主手+副手；副手显示同图标+灰滤镜"},
-  {"id": "melee", "cn": "近战", "cat": "weapon_hold", "status": "in_use"},
-  {"id": "ranged", "cn": "远程", "cat": "weapon_hold", "status": "planned"},
-  {"id": "thrown", "cn": "投掷", "cat": "weapon_hold", "status": "planned"},
+  {"id": "one_handed", "cn": "单手", "cat": "handedness", "status": "in_use"},
+  {"id": "two_handed", "cn": "双手", "cat": "handedness", "status": "in_use", "desc": "同时占用主手+副手；副手显示同图标+灰滤镜"},
+  {"id": "melee", "cn": "近战", "cat": "weapon_range", "status": "in_use"},
+  {"id": "ranged", "cn": "远程", "cat": "weapon_range", "status": "planned"},
+  {"id": "thrown", "cn": "投掷", "cat": "weapon_range", "status": "planned"},
 
   {"id": "weapon_spear", "cn": "矛", "cat": "weapon_type", "status": "in_use"},
   {"id": "weapon_sword", "cn": "剑", "cat": "weapon_type", "status": "planned"},
