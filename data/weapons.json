@@ -9,7 +9,7 @@
       "ap_cost": 1.0,
       "coeff": 0.85,
       "damage_kind": "physical",
-      "icon": "res://icons/Items/Weapons/Special_Veiken_Skill1.png",
+      "icon": "res://icons/Skills/WeaponSkills/Special_Veiken_Skill1.png",
       "name": "突刺·龙枪",
       "range": 2.0,
       "tags": [
@@ -57,7 +57,7 @@
       },
       "coeff": 1.0,
       "damage_kind": "physical",
-      "icon": "res://icons/Items/Weapons/Special_Belooz_Skill_1.png",
+      "icon": "res://icons/Skills/WeaponSkills/Special_Belooz_Skill_1.png",
       "inflict": {
         "chance": 30.0,
         "dot_pct_max_hp": 5.0,
@@ -107,7 +107,7 @@
       },
       "coeff": 1.0,
       "damage_kind": "physical",
-      "icon": "res://icons/Items/Weapons/Special_Belooz_Skill_2.png",
+      "icon": "res://icons/Skills/WeaponSkills/Special_Belooz_Skill_2.png",
       "name": "抓取（比路兹）",
       "prefer": "air",
       "range": 1.0,
@@ -139,7 +139,7 @@
       "ap_cost": 1,
       "coeff": 1,
       "damage_kind": "physical",
-      "icon": "res://icons/Items/Weapons/Special_Desmond_skill_1.png",
+      "icon": "res://icons/Skills/WeaponSkills/Special_Desmond_skill_1.png",
       "name": "撕裂（戴斯蒙）",
       "range": 1,
       "tags": [

@@ -16,13 +16,13 @@ const MapIO := preload("res://MapIO.gd")   # 地图读 / 写单一入口（与 M
 # 战斗地图：默认与地图编辑器共享同一张图（编辑器改 → 这里读到）。
 # 实际打开哪张：优先 SandboxConfig.map_path（选地图界面传入），空则用此默认；缺失/损坏回退全草原。
 const MAP_PATH := "res://maps/sandbox.json"
-const PLAYER_PORTRAIT := "res://icons/Character_Icons/Plyer_Special_Belooz.png"  # 玩家立绘（角色状态页大图）
+const PLAYER_PORTRAIT := "res://icons/Characters/Plyer_Special_Belooz.png"  # 玩家立绘（角色状态页大图）
 const PLAYER_ICON := "res://icons/Unit_Icons/Player_Special_Belooz.png"          # 玩家棋子图标（token）
-const ENEMY_PORTRAIT := "res://icons/Character_Icons/Empire_Infantry.png"        # 帝国步兵 立绘
+const ENEMY_PORTRAIT := "res://icons/Characters/Empire_Infantry.png"        # 帝国步兵 立绘
 const ENEMY_ICON := "res://icons/Unit_Icons/Empire_Infantry.png"                 # 帝国步兵 棋子图标（修正：Unit_Icons 复数）
-const ENEMY2_PORTRAIT := "res://icons/Character_Icons/Empire_Light_Infantry.png" # 帝国轻步兵 立绘（empire 开头 = 敌人）
+const ENEMY2_PORTRAIT := "res://icons/Characters/Empire_Light_Infantry.png" # 帝国轻步兵 立绘（empire 开头 = 敌人）
 const ENEMY2_ICON := "res://icons/Unit_Icons/Empire_Light_Infantry.png"          # 帝国轻步兵 棋子图标
-const ALLY_PORTRAIT := "res://icons/Character_Icons/Plyer_Special_Veiken.png"    # 友方维肯 立绘
+const ALLY_PORTRAIT := "res://icons/Characters/Plyer_Special_Veiken.png"    # 友方维肯 立绘
 const ALLY_ICON := "res://icons/Unit_Icons/Player_Special_Veiken.png"            # 友方维肯 棋子图标
 const ALLY_SPAWN := Vector2i(6, 7)     # 友方出生点（挨着玩家）
 const DEFAULT_TERRAIN := "plain"
