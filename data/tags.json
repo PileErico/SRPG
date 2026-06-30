@@ -33,6 +33,10 @@
   {"id": "weapon_claw", "cn": "爪", "cat": "weapon_type", "status": "in_use"},
   {"id": "innate", "cn": "天生武器", "cat": "weapon_type", "status": "in_use", "desc": "豁免装备限制、永不卸下/缴械；无单/双手词条"},
 
+  {"id": "helmet", "cn": "头盔", "cat": "gear_type", "status": "in_use"},
+  {"id": "armor", "cn": "身甲", "cat": "gear_type", "status": "in_use", "desc": "身体护甲（与“防具”类别 KIND_CN 区分；身甲是该槽位/类型）"},
+  {"id": "accessory", "cn": "饰品", "cat": "gear_type", "status": "in_use"},
+
   {"id": "skill_spear", "cn": "矛技能", "cat": "skill_type", "status": "in_use"},
   {"id": "skill_claw", "cn": "爪技能", "cat": "skill_type", "status": "in_use"},
   {"id": "skill_sword", "cn": "剑技能", "cat": "skill_type", "status": "planned"},
