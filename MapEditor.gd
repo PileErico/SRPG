@@ -100,9 +100,13 @@ var canvas
 var brush_buttons := []
 # —— 图层切换 + 区域工具（左侧栏）——
 # 地形数据编辑（选中笔刷的战斗属性 → 写回 terrains.json，全局共用）
-const TERR_PASS_OPTS := [["all", "任何单位"], ["none", "不可通行"], ["tag", "特定tag(只读)"]]
+const TERR_PASS_OPTS := [["all", "任何单位"], ["none", "不可通行"], ["tag", "限定tag"]]
+# 移动型 tag（passable_by 限定可进哪些；如深水仅 flying）。与 docs/标签词典 的移动型一致。
+const PASS_TAGS := [["ground", "地面"], ["flying", "飞行"], ["spectral", "灵体"]]
 var _terr_cost_spin: SpinBox
 var _terr_pass_opt: OptionButton
+var _terr_pass_tag_row: HBoxContainer   # 通行=限定tag 时显示的勾选行
+var _terr_pass_checks := {}             # tag → CheckBox
 var _terr_data_loading := false
 var _terrain_panel: Control            # 地形笔刷区（当前层=地形时显示）
 var _region_panel: Control             # 区域工具区（当前层=区域时显示）
@@ -428,6 +432,18 @@ func _build_terrain_brushes() -> Control:
 	_terr_pass_opt.item_selected.connect(_on_terr_pass_changed)
 	prow.add_child(_terr_pass_opt)
 	box.add_child(prow)
+	# 通行=限定tag 时：勾选哪些移动型可进（如深水仅勾「飞行」）
+	_terr_pass_tag_row = HBoxContainer.new()
+	_terr_pass_tag_row.add_child(_make_label("可进"))
+	_terr_pass_checks = {}
+	for pair in PASS_TAGS:
+		var cb := CheckBox.new()
+		cb.text = str(pair[1])
+		cb.toggled.connect(func(_on: bool): _on_terr_pass_tag_toggled())
+		_terr_pass_tag_row.add_child(cb)
+		_terr_pass_checks[str(pair[0])] = cb
+	_terr_pass_tag_row.visible = false
+	box.add_child(_terr_pass_tag_row)
 	var save_b := Button.new()
 	save_b.text = "保存到 terrains.json"
 	save_b.tooltip_text = "把改过的地形战斗属性写回 terrains.json（影响所有地图；编辑器与战斗共用同一份）"
@@ -447,10 +463,15 @@ func _refresh_terrain_data() -> void:
 	var pb = mv.get("passable_by", "all")
 	if typeof(pb) == TYPE_STRING and pb == "all":
 		_terr_pass_opt.select(0)
+		_terr_pass_tag_row.visible = false
 	elif typeof(pb) == TYPE_STRING and pb == "none":
 		_terr_pass_opt.select(1)
-	else:
-		_terr_pass_opt.select(2)   # tag 列表 = 特定（本版只读）
+		_terr_pass_tag_row.visible = false
+	else:   # 数组 = 限定tag
+		_terr_pass_opt.select(2)
+		_terr_pass_tag_row.visible = true
+		for pair in PASS_TAGS:
+			_terr_pass_checks[str(pair[0])].button_pressed = (typeof(pb) == TYPE_ARRAY and pb.has(str(pair[0])))
 	_terr_data_loading = false
 
 # 取选中笔刷的 move 块（live 引用，没有则建）
@@ -471,10 +492,36 @@ func _on_terr_pass_changed(idx: int) -> void:
 		return
 	if idx == 0:
 		_terr_move()["passable_by"] = "all"
+		_terr_pass_tag_row.visible = false
+		set_status("「%s」通行=任何单位（点保存写回）" % str(PALETTE[brush_index].label))
 	elif idx == 1:
 		_terr_move()["passable_by"] = "none"
-	if idx != 2:   # 「特定tag」保留原值（tag 列表编辑＝future）
-		set_status("「%s」通行=%s（点保存写回）" % [str(PALETTE[brush_index].label), str(TERR_PASS_OPTS[idx][1])])
+		_terr_pass_tag_row.visible = false
+		set_status("「%s」通行=不可通行（点保存写回）" % str(PALETTE[brush_index].label))
+	else:   # 限定tag：切到数组形（非数组则初始全勾，用户取消以限制），显示勾选行
+		if typeof(_terr_move().get("passable_by")) != TYPE_ARRAY:
+			var all_tags := []
+			for pair in PASS_TAGS:
+				all_tags.append(str(pair[0]))
+			_terr_move()["passable_by"] = all_tags
+		_terr_pass_tag_row.visible = true
+		_terr_data_loading = true
+		var arr = _terr_move().get("passable_by", [])
+		for pair in PASS_TAGS:
+			_terr_pass_checks[str(pair[0])].button_pressed = (typeof(arr) == TYPE_ARRAY and arr.has(str(pair[0])))
+		_terr_data_loading = false
+		set_status("「%s」通行=限定tag：勾选可进的移动型（取消＝禁止该类）" % str(PALETTE[brush_index].label))
+
+# 限定tag 勾选变化 → 从勾选项重建 passable_by 数组
+func _on_terr_pass_tag_toggled() -> void:
+	if _terr_data_loading or brush_index < 0 or brush_index >= PALETTE.size():
+		return
+	var arr := []
+	for pair in PASS_TAGS:
+		if _terr_pass_checks[str(pair[0])].button_pressed:
+			arr.append(str(pair[0]))
+	_terr_move()["passable_by"] = arr
+	set_status("「%s」通行=限定[%s]（点保存写回）" % [str(PALETTE[brush_index].label), ", ".join(arr)])
 
 func _on_save_terrain_data() -> void:
 	if TerrainDB.save():
