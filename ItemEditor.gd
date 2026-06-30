@@ -51,7 +51,8 @@ var _is_new: bool = false
 var _list: ItemList
 var _list_ids: Array = []          # 与列表行一一对应的 id
 var _msg: Label
-var _form: VBoxContainer           # 右侧表单容器（按类别重建）
+var _form: VBoxContainer           # 中间表单容器（按类别重建）
+var _preview: VBoxContainer        # 最右侧即时预览（成品 tooltip，随编辑刷新）
 var _save_btn: Button
 var _del_btn: Button
 
@@ -117,6 +118,13 @@ func _ready() -> void:
 
 	split.add_child(_build_left_pane())
 
+	# 右侧 = 表单 | 即时预览 两栏
+	var right_split := HSplitContainer.new()
+	right_split.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	right_split.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	right_split.split_offset = 380
+	split.add_child(right_split)
+
 	var right_scroll := ScrollContainer.new()
 	right_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	right_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -124,7 +132,17 @@ func _ready() -> void:
 	_form.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_form.add_theme_constant_override("separation", 8)
 	right_scroll.add_child(_form)
-	split.add_child(right_scroll)
+	right_split.add_child(right_scroll)
+
+	# 即时预览栏
+	var prev_scroll := ScrollContainer.new()
+	prev_scroll.custom_minimum_size = Vector2(230, 0)
+	prev_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_preview = VBoxContainer.new()
+	_preview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_preview.add_theme_constant_override("separation", 6)
+	prev_scroll.add_child(_preview)
+	right_split.add_child(prev_scroll)
 
 	# 底栏：消息 + 保存
 	var bottom := HBoxContainer.new()
@@ -235,6 +253,174 @@ func _show_empty_form() -> void:
 	hint.text = "← 选左侧物品编辑，或点＋新建一件"
 	hint.add_theme_color_override("font_color", Color(0.6, 0.65, 0.72))
 	_form.add_child(hint)
+	_refresh_preview()
+
+
+# —— 即时预览（成品 tooltip，随编辑刷新；仿游戏 UnitStatusPanel._build_item_tooltip）——
+func _refresh_preview() -> void:
+	if _preview == null or not is_instance_valid(_preview):
+		return
+	for c in _preview.get_children():
+		c.free()   # 立即移除（避免同帧多次刷新时 queue_free 延迟导致堆叠）
+	var title := Label.new()
+	title.text = "预览（成品效果）"
+	title.add_theme_color_override("font_color", Color("#EBBC04"))
+	title.add_theme_font_size_override("font_size", 14)
+	_preview.add_child(title)
+	if _w_id == null or not is_instance_valid(_w_id):
+		var h := Label.new()
+		h.text = "（编辑物品时此处即时显示）"
+		h.add_theme_color_override("font_color", Color(0.55, 0.6, 0.66))
+		h.add_theme_font_size_override("font_size", 12)
+		_preview.add_child(h)
+		return
+	_preview.add_child(_render_item_tooltip(_collect()))
+
+
+# 把一件物品 dict 渲成 tooltip 面板（黑底 + 稀有边框）
+func _render_item_tooltip(item: Dictionary) -> Control:
+	var rc := _rarity_color(_rarity_of(item))
+	var panel := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0, 0, 0, 1)
+	sb.border_color = rc
+	sb.set_border_width_all(2)
+	sb.set_corner_radius_all(4)
+	sb.set_content_margin_all(10)
+	panel.add_theme_stylebox_override("panel", sb)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 4)
+	panel.add_child(v)
+
+	var nm := str(item.get("name", ""))
+	var name_l := Label.new()
+	name_l.text = nm if nm != "" else "（未命名）"
+	name_l.add_theme_font_size_override("font_size", 18)
+	name_l.add_theme_color_override("font_color", rc)
+	v.add_child(name_l)
+
+	var sub := Label.new()
+	sub.text = "%s · %s" % [KIND_CN.get(_current_kind, _current_kind), EquipSlots.SLOT_CN.get(str(item.get("slot", "")), str(item.get("slot", "")))]
+	sub.add_theme_font_size_override("font_size", 12)
+	sub.add_theme_color_override("font_color", Color(0.66, 0.7, 0.78))
+	v.add_child(sub)
+
+	_preview_tags(v, item.get("tags", []))
+
+	var req = item.get("requires", [])
+	if typeof(req) == TYPE_ARRAY and not req.is_empty():
+		var rn := []
+		for q in req:
+			rn.append(TagDB.cn(str(q)))
+		var rl := Label.new()
+		rl.text = "需求：" + "、".join(rn)
+		rl.add_theme_font_size_override("font_size", 12)
+		rl.add_theme_color_override("font_color", Color(0.95, 0.62, 0.5))
+		v.add_child(rl)
+
+	for m in item.get("mods", []):
+		if typeof(m) == TYPE_DICTIONARY:
+			v.add_child(_preview_mod_line(m))
+
+	var atk = item.get("attack", null)
+	if typeof(atk) == TYPE_DICTIONARY:
+		v.add_child(HSeparator.new())
+		var an := Label.new()
+		an.text = "攻击：" + str(atk.get("name", ""))
+		an.add_theme_font_size_override("font_size", 15)
+		an.add_theme_color_override("font_color", Color("#EBBC04"))
+		v.add_child(an)
+		_preview_tags(v, atk.get("tags", []))
+		v.add_child(_kv("距离", "%d" % int(atk.get("range", 1))))
+		v.add_child(_kv("伤害系数", "%d%%" % int(round(float(atk.get("coeff", 1.0)) * 100.0))))
+		v.add_child(_kv("AP 消耗", "%d" % int(atk.get("ap_cost", 1))))
+		v.add_child(_kv("伤害类型", str(atk.get("damage_kind", "physical"))))
+		var bspec = atk.get("bonus", null)
+		if typeof(bspec) == TYPE_DICTIONARY:
+			var ns := []
+			for s in bspec.get("stats", []):
+				ns.append(_stat_cn(str(s)))
+			v.add_child(_kv("伤害补正", "（%s）×%s" % ["＋".join(ns), _numfmt(float(bspec.get("mult", 0)))]))
+		var pen := float(atk.get("armor_pen", 0))
+		if pen > 0.0:
+			v.add_child(_kv("穿甲", "%d%%" % int(round(pen * 100.0))))
+		var inf = atk.get("inflict", null)
+		if typeof(inf) == TYPE_DICTIONARY:
+			v.add_child(_kv("异常", "%d%% 施加 %s" % [int(float(inf.get("chance", 0))), str(inf.get("name", ""))]))
+		var aoe = atk.get("aoe", null)
+		if typeof(aoe) == TYPE_DICTIONARY:
+			var ff := "（友伤）" if bool(aoe.get("friendly_fire", false)) else ""
+			v.add_child(_kv("范围", "%s·长%d%s" % [str(aoe.get("shape", "")), int(aoe.get("length", 1)), ff]))
+		var prefer := str(atk.get("prefer", ""))
+		if prefer == "ground" or prefer == "air":
+			var note := Label.new()
+			note.text = "地面优先" if prefer == "ground" else "天空优先"
+			note.add_theme_font_size_override("font_size", 12)
+			note.add_theme_color_override("font_color", Color(0.7, 0.85, 1.0))
+			v.add_child(note)
+	return panel
+
+
+func _preview_tags(parent: Node, tags) -> void:
+	if typeof(tags) != TYPE_ARRAY or tags.is_empty():
+		return
+	var flow := HFlowContainer.new()
+	flow.add_theme_constant_override("h_separation", 4)
+	flow.add_theme_constant_override("v_separation", 4)
+	for t in tags:
+		flow.add_child(_tag_chip(TagDB.cn(str(t))))
+	parent.add_child(flow)
+
+
+func _tag_chip(text: String) -> Control:
+	var p := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(1, 1, 1, 0.14)
+	sb.set_corner_radius_all(3)
+	sb.content_margin_left = 6
+	sb.content_margin_right = 6
+	sb.content_margin_top = 1
+	sb.content_margin_bottom = 1
+	p.add_theme_stylebox_override("panel", sb)
+	var l := Label.new()
+	l.text = text
+	l.add_theme_font_size_override("font_size", 12)
+	p.add_child(l)
+	return p
+
+
+# 一条 mod → 「属性中文 +值[%]」，正绿负红
+func _preview_mod_line(m) -> Label:
+	var l := Label.new()
+	var key := str(m.get("stat", ""))
+	var op := str(m.get("op", "flat"))
+	var val := float(m.get("value", 0))
+	var sfx := "%" if op == "pct" else ""
+	var sign := "+" if val >= 0 else ""
+	l.text = "%s %s%s%s" % [_stat_cn(key), sign, _numfmt(val), sfx]
+	l.add_theme_color_override("font_color", Color(0.45, 0.85, 0.5) if val >= 0 else Color(0.92, 0.5, 0.5))
+	return l
+
+
+func _kv(label: String, value: String) -> Label:
+	var l := Label.new()
+	l.text = "%s：%s" % [label, value]
+	l.add_theme_font_size_override("font_size", 13)
+	l.add_theme_color_override("font_color", Color(0.82, 0.85, 0.9))
+	return l
+
+
+# 属性键 → 中文（查 STAT_GROUPS，缺省回退键名）
+func _stat_cn(key: String) -> String:
+	for grp in STAT_GROUPS:
+		for s in grp[1]:
+			if str(s[0]) == key:
+				return str(s[1])
+	return key
+
+
+func _numfmt(v: float) -> String:
+	return str(int(v)) if v == floor(v) else str(v)
 
 
 func _update_slot_hint() -> void:
@@ -310,6 +496,7 @@ func _build_form() -> void:
 	_slot_hint.add_theme_font_size_override("font_size", 12)
 	_form.add_child(_slot_hint)
 	_w_slot.item_selected.connect(func(_i): _update_slot_hint())
+	_w_slot.item_selected.connect(func(_i): _refresh_preview())
 	_update_slot_hint()
 
 	# 稀有度
@@ -318,6 +505,7 @@ func _build_form() -> void:
 		_w_rarity.add_item("%s（%s）" % [TagDB.cn(r), r])
 		_w_rarity.set_item_metadata(_w_rarity.item_count - 1, r)
 	_select_meta(_w_rarity, _rarity_of(_current))
+	_w_rarity.item_selected.connect(func(_i): _refresh_preview())
 	_form.add_child(_field_row("稀有度", _w_rarity))
 
 	_w_icon = _add_line(_form, "立绘 icon（res://...png）", str(_current.get("icon", "")))
@@ -344,8 +532,11 @@ func _build_form() -> void:
 			_add_mod_row(str(m.get("stat", "atk")), str(m.get("op", "flat")), float(m.get("value", 0)))
 	var addmod := Button.new()
 	addmod.text = "＋ 添加修正"
-	addmod.pressed.connect(func(): _add_mod_row("atk", "flat", 0.0))
+	addmod.pressed.connect(func():
+		_add_mod_row("atk", "flat", 0.0)
+		_refresh_preview())
 	_form.add_child(addmod)
+	_refresh_preview()
 
 
 func _build_attack_form() -> void:
@@ -363,6 +554,7 @@ func _build_attack_form() -> void:
 		_w_atk_dmgkind.add_item(dk)
 		_w_atk_dmgkind.set_item_metadata(_w_atk_dmgkind.item_count - 1, dk)
 	_select_meta(_w_atk_dmgkind, str(atk.get("damage_kind", "physical")))
+	_w_atk_dmgkind.item_selected.connect(func(_i): _refresh_preview())
 	_form.add_child(_field_row("伤害类型 damage_kind", _w_atk_dmgkind))
 	_w_atk_tags = _add_line(_form, "攻击标签（逗号分隔）", _join(atk.get("tags", [])))
 	var note := Label.new()
@@ -381,6 +573,7 @@ func _add_mod_row(stat: String, op: String, value: float) -> void:
 	st.custom_minimum_size = Vector2(180, 0)
 	_fill_stat_options(st)
 	_select_meta(st, stat)
+	st.item_selected.connect(func(_i): _refresh_preview())
 	row.add_child(st)
 
 	var opb := OptionButton.new()
@@ -389,6 +582,7 @@ func _add_mod_row(stat: String, op: String, value: float) -> void:
 		opb.add_item(o[1])
 		opb.set_item_metadata(opb.item_count - 1, o[0])
 	_select_meta(opb, op)
+	opb.item_selected.connect(func(_i): _refresh_preview())
 	row.add_child(opb)
 
 	var val := SpinBox.new()
@@ -397,6 +591,7 @@ func _add_mod_row(stat: String, op: String, value: float) -> void:
 	val.step = 0.5
 	val.value = value
 	val.custom_minimum_size = Vector2(110, 0)
+	val.value_changed.connect(func(_v): _refresh_preview())
 	row.add_child(val)
 
 	var rm := Button.new()
@@ -404,7 +599,8 @@ func _add_mod_row(stat: String, op: String, value: float) -> void:
 	var entry := {"stat": st, "op": opb, "value": val, "row": row}
 	rm.pressed.connect(func():
 		_mod_rows.erase(entry)
-		row.queue_free())
+		row.queue_free()
+		_refresh_preview())
 	row.add_child(rm)
 
 	_mods_box.add_child(row)
@@ -578,12 +774,14 @@ func _field_row(label: String, control: Control) -> HBoxContainer:
 func _add_line(parent: VBoxContainer, label: String, value: String) -> LineEdit:
 	var le := LineEdit.new()
 	le.text = value
+	le.text_changed.connect(func(_t): _refresh_preview())
 	parent.add_child(_field_row(label, le))
 	return le
 
 func _add_check(parent: VBoxContainer, label: String, value: bool) -> CheckBox:
 	var cb := CheckBox.new()
 	cb.button_pressed = value
+	cb.toggled.connect(func(_v): _refresh_preview())
 	parent.add_child(_field_row(label, cb))
 	return cb
 
@@ -593,5 +791,6 @@ func _add_spin(parent: VBoxContainer, label: String, value: float, mn: float, mx
 	sb.max_value = mx
 	sb.step = step
 	sb.value = value
+	sb.value_changed.connect(func(_v): _refresh_preview())
 	parent.add_child(_field_row(label, sb))
 	return sb
