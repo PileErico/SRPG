@@ -107,6 +107,8 @@ var _terr_cost_spin: SpinBox
 var _terr_pass_opt: OptionButton
 var _terr_pass_tag_row: HBoxContainer   # 通行=限定tag 时显示的勾选行
 var _terr_pass_checks := {}             # tag → CheckBox
+var _terr_tagcost_checks := {}          # tag_cost：tag → 启用 CheckBox
+var _terr_tagcost_spins := {}           # tag_cost：tag → 成本 SpinBox
 var _terr_data_loading := false
 var _terrain_panel: Control            # 地形笔刷区（当前层=地形时显示）
 var _region_panel: Control             # 区域工具区（当前层=区域时显示）
@@ -444,6 +446,26 @@ func _build_terrain_brushes() -> Control:
 		_terr_pass_checks[str(pair[0])] = cb
 	_terr_pass_tag_row.visible = false
 	box.add_child(_terr_pass_tag_row)
+	# tag_cost：按移动型覆盖移动成本（勾启用 + 成本；如森林 flying→1）。不勾＝用基础 cost。
+	box.add_child(_make_label("tag 成本（按移动型取更优）"))
+	_terr_tagcost_checks = {}
+	_terr_tagcost_spins = {}
+	for pair in PASS_TAGS:
+		var row := HBoxContainer.new()
+		var cb := CheckBox.new()
+		cb.text = str(pair[1])
+		cb.toggled.connect(func(_on: bool): _on_terr_tagcost_changed())
+		row.add_child(cb)
+		var sp := SpinBox.new()
+		sp.min_value = 0
+		sp.max_value = 9
+		sp.value = 1
+		sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		sp.value_changed.connect(func(_v: float): _on_terr_tagcost_changed())
+		row.add_child(sp)
+		_terr_tagcost_checks[str(pair[0])] = cb
+		_terr_tagcost_spins[str(pair[0])] = sp
+		box.add_child(row)
 	var save_b := Button.new()
 	save_b.text = "保存到 terrains.json"
 	save_b.tooltip_text = "把改过的地形战斗属性写回 terrains.json（影响所有地图；编辑器与战斗共用同一份）"
@@ -472,6 +494,14 @@ func _refresh_terrain_data() -> void:
 		_terr_pass_tag_row.visible = true
 		for pair in PASS_TAGS:
 			_terr_pass_checks[str(pair[0])].button_pressed = (typeof(pb) == TYPE_ARRAY and pb.has(str(pair[0])))
+	# tag_cost 行：勾选并填入有覆盖的 tag
+	var tc = mv.get("tag_cost", {})
+	for pair in PASS_TAGS:
+		var tag := str(pair[0])
+		var has_tc: bool = typeof(tc) == TYPE_DICTIONARY and tc.has(tag)
+		_terr_tagcost_checks[tag].button_pressed = has_tc
+		if has_tc:
+			_terr_tagcost_spins[tag].value = int(tc[tag])
 	_terr_data_loading = false
 
 # 取选中笔刷的 move 块（live 引用，没有则建）
@@ -522,6 +552,22 @@ func _on_terr_pass_tag_toggled() -> void:
 			arr.append(str(pair[0]))
 	_terr_move()["passable_by"] = arr
 	set_status("「%s」通行=限定[%s]（点保存写回）" % [str(PALETTE[brush_index].label), ", ".join(arr)])
+
+# tag_cost 勾选 / 成本变化 → 从勾选的 tag 重建 move.tag_cost（空则移除该键）
+func _on_terr_tagcost_changed() -> void:
+	if _terr_data_loading or brush_index < 0 or brush_index >= PALETTE.size():
+		return
+	var tc := {}
+	for pair in PASS_TAGS:
+		var tag := str(pair[0])
+		if _terr_tagcost_checks[tag].button_pressed:
+			tc[tag] = int(_terr_tagcost_spins[tag].value)
+	var mv := _terr_move()
+	if tc.is_empty():
+		mv.erase("tag_cost")
+	else:
+		mv["tag_cost"] = tc
+	set_status("「%s」tag 成本已改（点保存写回）" % str(PALETTE[brush_index].label))
 
 func _on_save_terrain_data() -> void:
 	if TerrainDB.save():
