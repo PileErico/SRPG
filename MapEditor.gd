@@ -99,6 +99,11 @@ var status_label: Label
 var canvas
 var brush_buttons := []
 # —— 图层切换 + 区域工具（左侧栏）——
+# 地形数据编辑（选中笔刷的战斗属性 → 写回 terrains.json，全局共用）
+const TERR_PASS_OPTS := [["all", "任何单位"], ["none", "不可通行"], ["tag", "特定tag(只读)"]]
+var _terr_cost_spin: SpinBox
+var _terr_pass_opt: OptionButton
+var _terr_data_loading := false
 var _terrain_panel: Control            # 地形笔刷区（当前层=地形时显示）
 var _region_panel: Control             # 区域工具区（当前层=区域时显示）
 var _region_list: ItemList             # 区域列表
@@ -402,7 +407,80 @@ func _build_terrain_brushes() -> Control:
 		b.toggled.connect(_on_brush_toggled.bind(i))
 		list.add_child(b)
 		brush_buttons.append(b)
+	# —— 地形数据（编辑选中笔刷的战斗属性，写回 terrains.json，全局共用）——
+	box.add_child(HSeparator.new())
+	box.add_child(_make_label("地形数据（选中笔刷）"))
+	var crow := HBoxContainer.new()
+	crow.add_child(_make_label("移动成本"))
+	_terr_cost_spin = SpinBox.new()
+	_terr_cost_spin.min_value = 0
+	_terr_cost_spin.max_value = 9
+	_terr_cost_spin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_terr_cost_spin.value_changed.connect(_on_terr_cost_changed)
+	crow.add_child(_terr_cost_spin)
+	box.add_child(crow)
+	var prow := HBoxContainer.new()
+	prow.add_child(_make_label("通行"))
+	_terr_pass_opt = OptionButton.new()
+	for i in TERR_PASS_OPTS.size():
+		_terr_pass_opt.add_item(TERR_PASS_OPTS[i][1], i)
+	_terr_pass_opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_terr_pass_opt.item_selected.connect(_on_terr_pass_changed)
+	prow.add_child(_terr_pass_opt)
+	box.add_child(prow)
+	var save_b := Button.new()
+	save_b.text = "保存到 terrains.json"
+	save_b.tooltip_text = "把改过的地形战斗属性写回 terrains.json（影响所有地图；编辑器与战斗共用同一份）"
+	save_b.pressed.connect(_on_save_terrain_data)
+	box.add_child(save_b)
 	return box
+
+# 选中笔刷时刷新「地形数据」编辑区
+func _refresh_terrain_data() -> void:
+	if _terr_cost_spin == null or brush_index < 0 or brush_index >= PALETTE.size():
+		return
+	_terr_data_loading = true
+	var mv = PALETTE[brush_index].get("move", {})
+	if typeof(mv) != TYPE_DICTIONARY:
+		mv = {}
+	_terr_cost_spin.value = int(mv.get("cost", 1))
+	var pb = mv.get("passable_by", "all")
+	if typeof(pb) == TYPE_STRING and pb == "all":
+		_terr_pass_opt.select(0)
+	elif typeof(pb) == TYPE_STRING and pb == "none":
+		_terr_pass_opt.select(1)
+	else:
+		_terr_pass_opt.select(2)   # tag 列表 = 特定（本版只读）
+	_terr_data_loading = false
+
+# 取选中笔刷的 move 块（live 引用，没有则建）
+func _terr_move() -> Dictionary:
+	var e = PALETTE[brush_index]
+	if typeof(e.get("move")) != TYPE_DICTIONARY:
+		e["move"] = {}
+	return e["move"]
+
+func _on_terr_cost_changed(v: float) -> void:
+	if _terr_data_loading or brush_index < 0 or brush_index >= PALETTE.size():
+		return
+	_terr_move()["cost"] = int(v)
+	set_status("「%s」移动成本=%d（点「保存到 terrains.json」写回）" % [str(PALETTE[brush_index].label), int(v)])
+
+func _on_terr_pass_changed(idx: int) -> void:
+	if _terr_data_loading or brush_index < 0 or brush_index >= PALETTE.size():
+		return
+	if idx == 0:
+		_terr_move()["passable_by"] = "all"
+	elif idx == 1:
+		_terr_move()["passable_by"] = "none"
+	if idx != 2:   # 「特定tag」保留原值（tag 列表编辑＝future）
+		set_status("「%s」通行=%s（点保存写回）" % [str(PALETTE[brush_index].label), str(TERR_PASS_OPTS[idx][1])])
+
+func _on_save_terrain_data() -> void:
+	if TerrainDB.save():
+		set_status("已保存地形数据 → terrains.json（影响所有地图，编辑器与战斗共用）")
+	else:
+		set_status("保存失败：无法写入 terrains.json")
 
 # 区域工具：列表（选当前）+ 新建/改名/删除 + 颜色
 func _build_region_tools() -> Control:
@@ -1087,6 +1165,7 @@ func _on_reset_view() -> void:
 func select_brush(i: int) -> void:
 	brush_index = i
 	set_status("画笔：" + PALETTE[i].label)
+	_refresh_terrain_data()   # 同步「地形数据」编辑区到选中笔刷
 
 func pick_brush_at(col: int, row: int) -> void:
 	var tile = tiles[row][col]

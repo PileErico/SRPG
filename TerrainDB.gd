@@ -9,6 +9,7 @@ const TERRAINS_PATH := "res://terrains.json"
 
 static var _palette := []      # 有序地形定义（笔刷栏顺序 / 战斗调色都按这个）
 static var _by_key := {}       # "terrain/variant" -> entry，O(1) 查表
+static var _root := {}         # 原始顶层字典（含 format_version/_note）——save 时保留这些字段
 static var _loaded := false
 
 static func _ensure() -> void:
@@ -17,11 +18,13 @@ static func _ensure() -> void:
 	_loaded = true
 	_palette = []
 	_by_key = {}
+	_root = {}
 	if FileAccess.file_exists(TERRAINS_PATH):
 		var f = FileAccess.open(TERRAINS_PATH, FileAccess.READ)
 		var data = JSON.parse_string(f.get_as_text())
 		f.close()
 		if typeof(data) == TYPE_DICTIONARY and typeof(data.get("terrains")) == TYPE_ARRAY:
+			_root = data
 			for entry in data["terrains"]:
 				if typeof(entry) == TYPE_DICTIONARY and entry.has("terrain") and entry.has("variant"):
 					_palette.append(entry)
@@ -65,3 +68,22 @@ static func decor_of(tile) -> String:
 static func label_of(tile) -> String:
 	var e = entry_for(tile)
 	return str(e.label) if e != null else "未知"
+
+# —— 写回 / 热重载（编辑器「地形数据」编辑用；仿 ItemDB 的 reload/save 范式）——
+# palette() 返回的是 _palette 的 live 引用：编辑器原地改 entry.move 即改这里，沙盒同进程立即可见；
+# save() 把整张表写回 terrains.json（持久化，影响所有地图）。
+static func save() -> bool:
+	_ensure()
+	var out := _root if typeof(_root) == TYPE_DICTIONARY and not _root.is_empty() else {}
+	out["terrains"] = _palette   # 保留 format_version/_note 等顶层字段，只更新 terrains
+	var f = FileAccess.open(TERRAINS_PATH, FileAccess.WRITE)
+	if f == null:
+		return false
+	f.store_string(JSON.stringify(out, "  "))
+	f.close()
+	return true
+
+# 丢弃内存表、下次查询重新从磁盘读（terrains.json 被外部改过时用）
+static func reload() -> void:
+	_loaded = false
+	_ensure()
