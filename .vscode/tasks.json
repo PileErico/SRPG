@@ -1,0 +1,38 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "运行 游戏",
+			"type": "process",
+			"command": "D:/godot/Godot_v4.6.2-stable_mono_win64_console.exe",
+			"args": ["--path", "D:/1战棋", "res://StartMenu.tscn"],
+			"group": { "kind": "build", "isDefault": true },
+			"presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+			"problemMatcher": []
+		},
+		{
+			"label": "运行 Sandbox",
+			"type": "process",
+			"command": "D:/godot/Godot_v4.6.2-stable_mono_win64_console.exe",
+			"args": ["--path", "D:/1战棋", "res://Sandbox.tscn"],
+			"group": "build",
+			"presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+			"problemMatcher": []
+		},
+		{
+			"label": "运行 地图编辑器",
+			"type": "process",
+			"command": "D:/godot/Godot_v4.6.2-stable_mono_win64_console.exe",
+			"args": ["--path", "D:/1战棋", "res://MapEditor.tscn"],
+			"presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+			"problemMatcher": []
+		},
+		{
+			"label": "打开 Godot 编辑器",
+			"type": "process",
+			"command": "D:/godot/Godot_v4.6.2-stable_mono_win64.exe",
+			"args": ["-e", "--path", "D:/1战棋"],
+			"problemMatcher": []
+		}
+	]
+}

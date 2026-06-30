@@ -1,0 +1,13 @@
+# Godot 4 编辑器缓存（自动生成，不入库）
+.godot/
+# 旧版导入目录（Godot 3 遗留，用不到）
+.import/
+# Mono/C# 产物（本工程纯 GDScript，保险起见忽略）
+.mono/
+mono_crash.*.json
+# 临时 headless 自测脚本（命名约定 _*_test.gd，用完即删，兜底忽略）
+/_*_test.gd
+/_*_test.gd.uid
+# 系统 / 编辑器杂物
+Thumbs.db
+.DS_Store

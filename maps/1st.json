@@ -1,0 +1,946 @@
+{
+  "format_version": 2,
+  "grid": "hex_flat_oddq",
+  "height": 15,
+  "regions": [
+    {
+      "cells": [],
+      "color": "#D5453A",
+      "id": "region_1",
+      "label": "区域1"
+    }
+  ],
+  "tiles": [
+    [
+      {
+        "terrain": "rubble",
+        "variant": "rubble"
+      },
+      {
+        "terrain": "road",
+        "variant": "road"
+      },
+      {
+        "terrain": "rubble",
+        "variant": "rubble"
+      },
+      {
+        "terrain": "rubble",
+        "variant": "rubble"
+      },
+      {
+        "terrain": "rubble",
+        "variant": "rubble"
+      },
+      {
+        "terrain": "rubble",
+        "variant": "rubble"
+      },
+      {
+        "terrain": "rubble",
+        "variant": "rubble"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      }
+    ],
+    [
+      {
+        "terrain": "rubble",
+        "variant": "rubble"
+      },
+      {
+        "terrain": "road",
+        "variant": "road"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      }
+    ],
+    [
+      {
+        "terrain": "rubble",
+        "variant": "rubble"
+      },
+      {
+        "terrain": "road",
+        "variant": "road"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      }
+    ],
+    [
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "road",
+        "variant": "road"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      }
+    ],
+    [
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "road",
+        "variant": "road"
+      },
+      {
+        "terrain": "road",
+        "variant": "road"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      }
+    ],
+    [
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "road",
+        "variant": "road"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      }
+    ],
+    [
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "road",
+        "variant": "road"
+      },
+      {
+        "terrain": "road",
+        "variant": "road"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      }
+    ],
+    [
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "rubble",
+        "variant": "rubble"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "road",
+        "variant": "road"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      }
+    ],
+    [
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "rubble",
+        "variant": "rubble"
+      },
+      {
+        "terrain": "rubble",
+        "variant": "rubble"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "road",
+        "variant": "road"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      }
+    ],
+    [
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "road",
+        "variant": "road"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      }
+    ],
+    [
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "road",
+        "variant": "road"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      }
+    ],
+    [
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "road",
+        "variant": "road"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      }
+    ],
+    [
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "road",
+        "variant": "road"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "hill",
+        "variant": "hill"
+      },
+      {
+        "terrain": "hill",
+        "variant": "hill"
+      }
+    ],
+    [
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "road",
+        "variant": "road"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "hill",
+        "variant": "hill"
+      },
+      {
+        "terrain": "hill",
+        "variant": "hill"
+      },
+      {
+        "terrain": "mountain",
+        "variant": "mountain"
+      },
+      {
+        "terrain": "mountain",
+        "variant": "mountain"
+      }
+    ],
+    [
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "road",
+        "variant": "road"
+      },
+      {
+        "terrain": "road",
+        "variant": "road"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "hill",
+        "variant": "hill"
+      },
+      {
+        "terrain": "hill",
+        "variant": "hill"
+      },
+      {
+        "terrain": "mountain",
+        "variant": "mountain"
+      },
+      {
+        "terrain": "mountain",
+        "variant": "mountain"
+      }
+    ]
+  ],
+  "width": 15
+}

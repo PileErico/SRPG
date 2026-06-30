@@ -1,0 +1,1237 @@
+extends Control
+## 地图编辑器（地形层）。
+## 闭环：选画笔铺地形 -> 保存 JSON -> 读取 JSON 渲染并可继续编辑。
+## 网格：flat-top / odd-q 六边形（见 HexCanvas.gd）。
+## 操作：左键画 / 右键取色 / 中键拖拽平移 / 滚轮缩放 /
+##       Ctrl+Z 撤销 / Ctrl+Y(或 Ctrl+Shift+Z) 重做 / Ctrl+S 保存。
+
+const HexCanvas := preload("res://HexCanvas.gd")
+const EditorCanvas := preload("res://EditorCanvas.gd")
+const TerrainDB := preload("res://TerrainDB.gd")
+const MapIO := preload("res://MapIO.gd")   # 地图读 / 写单一入口（与 Sandbox 共用）
+
+const MAX_W := 50
+const MAX_H := 50
+const MAX_UNDO := 50
+const HISTORY_SHOWN := 14
+const DEFAULT_TERRAIN := "plain"
+const DEFAULT_VARIANT := "grassland"
+
+# 战斗地图（与 Sandbox 共享的同一张图）：编辑器启动即载入它、Ctrl+S 写回它；
+# Sandbox 启动也读它 —— 「编辑器改 → 沙盒看到」靠这条路径打通。
+const MAP_PATH := "res://maps/sandbox.json"
+
+# 地图库：选一个文件夹作默认路径，侧栏列出其中 *.json，点击快捷切换/编辑。
+const DEFAULT_MAP_DIR := "res://maps"
+const CONFIG_PATH := "user://map_editor.cfg"   # 记住上次选的地图文件夹
+
+# 地形定义：单一数据源 res://terrains.json，经 TerrainDB（编辑器/战斗共用、O(1) 查表）读取。
+# terrain 管战斗属性，variant 管外观，tags 供效果/交互统一判断。
+# tags 属于“地形类型”，不写进每个格子；地图 JSON 仍只存 terrain/variant，tag 按表查得。
+# 每格仅两色：color（底色）+ accent（纹理线条色）。decor 决定线稿图案。
+var PALETTE := []
+
+# 新建画布的尺寸预设（下拉第 0 项是占位提示）
+const SIZE_PRESETS := [
+	{"label": "尺寸…", "w": 0,  "h": 0},
+	{"label": "10×10", "w": 10, "h": 10},
+	{"label": "15×15", "w": 15, "h": 15},
+	{"label": "20×20", "w": 20, "h": 20},
+	{"label": "25×25", "w": 25, "h": 25},
+	{"label": "30×30", "w": 30, "h": 30},
+	{"label": "40×40", "w": 40, "h": 40},
+	{"label": "50×50", "w": 50, "h": 50},
+]
+
+var width := 15
+var height := 15
+var tiles := []            # tiles[row][col] = {"terrain":..., "variant":...}
+var map_units := []        # 预置单位（地图 units 字段）原样透传：编辑器（α 期）不编辑、仅加载保留+存盘写回
+var brush_index := 0
+var embedded := false      # 嵌入 Game 统一宿主时为 true：隐藏自己的「主菜单」按钮（由 Game 顶栏统一提供）
+
+# —— 图层（地形底层 + 叠加层）。当前先两层：terrain / region，结构留好第三层位 ——
+# 区域层：给一片格子命名（"前厅"/"守军房"），喂战斗侧 AI 的 ai_region 仇恨触发。
+# 内存形：regions[i] = {id, label, color, kind, cells:{Vector2i:true}}；存盘转 cells:[[x,y],…]（见 _regions_to_json）。
+# kind=区域类型：aggro=AI 仇恨/触发区（敌人 ai_region 引用）；deploy=玩家部署区（战斗只许玩家放区内）。缺省 aggro。
+var current_layer := "terrain"      # "terrain" | "region"
+var regions := []
+var _active_region_idx := -1
+# 区域配色循环池（新建区域时按序取）
+const REGION_COLORS := ["#D5453A", "#EBBC04", "#4FAE5A", "#3A7BD5", "#9B59B6", "#E0822A", "#2AB0B0", "#C84BD5"]
+# 区域类型：[id, 中文]（写进地图 regions[].kind，战斗侧据此分派）
+const REGION_KINDS := [["aggro", "触发区"], ["deploy", "部署区"]]
+
+# —— 单位层：在编辑器里摆「这一关的单位」（authoring 关卡内容，存进地图 units 字段）——
+# 与沙盒「自由测试」不同：这里摆的是关卡固定内容（敌人/预置友军/中立），随地图持久化。
+const UNIT_FACTIONS := [["enemy", "敌方"], ["player", "我方"], ["ally", "友方"], ["neutral", "中立"]]
+const FACTION_COLORS := {
+	"player": Color(0.30, 0.55, 0.95), "ally": Color(0.30, 0.55, 0.95),
+	"enemy": Color(0.90, 0.30, 0.30), "neutral": Color(0.90, 0.80, 0.30),
+}
+const UNIT_PROTOS_PATH := "res://data/unit_prototypes.json"
+var _unit_panel: Control   # 单位工具区（当前层=单位时显示）
+var _unit_list: ItemList   # 单位原型选择列表
+var _unit_proto = null     # 当前要落子的原型（null=未选）
+var _unit_faction := "enemy"   # 落子阵营（关卡敌人居多，默认敌方）
+var _unit_protos := []     # 内置原型缓存（data/unit_prototypes.json）
+
+var current_path := ""     # 当前地图对应的本地文件（空＝尚未存盘）
+var _dirty := false        # 自上次存/读以来是否有改动
+
+var width_spin: SpinBox
+var height_spin: SpinBox
+var status_label: Label
+var canvas
+var brush_buttons := []
+# —— 图层切换 + 区域工具（左侧栏）——
+var _terrain_panel: Control            # 地形笔刷区（当前层=地形时显示）
+var _region_panel: Control             # 区域工具区（当前层=区域时显示）
+var _region_list: ItemList             # 区域列表
+var _region_color_btn: ColorPickerButton
+var _region_kind_opt: OptionButton     # 区域类型下拉（触发区/部署区）
+var _region_rename_dlg: ConfirmationDialog
+var _region_rename_edit: LineEdit
+var _save_dlg: FileDialog
+var _load_dlg: FileDialog
+var _history_list: ItemList
+var _file_label: Label
+var _confirm_dlg: ConfirmationDialog   # 未保存改动时的「确定丢弃？」确认框
+var _pending: Callable                 # 确认后要执行的动作（新建 / 加载 / 切换地图）
+
+# —— 地图库（文件夹 + 其中的地图列表）——
+var _map_dir := DEFAULT_MAP_DIR
+var _map_list: ItemList                # 侧栏：当前文件夹内的地图文件
+var _map_paths := []                   # 与 _map_list 行一一对应的完整路径
+var _dir_label: Label                  # 显示当前文件夹
+var _dir_dlg: FileDialog               # 选文件夹对话框
+var _newmap_dlg: ConfirmationDialog    # 「新建地图」弹窗（输入文件名）
+var _newmap_name: LineEdit             # 新建地图的文件名输入框
+
+# 撤销/重做：以整图快照为单位，每项 {"snap":Dictionary, "label":String}
+var _undo_stack := []
+var _redo_stack := []
+var _stroke_snapshot = null
+var _stroke_dirty := false
+var _stroke_count := 0
+
+func _ready() -> void:
+	_load_terrains()
+	_load_config()        # 恢复上次选的地图文件夹
+	_build_ui()
+	_scan_maps()          # 列出文件夹内的地图
+	# 启动即打开战斗地图（与 Sandbox 共享）；不存在则建空白图并把它指向战斗地图路径，
+	# 这样首次 Ctrl+S 就会生成它，沙盒随即能读到。
+	if FileAccess.file_exists(MAP_PATH):
+		load_from_file(MAP_PATH)
+	else:
+		new_map(width, height)
+		current_path = MAP_PATH
+		_update_file_label()
+		_refresh_map_highlight()
+
+# 地形定义经 TerrainDB 载入（单一数据源；缺失/损坏的兜底也在 TerrainDB 内）
+func _load_terrains() -> void:
+	PALETTE = TerrainDB.palette()
+
+# ------------------------------------------------------------------ UI
+
+func _build_ui() -> void:
+	set_anchors_preset(Control.PRESET_FULL_RECT)
+
+	var root := VBoxContainer.new()
+	root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(root)
+
+	# ---- 顶部工具栏 ----
+	var bar := HBoxContainer.new()
+	root.add_child(bar)
+
+	if not embedded:   # 嵌入 Game 时由 Game 顶栏提供「主菜单」，这里不重复
+		var menu_btn := Button.new()
+		menu_btn.text = "主菜单"
+		menu_btn.pressed.connect(_on_back_to_menu)
+		bar.add_child(menu_btn)
+		bar.add_child(VSeparator.new())
+
+	bar.add_child(_make_label("宽"))
+	width_spin = SpinBox.new()
+	width_spin.min_value = 1
+	width_spin.max_value = MAX_W
+	width_spin.value = width
+	bar.add_child(width_spin)
+
+	bar.add_child(_make_label("高"))
+	height_spin = SpinBox.new()
+	height_spin.min_value = 1
+	height_spin.max_value = MAX_H
+	height_spin.value = height
+	bar.add_child(height_spin)
+
+	bar.add_child(_make_label("预设"))
+	var preset_option := OptionButton.new()
+	for p in SIZE_PRESETS:
+		preset_option.add_item(p.label)
+	preset_option.item_selected.connect(_on_preset_selected)
+	bar.add_child(preset_option)
+
+	var new_btn := Button.new()
+	new_btn.text = "新建"
+	new_btn.pressed.connect(_on_new_pressed)
+	bar.add_child(new_btn)
+
+	bar.add_child(VSeparator.new())
+
+	var save_btn := Button.new()
+	save_btn.text = "保存"
+	save_btn.pressed.connect(_save_shortcut)
+	bar.add_child(save_btn)
+
+	var save_as_btn := Button.new()
+	save_as_btn.text = "另存为"
+	save_as_btn.pressed.connect(_on_save_as_pressed)
+	bar.add_child(save_as_btn)
+
+	var load_btn := Button.new()
+	load_btn.text = "加载"
+	load_btn.pressed.connect(_on_load_pressed)
+	bar.add_child(load_btn)
+
+	bar.add_child(VSeparator.new())
+
+	var undo_btn := Button.new()
+	undo_btn.text = "撤销"
+	undo_btn.pressed.connect(undo)
+	bar.add_child(undo_btn)
+
+	var redo_btn := Button.new()
+	redo_btn.text = "重做"
+	redo_btn.pressed.connect(redo)
+	bar.add_child(redo_btn)
+
+	bar.add_child(VSeparator.new())
+
+	var reset_view_btn := Button.new()
+	reset_view_btn.text = "适配窗口"
+	reset_view_btn.pressed.connect(_on_reset_view)
+	bar.add_child(reset_view_btn)
+
+	bar.add_child(VSeparator.new())
+	status_label = Label.new()
+	bar.add_child(status_label)
+
+	# ---- 主体：左笔刷栏 + 中画布 + 右历史栏 ----
+	var main := HBoxContainer.new()
+	main.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	main.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	root.add_child(main)
+
+	main.add_child(_build_brush_sidebar())
+
+	canvas = EditorCanvas.new()
+	canvas.editor = self
+	canvas.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	canvas.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	main.add_child(canvas)
+
+	main.add_child(_build_side_panel())
+
+	# ---- 文件对话框（建一次复用）----
+	_save_dlg = _make_file_dialog(FileDialog.FILE_MODE_SAVE_FILE)
+	_save_dlg.current_file = "map.json"
+	_save_dlg.file_selected.connect(save_to_file)
+	add_child(_save_dlg)
+
+	_load_dlg = _make_file_dialog(FileDialog.FILE_MODE_OPEN_FILE)
+	_load_dlg.file_selected.connect(load_from_file)
+	add_child(_load_dlg)
+
+	# 选文件夹对话框（地图库默认路径）
+	_dir_dlg = FileDialog.new()
+	_dir_dlg.file_mode = FileDialog.FILE_MODE_OPEN_DIR
+	_dir_dlg.access = FileDialog.ACCESS_FILESYSTEM
+	_dir_dlg.use_native_dialog = true
+	_dir_dlg.dir_selected.connect(_set_map_dir)
+	add_child(_dir_dlg)
+
+	# 未保存改动确认框（新建/加载/切换前若 _dirty 则先问一次）
+	_confirm_dlg = ConfirmationDialog.new()
+	_confirm_dlg.title = "未保存的改动"
+	_confirm_dlg.dialog_text = "当前地图有未保存的改动，确定要丢弃吗？"
+	_confirm_dlg.ok_button_text = "丢弃"
+	_confirm_dlg.get_cancel_button().text = "取消"
+	_confirm_dlg.confirmed.connect(func():
+		if _pending.is_valid():
+			_pending.call())
+	_confirm_dlg.canceled.connect(_refresh_map_highlight)  # 取消切换则恢复列表选中
+	add_child(_confirm_dlg)
+
+	# 新建地图弹窗（输入文件名，尺寸用顶栏的宽/高）
+	_newmap_dlg = ConfirmationDialog.new()
+	_newmap_dlg.title = "新建地图"
+	_newmap_dlg.ok_button_text = "创建"
+	_newmap_dlg.get_cancel_button().text = "取消"
+	var nm_box := VBoxContainer.new()
+	nm_box.add_child(_make_label("文件名（存到当前文件夹）"))
+	_newmap_name = LineEdit.new()
+	_newmap_name.text = "new_map.json"
+	_newmap_name.custom_minimum_size = Vector2(280, 0)
+	nm_box.add_child(_newmap_name)
+	_newmap_dlg.add_child(nm_box)
+	_newmap_dlg.register_text_enter(_newmap_name)
+	_newmap_dlg.confirmed.connect(_create_map)
+	add_child(_newmap_dlg)
+
+	# 区域改名弹窗
+	_region_rename_dlg = ConfirmationDialog.new()
+	_region_rename_dlg.title = "区域改名"
+	_region_rename_dlg.ok_button_text = "确定"
+	_region_rename_dlg.get_cancel_button().text = "取消"
+	var rr_box := VBoxContainer.new()
+	rr_box.add_child(_make_label("区域名"))
+	_region_rename_edit = LineEdit.new()
+	_region_rename_edit.custom_minimum_size = Vector2(260, 0)
+	rr_box.add_child(_region_rename_edit)
+	_region_rename_dlg.add_child(rr_box)
+	_region_rename_dlg.register_text_enter(_region_rename_edit)
+	_region_rename_dlg.confirmed.connect(_apply_region_rename)
+	add_child(_region_rename_dlg)
+
+	brush_buttons[0].button_pressed = true  # 默认选第一支画笔
+	_refresh_history()
+	_refresh_region_list()
+	_update_file_label()
+
+func _build_brush_sidebar() -> Control:
+	var sidebar := VBoxContainer.new()
+	sidebar.custom_minimum_size = Vector2(180, 0)
+
+	# —— 图层切换：地形 / 区域（互斥）——
+	sidebar.add_child(_make_label("图层"))
+	var layer_row := HBoxContainer.new()
+	var lg := ButtonGroup.new()
+	var terr_btn := _layer_button("地形", "terrain", lg)
+	terr_btn.button_pressed = true
+	layer_row.add_child(terr_btn)
+	layer_row.add_child(_layer_button("区域", "region", lg))
+	layer_row.add_child(_layer_button("单位", "unit", lg))
+	sidebar.add_child(layer_row)
+	sidebar.add_child(HSeparator.new())
+
+	# 地形笔刷区（当前层=地形时显示）
+	_terrain_panel = _build_terrain_brushes()
+	sidebar.add_child(_terrain_panel)
+	# 区域工具区（当前层=区域时显示）
+	_region_panel = _build_region_tools()
+	_region_panel.visible = false
+	sidebar.add_child(_region_panel)
+	# 单位工具区（当前层=单位时显示）
+	_unit_panel = _build_unit_tools()
+	_unit_panel.visible = false
+	sidebar.add_child(_unit_panel)
+	return sidebar
+
+# 图层切换按钮（toggle，分组互斥）
+func _layer_button(label: String, layer_id: String, group: ButtonGroup) -> Button:
+	var b := Button.new()
+	b.text = label
+	b.toggle_mode = true
+	b.button_group = group
+	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	b.toggled.connect(func(pressed: bool):
+		if pressed:
+			_set_layer(layer_id))
+	return b
+
+func _set_layer(id: String) -> void:
+	current_layer = id
+	if _terrain_panel: _terrain_panel.visible = (id == "terrain")
+	if _region_panel: _region_panel.visible = (id == "region")
+	if _unit_panel: _unit_panel.visible = (id == "unit")
+	if canvas: canvas.queue_redraw()
+	if id == "region" and regions.is_empty():
+		set_status("区域层：点「＋ 新建区域」再左键画、右键擦")
+	elif id == "unit":
+		set_status("单位层：选原型 + 阵营 → 左键落子 / 右键删除（摆这一关的单位）")
+	else:
+		set_status("当前层：%s" % ("地形" if id == "terrain" else "区域"))
+
+# 地形笔刷竖列（原 _build_brush_sidebar 内容）
+func _build_terrain_brushes() -> Control:
+	var box := VBoxContainer.new()
+	box.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	box.add_child(_make_label("地形笔刷"))
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	box.add_child(scroll)
+	var list := VBoxContainer.new()
+	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(list)
+	var bg := ButtonGroup.new()
+	brush_buttons = []
+	for i in PALETTE.size():
+		var b := _make_brush_button(PALETTE[i], bg)
+		b.toggled.connect(_on_brush_toggled.bind(i))
+		list.add_child(b)
+		brush_buttons.append(b)
+	return box
+
+# 区域工具：列表（选当前）+ 新建/改名/删除 + 颜色
+func _build_region_tools() -> Control:
+	var v := VBoxContainer.new()
+	v.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	v.add_child(_make_label("区域（左键画 / 右键擦）"))
+	_region_list = ItemList.new()
+	_region_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_region_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_region_list.custom_minimum_size = Vector2(0, 150)
+	_region_list.item_selected.connect(_on_region_selected)
+	v.add_child(_region_list)
+	var btns := HBoxContainer.new()
+	var add_b := Button.new()
+	add_b.text = "＋ 新建区域"
+	add_b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	add_b.pressed.connect(_on_add_region)
+	btns.add_child(add_b)
+	v.add_child(btns)
+	var btns2 := HBoxContainer.new()
+	var ren_b := Button.new()
+	ren_b.text = "改名"
+	ren_b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	ren_b.pressed.connect(_on_rename_region)
+	btns2.add_child(ren_b)
+	var del_b := Button.new()
+	del_b.text = "删除"
+	del_b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	del_b.pressed.connect(_on_delete_region)
+	btns2.add_child(del_b)
+	v.add_child(btns2)
+	var crow := HBoxContainer.new()
+	crow.add_child(_make_label("颜色"))
+	_region_color_btn = ColorPickerButton.new()
+	_region_color_btn.custom_minimum_size = Vector2(0, 26)
+	_region_color_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_region_color_btn.color_changed.connect(_on_region_color_changed)
+	crow.add_child(_region_color_btn)
+	v.add_child(crow)
+	# 区域类型：触发区(aggro) / 部署区(deploy)——写进地图，战斗侧据此分派
+	var krow := HBoxContainer.new()
+	krow.add_child(_make_label("类型"))
+	_region_kind_opt = OptionButton.new()
+	for i in REGION_KINDS.size():
+		_region_kind_opt.add_item(REGION_KINDS[i][1], i)
+	_region_kind_opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_region_kind_opt.item_selected.connect(_on_region_kind_changed)
+	krow.add_child(_region_kind_opt)
+	v.add_child(krow)
+	return v
+
+# 单位工具：阵营选择 + 原型列表（选一个再到画布上左键落子）
+func _build_unit_tools() -> Control:
+	var v := VBoxContainer.new()
+	v.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	v.add_child(_make_label("单位（左键落子 / 右键删）"))
+	var frow := HBoxContainer.new()
+	frow.add_child(_make_label("阵营"))
+	var fopt := OptionButton.new()
+	for i in UNIT_FACTIONS.size():
+		fopt.add_item(UNIT_FACTIONS[i][1], i)
+	fopt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	fopt.item_selected.connect(func(idx: int): _unit_faction = UNIT_FACTIONS[idx][0])
+	frow.add_child(fopt)
+	v.add_child(frow)
+	v.add_child(_make_label("原型（选一个再落子）"))
+	_unit_list = ItemList.new()
+	_unit_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_unit_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_unit_list.custom_minimum_size = Vector2(0, 180)
+	_unit_list.item_selected.connect(_on_unit_proto_selected)
+	v.add_child(_unit_list)
+	_refresh_unit_protos()
+	return v
+
+func _refresh_unit_protos() -> void:
+	_unit_protos = _load_unit_protos()
+	if _unit_list == null:
+		return
+	_unit_list.clear()
+	for p in _unit_protos:
+		_unit_list.add_item("%s（%s）" % [str(p.get("name", "单位")), _faction_cn(str(p.get("default_faction", "enemy")))])
+
+func _load_unit_protos() -> Array:
+	var out := []
+	if FileAccess.file_exists(UNIT_PROTOS_PATH):
+		var f := FileAccess.open(UNIT_PROTOS_PATH, FileAccess.READ)
+		var d = JSON.parse_string(f.get_as_text())
+		f.close()
+		if typeof(d) == TYPE_ARRAY:
+			for e in d:
+				if typeof(e) == TYPE_DICTIONARY:
+					out.append(e)
+	return out
+
+func _on_unit_proto_selected(idx: int) -> void:
+	if idx >= 0 and idx < _unit_protos.size():
+		_unit_proto = _unit_protos[idx]
+		_unit_faction = str(_unit_proto.get("default_faction", _unit_faction))   # 选原型即取其默认阵营（仍可改）
+		set_status("将落子：%s（%s）— 左键放到格上" % [str(_unit_proto.get("name", "单位")), _faction_cn(_unit_faction)])
+
+func _faction_cn(fac: String) -> String:
+	for pair in UNIT_FACTIONS:
+		if pair[0] == fac:
+			return str(pair[1])
+	return fac
+
+# 单位层棋子色（供 EditorCanvas 画 token；与战斗一致：我方/友方蓝、敌方红、中立黄）
+func faction_color(fac: String) -> Color:
+	return FACTION_COLORS.get(fac, Color(0.8, 0.8, 0.8))
+
+# 单位层：在 (col,row) 落子当前选中的原型（替换该格已有单位）。走 stroke → 一次撤销。
+func _place_unit(col: int, row: int) -> void:
+	if _unit_proto == null:
+		set_status("先在左侧选一个原型")
+		return
+	for i in range(map_units.size() - 1, -1, -1):
+		var e = map_units[i]
+		if typeof(e) == TYPE_DICTIONARY and int(e.get("col", -1)) == col and int(e.get("row", -1)) == row:
+			map_units.remove_at(i)
+	map_units.append({"proto": (_unit_proto as Dictionary).duplicate(true), "col": col, "row": row, "faction": _unit_faction})
+	_stroke_dirty = true
+	if canvas: canvas.queue_redraw()
+
+# 单位层：删除 (col,row) 上的单位
+func _remove_unit(col: int, row: int) -> void:
+	for i in range(map_units.size() - 1, -1, -1):
+		var e = map_units[i]
+		if typeof(e) == TYPE_DICTIONARY and int(e.get("col", -1)) == col and int(e.get("row", -1)) == row:
+			map_units.remove_at(i)
+			_stroke_dirty = true
+	if canvas: canvas.queue_redraw()
+
+func _build_side_panel() -> Control:
+	var side := VBoxContainer.new()
+	side.custom_minimum_size = Vector2(240, 0)
+
+	# —— 地图库（文件夹 + 其中地图列表）——
+	side.add_child(_make_label("地图库"))
+	_dir_label = _make_label("")
+	_dir_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_dir_label.add_theme_color_override("font_color", Color(0.75, 0.78, 0.85))
+	side.add_child(_dir_label)
+	var dir_btns := HBoxContainer.new()
+	var pick_btn := Button.new()
+	pick_btn.text = "选择文件夹"
+	pick_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	pick_btn.pressed.connect(_on_pick_dir)
+	dir_btns.add_child(pick_btn)
+	var refresh_btn := Button.new()
+	refresh_btn.text = "刷新"
+	refresh_btn.pressed.connect(_scan_maps)
+	dir_btns.add_child(refresh_btn)
+	side.add_child(dir_btns)
+
+	_map_list = ItemList.new()
+	_map_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_map_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_map_list.custom_minimum_size = Vector2(0, 150)
+	_map_list.item_selected.connect(_on_map_selected)   # 单击即切换（select() 不触发此信号）
+	side.add_child(_map_list)
+
+	var new_map_btn := Button.new()
+	new_map_btn.text = "＋ 新建地图…"
+	new_map_btn.pressed.connect(_on_new_map_in_dir)
+	side.add_child(new_map_btn)
+
+	side.add_child(HSeparator.new())
+
+	# —— 当前文件 ——
+	_file_label = _make_label("文件：(未保存)")
+	_file_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	side.add_child(_file_label)
+
+	side.add_child(HSeparator.new())
+
+	# —— 最近操作（撤销栈）——
+	side.add_child(_make_label("最近操作（顶＝下一个撤销）"))
+	_history_list = ItemList.new()
+	_history_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_history_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	side.add_child(_history_list)
+	return side
+
+# ------------------------------------------------------------------ 地图库
+
+# 扫描当前文件夹下的 *.json，填进侧栏列表（并高亮当前文件）
+func _scan_maps() -> void:
+	if _map_list == null:
+		return
+	_map_list.clear()
+	_map_paths.clear()
+	var dir := DirAccess.open(_map_dir)
+	if dir == null:
+		_dir_label.text = "文件夹：%s（打不开）" % _map_dir
+		return
+	_dir_label.text = "文件夹：%s" % _map_dir
+	var names := []
+	dir.list_dir_begin()
+	var fname := dir.get_next()
+	while fname != "":
+		if not dir.current_is_dir() and fname.to_lower().ends_with(".json"):
+			names.append(fname)
+		fname = dir.get_next()
+	dir.list_dir_end()
+	names.sort()
+	for n in names:
+		_map_paths.append(_join(_map_dir, n))
+		_map_list.add_item(n)
+	_refresh_map_highlight()
+
+func _join(d: String, f: String) -> String:
+	return f if d == "" else (d + f if d.ends_with("/") else d + "/" + f)
+
+# 在列表里选中“当前文件”那一行（按文件名匹配，列表只来自单个文件夹）
+func _refresh_map_highlight() -> void:
+	if _map_list == null:
+		return
+	_map_list.deselect_all()
+	if current_path == "":
+		return
+	var cur := current_path.get_file()
+	for i in _map_paths.size():
+		if _map_paths[i].get_file() == cur:
+			_map_list.select(i)   # 静默：select() 不触发 item_selected
+			_map_list.ensure_current_is_visible()
+			return
+
+# 单击列表项 = 切换到该地图（有未存改动先确认）
+func _on_map_selected(idx: int) -> void:
+	if idx < 0 or idx >= _map_paths.size():
+		return
+	var path: String = _map_paths[idx]
+	if path == current_path or path.get_file() == current_path.get_file():
+		return   # 点的就是当前图，不重复加载
+	_confirm_discard(func(): load_from_file(path))
+
+func _on_pick_dir() -> void:
+	_dir_dlg.current_dir = ProjectSettings.globalize_path(_map_dir)
+	_dir_dlg.popup_centered(Vector2i(900, 600))
+
+func _set_map_dir(path: String) -> void:
+	_map_dir = path
+	_save_config()
+	_scan_maps()
+	set_status("地图文件夹：%s" % path)
+
+# 新建地图到当前文件夹：先确认丢弃未存改动，再弹文件名输入
+func _on_new_map_in_dir() -> void:
+	_confirm_discard(func():
+		_newmap_name.text = "new_map.json"
+		_newmap_dlg.popup_centered())
+
+func _create_map() -> void:
+	var nm := _newmap_name.text.strip_edges()
+	if nm == "":
+		nm = "new_map"
+	if not nm.to_lower().ends_with(".json"):
+		nm += ".json"
+	new_map(int(width_spin.value), int(height_spin.value))
+	save_to_file(_join(_map_dir, nm))   # 立刻落盘到文件夹（save_to_file 会重扫列表）
+
+# ------------------------------------------------------------------ 配置（记住文件夹）
+
+func _load_config() -> void:
+	if not FileAccess.file_exists(CONFIG_PATH):
+		return
+	var f := FileAccess.open(CONFIG_PATH, FileAccess.READ)
+	var data = JSON.parse_string(f.get_as_text())
+	f.close()
+	if typeof(data) == TYPE_DICTIONARY and typeof(data.get("map_dir")) == TYPE_STRING and data["map_dir"] != "":
+		_map_dir = data["map_dir"]
+
+func _save_config() -> void:
+	var f := FileAccess.open(CONFIG_PATH, FileAccess.WRITE)
+	if f == null:
+		return
+	f.store_string(JSON.stringify({"map_dir": _map_dir}, "  "))
+	f.close()
+
+func _make_label(t: String) -> Label:
+	var l := Label.new()
+	l.text = t
+	return l
+
+func _make_brush_button(entry: Dictionary, group: ButtonGroup) -> Button:
+	var b := Button.new()
+	b.text = entry.label
+	b.toggle_mode = true
+	b.button_group = group
+	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	b.custom_minimum_size = Vector2(0, 34)
+	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	b.tooltip_text = "%s（terrain=%s, variant=%s）\ntags: %s" % [
+		entry.label, entry.terrain, entry.variant, ", ".join(entry.tags)]
+
+	var swatch := Color.html(entry.color)
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = swatch
+	sb.set_content_margin_all(6)
+	b.add_theme_stylebox_override("normal", sb)
+	b.add_theme_stylebox_override("hover", sb)
+	var sb_pressed := sb.duplicate()
+	sb_pressed.border_color = Color.WHITE
+	sb_pressed.set_border_width_all(3)
+	b.add_theme_stylebox_override("pressed", sb_pressed)
+
+	var lum := 0.299 * swatch.r + 0.587 * swatch.g + 0.114 * swatch.b
+	var fg := Color.BLACK if lum > 0.6 else Color.WHITE
+	for c in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
+		b.add_theme_color_override(c, fg)
+	return b
+
+func _make_file_dialog(mode: int) -> FileDialog:
+	var dlg := FileDialog.new()
+	dlg.file_mode = mode
+	dlg.access = FileDialog.ACCESS_FILESYSTEM
+	dlg.use_native_dialog = true
+	dlg.add_filter("*.json", "地图 JSON")
+	return dlg
+
+# ------------------------------------------------------------------ 事件
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not (event is InputEventKey and event.pressed and not event.echo):
+		return
+	if event.ctrl_pressed:
+		match event.keycode:
+			KEY_Z:
+				if event.shift_pressed:
+					redo()
+				else:
+					undo()
+				get_viewport().set_input_as_handled()
+			KEY_Y:
+				redo()
+				get_viewport().set_input_as_handled()
+			KEY_S:
+				_save_shortcut()
+				get_viewport().set_input_as_handled()
+		return
+	# 数字键 1~9 快速选笔刷（仅地形层；焦点在输入框时该键被其消费、不会落到这里）
+	if current_layer == "terrain" and event.keycode >= KEY_1 and event.keycode <= KEY_9:
+		var idx: int = event.keycode - KEY_1
+		if idx < brush_buttons.size():
+			brush_buttons[idx].button_pressed = true  # 触发 toggled -> select_brush
+			get_viewport().set_input_as_handled()
+
+# 有未保存改动时先确认再执行 action（新建/加载共用）
+func _confirm_discard(action: Callable) -> void:
+	if not _dirty:
+		action.call()
+		return
+	_pending = action
+	_confirm_dlg.popup_centered()
+
+func _on_new_pressed() -> void:
+	var w := int(width_spin.value)
+	var h := int(height_spin.value)
+	_confirm_discard(func(): new_map(w, h))
+
+func _on_preset_selected(idx: int) -> void:
+	# 选预设只填入宽/高输入框，真正生成等用户点“新建”，避免误触清空当前地图
+	if idx <= 0:
+		return
+	var p = SIZE_PRESETS[idx]
+	width_spin.value = p.w
+	height_spin.value = p.h
+	set_status("已选预设 %s，点“新建”生成" % p.label)
+
+func _on_brush_toggled(pressed: bool, idx: int) -> void:
+	if pressed:
+		select_brush(idx)
+
+func _save_shortcut() -> void:
+	# 有文件就覆盖，没有就走“另存为”弹窗
+	if current_path == "":
+		_on_save_as_pressed()
+	else:
+		save_to_file(current_path)
+
+func _on_save_as_pressed() -> void:
+	if current_path != "":
+		_save_dlg.current_file = current_path.get_file()
+	_save_dlg.current_dir = ProjectSettings.globalize_path(_map_dir)  # 默认存到地图文件夹
+	_save_dlg.popup_centered(Vector2i(900, 600))
+
+func _on_load_pressed() -> void:
+	_confirm_discard(func(): _load_dlg.popup_centered(Vector2i(900, 600)))
+
+func _on_back_to_menu() -> void:
+	# 返回主菜单（有未保存改动先确认）
+	_confirm_discard(func(): get_tree().change_scene_to_file("res://StartMenu.tscn"))
+
+func _on_reset_view() -> void:
+	if canvas:
+		canvas.fit_to_view()
+	set_status("已适配窗口")
+
+func select_brush(i: int) -> void:
+	brush_index = i
+	set_status("画笔：" + PALETTE[i].label)
+
+func pick_brush_at(col: int, row: int) -> void:
+	var tile = tiles[row][col]
+	for i in PALETTE.size():
+		var e = PALETTE[i]
+		if e.terrain == tile.get("terrain") and e.variant == tile.get("variant"):
+			if i < brush_buttons.size():
+				brush_buttons[i].button_pressed = true  # 触发 toggled -> select_brush
+			set_status("取色：" + e.label)
+			return
+	set_status("该地块不在当前笔刷列表中")
+
+# ------------------------------------------------------------------ 图层分派 + 区域
+
+# 画布左键 → 按当前层：地形=画地形 / 区域=把格加入当前区域
+func primary_paint(col: int, row: int) -> void:
+	if current_layer == "region":
+		_region_paint(col, row, true)
+	elif current_layer == "unit":
+		_place_unit(col, row)
+	else:
+		paint_cell(col, row)
+
+# 画布右键 → 按当前层：地形=取色 / 区域=从当前区域移除格 / 单位=删除该格单位
+func secondary_paint(col: int, row: int) -> void:
+	if current_layer == "region":
+		_region_paint(col, row, false)
+	elif current_layer == "unit":
+		_remove_unit(col, row)
+	else:
+		pick_brush_at(col, row)
+
+# 当前选中的区域（无则返回空字典；调用方用 .is_empty() 判断"没有"）
+func active_region() -> Dictionary:
+	if _active_region_idx >= 0 and _active_region_idx < regions.size():
+		return regions[_active_region_idx] as Dictionary
+	return {}
+
+# 给当前区域加/删一格（走 stroke：一段拖动算一次撤销）
+func _region_paint(col: int, row: int, add: bool) -> void:
+	var reg := active_region()
+	if reg.is_empty():
+		set_status("先在左侧「＋ 新建区域」或选一个区域")
+		return
+	var key := Vector2i(col, row)
+	var has: bool = reg["cells"].has(key)
+	if add and not has:
+		reg["cells"][key] = true
+	elif (not add) and has:
+		reg["cells"].erase(key)
+	else:
+		return   # 无变化
+	_stroke_dirty = true
+	_stroke_count += 1
+	_dirty = true
+	if canvas:
+		canvas.queue_redraw()
+
+func _on_region_selected(idx: int) -> void:
+	_active_region_idx = idx
+	if _region_color_btn and idx >= 0 and idx < regions.size():
+		_region_color_btn.color = Color.html(str(regions[idx].get("color", "#FFFFFF")))
+	_sync_region_kind_opt()
+	if canvas:
+		canvas.queue_redraw()
+
+# 把「类型」下拉同步到当前区域的 kind（select() 不触发 item_selected，无回环）
+func _sync_region_kind_opt() -> void:
+	if _region_kind_opt == null:
+		return
+	var reg := active_region()
+	var k := str(reg.get("kind", "aggro")) if not reg.is_empty() else "aggro"
+	for i in REGION_KINDS.size():
+		if REGION_KINDS[i][0] == k:
+			_region_kind_opt.select(i)
+			return
+	_region_kind_opt.select(0)
+
+func _on_region_kind_changed(idx: int) -> void:
+	var reg := active_region()
+	if reg.is_empty() or idx < 0 or idx >= REGION_KINDS.size():
+		return
+	var k := str(REGION_KINDS[idx][0])
+	if str(reg.get("kind", "aggro")) == k:
+		return
+	_push_undo(_snapshot(), "区域类型")
+	reg["kind"] = k
+	_dirty = true
+	_refresh_region_list()
+	_update_file_label()
+	if canvas:
+		canvas.queue_redraw()
+
+func _on_add_region() -> void:
+	_push_undo(_snapshot(), "新建区域")
+	regions.append({
+		"id": _unique_region_id(),
+		"label": "区域%d" % (regions.size() + 1),
+		"color": REGION_COLORS[regions.size() % REGION_COLORS.size()],
+		"kind": "aggro",   # 默认触发区；可在「类型」下拉改成部署区
+		"cells": {},
+	})
+	_active_region_idx = regions.size() - 1
+	_dirty = true
+	_refresh_region_list()
+	_update_file_label()
+	if canvas:
+		canvas.queue_redraw()
+
+func _on_rename_region() -> void:
+	var reg := active_region()
+	if reg.is_empty():
+		return
+	_region_rename_edit.text = str(reg.get("label", ""))
+	_region_rename_dlg.popup_centered()
+
+func _apply_region_rename() -> void:
+	var reg := active_region()
+	if reg.is_empty():
+		return
+	var nm := _region_rename_edit.text.strip_edges()
+	if nm == "":
+		return
+	_push_undo(_snapshot(), "区域改名")
+	reg["label"] = nm
+	_dirty = true
+	_refresh_region_list()
+	_update_file_label()
+
+func _on_delete_region() -> void:
+	if active_region().is_empty():
+		return
+	_push_undo(_snapshot(), "删除区域")
+	regions.remove_at(_active_region_idx)
+	_active_region_idx = mini(_active_region_idx, regions.size() - 1)
+	_dirty = true
+	_refresh_region_list()
+	_update_file_label()
+	if canvas:
+		canvas.queue_redraw()
+
+# 颜色实时改（ColorPicker 拖动会高频触发 → 不入撤销栈、避免刷屏；只标脏）
+func _on_region_color_changed(c: Color) -> void:
+	var reg := active_region()
+	if reg.is_empty():
+		return
+	reg["color"] = "#" + c.to_html(false)
+	_dirty = true
+	if canvas:
+		canvas.queue_redraw()
+
+func _refresh_region_list() -> void:
+	if _region_list == null:
+		return
+	_region_list.clear()
+	for i in regions.size():
+		var reg = regions[i]
+		var n: int = (reg["cells"] as Dictionary).size()
+		var mark := "［部署］" if str(reg.get("kind", "aggro")) == "deploy" else ""
+		_region_list.add_item("%s%s (%d)" % [mark, str(reg.get("label", "区域")), n])
+		_region_list.set_item_custom_fg_color(i, Color.html(str(reg.get("color", "#FFFFFF"))))
+	if _active_region_idx >= 0 and _active_region_idx < regions.size():
+		_region_list.select(_active_region_idx)
+		if _region_color_btn:
+			_region_color_btn.color = Color.html(str(regions[_active_region_idx].get("color", "#FFFFFF")))
+	_sync_region_kind_opt()
+
+# 不与现有区域 id 冲突的 region_N
+func _unique_region_id() -> String:
+	var i := 1
+	while true:
+		var cand := "region_%d" % i
+		var used := false
+		for r in regions:
+			if str(r.get("id", "")) == cand:
+				used = true
+				break
+		if not used:
+			return cand
+		i += 1
+	return "region_x"
+
+# 某格所属区域名（悬停信息用）
+func _regions_at(col: int, row: int) -> String:
+	var key := Vector2i(col, row)
+	var names := []
+	for r in regions:
+		if (r["cells"] as Dictionary).has(key):
+			names.append(str(r.get("label", "区域")))
+	return ", ".join(names)
+
+# ------------------------------------------------------------------ 数据
+
+func new_map(w: int, h: int) -> void:
+	var nw := clampi(w, 1, MAX_W)
+	var nh := clampi(h, 1, MAX_H)
+	if not tiles.is_empty():
+		_push_undo(_snapshot(), "新建 %d×%d" % [nw, nh])
+	width = nw
+	height = nh
+	tiles = []
+	for row in height:
+		var line := []
+		for col in width:
+			line.append({"terrain": DEFAULT_TERRAIN, "variant": DEFAULT_VARIANT})
+		tiles.append(line)
+	regions = []                 # 新图：清空区域层
+	_active_region_idx = -1
+	current_path = ""
+	_dirty = false
+	if width_spin: width_spin.value = width
+	if height_spin: height_spin.value = height
+	if canvas: canvas.request_fit()
+	_refresh_canvas()
+	_refresh_region_list()
+	_update_file_label()
+	_refresh_map_highlight()
+	set_status("新建地图 %d×%d" % [width, height])
+
+func paint_cell(col: int, row: int) -> void:
+	var b = PALETTE[brush_index]
+	var tile = tiles[row][col]
+	if tile.get("terrain") == b.terrain and tile.get("variant") == b.variant:
+		return
+	tiles[row][col] = {"terrain": b.terrain, "variant": b.variant}
+	_stroke_dirty = true
+	_stroke_count += 1
+	_dirty = true
+	if canvas:
+		canvas.queue_redraw()
+
+# 画布查表（未知地形 -> 品红，便于发现数据异常）；统一走 TerrainDB 的 O(1) 查表
+func color_for_tile(tile) -> Color:
+	return TerrainDB.color_of(tile)
+
+func decor_for_tile(tile) -> String:
+	return TerrainDB.decor_of(tile)
+
+func accent_for_tile(tile) -> Color:
+	return TerrainDB.accent_of(tile)
+
+# 左下角悬停信息：坐标 + 地块标签/类型/外观/tags
+func hover_text(col: int, row: int) -> String:
+	if row < 0 or row >= tiles.size() or col < 0 or col >= tiles[row].size():
+		return ""
+	var t = tiles[row][col]
+	var e = TerrainDB.entry_for(t)
+	var label := str(e.label) if e != null else "未知"
+	var tags := ", ".join(e.tags) if e != null else ""
+	var base := "(%d, %d)  %s  %s/%s\ntags: %s" % [col, row, label, t.get("terrain"), t.get("variant"), tags]
+	var rtxt := _regions_at(col, row)
+	if rtxt != "":
+		base += "\n区域: " + rtxt
+	return base
+
+func _refresh_canvas() -> void:
+	if canvas:
+		canvas.queue_redraw()
+
+func set_status(s: String) -> void:
+	if status_label:
+		status_label.text = s
+
+func _update_file_label() -> void:
+	if _file_label == null:
+		return
+	var name := "(未保存)" if current_path == "" else current_path.get_file()
+	_file_label.text = "文件：%s%s" % [name, "  *" if _dirty else ""]
+
+# ------------------------------------------------------------------ 撤销 / 重做
+
+func _snapshot() -> Dictionary:
+	return {"width": width, "height": height, "tiles": _copy_tiles(tiles), "regions": _copy_regions(regions), "map_units": _copy_map_units(map_units)}
+
+# 深拷贝单位层（含 proto 嵌套字典）——撤销快照要把单位层一起拷，否则落子/删单位无法撤销
+func _copy_map_units(src: Array) -> Array:
+	var out := []
+	for e in src:
+		if typeof(e) == TYPE_DICTIONARY:
+			out.append({"proto": (e.get("proto", {}) as Dictionary).duplicate(true), "col": int(e.get("col", 0)), "row": int(e.get("row", 0)), "faction": str(e.get("faction", "enemy"))})
+	return out
+
+func _copy_tiles(src: Array) -> Array:
+	var out := []
+	for row in src:
+		var line := []
+		for cell in row:
+			line.append({"terrain": cell.terrain, "variant": cell.variant})
+		out.append(line)
+	return out
+
+# 深拷贝区域（含 cells 集合）——撤销快照必须把区域层一起拷，否则画区域无法撤销
+func _copy_regions(src: Array) -> Array:
+	var out := []
+	for r in src:
+		var cells := {}
+		for k in r["cells"]:
+			cells[k] = true
+		out.append({"id": str(r.get("id", "")), "label": str(r.get("label", "")), "color": str(r.get("color", "#FFFFFF")), "kind": str(r.get("kind", "aggro")), "cells": cells})
+	return out
+
+func _push_undo(snap: Dictionary, label: String) -> void:
+	_undo_stack.append({"snap": snap, "label": label})
+	while _undo_stack.size() > MAX_UNDO:
+		_undo_stack.pop_front()
+	_redo_stack.clear()  # 任何新操作清空重做栈
+	_refresh_history()
+
+func _apply_snapshot(snap: Dictionary) -> void:
+	width = snap.width
+	height = snap.height
+	tiles = snap.tiles
+	regions = snap.get("regions", [])
+	map_units = snap.get("map_units", [])
+	_active_region_idx = clampi(_active_region_idx, -1, regions.size() - 1)
+	if width_spin: width_spin.value = width
+	if height_spin: height_spin.value = height
+	_refresh_canvas()
+	_refresh_region_list()
+
+func begin_stroke() -> void:
+	_stroke_snapshot = _snapshot()
+	_stroke_dirty = false
+	_stroke_count = 0
+
+func end_stroke() -> void:
+	if _stroke_dirty and _stroke_snapshot != null:
+		var lbl := ""
+		match current_layer:
+			"region": lbl = "区域编辑"
+			"unit": lbl = "单位编辑"
+			_: lbl = "绘制 %s ×%d" % [PALETTE[brush_index].label, _stroke_count]
+		_push_undo(_stroke_snapshot, lbl)
+		_update_file_label()
+	_stroke_snapshot = null
+	_stroke_dirty = false
+	_stroke_count = 0
+
+func undo() -> void:
+	if _undo_stack.is_empty():
+		set_status("无可撤销")
+		return
+	var entry = _undo_stack.pop_back()
+	_redo_stack.append({"snap": _snapshot(), "label": entry.label})
+	_apply_snapshot(entry.snap)
+	_dirty = true
+	_refresh_history()
+	_update_file_label()
+	set_status("已撤销：" + entry.label)
+
+func redo() -> void:
+	if _redo_stack.is_empty():
+		set_status("无可重做")
+		return
+	var entry = _redo_stack.pop_back()
+	_undo_stack.append({"snap": _snapshot(), "label": entry.label})
+	_apply_snapshot(entry.snap)
+	_dirty = true
+	_refresh_history()
+	_update_file_label()
+	set_status("已重做：" + entry.label)
+
+func _refresh_history() -> void:
+	if _history_list == null:
+		return
+	_history_list.clear()
+	var n := _undo_stack.size()
+	if n == 0:
+		_history_list.add_item("（暂无操作）")
+		return
+	var shown := 0
+	var i := n - 1
+	while i >= 0 and shown < HISTORY_SHOWN:
+		var from_top := n - i  # 1 = 最新（下一个被撤销）
+		var prefix := "↩ " if from_top == 1 else "    "
+		_history_list.add_item("%s%d. %s" % [prefix, from_top, _undo_stack[i].label])
+		shown += 1
+		i -= 1
+
+# ------------------------------------------------------------------ 存档 / 读档
+
+func to_json_dict() -> Dictionary:
+	return MapIO.to_dict(width, height, tiles, _regions_to_json(), map_units)
+
+# 区域 → JSON：cells 集合转 [[x,y],…]（确定性排序，利于 diff）
+func _regions_to_json() -> Array:
+	var out := []
+	for r in regions:
+		var keys: Array = (r["cells"] as Dictionary).keys()
+		keys.sort_custom(func(a, b): return a.y < b.y or (a.y == b.y and a.x < b.x))
+		var cells := []
+		for k in keys:
+			cells.append([k.x, k.y])
+		out.append({"id": str(r.get("id", "")), "label": str(r.get("label", "")), "color": str(r.get("color", "#FFFFFF")), "kind": str(r.get("kind", "aggro")), "cells": cells})
+	return out
+
+# JSON → 区域（过滤越界格；非数组/坏项跳过）
+func _regions_from_json(raw, mw: int, mh: int) -> Array:
+	var out := []
+	if typeof(raw) != TYPE_ARRAY:
+		return out
+	for r in raw:
+		if typeof(r) != TYPE_DICTIONARY:
+			continue
+		var cells := {}
+		var rc = r.get("cells", [])
+		if typeof(rc) == TYPE_ARRAY:
+			for pair in rc:
+				if typeof(pair) == TYPE_ARRAY and pair.size() >= 2:
+					var x := int(pair[0])
+					var y := int(pair[1])
+					if x >= 0 and x < mw and y >= 0 and y < mh:
+						cells[Vector2i(x, y)] = true
+		out.append({"id": str(r.get("id", "region")), "label": str(r.get("label", "区域")), "color": str(r.get("color", "#FFFFFF")), "kind": str(r.get("kind", "aggro")), "cells": cells})
+	return out
+
+func save_to_file(path: String) -> void:
+	if not MapIO.write_map(path, width, height, tiles, _regions_to_json(), map_units):
+		set_status("保存失败：无法写入文件")
+		return
+	current_path = path
+	_dirty = false
+	_update_file_label()
+	_scan_maps()   # 新文件可能落进当前文件夹 → 刷新列表并高亮
+	set_status("已保存：" + path)
+
+func load_from_file(path: String) -> void:
+	var res := MapIO.read_file(path)
+	if not res.get("ok", false):
+		if not FileAccess.file_exists(path):
+			set_status("加载失败：文件不存在")
+		else:
+			set_status("加载失败：JSON 解析错误或缺少 width/height/tiles 字段")
+		return
+	var nw := int(res["width"])
+	var nh := int(res["height"])
+	var new_tiles: Array = res["tiles"]
+	# regions 仍由编辑器自己转成内存形（Vector2i 集合）；MapIO 透传的是 [[x,y]] 形（_regions_from_json 兼容）
+	var new_regions := _regions_from_json(res["regions"], nw, nh)
+	if not tiles.is_empty():
+		_push_undo(_snapshot(), "加载 %s" % path.get_file())
+	width = nw
+	height = nh
+	tiles = new_tiles
+	regions = new_regions
+	map_units = res["units"]   # 预置单位原样保留（α 期编辑器不编辑，仅在存盘时写回，不丢）
+	_active_region_idx = -1 if regions.is_empty() else 0
+	current_path = path
+	_dirty = false
+	if width_spin: width_spin.value = width
+	if height_spin: height_spin.value = height
+	if canvas: canvas.request_fit()
+	_refresh_canvas()
+	_refresh_region_list()
+	_update_file_label()
+	_refresh_map_highlight()
+	set_status("已加载：%s (%d×%d)" % [path, width, height])

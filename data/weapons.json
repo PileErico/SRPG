@@ -1,0 +1,69 @@
+[
+  {
+    "id": "spear_dragon_calamity",
+    "name": "龙之灾祸",
+    "slot": "main_hand",
+    "two_handed": true,
+    "icon": "res://icons/Items/Weapons/Special_Veiken.png",
+    "tags": ["special", "weapon_spear", "two_handed", "melee"],
+    "requires": ["char_veiken"],
+    "mods": [
+      {"stat": "atk", "op": "flat", "value": 5},
+      {"stat": "res_ice", "op": "flat", "value": 10}
+    ],
+    "attack": {
+      "name": "突刺·龙枪",
+      "icon": "res://icons/Items/Weapons/Special_Veiken_Skill1.png",
+      "coeff": 0.85,
+      "range": 2,
+      "ap_cost": 1,
+      "damage_kind": "physical",
+      "tags": ["skill_spear", "piercing", "aoe"],
+      "aoe": {"shape": "line", "length": 2, "friendly_fire": true}
+    }
+  },
+  {
+    "id": "claw_wing",
+    "name": "比路兹的翼爪",
+    "slot": "main_hand",
+    "innate": true,
+    "icon": "res://icons/Items/Weapons/Special_Belooz_1.png",
+    "tags": ["special", "weapon_claw", "melee", "innate"],
+    "requires": ["char_belooz"],
+    "mods": [],
+    "attack": {
+      "name": "撕裂",
+      "icon": "res://icons/Items/Weapons/Special_Belooz_Skill_1.png",
+      "coeff": 1.0,
+      "range": 1,
+      "ap_cost": 1,
+      "damage_kind": "physical",
+      "tags": ["skill_claw", "slashing", "single_target"],
+      "prefer": "ground",
+      "bonus": {"stats": ["STR", "DEX"], "mult": 0.5},
+      "inflict": {"name": "流血·翼爪", "kind": "debuff", "chance": 30, "duration": 2, "dot_pct_max_hp": 5, "tags": ["bleeding"]}
+    }
+  },
+  {
+    "id": "claw_foot",
+    "name": "比路兹的足爪",
+    "slot": "off_hand",
+    "innate": true,
+    "icon": "res://icons/Items/Weapons/Special_Belooz_2.png",
+    "tags": ["special", "weapon_claw", "melee", "innate"],
+    "requires": ["char_belooz"],
+    "mods": [],
+    "attack": {
+      "name": "抓取",
+      "icon": "res://icons/Items/Weapons/Special_Belooz_Skill_2.png",
+      "coeff": 1.0,
+      "range": 1,
+      "ap_cost": 1,
+      "damage_kind": "physical",
+      "tags": ["skill_claw", "piercing", "single_target"],
+      "prefer": "air",
+      "bonus": {"stats": ["STR", "DEX"], "mult": 0.5},
+      "armor_pen": 0.30
+    }
+  }
+]

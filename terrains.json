@@ -1,0 +1,169 @@
+{
+  "format_version": 2,
+  "_note": "地形单一数据源：编辑器取 label/color/accent/decor/tags 绘制；战斗取 move（通行性+成本）与 effects（地块效果）。move.passable_by: \"all\"=任何单位可进 / \"none\"=不可通行 / [tag,...]=仅含其中之一可进（如深水仅<飞行>）；move.cost=基础通行成本，tag_cost 按单位 tag 取更优（最小）；effects=站在该格的单位获得的效果，带 when 条件，伤害结算时惰性读取。",
+  "terrains": [
+    {
+      "id": "grassland",
+      "label": "草原",
+      "terrain": "plain",
+      "variant": "grassland",
+      "color": "#4A7C3A",
+      "accent": "#7BB35C",
+      "decor": "grass",
+      "tags": ["ground", "open"],
+      "move": { "cost": 1, "passable_by": "all" },
+      "effects": []
+    },
+    {
+      "id": "wasteland",
+      "label": "荒原",
+      "terrain": "plain",
+      "variant": "wasteland",
+      "color": "#B89B6A",
+      "accent": "#806237",
+      "decor": "crack",
+      "tags": ["ground", "open", "barren"],
+      "move": { "cost": 1, "passable_by": "all" },
+      "effects": []
+    },
+    {
+      "id": "forest",
+      "label": "森林",
+      "terrain": "forest",
+      "variant": "forest",
+      "color": "#2D5016",
+      "accent": "#6FB23F",
+      "decor": "tree",
+      "tags": ["ground", "cover", "flammable", "blocks_sight"],
+      "move": { "cost": 2, "passable_by": "all", "tag_cost": { "flying": 1 } },
+      "effects": [
+        {
+          "name": "森林掩蔽",
+          "desc": "闪避效能+15%（飞行态不享受）",
+          "when": { "occupant_lacks_tags": ["flying"] },
+          "grant": { "stat": "evasion", "layer": "效能", "percent": 15, "nature": "buff" }
+        }
+      ]
+    },
+    {
+      "id": "mountain",
+      "label": "山地",
+      "terrain": "mountain",
+      "variant": "mountain",
+      "color": "#7C7268",
+      "accent": "#4A443C",
+      "decor": "peak",
+      "tags": ["ground", "highland", "rough", "blocks_sight"],
+      "move": { "cost": 3, "passable_by": "all", "tag_cost": { "flying": 1 } },
+      "effects": []
+    },
+    {
+      "id": "shallow_water",
+      "label": "浅水",
+      "terrain": "water",
+      "variant": "shallow",
+      "color": "#3A6EA5",
+      "accent": "#9CC6E8",
+      "decor": "wave",
+      "tags": ["water", "shallow"],
+      "move": { "cost": 2, "passable_by": "all", "tag_cost": { "flying": 1 } },
+      "effects": []
+    },
+    {
+      "id": "deep_water",
+      "label": "深水",
+      "terrain": "water",
+      "variant": "deep",
+      "color": "#1E3F66",
+      "accent": "#5E89B6",
+      "decor": "wave",
+      "tags": ["water", "deep"],
+      "move": { "cost": 1, "passable_by": ["flying"] },
+      "effects": []
+    },
+    {
+      "id": "road",
+      "label": "道路",
+      "terrain": "road",
+      "variant": "road",
+      "color": "#9B8B6E",
+      "accent": "#6E5F45",
+      "decor": "path",
+      "tags": ["ground", "open", "road"],
+      "move": { "cost": 1, "passable_by": "all" },
+      "effects": []
+    },
+    {
+      "id": "bush",
+      "label": "灌木",
+      "terrain": "bush",
+      "variant": "bush",
+      "color": "#3E6B2E",
+      "accent": "#7FB04A",
+      "decor": "bush",
+      "tags": ["ground", "cover", "flammable"],
+      "move": { "cost": 1, "passable_by": "all" },
+      "effects": []
+    },
+    {
+      "id": "hill",
+      "label": "丘陵",
+      "terrain": "hill",
+      "variant": "hill",
+      "color": "#6E7A48",
+      "accent": "#A6B36A",
+      "decor": "hill",
+      "tags": ["ground", "highland", "open"],
+      "move": { "cost": 2, "passable_by": "all", "tag_cost": { "flying": 1 } },
+      "effects": []
+    },
+    {
+      "id": "sand",
+      "label": "沙地",
+      "terrain": "sand",
+      "variant": "sand",
+      "color": "#D6C088",
+      "accent": "#B0935A",
+      "decor": "dune",
+      "tags": ["ground", "open", "barren"],
+      "move": { "cost": 2, "passable_by": "all", "tag_cost": { "flying": 1 } },
+      "effects": []
+    },
+    {
+      "id": "snow",
+      "label": "雪地",
+      "terrain": "snow",
+      "variant": "snow",
+      "color": "#D6E2EC",
+      "accent": "#9FBBD0",
+      "decor": "snow",
+      "tags": ["ground", "open", "cold"],
+      "move": { "cost": 2, "passable_by": "all", "tag_cost": { "flying": 1 } },
+      "effects": []
+    },
+    {
+      "id": "rubble",
+      "label": "废墟",
+      "terrain": "rubble",
+      "variant": "rubble",
+      "color": "#8A8478",
+      "accent": "#544E45",
+      "decor": "rubble",
+      "tags": ["ground", "cover", "rough", "blocks_sight"],
+      "move": { "cost": 2, "passable_by": "all", "tag_cost": { "flying": 1 } },
+      "effects": []
+    },
+    {
+      "id": "wall",
+      "label": "墙",
+      "terrain": "wall",
+      "variant": "wall",
+      "color": "#5A534D",
+      "accent": "#332E2A",
+      "decor": "brick",
+      "tags": ["wall", "blocks_sight"],
+      "move": { "cost": 1, "passable_by": "none" },
+      "effects": []
+    }
+  ]
+}

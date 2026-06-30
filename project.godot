@@ -1,0 +1,21 @@
+; Engine configuration file.
+; Hex Map Editor - 战棋地图编辑器（地形层）
+; Godot 4.6.x (mono editor, pure GDScript project)
+
+config_version=5
+
+[application]
+
+config/name="HexMapEditor"
+run/main_scene="res://StartMenu.tscn"
+config/features=PackedStringArray("4.6", "GL Compatibility")
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

@@ -1,0 +1,25 @@
+[
+  {
+    "id": "innate_martial",
+    "name": "天性武者",
+    "rarity": "special",
+    "mods": [
+      {"stat": "STR", "op": "flat", "value": 5},
+      {"stat": "DEX", "op": "flat", "value": 5},
+      {"stat": "STA", "op": "flat", "value": 5}
+    ],
+    "desc": "比路兹身为鸟人更加擅长也只愿意使用自己的天生武器进行战斗。她因此无法正常装备任何武器。",
+    "no_weapon": true
+  },
+  {
+    "id": "dragonslayer",
+    "name": "屠龙者",
+    "rarity": "special",
+    "mods": [
+      {"stat": "atk_eff", "op": "flat", "value": 5},
+      {"stat": "def_eff", "op": "flat", "value": 5}
+    ],
+    "triple_vs": ["monster", "beast"],
+    "desc": "与带有〈怪物〉或〈野兽〉标签的敌人战斗时，以上加成以三倍生效。"
+  }
+]

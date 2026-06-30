@@ -1,0 +1,2189 @@
+extends Control
+## 单位 sandbox：15×15 全草原地图 + 一个基础单位，用来逐步挂属性、看表现。
+## 复用 terrains.json（与编辑器同一地形数据源）与 HexCanvas（经 SandboxCanvas 叠加单位）。
+## 充当 HexCanvas 需要的“editor”宿主：提供 width/height/tiles + 地形查表 + hover_text。
+
+const Unit := preload("res://Unit.gd")
+const SkillDB := preload("res://SkillDB.gd")
+const TerrainDB := preload("res://TerrainDB.gd")
+const SandboxCanvas := preload("res://SandboxCanvas.gd")
+const UnitStatusPanel := preload("res://UnitStatusPanel.gd")
+const TurnOrderBar := preload("res://TurnOrderBar.gd")
+const DeployPanel := preload("res://DeployPanel.gd")
+const RosterBar := preload("res://RosterBar.gd")
+const SandboxConfig := preload("res://SandboxConfig.gd")
+const MapIO := preload("res://MapIO.gd")   # 地图读 / 写单一入口（与 MapEditor 共用）
+# 战斗地图：默认与地图编辑器共享同一张图（编辑器改 → 这里读到）。
+# 实际打开哪张：优先 SandboxConfig.map_path（选地图界面传入），空则用此默认；缺失/损坏回退全草原。
+const MAP_PATH := "res://maps/sandbox.json"
+const PLAYER_PORTRAIT := "res://icons/Character_Icons/Plyer_Special_Belooz.png"  # 玩家立绘（角色状态页大图）
+const PLAYER_ICON := "res://icons/Unit_Icons/Player_Special_Belooz.png"          # 玩家棋子图标（token）
+const ENEMY_PORTRAIT := "res://icons/Character_Icons/Empire_Infantry.png"        # 帝国步兵 立绘
+const ENEMY_ICON := "res://icons/Unit_Icons/Empire_Infantry.png"                 # 帝国步兵 棋子图标（修正：Unit_Icons 复数）
+const ENEMY2_PORTRAIT := "res://icons/Character_Icons/Empire_Light_Infantry.png" # 帝国轻步兵 立绘（empire 开头 = 敌人）
+const ENEMY2_ICON := "res://icons/Unit_Icons/Empire_Light_Infantry.png"          # 帝国轻步兵 棋子图标
+const ALLY_PORTRAIT := "res://icons/Character_Icons/Plyer_Special_Veiken.png"    # 友方维肯 立绘
+const ALLY_ICON := "res://icons/Unit_Icons/Player_Special_Veiken.png"            # 友方维肯 棋子图标
+const ALLY_SPAWN := Vector2i(6, 7)     # 友方出生点（挨着玩家）
+const DEFAULT_TERRAIN := "plain"
+const DEFAULT_VARIANT := "grassland"
+const AI_THINK_DELAY := 0.5            # 敌方 AI 回合开始的思考停顿
+const AI_ACT_GAP := 1.0                # 每个动作之间的停顿（移动→停 1 秒→攻击），便于观看
+
+var width := 15
+var height := 15
+var tiles := []            # tiles[row][col] = {"terrain":..,"variant":..}；sandbox 全草原
+var PALETTE := []
+var units := []            # Unit 列表
+# 仇恨触发区域（mode②）：{region_id: {Vector2i:true}}。关卡设计者在地图编辑器「区域层」绘制。
+# 由 _load_map 从地图 regions 字段读入 _map_regions，_setup_regions 转成 aggro_regions。
+var aggro_regions := {}
+var _map_regions := []     # 地图文件 regions 原始数据：[{id,label,color,cells:[[x,y]…],kind?}]（schema v2，可空）
+var _map_units := []       # 地图文件 units 原始数据：[{proto,col,row,faction}]（schema v3，可空）→ _spawn_map_units 落子
+var _deploy_cells := {}    # 部署区格集合 {Vector2i:true}：kind=="deploy" 的区域并集（玩家单位只能放这里）
+
+# —— 简陋回合框架（round/turn 双层，出手按速度；详见 docs/单位系统设计.md）——
+var round_num := 1
+var turn_order := []       # 本 round 的出手序列（速度大→小；同速玩家优先）
+var active_index := 0      # 当前行动单位在 turn_order 的下标
+# ZOC 借机去重：本 round 内「拥有者→移动者」已触发过的集合（key=owner_id_mover_id），每 round 清空。
+var zoc_triggered := {}
+
+# —— 选中 / 移动指令状态 ——
+var selected_unit = null   # 左键选中的单位（用于唤出选单 / 移动）
+var move_mode := false     # 选了「移动」后进入移动指令模式：显示范围 + 路径线
+var attack_mode := false   # 选了「攻击」后进入攻击模式：角色周围攻击范围、点敌即打
+var skill_mode := false    # 选了某主动技能后：显示目标范围（绿）、点范围内合法目标释放
+var active_skill_id := ""  # 当前待释放的技能 id（skill_mode 期间有效）
+var skill_cells := {}      # 技能目标范围 {Vector2i: true}（含可自选的己格）
+var reachable := {}        # 移动模式下可达格：{Vector2i(col,row): 累计移动消耗}
+var attack_cells := {}     # 攻击格 {Vector2i: true}：移动模式=极限可攻击预览；攻击模式=角色周围实际可攻击
+var _came_from := {}       # Dijkstra 前驱：{格: 上一格}，用于即时重建鼠标路径
+var hover_path := []       # 当前鼠标悬停格的移动路径（Vector2i 序列，含起点）
+
+# —— 范围显示（移动/攻击范围层）——
+var range_overlays := []        # 画布要画的范围层：[{reach,attack,move_color,atk_color}]
+var show_enemy_preview := false # 移动模式按 Tab：是否同时显示最近敌方的移动/攻击范围
+var hover_range_unit = null     # 鼠标悬停在地图棋子上的单位（显示其移动/攻击范围；敌我皆可）
+const RANGE_MOVE_FRIENDLY := Color(0.45, 0.70, 1.0, 0.32)  # 我方移动范围：浅蓝
+const RANGE_MOVE_ENEMY := Color(1.0, 0.92, 0.35, 0.28)     # 敌方移动范围：浅黄
+const RANGE_ATTACK := Color(0.95, 0.32, 0.30, 0.36)        # 攻击范围：浅红
+const RANGE_SKILL := Color(0.30, 0.85, 0.42, 0.34)         # 技能（治疗）范围：浅绿
+
+# —— 移动动画（沿路径平移，非瞬移）——
+var _animating := false
+var _anim_unit = null      # 正在播放滑动动画的单位（移动滑行 / 攻击撞击共用）
+var _anim_pos := Vector2.ZERO  # 该单位当前的绘制世界坐标（动画期间覆盖 hex_center）
+const MOVE_ANIM_STEP := 0.09   # 每格滑动秒数
+
+# —— 起飞 / 降落过渡（纯 cosmetic，不占用 _animating 串行通道）——
+var _fly_anim := {}        # 单位 → 悬空因子 0..1（仅起降动画进行中存在）
+var _fly_tweens := {}      # 单位 → 当前起降 Tween（再次切换时先 kill 旧的）
+const FLY_ANIM_TIME := 0.28   # 起飞/降落过渡时长
+
+# —— 攻击动画 / 音效 ——
+const ATTACK_SFX := "res://audio/attack.mp3"
+const FLASH_TIME := 0.2    # 受击闪红时长
+var _flash_units := {}     # 正在闪红的受击单位集合
+var _sfx: AudioStreamPlayer  # 攻击音效播放器
+
+var canvas
+var _turn_panel: VBoxContainer   # 紧凑回合状态
+var _log: RichTextLabel          # 战斗记录（BBCode）
+var _context_menu: PopupMenu
+var _skill_submenu: PopupMenu          # 「技能」子菜单（列已学主动技能）
+var _skill_menu_map := {}              # 子菜单项 id -> skill_id
+var _status_panel
+var _turn_bar                    # 顶部行动顺序槽（TurnOrderBar）
+var viewed_unit = null   # 角色状态页当前查看的单位（用于棋子圆圈高亮）
+var hover_unit = null    # 鼠标扫过行动顺序槽头像时，要在地图上高亮所在格的单位
+
+# —— 遭遇战结束（胜负）——
+var battle_over := false
+var _banner: Label        # 胜利 / 失败 横幅（含「按 R 重开」）
+
+# —— 阶段：deploy=布置（调试侧栏摆单位、回合不跑）/ battle=战斗（回合+AI 正常）——
+var phase := "deploy"
+var _deploy_panel         # DeployPanel（右侧：选中单位编辑器 + 保存预设 + 开始游戏）
+var _roster_bar           # RosterBar（底部横向栏：可用单位管理 + ＋ 添加）
+var _battle_ui: VBoxContainer   # 战斗期才显示的右栏（回合状态 + 战斗记录）
+
+# 可用单位 roster（底部栏全部已准备单位）。其中「已布置」的也在 units 里（= 上场参战的子集）。
+# roster 单位的配置（四维/装备/技能…）可存成「单位预设」，与场上位置无关。
+var roster := []
+const UNIT_PRESETS_PATH := "user://unit_presets.json"   # 单位预设（用户自存的配置，跨次启动保留）
+const UNIT_PROTOS_PATH := "res://data/unit_prototypes.json"
+
+# 平顶六边形 odd-q 邻居偏移（奇数列向下错半格，分奇偶两套）
+const NB_EVEN := [Vector2i(1, 0), Vector2i(1, -1), Vector2i(0, -1), Vector2i(-1, -1), Vector2i(-1, 0), Vector2i(0, 1)]
+const NB_ODD := [Vector2i(1, 1), Vector2i(1, 0), Vector2i(0, -1), Vector2i(-1, 0), Vector2i(-1, 1), Vector2i(0, 1)]
+# 侧栏属性键 → 中文标签
+const STAT_LABELS := {
+	"HP": "生命", "HP_max": "生命上限", "armor": "护甲", "armor_max": "护甲上限",
+	"AP_max": "AP上限", "move": "移动力", "speed": "速度",
+	"atk": "攻击", "mag": "理术", "atk_eff": "攻击效能", "def_eff": "防御效能",
+	"acc": "命中", "eva": "闪避", "crit_rate": "暴击率", "crit_dmg": "暴击威力",
+	"block_rate": "格挡率", "block_power": "格挡性能",
+	"res_phys": "物理抗性", "res_status": "异常抗性",
+	"res_fire": "火焰抗性", "res_thunder": "雷电抗性", "res_ice": "冰冻抗性", "res_holy": "神圣抗性",
+}
+# tag → 中文标签（通行性/效果文字用）
+const TAG_LABELS := {"flying": "飞行", "spectral": "灵体", "ground": "地面"}
+
+func _ready() -> void:
+	randomize()   # 战斗判定掷骰
+	_load_terrains()
+	_load_map()   # 读「选地图」传入或默认的战斗地图（缺失则回退全草原）
+	_setup_regions()
+	_build_ui()
+	_spawn_map_units()   # 落地图预置单位（关卡设计的敌 / 中立 / 固定单位）；旧图无 units = 空
+	_enter_deploy()   # 停在布置阶段：侧栏摆单位、回合不跑；点「开始游戏」才 _start_battle
+
+# 仇恨触发区域（mode②）：从地图 regions 字段（_map_regions）构建 {region_id: {Vector2i:true}}。
+# 敌人挂 ai_region 引用某区域 id，玩家踏入即激活（消费见 _ai_update_aggro）。旧图无 regions = 空。
+func _setup_regions() -> void:
+	aggro_regions = {}
+	_deploy_cells = {}
+	for reg in _map_regions:
+		if typeof(reg) != TYPE_DICTIONARY:
+			continue
+		var id := str(reg.get("id", ""))
+		var kind := str(reg.get("kind", "aggro"))   # 缺省＝仇恨触发区（向后兼容）
+		var cells := {}
+		for c in reg.get("cells", []):
+			# cells 项形如 [x, y]
+			if typeof(c) == TYPE_ARRAY and c.size() >= 2 and _cell_in_bounds(int(c[0]), int(c[1])):
+				cells[Vector2i(int(c[0]), int(c[1]))] = true
+		if kind == "deploy":
+			# 部署区（玩家布置区）：并入 _deploy_cells（faction 暂统一按玩家）
+			for cell in cells:
+				_deploy_cells[cell] = true
+		elif id != "":
+			aggro_regions[id] = cells   # 仇恨/触发区按 id 存（敌人 ai_region 引用）
+
+func _rect_cells(x0: int, y0: int, x1: int, y1: int) -> Dictionary:
+	var d := {}
+	for x in range(x0, x1 + 1):
+		for y in range(y0, y1 + 1):
+			if _cell_in_bounds(x, y):
+				d[Vector2i(x, y)] = true
+	return d
+
+# —— 地形：经 TerrainDB 复用 terrains.json（与编辑器同一数据源、O(1) 查表）——
+func _load_terrains() -> void:
+	PALETTE = TerrainDB.palette()
+
+# 读编辑器存的战斗地图（MAP_PATH）；缺失/损坏则回退到全草原，保证沙盒永远能跑
+func _load_map() -> void:
+	_map_regions = []   # 默认无区域（旧 v1 图 / 加载失败）
+	_map_units = []     # 默认无预置单位（旧图 / 加载失败）
+	# 优先用「选地图」界面传入的路径（SandboxConfig.map_path）；空则用默认战斗图
+	var path: String = SandboxConfig.map_path if SandboxConfig.map_path != "" else MAP_PATH
+	var res := MapIO.read_file(path)   # 统一读 / 钳制（与 MapEditor 共用 MapIO）
+	if res.get("ok", false):
+		width = int(res["width"])
+		height = int(res["height"])
+		tiles = res["tiles"]
+		_map_regions = res["regions"]   # schema v2：命名区域（向后兼容，旧图无此键=空）
+		_map_units = res["units"]       # schema v3：预置单位（向后兼容，旧图无此键=空）
+		return
+	if FileAccess.file_exists(path):
+		push_warning("战斗地图 %s 格式无效，回退全草原" % path)
+	_new_grassland(width, height)
+
+func _new_grassland(w: int, h: int) -> void:
+	width = w
+	height = h
+	tiles = []
+	for row in height:
+		var line := []
+		for col in width:
+			line.append({"terrain": DEFAULT_TERRAIN, "variant": DEFAULT_VARIANT})
+		tiles.append(line)
+
+# 从内存地图字典装载战场（编辑器「一键试玩」用，免存盘）。dict = MapEditor.to_json_dict() 形。
+# 重置到布置阶段：保留 roster（玩家自带军，收回待命），按新地图重新落预置单位。
+func load_from_memory(map_dict: Dictionary) -> void:
+	var res := MapIO.normalize(map_dict)
+	if not res.get("ok", false):
+		push_warning("试玩装载失败：地图数据无效")
+		return
+	battle_over = false
+	width = int(res["width"])
+	height = int(res["height"])
+	tiles = res["tiles"]
+	_map_regions = res["regions"]
+	_map_units = res["units"]
+	_setup_regions()
+	# 场上清空、roster 收回待命（保留玩家自带军，跨试玩不丢）
+	units = []
+	for u in roster:
+		u.col = -1
+		u.row = -1
+		u.effects = []
+		u.init_vitals()
+	_spawn_map_units()   # 按新地图落预置单位（关卡的敌 / 我）
+	turn_order = []
+	active_index = 0
+	round_num = 1
+	if canvas != null:
+		canvas.request_fit()
+		canvas.queue_redraw()
+	_enter_deploy()
+
+# 敌方阵容（遭遇战）：两个不同帝国单位（empire 开头 = 敌人）。
+# ai_threat=威胁感知(进它移动+攻击范围就扑)；ai_region=区域守卫(玩家进指定房间才醒)；ai_group=同组连锁。
+const ENEMY_ROSTER := [
+	# 两个都用威胁感知：进它的「移动+攻击」范围(6+1=7)就扑上来
+	{"name": "帝国步兵", "cell": Vector2i(10, 7), "speed": 5, "portrait": ENEMY_PORTRAIT, "icon": ENEMY_ICON,
+		"ai_threat": true},
+	{"name": "帝国轻步兵", "cell": Vector2i(11, 8), "speed": 7, "portrait": ENEMY2_PORTRAIT, "icon": ENEMY2_ICON,
+		"ai_threat": true},
+]
+
+func _spawn_units() -> void:
+	var p = Unit.new("比路兹", "player", 7, 7)   # 比路兹 = 我方
+	p.portrait = PLAYER_PORTRAIT
+	p.icon = PLAYER_ICON
+	p.tags.append("char_belooz")            # 比路兹专属标记（拥有独特立绘 → 专属技能页）
+	p.tags.append("harpy")                  # 种族：鸟人
+	_set_four(p, 3, 5, 3, 4)                # 比路兹基础四维（力量/灵巧/智力/体力）
+	p.exp = 35                              # 占位经验（演示紫色经验槽，可改）
+	p.set_trait("innate_martial")           # 专属特性：天性武者（+5 力量/灵巧/体力、无法装“外来”武器）
+	p.equip("claw_wing")                    # 主手：翼爪（撕裂）——天生武器，地面用，不可卸/缴
+	p.equip("claw_foot")                    # 副手：足爪（抓取）——天生武器，空中用，不可卸/缴
+	p.level = 5                             # 【占位/演示】等级 5：可学/可升「战场救治」到 II（门槛 2/5/9）
+	p.learn_skill("battlefield_heal")       # 【占位/演示】预学战场救治 I：技能页显金「I」、战斗里「技能」可用
+	var a = Unit.new("维肯", "player", ALLY_SPAWN.x, ALLY_SPAWN.y)   # 维肯 = 我方
+	a.portrait = ALLY_PORTRAIT
+	a.icon = ALLY_ICON
+	a.tags.append("char_veiken")            # 维肯专属标记（龙之灾祸 requires 它）
+	a.tags.append("human")                  # 种族：人类
+	_set_four(a, 8, 6, 4, 8)                # 维肯：力量8/敏捷6/智力4/体力8
+	a.set_trait("dragonslayer")             # 专属特性：屠龙者（+5%攻防效能；对怪物/野兽三倍）
+	a.equip("spear_dragon_calamity")        # 开局装上专属双手长矛
+	units = [p, a]
+	for d in ENEMY_ROSTER:
+		units.append(_make_enemy(d))
+	# 出生点越界保护：地图被编辑得比出生坐标小时，把单位钳进界内，避免越界崩溃
+	for u in units:
+		var c := Vector2i(clampi(u.col, 0, width - 1), clampi(u.row, 0, height - 1))
+		if c.x != u.col or c.y != u.row:
+			push_warning("单位 %s 出生点(%d,%d)越界，已钳至(%d,%d)" % [u.unit_name, u.col, u.row, c.x, c.y])
+			u.col = c.x
+			u.row = c.y
+	# 统一收尾：四维/特性/装备都就位后，重算派生第一层属性并注满生命
+	for u in units:
+		u.recompute_derived()
+		u.init_vitals()
+
+# 设四维主属性（力量/灵巧/智力/体力）——占位用，正式数据日后从角色表读
+func _set_four(u, strv: int, dex: int, intl: int, sta: int) -> void:
+	u.stats["STR"] = strv
+	u.stats["DEX"] = dex
+	u.stats["INT"] = intl
+	u.stats["STA"] = sta
+
+# 按花名册条目造一个敌方单位（含 AI 警觉配置）
+func _make_enemy(def: Dictionary):
+	var e = Unit.new(str(def["name"]), "enemy", def["cell"].x, def["cell"].y)
+	e.portrait = str(def["portrait"])
+	e.icon = str(def["icon"])
+	e.tags.append(str(def.get("race", "human")))   # 种族 tag（帝国军=human；怪物/野兽日后在花名册指定）
+	e.stats["speed"] = int(def["speed"])
+	e.ai_threat = bool(def.get("ai_threat", true))
+	e.ai_region = str(def.get("ai_region", ""))
+	e.ai_group = str(def.get("ai_group", ""))
+	return e
+
+# 落子地图预置单位（_map_units → units）：关卡设计者在编辑器/部署里摆好、存进地图的敌 / 中立 / 固定单位。
+# 每条 = {proto, col, row, faction}；直接进 units（不过部署区限制——这是关卡数据，非玩家临时布置）。
+# 出生点越界则钳进界内。make_unit 已收尾 recompute_derived + init_vitals。
+func _spawn_map_units() -> void:
+	for entry in _map_units:
+		if typeof(entry) != TYPE_DICTIONARY:
+			continue
+		var proto = entry.get("proto", {})
+		if typeof(proto) != TYPE_DICTIONARY or proto.is_empty():
+			continue
+		var fac := str(entry.get("faction", proto.get("default_faction", "enemy")))
+		var col := clampi(int(entry.get("col", 0)), 0, maxi(0, width - 1))
+		var row := clampi(int(entry.get("row", 0)), 0, maxi(0, height - 1))
+		units.append(make_unit(proto, fac, col, row))
+
+# 把当前场上所有单位存进地图文件的 units 字段（关卡预置）。复用 _unit_to_proto + 补 AI 字段；
+# 写回当前地图路径（保留 tiles/regions 不变）。返回是否成功。
+func save_units_to_map() -> bool:
+	var units_json := []
+	for u in units:
+		var proto := _unit_to_proto(u)
+		proto.erase("_preset")                 # 这是关卡预置、不是用户预设
+		proto["ai_threat"] = u.ai_threat        # 预置敌人的 AI 警觉配置要随地图存
+		proto["ai_region"] = u.ai_region
+		proto["ai_group"] = u.ai_group
+		units_json.append({"proto": proto, "col": u.col, "row": u.row, "faction": u.faction})
+	var path: String = SandboxConfig.map_path if SandboxConfig.map_path != "" else MAP_PATH
+	if MapIO.write_map(path, width, height, tiles, _map_regions, units_json):
+		_map_units = units_json   # 同步内存：R 重开 / exit_battle 从这里重建
+		return true
+	return false
+
+# ============ 布置阶段（deploy）：调试侧栏生成/编辑单位，点开始游戏才开打 ============
+
+# 进入/回到布置阶段：回合不跑，显示调试侧栏、隐藏战斗 UI 与顶部顺序槽
+func _enter_deploy() -> void:
+	phase = "deploy"
+	battle_over = false
+	_clear_selection()
+	if _deploy_panel != null:
+		_deploy_panel.visible = true
+		_deploy_panel.set_battle_mode(false)
+		_deploy_panel.select_unit(null)   # 清掉可能指向已移除单位的编辑选中
+	if _roster_bar != null:
+		_roster_bar.visible = true
+		_roster_bar.refresh()
+	_set_battle_ui_visible(false)
+	if _turn_bar != null:
+		_turn_bar.visible = false
+	if canvas != null:
+		canvas.queue_redraw()
+
+func _set_battle_ui_visible(on: bool) -> void:
+	if _battle_ui != null:
+		_battle_ui.visible = on
+
+# 「开始游戏」：锁定布置 → 翻到战斗阶段 → 启动回合系统（复用 _start_battle）
+func begin_game() -> void:
+	if phase != "deploy":
+		return
+	if units.is_empty():
+		return
+	phase = "battle"
+	if _deploy_panel != null:
+		_deploy_panel.set_battle_mode(true)   # 隐藏编辑控件
+	if _roster_bar != null:
+		_roster_bar.visible = false           # 战斗期收起底部可用单位栏
+	_set_battle_ui_visible(true)
+	if _turn_bar != null:
+		_turn_bar.visible = true
+	_start_battle()
+
+# 通用造单位工厂：按原型 proto（unit_prototypes.json 一条或 {}）+ 指定阵营，落在 (col,row)。
+# 合并了 _spawn_units 造具名角色 与 _make_enemy 的套路，供调试侧栏拖放调用。
+func make_unit(proto: Dictionary, fac: String, col: int, row: int):
+	var u = Unit.new(str(proto.get("name", "新兵")), fac, col, row)
+	u.portrait = str(proto.get("portrait", ""))
+	u.icon = str(proto.get("icon", ""))
+	for t in proto.get("tags", []):
+		if not u.tags.has(str(t)):
+			u.tags.append(str(t))
+	var four = proto.get("four", {})
+	if typeof(four) == TYPE_DICTIONARY and not four.is_empty():
+		_set_four(u, int(four.get("STR", 5)), int(four.get("DEX", 5)), int(four.get("INT", 5)), int(four.get("STA", 5)))
+	if proto.get("speed", null) != null:
+		u.stats["speed"] = int(proto["speed"])
+	u.level = int(proto.get("level", 1))
+	u.exp = int(proto.get("exp", 0))
+	var tr := str(proto.get("trait", ""))
+	if tr != "":
+		u.set_trait(tr)
+	for it in proto.get("equip", []):
+		u.equip(str(it))
+	# 属性覆盖（预设里手动调过的非派生属性：move/speed/AP_max/armor_max/各抗/效能…）
+	var ov = proto.get("stats", {})
+	if typeof(ov) == TYPE_DICTIONARY:
+		for k in ov:
+			u.stats[k] = ov[k]
+	# 技能：列表（各学到 1 级）或字典 {id:level}（学到该等级）
+	var sk_src = proto.get("skills", [])
+	if typeof(sk_src) == TYPE_DICTIONARY:
+		for sid in sk_src:
+			for _n in range(maxi(1, int(sk_src[sid]))):
+				if u.learn_skill(str(sid)) == 0:
+					break
+	else:
+		for sk in sk_src:
+			u.learn_skill(str(sk))
+	# 敌方 AI 字段（玩家/友方忽略）
+	u.ai_threat = bool(proto.get("ai_threat", true))
+	u.ai_region = str(proto.get("ai_region", ""))
+	u.ai_group = str(proto.get("ai_group", ""))
+	u.recompute_derived()
+	u.init_vitals()
+	return u
+
+# 编辑单位后收尾：重算四维派生 + 注满生命/护甲（编辑器改四维/特性/装备后调）
+func _commit_unit(u) -> void:
+	if u == null:
+		return
+	u.recompute_derived()
+	u.init_vitals()
+	if _roster_bar != null:
+		_roster_bar.refresh()
+	if canvas != null:
+		canvas.queue_redraw()
+
+# ============ 可用单位 roster（底部横向栏：＋添加 / 拖到地图布置 / 编辑 / 预设）============
+
+# 从原型或预设 proto 添加一个「可用单位」到 roster（待命，未落子），并选中编辑
+func add_roster_unit(proto: Dictionary):
+	var fac := str(proto.get("default_faction", proto.get("faction", "player")))
+	var u = make_unit(proto, fac, -1, -1)   # col=-1：待命（不在 units、地图不渲染）
+	roster.append(u)
+	_refresh_roster_bar()
+	select_roster_unit(u)
+	return u
+
+# 选中一个 roster 单位 → 右侧编辑器；若已落子则镜头居中并高亮
+func select_roster_unit(u) -> void:
+	set_viewed_unit(u)
+	if is_placed(u):
+		focus_on_unit(u)
+	if _deploy_panel != null:
+		_deploy_panel.select_unit(u)
+
+func is_placed(u) -> bool:
+	return units.has(u)
+
+# 把 roster 单位落到 (col,row)（已落子则移到新格）；越界/被占则拒绝
+func place_roster_unit(u, col: int, row: int) -> void:
+	if u == null or phase != "deploy" or not _cell_in_bounds(col, row):
+		return
+	var occ = unit_at(col, row)
+	if occ != null and occ != u:
+		return
+	# 部署区限制：地图画了部署区时，玩家方（我方/友方）单位只能放区内；
+	# 敌方/中立、以及没画部署区的图（_deploy_cells 空）= 任意放（不挡调试 / 关卡设计者摆敌）。
+	if _is_friendly(u) and not _deploy_cells.is_empty() and not _deploy_cells.has(Vector2i(col, row)):
+		if _deploy_panel != null:
+			_deploy_panel.notify("玩家单位只能放在部署区（高亮格）内")
+		return
+	u.col = col
+	u.row = row
+	if not units.has(u):
+		units.append(u)
+	set_viewed_unit(u)
+	_refresh_roster_bar()
+	if _deploy_panel != null:
+		_deploy_panel.select_unit(u)
+	if canvas != null:
+		canvas.queue_redraw()
+
+# 撤下：从场上召回到待命（仍在 roster、可重新布置）
+func recall_roster_unit(u) -> void:
+	if u == null:
+		return
+	units.erase(u)
+	u.col = -1
+	u.row = -1
+	_refresh_roster_bar()
+	if canvas != null:
+		canvas.queue_redraw()
+
+# 彻底移出 roster（连带撤下场上）
+func remove_roster_unit(u) -> void:
+	units.erase(u)
+	roster.erase(u)
+	if viewed_unit == u:
+		set_viewed_unit(null)
+	if hover_unit == u:
+		hover_unit = null
+	if selected_unit == u:
+		selected_unit = null
+	if _deploy_panel != null and _sel_is(u):
+		_deploy_panel.select_unit(null)
+	_refresh_roster_bar()
+	if canvas != null:
+		canvas.queue_redraw()
+
+func _sel_is(u) -> bool:
+	return _deploy_panel != null and _deploy_panel.get("_sel") == u
+
+func _refresh_roster_bar() -> void:
+	if _roster_bar != null:
+		_roster_bar.refresh()
+
+# 拖放落子（SandboxCanvas._drop_data 调用）：把被拖的 roster 单位放到该格
+func deploy_drop(col: int, row: int, data: Dictionary) -> void:
+	if phase != "deploy" or typeof(data) != TYPE_DICTIONARY:
+		return
+	if data.get("kind") == "roster_unit":
+		place_roster_unit(data.get("ref"), col, row)
+
+# 布置阶段右键某格：有已布置单位 → 撤下回待命
+func deploy_right_click(col: int, row: int) -> void:
+	if phase != "deploy":
+		return
+	var u = unit_at(col, row)
+	if u != null:
+		recall_roster_unit(u)
+
+# 一键把默认演示阵容（比路兹/维肯/2 敌）加入 roster（待命，不自动落子）
+func spawn_default_roster() -> void:
+	for proto in _all_prototypes():
+		add_roster_unit(proto)
+
+# ---- 单位预设（保存「调整好的单位配置」，与场上位置无关）----
+
+# 把一个单位序列化成 proto 字典（可被 make_unit 复原）
+func _unit_to_proto(u) -> Dictionary:
+	var keep_tags := []
+	for t in u.tags:
+		if t in ["player", "ally", "enemy", "neutral", "flying"]:
+			continue   # 阵营立场单独存、flying 是运行时态
+		keep_tags.append(t)
+	var equip_ids := []
+	for slot in u.equipment:
+		var id = u.equipment[slot]
+		if not equip_ids.has(id):
+			equip_ids.append(id)
+	var skill_lv := {}
+	for sid in u.skills:
+		skill_lv[sid] = u.skill_level(sid)
+	var stat_ov := {}
+	for k in ["move", "speed", "AP_max", "armor_max", "atk_eff", "def_eff", "res_phys", "res_fire", "res_thunder", "res_ice", "res_holy"]:
+		stat_ov[k] = u.stats.get(k, 0)
+	return {
+		"name": u.unit_name,
+		"default_faction": u.faction,
+		"portrait": u.portrait,
+		"icon": u.icon,
+		"tags": keep_tags,
+		"four": {"STR": u.stats.get("STR", 5), "DEX": u.stats.get("DEX", 5), "INT": u.stats.get("INT", 5), "STA": u.stats.get("STA", 5)},
+		"level": u.level,
+		"exp": u.exp,
+		"trait": u.trait_id,
+		"equip": equip_ids,
+		"skills": skill_lv,
+		"stats": stat_ov,
+		"_preset": true,
+	}
+
+# 保存单位为预设（名 preset_name），写进 user://unit_presets.json（同名覆盖）
+func save_unit_preset(u, preset_name: String) -> void:
+	if u == null or preset_name.strip_edges() == "":
+		return
+	var proto := _unit_to_proto(u)
+	proto["name"] = preset_name
+	var arr := load_unit_presets()
+	var replaced := false
+	for i in arr.size():
+		if str(arr[i].get("name", "")) == preset_name:
+			arr[i] = proto
+			replaced = true
+			break
+	if not replaced:
+		arr.append(proto)
+	var f := FileAccess.open(UNIT_PRESETS_PATH, FileAccess.WRITE)
+	if f != null:
+		f.store_string(JSON.stringify(arr, "  "))
+		f.close()
+
+func load_unit_presets() -> Array:
+	if not FileAccess.file_exists(UNIT_PRESETS_PATH):
+		return []
+	var f := FileAccess.open(UNIT_PRESETS_PATH, FileAccess.READ)
+	var d = JSON.parse_string(f.get_as_text())
+	f.close()
+	return d if typeof(d) == TYPE_ARRAY else []
+
+# 读 unit_prototypes.json 的内置原型
+func _all_prototypes() -> Array:
+	var out := []
+	if FileAccess.file_exists(UNIT_PROTOS_PATH):
+		var f := FileAccess.open(UNIT_PROTOS_PATH, FileAccess.READ)
+		var d = JSON.parse_string(f.get_as_text())
+		f.close()
+		if typeof(d) == TYPE_ARRAY:
+			for e in d:
+				if typeof(e) == TYPE_DICTIONARY:
+					out.append(e)
+	return out
+
+# 「＋」菜单数据：内置原型（含开头「空白单位」）+ 用户预设
+func roster_sources() -> Dictionary:
+	var protos := [{"name": "空白单位"}]
+	protos.append_array(_all_prototypes())
+	return {"protos": protos, "presets": load_unit_presets()}
+
+# —— UI：上部[画布 + 右编辑栏] + 底部[可用单位横栏] ——
+func _build_ui() -> void:
+	set_anchors_preset(Control.PRESET_FULL_RECT)
+	var root := VBoxContainer.new()
+	root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	root.add_theme_constant_override("separation", 0)
+	add_child(root)
+	var main := HBoxContainer.new()
+	main.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	main.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	root.add_child(main)
+
+	canvas = SandboxCanvas.new()
+	canvas.editor = self
+	canvas.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	canvas.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	main.add_child(canvas)
+
+	var side := VBoxContainer.new()
+	side.custom_minimum_size = Vector2(320, 0)
+	# 布置阶段：调试侧栏（生成/编辑单位与物品、开始游戏）
+	_deploy_panel = DeployPanel.new()
+	_deploy_panel.host = self
+	side.add_child(_deploy_panel)
+	# 战斗阶段：回合状态 + 战斗记录（布置阶段隐藏）
+	_battle_ui = VBoxContainer.new()
+	_battle_ui.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	side.add_child(_battle_ui)
+	# 退出战斗 → 回到布置阶段（保留 roster、可重新布置/开打）
+	var exit_btn := Button.new()
+	exit_btn.text = "⏹ 退出战斗（回布置）"
+	exit_btn.pressed.connect(exit_battle)
+	_battle_ui.add_child(exit_btn)
+	_battle_ui.add_child(HSeparator.new())
+	# 回合状态（紧凑）
+	_turn_panel = VBoxContainer.new()
+	_battle_ui.add_child(_turn_panel)
+	_battle_ui.add_child(HSeparator.new())
+	# 战斗记录
+	var log_title := Label.new()
+	log_title.text = "战斗记录"
+	_battle_ui.add_child(log_title)
+	_log = RichTextLabel.new()
+	_log.bbcode_enabled = true
+	_log.scroll_following = true
+	_log.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_battle_ui.add_child(_log)
+	main.add_child(side)
+
+	# 底部「可用单位」横栏（布置阶段管理 roster；战斗阶段隐藏）
+	_roster_bar = RosterBar.new()
+	_roster_bar.host = self
+	_roster_bar.custom_minimum_size = Vector2(0, 104)
+	root.add_child(_roster_bar)
+
+	# 左键选中单位时在鼠标处唤出的选单：项目按可用性动态构建（见 open_context_menu）
+	_context_menu = PopupMenu.new()
+	_context_menu.id_pressed.connect(_on_context_menu)
+	add_child(_context_menu)
+	# 「技能」子菜单：列已学主动技能（冷却中灰显 + 显剩余冷却数）；项目动态填，见 open_context_menu
+	_skill_submenu = PopupMenu.new()
+	_skill_submenu.name = "SkillSubmenu"
+	_skill_submenu.id_pressed.connect(_on_skill_chosen)
+	_context_menu.add_child(_skill_submenu)
+
+	# 攻击音效播放器
+	_sfx = AudioStreamPlayer.new()
+	_sfx.stream = _load_audio(ATTACK_SFX)
+	add_child(_sfx)
+
+	# 顶部行动顺序槽（HUD，居中、宽=屏幕一半）
+	_turn_bar = TurnOrderBar.new()
+	_turn_bar.host = self
+	add_child(_turn_bar)
+
+	# 角色状态页（模态覆盖层，置于最上、默认隐藏）
+	_status_panel = UnitStatusPanel.new()
+	_status_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_status_panel.visible = false
+	_status_panel.host = self     # 供翻页取同阵营单位 + 棋子高亮
+	add_child(_status_panel)
+
+# 行动顺序槽点头像 → 把镜头切到该单位所在格（不开角色状态）
+func focus_on_unit(u) -> void:
+	if u != null and canvas != null:
+		canvas.center_on_cell(u.col, u.row)
+
+# 行动顺序槽鼠标扫过头像 → 高亮该单位所在格；移开则清除
+func set_hover_unit(u) -> void:
+	if hover_unit == u:
+		return
+	hover_unit = u
+	if canvas != null:
+		canvas.queue_redraw()
+
+func clear_hover_unit(u) -> void:
+	if hover_unit == u:
+		set_hover_unit(null)
+
+# 设置角色状态页当前查看的单位（供棋子圆圈高亮）；变更后重绘画布
+func set_viewed_unit(u) -> void:
+	viewed_unit = u
+	if canvas != null:
+		canvas.queue_redraw()
+
+# 右栏顶部紧凑回合状态（详细属性见角色状态页）
+func _refresh_info() -> void:
+	if _turn_panel == null:
+		return
+	for c in _turn_panel.get_children():
+		c.queue_free()
+	if units.is_empty():
+		return
+	var u = active_unit()
+	if u == null:
+		u = units[0]
+	_add_info("回合", str(round_num))
+	_add_info("行动", "%s [%s]" % [u.unit_name, u.faction])
+	_add_info("AP", "%d / %d" % [u.ap, int(u.stats.get("AP_max", 0))])
+	_add_info("移动点", str(u.move_points))
+
+func _add_info(k: String, v: String) -> void:
+	var l := Label.new()
+	l.text = "%s：%s" % [k, v]
+	_turn_panel.add_child(l)
+
+# ============ 供 HexCanvas / SandboxCanvas 调用的“editor”接口 ============
+
+func faction_color(f: String) -> Color:
+	match f:
+		"enemy": return Color("#D5453A")    # 红
+		"neutral": return Color("#D5B53A")  # 黄
+		"ally": return Color("#3A7BD5")     # 蓝（友方，与我方同蓝基底）
+		_: return Color("#3A7BD5")          # 蓝（玩家）
+
+# 按 tile 的 terrain/variant 查地形定义（经 TerrainDB O(1) 查表，找不到返回 null）
+func _terrain_entry(tile):
+	return TerrainDB.entry_for(tile)
+
+func color_for_tile(tile) -> Color:
+	var e = _terrain_entry(tile)
+	return Color.html(e.color) if e != null else Color(1, 0, 1)
+
+func decor_for_tile(tile) -> String:
+	var e = _terrain_entry(tile)
+	return e.decor if e != null else "none"
+
+func accent_for_tile(tile) -> Color:
+	var e = _terrain_entry(tile)
+	return Color.html(e.accent) if e != null else Color(1, 0, 1)
+
+func unit_at(col: int, row: int):
+	for u in units:
+		if u.col == col and u.row == row:
+			return u
+	return null
+
+# 通行性文字：可通行 / 不可通行 / 仅<tag1/tag2>（读 move.passable_by）
+func _passability_text(entry) -> String:
+	if entry == null:
+		return "未知"
+	var pb = entry.get("move", {}).get("passable_by", "all")
+	if typeof(pb) == TYPE_ARRAY:
+		if pb.is_empty():
+			return "不可通行"
+		var names := []
+		for tg in pb:
+			names.append(TAG_LABELS.get(tg, str(tg)))
+		return "仅<%s>" % "/".join(names)
+	if pb == "none":
+		return "不可通行"
+	return "可通行"
+
+# 特殊效果文字：列出 effects 的 name（desc）；无则「无」
+func _effects_text(entry) -> String:
+	if entry == null:
+		return "无"
+	var effs = entry.get("effects", [])
+	if typeof(effs) != TYPE_ARRAY or effs.is_empty():
+		return "无"
+	var parts := []
+	for ef in effs:
+		var nm = str(ef.get("name", ""))
+		var d = str(ef.get("desc", ""))
+		if nm != "" and d != "":
+			parts.append("%s：%s" % [nm, d])
+		else:
+			parts.append(nm + d)
+	return "；".join(parts)
+
+# 左下角悬停信息：坐标 + 名称 + 通行性 + 特殊效果 +（该格单位）
+func hover_text(col: int, row: int) -> String:
+	if row < 0 or row >= tiles.size() or col < 0 or col >= tiles[row].size():
+		return ""
+	var entry = _terrain_entry(tiles[row][col])
+	var label = entry.get("label", "未知") if entry != null else "未知"
+	var s := "(%d, %d)  %s" % [col, row, label]
+	s += "\n通行性：%s" % _passability_text(entry)
+	s += "\n特殊效果：%s" % _effects_text(entry)
+	var u = unit_at(col, row)
+	if u != null:
+		s += "\n单位：%s [%s]" % [u.unit_name, u.faction]
+	return s
+
+# 画布输入接口（sandbox 不绘制地形/取色，留空兜底）
+func begin_stroke() -> void: pass
+func end_stroke() -> void: pass
+func paint_cell(_col: int, _row: int) -> void: pass
+func pick_brush_at(_col: int, _row: int) -> void: pass
+
+# 左键点格：移动模式下＝选目标提交移动 / 取消；否则＝点中行动单位则唤出选单
+func left_click_cell(col: int, row: int) -> void:
+	if _animating or battle_over:
+		return
+	if phase == "deploy":
+		# 布置阶段：点单位＝选中编辑（放置走拖拽，见 SandboxCanvas._drop_data）
+		var du = unit_at(col, row)
+		if du != null:
+			set_viewed_unit(du)
+			if _deploy_panel != null:
+				_deploy_panel.select_unit(du)
+		return
+	var clicked := Vector2i(col, row)
+	if skill_mode:
+		if skill_cells.has(clicked) and _valid_skill_target(selected_unit, SkillDB.get_skill(active_skill_id), unit_at(clicked.x, clicked.y)):
+			_do_skill(selected_unit, active_skill_id, clicked)
+		else:
+			_clear_selection()   # 点范围外/无效目标 = 取消技能
+		return
+	if attack_mode:
+		if attack_cells.has(clicked):
+			_do_attack(selected_unit, clicked)   # 传格子（直线 AoE 按方向打）
+		else:
+			_clear_selection()   # 点范围外 = 取消攻击
+		return
+	if move_mode:
+		if reachable.has(clicked):
+			_commit_move(col, row)
+		elif attack_cells.has(clicked):
+			pass   # 移动模式下红格仅为「极限可攻击范围」预览，不在此攻击
+		else:
+			_clear_selection()   # 点到范围外 = 取消移动
+		return
+	var here = unit_at(col, row)
+	if here != null:
+		selected_unit = here        # 点中任意单位 → 行动选单（仅列可用项；非当前/不可控单位只有「角色状态」）
+		open_context_menu()
+	else:
+		_clear_selection()          # 点空格 → 取消当前选中
+		open_ground_menu()          # 并弹出仅含「结束回合」的菜单（仅当前可控单位的回合）
+
+# 右键 / 点空白：取消当前选中或移动模式
+func cancel_action() -> void:
+	if _animating:
+		return
+	_clear_selection()
+
+# ============ 回合框架（简陋版：单层 round + 速度出手序列）============
+
+func _start_battle() -> void:
+	round_num = 1
+	zoc_triggered = {}
+	for u in units:
+		u.refresh_for_turn()       # 开局所有单位面板满 AP（便于查看）
+		u.reset_skill_charges()    # 技能冷却清零、本战次数按智力重置
+	_rebuild_turn_order()
+	active_index = 0
+	_begin_active_turn()
+
+func _rebuild_turn_order() -> void:
+	turn_order = _sorted_by_speed(units)
+
+# 按速度（effective_stat，含修正）大→小排序；同速我方/友方优先。
+func _sorted_by_speed(arr: Array) -> Array:
+	var out := arr.duplicate()
+	out.sort_custom(_speed_cmp)
+	return out
+
+func _speed_cmp(a, b) -> bool:
+	var sa: int = a.effective_stat("speed")
+	var sb: int = b.effective_stat("speed")
+	if sa != sb:
+		return sa > sb
+	var fa := _is_friendly(a)
+	var fb := _is_friendly(b)
+	if fa != fb:
+		return fa   # 同速：友方先
+	return false
+
+# 速度中途变化（buff/装备等）：保留已行动者与当前行动者，仅对「之后未行动」的重排，
+# 立刻反映到出手序列与行动顺序槽。任何改了 speed 修正的地方都应调用本函数。
+func _resort_pending() -> void:
+	if turn_order.is_empty() or active_index >= turn_order.size():
+		return
+	var acted := turn_order.slice(0, active_index)        # 本 round 已行动
+	var active = turn_order[active_index]                  # 当前行动者（保持最前）
+	var rest := turn_order.slice(active_index + 1)         # 之后未行动 → 重排
+	rest = _sorted_by_speed(rest)
+	var new_order := acted.duplicate()
+	new_order.append(active)
+	new_order.append_array(rest)
+	turn_order = new_order
+	# active_index 不变（= acted.size()）
+
+func notify_speed_changed() -> void:
+	_resort_pending()
+	_refresh_turn_bar()
+	_refresh_info()
+
+# 行动顺序槽要显示的条目序列：当前回合剩余（含标记）+ 下一回合全员（按当前速度）。
+func _turn_sequence() -> Array:
+	var seq := []
+	if turn_order.is_empty():
+		return seq
+	var active = active_unit()
+	if active_index < turn_order.size():
+		seq.append({"kind": "marker", "round": round_num})
+		for i in range(active_index, turn_order.size()):
+			var u = turn_order[i]
+			seq.append({"kind": "unit", "round": round_num, "unit": u, "active": (u == active)})
+	# 下一回合：全员按当前速度重排（尚未开始，无「当前行动者」）
+	seq.append({"kind": "marker", "round": round_num + 1})
+	for u in _sorted_by_speed(units):
+		seq.append({"kind": "unit", "round": round_num + 1, "unit": u, "active": false})
+	return seq
+
+func _refresh_turn_bar() -> void:
+	if _turn_bar != null:
+		_turn_bar.refresh(_turn_sequence())
+
+func active_unit():
+	if active_index < 0 or active_index >= turn_order.size():
+		return null
+	return turn_order[active_index]
+
+func _begin_active_turn() -> void:
+	if battle_over or phase != "battle":
+		return   # 布置阶段绝不进回合/AI（双保险——根本不调 _start_battle）
+	var u = active_unit()
+	if u != null:
+		u.refresh_for_turn()   # AP 刷新、移动点清零
+	_clear_selection()         # 清掉上一单位的选中/移动状态
+	_refresh_info()
+	_refresh_turn_bar()        # 行动者换人 → 更新顶部行动顺序槽（当前者下落、后续补位）
+	# 敌对方（敌方/中立）由 AI 操控；友方（我方/友方）由玩家操控
+	if u != null and not _is_friendly(u):
+		_run_enemy_ai(u)
+
+# ============ 敌方 AI（基础版：靠近最近敌人 → 进攻击距离就打）============
+
+func _run_enemy_ai(unit) -> void:
+	if not is_inside_tree():
+		return
+	await get_tree().create_timer(AI_THINK_DELAY).timeout
+	# 先评估仇恨：未被激活（休眠）则按兵不动、直接过；激活后才持续行动
+	# phase=="battle" 兜底：中途「退出战斗」回到布置阶段时，挂起的 AI 协程恢复后立即收手。
+	if is_inside_tree() and not battle_over and phase == "battle" and active_unit() == unit and _ai_update_aggro(unit):
+		while is_inside_tree() and not battle_over and phase == "battle" and active_unit() == unit:
+			var acted: bool = await _ai_one_action(unit)
+			if not acted:
+				break
+			await get_tree().create_timer(AI_ACT_GAP).timeout   # 动作间停顿（移动→停 1 秒→攻击）
+	if is_inside_tree() and not battle_over and phase == "battle" and active_unit() == unit:
+		end_turn()
+
+# 评估并更新 unit 的仇恨状态；返回是否已激活（已激活才会行动）。
+# passive：敌人进入「攻击距离」才警觉；alert：敌人进入「警戒半径」就警觉（含攻击距离）。
+# 连锁：ai_group 非空时，同组任一已激活 → 本体也激活。
+func _ai_update_aggro(unit) -> bool:
+	if unit.ai_aggroed:
+		return true
+	var trig := false
+	var here := Vector2i(unit.col, unit.row)
+	# ① 威胁感知：敌人进入「移动一批 + 攻击距离」的威胁范围
+	if unit.ai_threat:
+		var sense: int = unit.effective_stat("move") + int(unit.basic_attack().get("range", 1))
+		for h in units:
+			if _is_hostile(unit, h) and _hex_dist(here, Vector2i(h.col, h.row)) <= sense:
+				trig = true
+				break
+	# ② 区域触发：敌人踏进该单位挂的区域（关卡设计者指定）
+	if not trig and unit.ai_region != "" and aggro_regions.has(unit.ai_region):
+		var cells: Dictionary = aggro_regions[unit.ai_region]
+		for h in units:
+			if _is_hostile(unit, h) and cells.has(Vector2i(h.col, h.row)):
+				trig = true
+				break
+	# ③ 连锁：同组任一已激活
+	if not trig and unit.ai_group != "":
+		for g in units:
+			if g != unit and g.ai_group == unit.ai_group and g.ai_aggroed:
+				trig = true
+				break
+	if trig:
+		_ai_set_aggro(unit)
+	return unit.ai_aggroed
+
+# 激活仇恨：本体 + 连锁同组全部敌方；首次激活记一行日志。
+func _ai_set_aggro(unit) -> void:
+	if unit.ai_aggroed:
+		return
+	unit.ai_aggroed = true
+	_log_line("%s 进入战斗！" % _cname(unit))
+	if unit.ai_group != "":
+		for g in units:
+			if g != unit and not _is_friendly(g) and g.ai_group == unit.ai_group and not g.ai_aggroed:
+				_ai_set_aggro(g)   # 连锁仇恨
+
+# 一个 AI 动作：能打就打、否则靠近；返回是否做了事
+func _ai_one_action(unit) -> bool:
+	var target = _ai_nearest_hostile(unit)
+	if target == null:
+		return false
+	var here := Vector2i(unit.col, unit.row)
+	var tcell := Vector2i(target.col, target.row)
+	var rng := int(unit.basic_attack().get("range", 1))
+	# 1) 在攻击距离内且有 AP → 攻击
+	if _hex_dist(here, tcell) <= rng and _can_attack(unit):
+		_do_attack(unit, tcell)
+		return true
+	# 2) 否则朝目标移动一步（buy 一批移动力 / 用剩余移动点）
+	if _move_budget(unit) > 0:
+		return await _ai_step_toward(unit, target)
+	return false
+
+# 朝 target 走：在可达格里挑最靠近 target 的；不能更近就不动（返回 false）
+func _ai_step_toward(unit, target) -> bool:
+	var budget := _move_budget(unit)
+	if budget <= 0:
+		return false
+	var data := _dijkstra(unit, budget)
+	var best: Dictionary = data["best"]          # {格: 累计消耗}，含起点(0)
+	var came: Dictionary = data["came_from"]
+	var start := Vector2i(unit.col, unit.row)
+	var tcell := Vector2i(target.col, target.row)
+	var cur_dist := _hex_dist(start, tcell)
+	var pick := start
+	var pick_dist := cur_dist
+	var pick_cost := 0
+	for cell in best:
+		if cell == start:
+			continue
+		if _occupied_by_other(cell.x, cell.y, unit):
+			continue
+		var dd := _hex_dist(cell, tcell)
+		var cc := int(best[cell])
+		if dd < pick_dist or (dd == pick_dist and cc < pick_cost):
+			pick = cell
+			pick_dist = dd
+			pick_cost = cc
+	if pick == start or pick_dist >= cur_dist:
+		return false   # 没有更靠近的落点 → 收手
+	var path := _path_via(came, pick)
+	# 预算：移动点=0 时花 1 AP 买一批移动力，再扣路径消耗（与玩家提交移动同口径）
+	if unit.move_points == 0:
+		if unit.ap <= 0:
+			return false
+		unit.ap -= 1
+		unit.move_points += int(unit.stats.get("move", 0))
+	# ZOC 借机：离开起点前判定（敌方离开我方控制区也会被借机）；被钉住则本次没走成
+	if _zoc_on_leave(unit):
+		unit.move_points = 0
+		_refresh_info()
+		if canvas != null:
+			canvas.queue_redraw()
+		return false
+	unit.move_points -= int(best[pick])
+	unit.col = pick.x
+	unit.row = pick.y
+	_refresh_info()
+	await _animate_path(unit, path)
+	return true
+
+# 最近的敌对单位（按六边形距离）
+func _ai_nearest_hostile(unit):
+	var best = null
+	var bd := 1 << 30
+	var here := Vector2i(unit.col, unit.row)
+	for u in units:
+		if not _is_hostile(unit, u):
+			continue
+		var d := _hex_dist(here, Vector2i(u.col, u.row))
+		if d < bd:
+			bd = d
+			best = u
+	return best
+
+# 死亡处理：HP<=0 的单位移出战斗（不再重生）。攻击/伤害落地后调用。
+func _handle_deaths() -> void:
+	var dead := []
+	for u in units:
+		if int(u.stats.get("HP", 0)) <= 0:
+			dead.append(u)
+	if dead.is_empty():
+		return
+	var cur = active_unit()
+	var active_died: bool = cur != null and cur in dead   # 当前行动者阵亡（借机可致）
+	for u in dead:
+		_log_line("[b]%s 倒下！[/b]" % _cname(u))
+		units.erase(u)
+		if viewed_unit == u:
+			viewed_unit = null
+		if hover_unit == u:
+			hover_unit = null
+		if selected_unit == u:
+			selected_unit = null
+	# 从出手序列剔除死者
+	turn_order = turn_order.filter(func(x): return not (x in dead))
+	if active_died:
+		# 行动者阵亡 → 其 turn 结束；下一个已被 filter 前移到同下标（越界则进新 round）
+		if active_index >= turn_order.size():
+			active_index = 0
+			round_num += 1
+			_rebuild_turn_order()
+			zoc_triggered = {}
+		_check_battle_over()
+		if not battle_over:
+			call_deferred("_begin_active_turn")   # 延后开始下一单位的 turn（避免在借机结算中重入）
+	else:
+		var idx: int = turn_order.find(cur)
+		active_index = idx if idx >= 0 else clampi(active_index, 0, max(turn_order.size() - 1, 0))
+		_check_battle_over()
+	_refresh_info()
+	_refresh_turn_bar()   # 单位变动（阵亡）→ 更新行动顺序槽
+	if canvas != null:
+		canvas.queue_redraw()
+
+# 胜负判定：敌全灭=胜 / 友方全灭=负
+func _check_battle_over() -> void:
+	if battle_over:
+		return
+	var friends := 0
+	var foes := 0
+	for u in units:
+		if _is_friendly(u):
+			friends += 1
+		else:
+			foes += 1
+	if foes == 0:
+		_end_battle(true)
+	elif friends == 0:
+		_end_battle(false)
+
+func _end_battle(win: bool) -> void:
+	battle_over = true
+	_clear_selection()
+	var col := "#6FCF6F" if win else "#E07A5A"
+	var msg := "胜利！" if win else "失败…"
+	_log_line("[b][color=%s]══ %s ══[/color][/b]" % [col, msg])
+	_show_banner(msg, win)
+
+# 居中大横幅（按 R 重开）
+func _show_banner(msg: String, win: bool) -> void:
+	if _banner == null:
+		_banner = Label.new()
+		_banner.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_banner.add_theme_font_size_override("font_size", 44)
+		_banner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var box := StyleBoxFlat.new()
+		box.bg_color = Color(0, 0, 0, 0.62)
+		box.set_content_margin_all(20)
+		box.set_corner_radius_all(12)
+		_banner.add_theme_stylebox_override("normal", box)
+		add_child(_banner)
+	_banner.add_theme_color_override("font_color", Color(col_html(win)))
+	_banner.text = "%s\n（按 R 重开）" % msg
+	_banner.visible = true
+	_banner.reset_size()
+	var vp := get_viewport_rect().size
+	_banner.position = (vp - _banner.size) * 0.5
+
+func col_html(win: bool) -> String:
+	return "#6FCF6F" if win else "#E07A5A"
+
+# 退出战斗 / 重开：回到布置阶段（战斗期点「退出战斗」按钮，或胜负后按 R）
+func exit_battle() -> void:
+	battle_over = false
+	if _banner != null:
+		_banner.visible = false
+	selected_unit = null
+	viewed_unit = null
+	hover_unit = null
+	_exit_move_mode()
+	if _status_panel != null and _status_panel.has_method("close"):
+		_status_panel.close()
+	if _log != null:
+		_log.clear()
+	# R 重开 = 回到布置阶段：场上单位收回待命（roster 保留，可重新布置），回合状态归零
+	units = []
+	for u in roster:
+		u.col = -1
+		u.row = -1
+		u.effects = []
+		u.init_vitals()   # 回满生命/护甲（清掉战斗里的损耗）
+	_spawn_map_units()   # 重新落地图预置单位（关卡的敌 / 我），R 重开后不消失
+	turn_order = []
+	active_index = 0
+	round_num = 1
+	_enter_deploy()
+	if canvas != null:
+		canvas.queue_redraw()
+
+func _input(event: InputEvent) -> void:
+	if not (event is InputEventKey and event.pressed and not event.echo):
+		return
+	if battle_over and event.keycode == KEY_R:
+		exit_battle()
+		get_viewport().set_input_as_handled()
+	elif event.keycode == KEY_TAB and move_mode:
+		# 移动模式按 Tab：切换「是否同时显示最近敌方的移动/攻击范围」
+		show_enemy_preview = not show_enemy_preview
+		_update_overlays()
+		get_viewport().set_input_as_handled()
+
+func end_turn() -> void:
+	if battle_over:
+		return
+	var cur = active_unit()
+	# 该单位 turn 末：先结算个人 DoT（流血等）。若 DoT 致死，_handle_deaths 已接管推进 → 收手。
+	if _tick_turn_end_effects(cur):
+		_handle_deaths()
+		if battle_over or not (cur in units):
+			return
+	active_index += 1
+	if active_index >= turn_order.size():   # 全员走完一轮 → 新 round
+		active_index = 0
+		round_num += 1
+		_rebuild_turn_order()
+		zoc_triggered = {}   # 新 round：借机去重清空
+	_begin_active_turn()
+
+# 单位自己 turn 末：结算个人 DoT（按最大生命百分比直接掉 HP，无视护甲）+ 时长递减（按 round）+ 到期移除。
+# 返回是否造成了伤害（用于触发死亡检查）。
+func _tick_turn_end_effects(u) -> bool:
+	if u == null or not ("effects" in u) or u.effects.is_empty():
+		return false
+	var dmg_done := false
+	var keep := []
+	for e in u.effects:
+		var pct := float(e.get("dot_pct_max_hp", 0))
+		if pct > 0.0:
+			var d := int(round(float(u.effective_stat("HP_max")) * pct / 100.0))
+			if d > 0:
+				u.stats["HP"] = int(u.stats.get("HP", 0)) - d
+				dmg_done = true
+				_log_line("%s %s：-%d（最大生命%s%%）" % [_cname(u), str(e.get("name", "流血")), d, _numf(pct)])
+		if e.get("permanent", false):
+			keep.append(e)
+		else:
+			var dur := int(e.get("duration", 0)) - 1
+			if dur > 0:
+				e["duration"] = dur
+				keep.append(e)   # 否则到期移除（本回合已结算伤害）
+	u.effects = keep
+	return dmg_done
+
+func _on_context_menu(id: int) -> void:
+	match id:
+		0:
+			_enter_move_mode()    # 移动
+		1:
+			end_turn()            # 回合结束
+		2:
+			if selected_unit != null and _status_panel != null:
+				_status_panel.open(selected_unit)   # 角色状态
+		3:
+			_enter_attack_mode()  # 攻击
+		4:
+			_do_toggle_fly(selected_unit)   # 起飞 / 降落
+
+# 起飞 / 降落（动作，耗 1 AP）：切 ground/flying（换地形通行 + 换主/副手攻击：地撕裂/空抓取）。
+# 游戏状态即时切好；视觉上 token 用 _animate_fly_toggle 在贴地↔悬空之间缓动。
+func _do_toggle_fly(u) -> void:
+	if u == null or not u.can_fly() or u.ap <= 0 or _animating:
+		return
+	u.ap -= 1
+	var going_up: bool = not u.is_airborne()
+	u.set_airborne(going_up)
+	_push_log(["%s %s" % [_cname(u), "起飞（→足爪·抓取）" if going_up else "降落（→翼爪·撕裂）"]])
+	_clear_selection()
+	_refresh_info()
+	_animate_fly_toggle(u, going_up)
+
+# 起降视觉过渡：把该单位的「悬空因子」从当前值缓动到 1（起飞）/ 0（降落）。
+func _animate_fly_toggle(u, going_up: bool) -> void:
+	if _fly_tweens.has(u) and _fly_tweens[u] != null and _fly_tweens[u].is_valid():
+		_fly_tweens[u].kill()   # 旧的起降动画未完就再切 → 先停掉，从当前高度接着缓动
+	var from: float = _fly_anim.get(u, 0.0 if going_up else 1.0)
+	var to := 1.0 if going_up else 0.0
+	_fly_anim[u] = from
+	var tw := create_tween()
+	tw.tween_method(_set_fly_factor.bind(u), from, to, FLY_ANIM_TIME).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT if going_up else Tween.EASE_IN)
+	tw.tween_callback(_end_fly_anim.bind(u))
+	_fly_tweens[u] = tw
+
+func _set_fly_factor(v: float, u) -> void:
+	_fly_anim[u] = v
+	if canvas != null:
+		canvas.queue_redraw()
+
+func _end_fly_anim(u) -> void:
+	_fly_anim.erase(u)
+	_fly_tweens.erase(u)
+	if canvas != null:
+		canvas.queue_redraw()
+
+# 单位当前「悬空因子」0..1：起降动画中取插值；否则按 flying tag 取 1/0。供 SandboxCanvas._draw_unit。
+func fly_factor(u) -> float:
+	if _fly_anim.has(u):
+		return _fly_anim[u]
+	return 1.0 if u.is_airborne() else 0.0
+
+# —— 主动技能：菜单 / 进入目标模式 / 释放 ——
+
+# 该单位已学、且「主动」的技能 id 列表（按通用序列槽位 seq 升序，稳定）
+func _learned_active_skills(u) -> Array:
+	var out := []
+	if u == null:
+		return out
+	for id in u.skills:
+		var def = SkillDB.get_skill(id)
+		if def != null and def.get("active", false):
+			out.append(id)
+	out.sort_custom(func(a, b):
+		return int(SkillDB.get_skill(a).get("seq", 99)) < int(SkillDB.get_skill(b).get("seq", 99)))
+	return out
+
+# 填「技能」子菜单：每个已学主动技能一项；冷却中/用尽 → 灰显(disabled) + 名后用阿拉伯数字标剩余冷却。
+func _build_skill_submenu(u) -> void:
+	_skill_submenu.clear()
+	_skill_menu_map = {}
+	var i := 0
+	for id in _learned_active_skills(u):
+		var def = SkillDB.get_skill(id)
+		var ready: bool = u.skill_ready(id) and u.ap >= int(def.get("ap_cost", 1))
+		var label := str(def.get("name", id))
+		var cd := int(u.skills[id].get("cd", 0))
+		var uses := int(u.skills[id].get("uses", 0))
+		if cd > 0:
+			label += "（冷却 %d）" % cd          # 冷却中：括号里用阿拉伯数字标剩余回合
+		elif uses <= 0:
+			label += "（本战已用尽）"
+		_skill_submenu.add_item(label, i)
+		_skill_submenu.set_item_disabled(i, not ready)
+		_skill_menu_map[i] = id
+		i += 1
+
+# 在子菜单里选了某主动技能 → 进入该技能的目标选择模式
+func _on_skill_chosen(id: int) -> void:
+	var skill_id := str(_skill_menu_map.get(id, ""))
+	if skill_id != "" and selected_unit != null:
+		_enter_skill_mode(skill_id)
+
+# 进入技能目标模式：标出范围（绿），点范围内合法目标释放。
+func _enter_skill_mode(skill_id: String) -> void:
+	var u = selected_unit
+	var def = SkillDB.get_skill(skill_id)
+	if u == null or def == null:
+		return
+	if not u.skill_ready(skill_id) or u.ap < int(def.get("ap_cost", 1)):
+		return
+	move_mode = false
+	attack_mode = false
+	reachable = {}
+	_came_from = {}
+	hover_path = []
+	attack_cells = {}
+	skill_mode = true
+	active_skill_id = skill_id
+	skill_cells = {}
+	var rng := int(def.get("range", 1))
+	for c in _cells_within({Vector2i(u.col, u.row): true}, rng):
+		skill_cells[c] = true
+	_update_overlays()
+
+# 技能目标合法性：非敌方（己方/友方）；自己按 self_target 开关。
+func _valid_skill_target(caster, def, target) -> bool:
+	if target == null or def == null:
+		return false
+	if target == caster:
+		return def.get("self_target", true)
+	return not _is_hostile(caster, target)
+
+# 释放技能到目标格（已确保格在范围内）。当前实现：治疗类（heal_pct_max_hp 按等级档 + cleanse_tags）。
+func _do_skill(caster, skill_id: String, cell: Vector2i) -> void:
+	var def = SkillDB.get_skill(skill_id)
+	if def == null:
+		return
+	var target = unit_at(cell.x, cell.y)
+	if not _valid_skill_target(caster, def, target):
+		_clear_selection()
+		return
+	caster.ap -= int(def.get("ap_cost", 1))
+	caster.consume_skill(skill_id, caster.skill_cooldown_max(def))
+	var lines := ["%s 对 %s 使用 %s" % [_cname(caster), _cname(target), _hl(str(def.get("name", skill_id)))]]
+	# 治疗：按目标最大生命百分比（取技能当前等级档）
+	var heals = def.get("heal_pct_max_hp", [])
+	var lvl: int = caster.skill_level(skill_id)
+	if typeof(heals) == TYPE_ARRAY and heals.size() > 0:
+		var idx := clampi(lvl - 1, 0, heals.size() - 1)
+		var pct := float(heals[idx])
+		var maxhp := int(target.effective_stat("HP_max"))
+		var before := int(target.stats.get("HP", 0))
+		var healed := mini(int(round(maxhp * pct / 100.0)), maxhp - before)
+		target.stats["HP"] = before + maxi(0, healed)
+		lines.append("　治疗 %s（最大生命%s%%）：%d → %d" % [_hl(maxi(0, healed)), _numf(pct), before, int(target.stats["HP"])])
+	# 清除指定 tag 的效果（流血等）
+	for tag in def.get("cleanse_tags", []):
+		var n := _cleanse_effects_with_tag(target, str(tag))
+		if n > 0:
+			lines.append("　清除 %d 个「%s」效果" % [n, str(tag)])
+	_push_log(lines)
+	_clear_selection()
+	_refresh_info()
+	if canvas != null:
+		canvas.queue_redraw()
+
+# 在鼠标处唤出选单（紧贴光标）：只列「当前可用」的项、隐藏不可用项。
+# 仅当点中的是「当前行动的可控单位」才有 攻击/移动/回合结束（且 攻击/移动 还要有预算）；
+# 其它单位（非当前回合 / 敌方 / 中立）唯一能做的就是「角色状态」。
+func open_context_menu() -> void:
+	if _context_menu == null or selected_unit == null:
+		return
+	var u = selected_unit
+	var controllable: bool = (u == active_unit() and _is_friendly(u))
+	_context_menu.clear()
+	if controllable:
+		if _can_attack(u):
+			_context_menu.add_item("攻击", 3)
+		if _learned_active_skills(u).size() > 0 and u.ap > 0:   # 技能：插在攻击后、移动前
+			_build_skill_submenu(u)
+			_context_menu.add_submenu_item("技能", "SkillSubmenu")
+		if _can_move(u):
+			_context_menu.add_item("移动", 0)
+		if u.can_fly() and u.ap > 0:                      # 起飞/降落＝动作，耗 1 AP
+			_context_menu.add_item("降落" if u.is_airborne() else "起飞", 4)
+	_context_menu.add_item("角色状态", 2)
+	if controllable:
+		_context_menu.add_item("回合结束", 1)
+	_popup_context()
+
+# 点空白地面：只在「当前可控单位的回合」弹一个只含「结束回合」的菜单
+func open_ground_menu() -> void:
+	if _context_menu == null:
+		return
+	var au = active_unit()
+	if au == null or not _is_friendly(au):
+		return
+	_context_menu.clear()
+	_context_menu.add_item("回合结束", 1)
+	_popup_context()
+
+# 在鼠标处弹出 _context_menu（紧贴光标）。坐标系随是否内嵌而不同。
+func _popup_context() -> void:
+	_context_menu.reset_size()
+	var p := get_viewport().get_mouse_position()
+	if not get_viewport().gui_embed_subwindows:
+		p += Vector2(get_window().position)
+	_context_menu.position = Vector2i(p)
+	_context_menu.popup()
+
+func _can_move(u) -> bool:
+	return u != null and (u.move_points > 0 or u.ap > 0)
+
+func _can_attack(u) -> bool:
+	return u != null and u.ap >= int(u.basic_attack().get("ap_cost", 1))
+
+func _is_friendly(u) -> bool:
+	return u != null and u.faction in ["player", "ally"]
+
+# 平顶 odd-q：从 c 沿方向 d（0–5）走一格
+func _neighbor_in_dir(c: Vector2i, d: int) -> Vector2i:
+	var tbl = NB_ODD if (c.x & 1) == 1 else NB_EVEN
+	return Vector2i(c.x + tbl[d].x, c.y + tbl[d].y)
+
+# 从 from 沿某方向直线走 length 格；返回“包含 target 的那条方向线”的格序列（找不到=[]）
+func _line_cells(from: Vector2i, target: Vector2i, length: int) -> Array:
+	for d in 6:
+		var cells := []
+		var cur := from
+		for _i in length:
+			cur = _neighbor_in_dir(cur, d)
+			cells.append(cur)
+		if target in cells:
+			return cells
+	return []
+
+# ============ 移动力 / 寻路 ============
+
+func _cell_in_bounds(col: int, row: int) -> bool:
+	return col >= 0 and col < width and row >= 0 and row < height
+
+func _neighbors(col: int, row: int) -> Array:
+	var out := []
+	var tbl = NB_ODD if (col & 1) == 1 else NB_EVEN
+	for d in tbl:
+		out.append(Vector2i(col + d.x, row + d.y))
+	return out
+
+# 单位进入该地块的移动消耗（tag 驱动）：-1 = 不可进入。
+# passable_by 决定能否进（"all"/"none"/[tag…]，按单位 tag 判定）；
+# cost 为基础成本，tag_cost 按单位 tag 取更优（最小）。
+func _move_cost_at(col: int, row: int, unit) -> int:
+	if not _cell_in_bounds(col, row):
+		return -1
+	var entry = _terrain_entry(tiles[row][col])
+	if entry == null:
+		return 1
+	var mv = entry.get("move", {})
+	var utags = unit.tags if unit != null else []
+	# 通行性门槛
+	var pb = mv.get("passable_by", "all")
+	if typeof(pb) == TYPE_ARRAY:
+		var ok := false
+		for tg in pb:
+			if tg in utags:
+				ok = true
+				break
+		if not ok:
+			return -1
+	elif pb == "none":
+		return -1
+	# 成本：基础 cost，被单位 tag 的 tag_cost 取更优（最小）
+	var cost := int(mv.get("cost", 1))
+	var tag_cost = mv.get("tag_cost", {})
+	if typeof(tag_cost) == TYPE_DICTIONARY:
+		for tg in utags:
+			if tag_cost.has(tg):
+				cost = min(cost, int(tag_cost[tg]))
+	return cost
+
+func _occupied_by_other(col: int, row: int, self_u) -> bool:
+	for u in units:
+		if u != self_u and u.col == col and u.row == row:
+			return true
+	return false
+
+# 本次「移动」动作的可用预算（格数）：
+# 移动点>0 → 用剩余移动点；移动点=0 但有 AP → 用一次移动力（提交时才扣 AP）；否则 0。
+func _move_budget(u) -> int:
+	if u == null:
+		return 0
+	if u.move_points > 0:
+		return u.move_points
+	if u.ap > 0:
+		return int(u.stats.get("move", 0))
+	return 0
+
+# Dijkstra：算 unit 在 budget 内可达的格 + 前驱树。返回 {best:{格:累计消耗,含起点0}, came_from:{格:前驱}}。
+# 玩家移动范围、敌方 AI 走位共用。
+func _dijkstra(unit, budget: int) -> Dictionary:
+	var start := Vector2i(unit.col, unit.row)
+	var best := {start: 0}
+	var came := {}
+	var open := [start]
+	while not open.is_empty():
+		var bi := 0
+		for i in range(1, open.size()):
+			if best[open[i]] < best[open[bi]]:
+				bi = i
+		var cur: Vector2i = open[bi]
+		open.remove_at(bi)
+		# ZOC：踏入敌对控制区即停（该格可达但不能从它继续外扩）；起点格除外
+		if cur != start and _in_hostile_zoc(cur, unit):
+			continue
+		for nb in _neighbors(cur.x, cur.y):
+			if not _cell_in_bounds(nb.x, nb.y):
+				continue
+			if _occupied_by_other(nb.x, nb.y, unit):
+				continue
+			var step := _move_cost_at(nb.x, nb.y, unit)
+			if step < 0:
+				continue
+			var nc: int = best[cur] + step
+			if nc > budget:
+				continue
+			if not best.has(nb) or nc < best[nb]:
+				best[nb] = nc
+				came[nb] = cur
+				open.append(nb)
+	return {"best": best, "came_from": came}
+
+# 算 selected_unit 在 _move_budget 内可达的格 + 前驱树（供路径线重建）；再据此算极限可攻击格。
+func _recompute_reachable() -> void:
+	reachable = {}
+	attack_cells = {}
+	_came_from = {}
+	var u = selected_unit
+	if u != null and _is_friendly(u):
+		var start := Vector2i(u.col, u.row)
+		var data := _dijkstra(u, _move_budget(u))
+		var best: Dictionary = data["best"]
+		_came_from = data["came_from"]
+		best.erase(start)
+		reachable = best
+		# 攻击格 = 可站立格(可达 ∪ 起点) 外扩 武器攻击距离 圈，去掉可站立格本身
+		var rng := int(u.basic_attack().get("range", 1))
+		var standable := {start: true}
+		for c in reachable:
+			standable[c] = true
+		for c in _cells_within(standable, rng):
+			if not standable.has(c):
+				attack_cells[c] = true
+	_update_overlays()
+
+# 单位的「理论最远」移动 + 攻击范围（预览用）：以一次「移动动作」(1 AP→一批移动力) 的可达格为移动范围，
+# 攻击范围 = (可达 ∪ 起点) 外扩武器攻击距离的威胁圈（= 移动 1 AP 后再攻击 1 AP 能触及处）。
+func _compute_ranges(unit) -> Dictionary:
+	var start := Vector2i(unit.col, unit.row)
+	var data := _dijkstra(unit, unit.effective_stat("move"))
+	var best: Dictionary = data["best"]
+	best.erase(start)
+	var reach := best
+	var rng := int(unit.basic_attack().get("range", 1))
+	var standable := {start: true}
+	for c in reach:
+		standable[c] = true
+	var atk := {}
+	for c in _cells_within(standable, rng):
+		if not standable.has(c):
+			atk[c] = true
+	return {"reach": reach, "attack": atk}
+
+# 单位的 ZOC（控制区）= 周围一圈在界内的格
+func _zoc_cells(unit) -> Dictionary:
+	var d := {}
+	for nb in _neighbors(unit.col, unit.row):
+		if _cell_in_bounds(nb.x, nb.y):
+			d[nb] = true
+	return d
+
+# ============ ZOC 机制（控制区 + 借机）============
+
+func _zoc_key(owner, mover) -> String:
+	return "%d_%d" % [owner.get_instance_id(), mover.get_instance_id()]
+
+# cell 是否落在「敌对于 mover 的某单位」的 ZOC 内（= 与某敌对单位相邻）
+func _in_hostile_zoc(cell: Vector2i, mover) -> bool:
+	for u in units:
+		if u != mover and _is_hostile(mover, u) and _hex_dist(cell, Vector2i(u.col, u.row)) == 1:
+			return true
+	return false
+
+# 取 cell 处第一个「本 round 尚未对 mover 触发过」的敌对 ZOC 拥有者（找不到=null）
+func _first_zoc_owner(cell: Vector2i, mover):
+	for u in units:
+		if u != mover and _is_hostile(mover, u) and _hex_dist(cell, Vector2i(u.col, u.row)) == 1:
+			if not zoc_triggered.has(_zoc_key(u, mover)):
+				return u
+	return null
+
+# 移动者从当前格「离开/在区内移动」前的借机判定。返回 true = 被钉住（本次移动作废）。
+# 因「踏入 ZOC 即终点」，一次移动里只有起点可能在 ZOC 内，故只需在离开起点时判一次。
+func _zoc_on_leave(mover) -> bool:
+	var start := Vector2i(mover.col, mover.row)
+	if not _in_hostile_zoc(start, mover):
+		return false
+	var owner = _first_zoc_owner(start, mover)
+	if owner == null:
+		return false   # 该格的 ZOC 拥有者本 round 都已对它触发过 → 放行
+	zoc_triggered[_zoc_key(owner, mover)] = true   # 触发一次（无论命中与否，本 round 不再对它触发）
+	var stopped := _resolve_aoo(owner, mover)
+	_handle_deaths()
+	if int(mover.stats.get("HP", 0)) <= 0:
+		return true   # 移动者被借机打死，自然停下
+	return stopped
+
+# 借机（AoO）：owner 用基础攻击打 mover 一次（不耗 owner AP）。命中且未被格挡 = 钉住（返回 true）。
+func _resolve_aoo(owner, mover) -> bool:
+	_log_line("%s [b]借机[/b] → %s" % [_cname(owner), _cname(mover)])
+	var res = _resolve_one(owner, mover, owner.basic_attack(), false)
+	return bool(res.get("hit", false)) and not bool(res.get("blocked", false))
+
+# 移动范围内、属于敌方 ZOC 的格（移动模式自动标红，提示「踏进会被控制」）
+func _enemy_zoc_in_range(mover, reach: Dictionary) -> Dictionary:
+	var out := {}
+	for u in units:
+		if u == mover or not _is_hostile(mover, u):
+			continue
+		for nb in _neighbors(u.col, u.row):
+			var c := Vector2i(nb.x, nb.y)
+			if reach.has(c):
+				out[c] = true
+	return out
+
+# 组一个范围层：移动色按阵营（我方浅蓝 / 敌方浅黄），攻击色统一浅红；ZOC（仅敌方）红框标出
+func _overlay(unit, reach: Dictionary, attack: Dictionary) -> Dictionary:
+	var mc: Color = RANGE_MOVE_FRIENDLY if _is_friendly(unit) else RANGE_MOVE_ENEMY
+	var zoc: Dictionary = {} if _is_friendly(unit) else _zoc_cells(unit)
+	return {"reach": reach, "attack": attack, "zoc": zoc, "move_color": mc, "atk_color": RANGE_ATTACK}
+
+# 重建画布要画的范围层（按当前模式 / 悬停 / Tab 状态）
+func _update_overlays() -> void:
+	range_overlays = []
+	if skill_mode:
+		# 技能范围：绿填充（复用 reach 通道 + move_color；无 attack/zoc 层）
+		range_overlays.append({"reach": skill_cells, "attack": {}, "zoc": {}, "move_color": RANGE_SKILL, "atk_color": RANGE_ATTACK})
+	elif attack_mode:
+		range_overlays.append(_overlay(selected_unit, {}, attack_cells))
+	elif move_mode:
+		var ov := _overlay(selected_unit, reachable, attack_cells)
+		ov["zoc"] = _enemy_zoc_in_range(selected_unit, reachable)   # 自动显示移动范围内的敌方 ZOC（无需 Tab）
+		range_overlays.append(ov)
+		if show_enemy_preview:
+			var foe = _ai_nearest_hostile(selected_unit)   # 距离最近的敌方单位
+			if foe != null:
+				var r := _compute_ranges(foe)
+				range_overlays.append(_overlay(foe, r["reach"], r["attack"]))
+	elif hover_range_unit != null and not _animating:
+		var r := _compute_ranges(hover_range_unit)
+		range_overlays.append(_overlay(hover_range_unit, r["reach"], r["attack"]))
+	if canvas != null:
+		canvas.queue_redraw()
+
+# 行动顺序三态（火纹式，用于地图棋子）：
+#   已行动（本 round 它的 turn 已结束，idx<active_index）→ 整体压灰；
+#   当前可行动（active_unit）→ 绿描边；
+#   尚未行动（idx>active_index）→ 无装饰。
+func _has_acted(u) -> bool:
+	var idx := turn_order.find(u)
+	return idx >= 0 and idx < active_index
+
+func _is_active_unit(u) -> bool:
+	return u == active_unit()
+
+# 鼠标移到地图某格：若格上有单位则预览其移动/攻击范围（敌我皆可），离开则清除
+func update_unit_hover(cell: Vector2i) -> void:
+	var u = unit_at(cell.x, cell.y) if _cell_in_bounds(cell.x, cell.y) else null
+	if u == hover_range_unit:
+		return
+	hover_range_unit = u
+	if not move_mode and not attack_mode and not skill_mode:   # 移动/攻击/技能模式有自己的范围显示，悬停预览让位
+		_update_overlays()
+
+# 把一组格按六边形几何外扩 radius 圈（仅几何、不管通行性）；返回含原格的集合
+func _cells_within(cells: Dictionary, radius: int) -> Dictionary:
+	var out := cells.duplicate()
+	for _r in radius:
+		var added := {}
+		for c in out:
+			for nb in _neighbors(c.x, c.y):
+				if _cell_in_bounds(nb.x, nb.y) and not out.has(nb):
+					added[nb] = true
+		for k in added:
+			out[k] = true
+	return out
+
+# 进入移动模式：算范围、清路径线
+func _enter_move_mode() -> void:
+	if not _can_move(selected_unit):
+		return
+	move_mode = true
+	hover_path = []
+	_recompute_reachable()
+
+# 进入攻击模式：在角色当前位置按武器 attack skill 的距离标攻击范围，点范围内敌人即攻击
+func _enter_attack_mode() -> void:
+	var u = selected_unit
+	if not _can_attack(u):
+		return
+	move_mode = false
+	attack_mode = true
+	reachable = {}
+	_came_from = {}
+	hover_path = []
+	attack_cells = {}
+	var skill = u.basic_attack()
+	var rng := int(skill.get("range", 1))
+	var start := Vector2i(u.col, u.row)
+	var aoe = skill.get("aoe", null)
+	if typeof(aoe) == TYPE_DICTIONARY and aoe.get("shape", "") == "line":
+		# 直线 AoE：标 6 方向的直线格（spoke），点哪条线就打哪条
+		for d in 6:
+			var cur := start
+			for _i in rng:
+				cur = _neighbor_in_dir(cur, d)
+				if _cell_in_bounds(cur.x, cur.y):
+					attack_cells[cur] = true
+	else:
+		for c in _cells_within({start: true}, rng):
+			if c != start:
+				attack_cells[c] = true
+	_update_overlays()
+
+# 敌友判定：玩家/友军 为一方，敌方/中立 为另一方；跨方=敌对
+func _is_hostile(a, b) -> bool:
+	if a == null or b == null:
+		return false
+	var friendly := ["player", "ally"]
+	return (a.faction in friendly) != (b.faction in friendly)
+
+# 执行攻击：取攻方基础攻击 skill → 算命中目标（直线 AoE 按方向、可友伤）→ 扣 skill AP、逐目标判定 + 记录。
+func _do_attack(attacker, cell: Vector2i) -> void:
+	var skill = attacker.basic_attack()
+	var targets := _attack_targets(attacker, cell, skill)
+	var aoe = skill.get("aoe", null)
+	# 单体且点到空格/非敌 → 取消、不耗 AP
+	if targets.is_empty() and typeof(aoe) != TYPE_DICTIONARY:
+		_clear_selection()
+		return
+	attacker.ap -= int(skill.get("ap_cost", 1))
+	_resolve_attack(attacker, skill, targets)
+	_handle_deaths()
+	_play_attack_anim(attacker, cell, targets)   # 撞击 + 受击闪红 + 音效（cosmetic）
+	_clear_selection()
+	_refresh_info()
+	if canvas != null:
+		canvas.queue_redraw()
+
+# 点击格 → 命中单位列表：直线 AoE 取该方向直线上的单位（友伤按 friendly_fire），否则取该格的敌对单位
+func _attack_targets(attacker, cell: Vector2i, skill) -> Array:
+	var out := []
+	var aoe = skill.get("aoe", null)
+	if typeof(aoe) == TYPE_DICTIONARY and aoe.get("shape", "") == "line":
+		var cells = _line_cells(Vector2i(attacker.col, attacker.row), cell, int(aoe.get("length", 1)))
+		var ff = bool(aoe.get("friendly_fire", false))
+		for u in units:
+			var p := Vector2i(u.col, u.row)
+			if p in cells and (ff or _is_hostile(attacker, u)):
+				out.append(u)
+	else:
+		var t = unit_at(cell.x, cell.y)
+		if t != null and _is_hostile(attacker, t):
+			out.append(t)
+	return out
+
+# 命中率（%）= clamp(命中 − 闪避, 5, 95)，读 effective_stat
+func _hit_chance(attacker, target) -> int:
+	return clampi(attacker.effective_stat("acc") - target.effective_stat("eva"), 5, 95)
+
+# 一次攻击（可多目标）：抬头「攻方 使用 技能 → 目标…」，再逐目标跑判定序
+func _resolve_attack(attacker, skill, targets: Array) -> void:
+	var nm := str(skill.get("name", "攻击"))
+	if targets.is_empty():
+		_log_line("%s 使用 [b]%s[/b]（无命中目标）" % [_cname(attacker), nm])
+		return
+	var names := []
+	for t in targets:
+		names.append(_cname(t))
+	_log_line("%s 使用 [b]%s[/b] → %s" % [_cname(attacker), nm, "、".join(names)])
+	var multi := targets.size() > 1
+	for t in targets:
+		_resolve_one(attacker, t, skill, multi)
+
+# 对单个目标的判定序，全程读 effective_stat + 技能伤害系数；输出 = 攻击 × 系数 × 暴击 × 效能。
+# 精简记录：有什么写什么——没暴击不写暴击系数、效能 100% 不写、没减伤写「无」。
+# 返回 {"hit": 是否命中(未被闪避), "blocked": 是否被格挡}，供借机判定用。
+func _resolve_one(attacker, target, skill, show_target := false) -> Dictionary:
+	var lines := []
+	if show_target:   # 多目标(AoE)才标目标名分隔；单体时抬头已含目标 → 不重复
+		lines.append("→ %s" % _cname(target))
+	# 命中
+	var acc := int(attacker.effective_stat("acc"))
+	var eva := int(target.effective_stat("eva"))
+	var hc := clampi(acc - eva, 5, 95)
+	var roll := int(randf() * 100.0)
+	var hit := roll < hc
+	lines.append("命中%d-闪避%d=%d%%（骰%d）" % [acc, eva, hc, roll])
+	lines.append("→ %s" % _oc(hit, "已命中", "未命中"))
+	if not hit:
+		_push_log(lines)
+		return {"hit": false, "blocked": false}
+	# 暴击（属性吃 1 位小数：crit_rate 等可为 X.5）
+	var cr := float(attacker.effective_stat_f("crit_rate"))
+	var crit := randf() * 100.0 < cr
+	lines.append("暴击率%s%%" % _numf(cr))
+	lines.append("→ %s" % _oc(crit, "暴击", "未暴击"))
+	# 伤害 = 攻击 × 系数 [× 暴击] [× 效能≠100%]
+	var coeff := float(skill.get("coeff", 1.0))
+	var cmult := (float(attacker.effective_stat_f("crit_dmg")) / 100.0) if crit else 1.0
+	var aeff := float(attacker.effective_stat_f("atk_eff")) / 100.0
+	var atk := float(attacker.effective_stat_f("atk"))
+	var out := atk * coeff * cmult * aeff
+	var formula := "攻击%s×系数%s" % [_numf(atk), _numf(coeff)]
+	if crit:
+		formula += "×暴击%s" % _numf(cmult)
+	if aeff != 1.0:
+		formula += "×效能%s%%" % _numf(aeff * 100.0)
+	# 伤害补正：额外 flat 伤害，不吃效能（如撕裂/抓取的 (力量+灵巧)×0.5）
+	var bonus := _skill_bonus(attacker, skill)
+	if bonus > 0.0:
+		out += bonus
+		formula += "＋补正%s" % _numf(bonus)
+	lines.append("伤害：%s=%s" % [formula, _numf(out)])
+	# 格挡
+	var br := float(target.effective_stat_f("block_rate"))
+	var blocked := randf() * 100.0 < br
+	lines.append("格挡率%s%%" % _numf(br))
+	lines.append("→ %s" % _oc(blocked, "格挡", "未格挡"))
+	# 减伤：有什么写什么，没有写「无」
+	var bp := float(target.effective_stat_f("block_power")) if blocked else 0.0
+	var rp := float(target.effective_stat_f("res_phys"))
+	var reductions := []
+	if bp > 0:
+		reductions.append("格挡性能%s%%" % _numf(bp))
+	if rp > 0:
+		reductions.append("物抗%s%%" % _numf(rp))
+	var pen := float(skill.get("armor_pen", 0.0))
+	if pen > 0.0:
+		reductions.append("穿甲%s%%" % _numf(pen * 100.0))   # 标注：该攻击有穿甲
+	lines.append("减伤：%s" % ("、".join(reductions) if reductions.size() > 0 else "无"))
+	# 落血（穿甲：pen 比例无视护甲直接进 HP）
+	var dmg := int(round(out * (1.0 - bp / 100.0) * (1.0 - rp / 100.0)))
+	_apply_damage(target, dmg, pen)
+	lines.append("%s 剩余血量：%d（-%d）" % [_cname(target), int(target.stats.get("HP", 0)), dmg])
+	# 施加异常（如撕裂的流血）：基础概率 × (1 − 异常抵抗)，命中即挂效果
+	_try_inflict(attacker, target, skill, lines)
+	_push_log(lines)
+	return {"hit": true, "blocked": blocked}
+
+# 技能伤害补正（flat、不吃效能）：bonus = Σ(指定四维/属性) × mult。无则 0。
+func _skill_bonus(attacker, skill) -> float:
+	var b = skill.get("bonus", null)
+	if typeof(b) != TYPE_DICTIONARY:
+		return 0.0
+	var sum := 0.0
+	for s in b.get("stats", []):
+		sum += attacker.effective_stat_f(str(s))
+	return Unit.round1(sum * float(b.get("mult", 0.0)))
+
+# 命中后尝试施加异常（流血等）：概率 × (1−异常抵抗)；成功则挂进 target.effects（同名刷新时长）。
+func _try_inflict(attacker, target, skill, lines: Array) -> void:
+	var inf = skill.get("inflict", null)
+	if typeof(inf) != TYPE_DICTIONARY:
+		return
+	var base_ch := float(inf.get("chance", 0))
+	var resist := float(target.effective_stat_f("res_status"))
+	var ch := base_ch * (1.0 - resist / 100.0)
+	var iroll := randf() * 100.0
+	var applied := iroll < ch
+	lines.append("%s %s%%（异抗%s%%→%s%%·骰%s）→ %s" % [
+		str(inf.get("name", "")), _numf(base_ch), _numf(resist), _numf(ch), _numf(iroll),
+		_oc(applied, "施加", "抵抗")])
+	if applied:
+		_add_effect(target, inf)
+
+# 给单位挂一个效果（同名则刷新时长、不叠层）。
+func _add_effect(target, inf: Dictionary) -> void:
+	for e in target.effects:
+		if str(e.get("name", "")) == str(inf.get("name", "")):
+			e["duration"] = int(inf.get("duration", e.get("duration", 0)))
+			return
+	target.effects.append({
+		"name": str(inf.get("name", "")),
+		"kind": str(inf.get("kind", "debuff")),
+		"permanent": false,
+		"duration": int(inf.get("duration", 1)),
+		"dot_pct_max_hp": float(inf.get("dot_pct_max_hp", 0)),
+		"tags": inf.get("tags", []),   # 效果 tag（如 bleeding）：供「按 tag 驱散/清除」用
+	})
+
+# 移除单位身上所有带某 tag 的效果（如治疗清「bleeding」流血类）；返回移除条数。
+func _cleanse_effects_with_tag(u, tag: String) -> int:
+	if u == null or not ("effects" in u) or typeof(u.effects) != TYPE_ARRAY:
+		return 0
+	var before: int = u.effects.size()
+	u.effects = u.effects.filter(func(e): return not (e.get("tags", []) as Array).has(tag))
+	return before - u.effects.size()
+
+# 伤害落地：先扣护甲、溢出到 HP（甲抗/人抗分项见设计文档，测试期省略）
+func _apply_damage(target, dmg: int, pen := 0.0) -> void:
+	if dmg <= 0:
+		return
+	var pen_dmg := int(round(float(dmg) * clampf(pen, 0.0, 1.0)))   # 穿甲部分：无视护甲、直接进 HP
+	var armor_dmg := dmg - pen_dmg                                   # 其余：先扣甲、溢出进 HP
+	var armor := int(target.stats.get("armor", 0))
+	var to_hp := pen_dmg
+	if armor_dmg <= armor:
+		target.stats["armor"] = armor - armor_dmg
+	else:
+		target.stats["armor"] = 0
+		to_hp += armor_dmg - armor
+	if to_hp > 0:
+		target.stats["HP"] = int(target.stats.get("HP", 0)) - to_hp
+
+# —— 战斗记录 BBCode 小工具 ——
+func _hl(x) -> String:                       # 高亮加粗数字（金）
+	return "[b][color=#FFD24A]%s[/color][/b]" % str(x)
+
+func _oc(cond: bool, yes: String, no: String) -> String:  # 判定结果（绿/红）
+	var col := "#6FCF6F" if cond else "#E07A5A"
+	return "[b][color=%s]%s[/color][/b]" % [col, (yes if cond else no)]
+
+# 单位名按阵营上色（我方/友方蓝、敌方红、中立黄）
+func _cname(u) -> String:
+	return "[b][color=#%s]%s[/color][/b]" % [faction_color(u.faction).to_html(false), u.unit_name]
+
+# 浮点去尾巴：整数→"5"，0.85→"0.85"，8.5→"8.5"
+func _numf(x) -> String:
+	var f := float(x)
+	if f == float(int(f)):
+		return str(int(f))
+	return ("%.2f" % f).rstrip("0").rstrip(".")
+
+func _push_log(lines: Array) -> void:        # 一段（含分隔线）
+	if _log == null:
+		return
+	for ln in lines:
+		_log.append_text(ln + "\n")
+	_log.append_text("[color=#5a5a5a]────────────[/color]\n")
+
+func _log_line(text: String) -> void:        # 单行
+	if _log != null:
+		_log.append_text(text + "\n")
+
+# 退出移动 / 攻击模式（保留 selected_unit）
+func _exit_move_mode() -> void:
+	move_mode = false
+	attack_mode = false
+	skill_mode = false
+	active_skill_id = ""
+	skill_cells = {}
+	show_enemy_preview = false
+	reachable = {}
+	attack_cells = {}
+	_came_from = {}
+	hover_path = []
+	_update_overlays()
+
+# 彻底取消：清选中 + 退出移动模式
+func _clear_selection() -> void:
+	selected_unit = null
+	_exit_move_mode()
+
+# 鼠标移到 cell：重建从单位到该格的路径线（供画布即时绘制）
+func update_hover_path(cell: Vector2i) -> void:
+	hover_path = _reconstruct_path(cell)
+
+func _reconstruct_path(cell: Vector2i) -> Array:
+	if not reachable.has(cell):
+		return []
+	var path := [cell]
+	var cur := cell
+	while _came_from.has(cur):
+		cur = _came_from[cur]
+		path.append(cur)
+	path.reverse()   # 起点 → 目标
+	return path
+
+# 提交移动：移动点=0 时把 1 点通用 AP 转成移动点（仅此刻发生），扣路径消耗后落位 + 滑动动画
+func _commit_move(col: int, row: int) -> void:
+	var u = selected_unit
+	if u == null:
+		return
+	var target := Vector2i(col, row)
+	if not reachable.has(target):
+		return
+	var cost: int = reachable[target]
+	var path := _reconstruct_path(target)   # 捕获路径（_clear_selection 前）
+	# 预算：移动点=0 → 花 1 AP 买一批移动力（本次移动尝试的代价）
+	if u.move_points == 0:
+		if u.ap <= 0:
+			return
+		u.ap -= 1
+		u.move_points += int(u.stats.get("move", 0))
+	# ZOC 借机：离开起点前判定（起点在敌对控制区内才触发）；命中被钉住则本次移动作废
+	if _zoc_on_leave(u):
+		u.move_points = 0
+		_clear_selection()
+		_refresh_info()
+		if canvas != null:
+			canvas.queue_redraw()
+		return
+	u.move_points -= cost
+	u.col = col
+	u.row = row
+	_clear_selection()
+	_refresh_info()
+	_animate_path(u, path)   # 沿路径平移（非瞬移）；玩家不 await（即发即忘）
+
+# 沿 path（含起点的格序列）滑动单位 token；动画期间 _draw_unit 用 _anim_pos 绘制。
+# 可被 await（敌方 AI 串行走位用）；玩家提交移动则不 await。
+func _animate_path(u, path: Array) -> void:
+	if canvas == null or path.size() < 2:
+		return
+	_animating = true
+	_anim_unit = u
+	_anim_pos = canvas.hex_center(path[0].x, path[0].y)
+	var tw := create_tween()
+	tw.set_trans(Tween.TRANS_LINEAR)
+	for i in range(1, path.size()):
+		var a: Vector2 = canvas.hex_center(path[i - 1].x, path[i - 1].y)
+		var b: Vector2 = canvas.hex_center(path[i].x, path[i].y)
+		tw.tween_method(_set_anim_pos, a, b, MOVE_ANIM_STEP)
+	await tw.finished
+	_animating = false
+	_anim_unit = null
+	if canvas != null:
+		canvas.queue_redraw()
+
+func _set_anim_pos(p: Vector2) -> void:
+	_anim_pos = p
+	if canvas != null:
+		canvas.queue_redraw()
+
+# 攻击动画：攻方棋子朝目标方向冲撞一下再退回；撞击瞬间受击方闪红 + 播放音效。
+func _play_attack_anim(attacker, cell: Vector2i, targets: Array) -> void:
+	if canvas == null:
+		_flash_targets(targets)
+		_play_sfx()
+		return
+	var from: Vector2 = canvas.hex_center(attacker.col, attacker.row)
+	var to: Vector2 = canvas.hex_center(cell.x, cell.y)
+	var dir: Vector2 = to - from
+	if dir.length() < 0.001:
+		_flash_targets(targets)
+		_play_sfx()
+		return
+	var bump: Vector2 = from + dir.normalized() * 14.0
+	_animating = true
+	_anim_unit = attacker
+	_anim_pos = from
+	var tw := create_tween()
+	tw.tween_method(_set_anim_pos, from, bump, 0.09).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_callback(_on_attack_impact.bind(targets))   # 撞击点：受击闪红 + 音效
+	tw.tween_method(_set_anim_pos, bump, from, 0.13).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.tween_callback(_end_attack_anim)
+
+func _on_attack_impact(targets: Array) -> void:
+	_flash_targets(targets)
+	_play_sfx()
+
+func _end_attack_anim() -> void:
+	_animating = false
+	_anim_unit = null
+	if canvas != null:
+		canvas.queue_redraw()
+
+# 受击单位闪红：标记 + 定时清除（_draw_unit 期间把 token 画红）
+func _flash_targets(targets: Array) -> void:
+	if targets.is_empty():
+		return
+	for t in targets:
+		_flash_units[t] = true
+	if canvas != null:
+		canvas.queue_redraw()
+	if is_inside_tree():
+		get_tree().create_timer(FLASH_TIME).timeout.connect(_clear_flash.bind(targets))
+
+func _clear_flash(targets: Array) -> void:
+	for t in targets:
+		_flash_units.erase(t)
+	if canvas != null:
+		canvas.queue_redraw()
+
+func _play_sfx() -> void:
+	if _sfx != null and _sfx.stream != null:
+		_sfx.play()
+
+# 加载音频：优先已导入资源，否则直读 mp3 字节（免依赖编辑器导入）
+func _load_audio(path: String):
+	if ResourceLoader.exists(path):
+		var s = load(path)
+		if s is AudioStream:
+			return s
+	if FileAccess.file_exists(path):
+		var mp3 := AudioStreamMP3.new()
+		mp3.data = FileAccess.get_file_as_bytes(path)
+		return mp3
+	return null
+
+# 由前驱树 came 重建到 cell 的路径（起点 → cell，含两端）
+func _path_via(came: Dictionary, cell: Vector2i) -> Array:
+	var path := [cell]
+	var cur := cell
+	while came.has(cur):
+		cur = came[cur]
+		path.append(cur)
+	path.reverse()
+	return path
+
+# ============ 六边形距离（odd-q offset → cube）============
+func _to_cube(c: Vector2i) -> Vector3i:
+	var x := c.x
+	var z := c.y - (c.x - (c.x & 1)) / 2
+	return Vector3i(x, -x - z, z)
+
+func _hex_dist(a: Vector2i, b: Vector2i) -> int:
+	var ca := _to_cube(a)
+	var cb := _to_cube(b)
+	return int((abs(ca.x - cb.x) + abs(ca.y - cb.y) + abs(ca.z - cb.z)) / 2)
