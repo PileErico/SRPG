@@ -1,42 +1,27 @@
 extends Control
 ## 物品编辑器：创作游戏正式物品（武器 / 防具 / 饰品），写回 res://data/*.json。
-## 单独入口（StartMenu →「物品编辑器」），自包含 procedural 面板——之后可整合进游戏内置编辑器。
-## 数据契约对准代码：mod = {stat, op, value}，op∈flat/pct；stat 用 Unit.stats 真实键。
-## tag 设计（用户校准）：槽位非物品 tag、自动派生；物品类型用「分类下拉」表达（读 TagDB.by_cat），
-## 下拉随 tags.json 扩充自动长出；另有「其他标签」下拉+手动并存。只有「天生武器」需勾选。
+## 入口 StartMenu →「物品编辑器」；自包含 procedural 面板。
+## tag 设计（用户校准）：槽位非物品 tag、自动派生；类型/种类等用「分类下拉」（读 TagDB.by_cat）。
+##  武器：先选【类型】(近战/投掷/远程/触媒/盾，单选互斥) → 类型级联决定【种类】可选项；投掷无种类、盾不显握持。
+##  防具：部位(头盔/身甲)+种类(轻/中/重)。其他标签：下拉(选中即加)+手动(确认)。只「天生武器」需勾选。
 
 const ItemDB := preload("res://ItemDB.gd")
-const EquipSlots := preload("res://EquipSlots.gd")   # 装备资格（运行时）
-const TagDB := preload("res://TagDB.gd")             # tag 词典（cn / color / 分类，单一数据源 data/tags.json）
+const EquipSlots := preload("res://EquipSlots.gd")
+const TagDB := preload("res://TagDB.gd")
 
 const KIND_CN := {"weapon": "武器", "armor": "防具", "accessory": "饰品"}
-
-# 立绘默认文件夹（新建/浏览时定位）
 const ICON_DIR := {
 	"weapon": "res://icons/Items/Weapons",
 	"armor": "res://icons/Items/Armors",
 	"accessory": "res://icons/Items/Accessories",
 }
-
 const DAMAGE_KINDS := ["physical", "fire", "ice", "thunder", "holy"]
 const OPS := [["flat", "固定"], ["pct", "百分比%"]]
 
-# 按类别的「分类下拉」配置（每条 = [中文标签, tag 类别, 排除的tag]）；选项内容读 TagDB.by_cat，随词典扩充自动长。
-const TYPED_ROWS := {
-	"weapon": [
-		["握持方式", "handedness", []],
-		["武器类型", "weapon_type", ["innate"]],
-		["攻击距离", "weapon_range", []],
-	],
-	"armor": [
-		["防具类型", "gear_type", ["accessory"]],
-	],
-	"accessory": [],
-}
-# 自动管理（不进「其他标签」自由区）的 tag 类别
-const MANAGED_CATS := ["rarity", "handedness", "weapon_type", "weapon_range", "gear_type"]
+# 「自动管理」的 tag 类别（这些 tag 由专门控件管，从「其他标签」自由区排除）
+const MANAGED_CATS := ["rarity", "wtype", "wcat_melee", "wcat_ranged", "wcat_catalyst",
+	"wcat_shield", "handedness", "gear_type", "armor_weight"]
 
-# stat 可选表（对准 Unit.gd stats + _resolve_one 实际消费）。每项 [key, 中文, 战斗是否已消费]。
 const STAT_GROUPS := [
 	["四维", [["STR", "力量", true], ["DEX", "灵巧", true], ["INT", "智力", true], ["STA", "体力", true]]],
 	["进攻", [["atk", "攻击", true], ["acc", "命中", true], ["crit_rate", "暴击率", true],
@@ -50,11 +35,12 @@ const STAT_GROUPS := [
 
 # —— 状态 ——
 var _rarities: Array = []
-var _managed_tag_set: Dictionary = {}   # 全部「自动管理」tag id 的集合（自由标签里排除）
+var _managed_tag_set: Dictionary = {}
 var _current: Dictionary = {}
 var _current_kind: String = ""
 var _is_new: bool = false
-var _free_tags: Array = []              # 当前编辑物品的「其他标签」（自由）
+var _free_tags: Array = []
+var _atk_tags: Array = []
 
 # —— 控件 ——
 var _list: ItemList
@@ -66,27 +52,31 @@ var _save_btn: Button
 var _del_btn: Button
 var _file_dialog: FileDialog
 
-# 表单控件（每次重建表单重新赋值）
 var _w_id: LineEdit
 var _w_name: LineEdit
 var _w_rarity: OptionButton
 var _w_icon: LineEdit
+# 武器
+var _w_wtype: OptionButton
+var _w_wcat: OptionButton
+var _wcat_row: Control
+var _w_handed: OptionButton
+var _handed_row: Control
 var _w_innate: CheckBox
 var _w_innate_slot: OptionButton
 var _innate_slot_row: Control
-var _typed: Dictionary = {}            # cat -> OptionButton（分类下拉）
-var _typed_rows: Dictionary = {}       # cat -> Control（行容器，供按 innate 显隐）
-var _free_box: VBoxContainer
+# 防具
+var _w_gear: OptionButton
+var _w_weight: OptionButton
+# 修正 / 攻击
 var _mods_box: VBoxContainer
 var _mod_rows: Array = []
-# 武器 attack
 var _w_atk_name: LineEdit
 var _w_atk_icon: LineEdit
 var _w_atk_coeff: SpinBox
 var _w_atk_range: SpinBox
 var _w_atk_ap: SpinBox
 var _w_atk_dmgkind: OptionButton
-var _w_atk_tags: LineEdit
 
 
 func _ready() -> void:
@@ -126,7 +116,6 @@ func _ready() -> void:
 	root.add_child(split)
 	split.add_child(_build_left_pane())
 
-	# 右侧 = 表单 | 即时预览 两栏
 	var right_split := HSplitContainer.new()
 	right_split.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	right_split.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -174,7 +163,7 @@ func _build_managed_set() -> void:
 	for cat in MANAGED_CATS:
 		for id in TagDB.ids_in_cat(cat):
 			_managed_tag_set[id] = true
-	for s in ["main_hand", "off_hand"]:   # 旧失误的槽位 tag：自由区也排除
+	for s in ["main_hand", "off_hand"]:
 		_managed_tag_set[s] = true
 
 
@@ -218,9 +207,8 @@ func _refresh_list() -> void:
 	for id in ids:
 		var it = items[id]
 		var kind := ItemDB.kind_of(it)
-		var rar := _rarity_of(it)
 		_list.add_item("[%s] %s  (%s)" % [KIND_CN.get(kind, kind), str(it.get("name", id)), id])
-		_list.set_item_custom_fg_color(_list.item_count - 1, _rarity_color(rar))
+		_list.set_item_custom_fg_color(_list.item_count - 1, _rarity_color(_rarity_of(it)))
 		_list_ids.append(id)
 
 
@@ -230,7 +218,6 @@ func _on_list_select(idx: int) -> void:
 	_load_item(_list_ids[idx])
 
 
-# —— 新建 / 加载 ——
 func _new_item(kind: String) -> void:
 	_current = _skeleton(kind)
 	_current_kind = kind
@@ -264,69 +251,56 @@ func _show_empty_form() -> void:
 	_refresh_preview()
 
 
-# 预设骨架（默认值；tags 含默认类型 → 分类下拉初值）
 func _skeleton(kind: String) -> Dictionary:
 	match kind:
 		"weapon":
 			return {"id": "", "name": "新武器", "slot": "main_hand", "icon": "",
-				"tags": ["common", "one_handed", "weapon_sword", "melee"], "requires": [], "mods": [],
+				"tags": ["common", "melee", "weapon_sword", "one_handed"], "requires": [], "mods": [],
 				"two_handed": false, "innate": false,
 				"attack": {"name": "普通攻击", "icon": "", "coeff": 1.0, "range": 1,
 					"ap_cost": 1, "damage_kind": "physical", "tags": ["single_target"]}}
 		"armor":
 			return {"id": "", "name": "新防具", "slot": "armor", "icon": "",
-				"tags": ["common", "armor"], "requires": [],
+				"tags": ["common", "armor", "medium_armor"], "requires": [],
 				"mods": [{"stat": "armor_max", "op": "flat", "value": 10}]}
 		_:
 			return {"id": "", "name": "新饰品", "slot": "accessory_1", "icon": "",
 				"tags": ["common", "accessory"], "requires": [], "mods": []}
 
 
-# —— 表单 ——
 func _clear_form() -> void:
 	for c in _form.get_children():
 		c.queue_free()
 	_mod_rows.clear()
-	_typed.clear()
-	_typed_rows.clear()
 	_free_tags = []
+	_atk_tags = []
 
 
 func _build_form() -> void:
 	_clear_form()
 
+	# 1. 基础
 	_form.add_child(_section_label("基础"))
 	_w_id = _add_line(_form, "id（唯一主键）", str(_current.get("id", "")))
 	_w_name = _add_line(_form, "名字", str(_current.get("name", "")))
 	_build_icon_row()
 
-	# 武器：天生勾选 + 天生槽位 + 攻击
-	if _current_kind == "weapon":
-		_form.add_child(_section_label("武器"))
-		_w_innate = _add_check(_form, "天生武器（永不卸下；无单/双手词条）", bool(_current.get("innate", false)))
-		_w_innate_slot = OptionButton.new()
-		for s in ["main_hand", "off_hand"]:
-			_w_innate_slot.add_item(EquipSlots.SLOT_CN.get(s, s))
-			_w_innate_slot.set_item_metadata(_w_innate_slot.item_count - 1, s)
-		_select_meta(_w_innate_slot, str(_current.get("slot", "main_hand")))
-		_w_innate_slot.item_selected.connect(func(_i): _refresh_preview())
-		_innate_slot_row = _field_row("天生武器放在（仅天生需区分主/副手）", _w_innate_slot)
-		_form.add_child(_innate_slot_row)
-		_w_innate.toggled.connect(func(_v): _on_innate_toggled())
-		_build_attack_form()
-
-	# 标签区（稀有度本身也是 tag → 作为本区块第一行；类型下拉 + 其他标签）
+	# 2. 标签
 	_form.add_child(_section_label("标签"))
-	_w_rarity = OptionButton.new()
-	for r in _rarities:
-		_w_rarity.add_item("%s（%s）" % [TagDB.cn(r), r])
-		_w_rarity.set_item_metadata(_w_rarity.item_count - 1, r)
+	_w_rarity = _cat_dropdown_inline("稀有度", "rarity", false)
 	_select_meta(_w_rarity, _rarity_of(_current))
-	_w_rarity.item_selected.connect(func(_i): _refresh_preview())
-	_form.add_child(_field_row("稀有度", _w_rarity))
-	_build_tag_rows()
+	if _current_kind == "weapon":
+		_build_weapon_tags()
+	elif _current_kind == "armor":
+		_w_gear = _cat_dropdown_inline("防具部位", "gear_type", false, ["accessory"])
+		_select_meta(_w_gear, _tag_in_cat(_current.get("tags", []), "gear_type"))
+		_w_weight = _cat_dropdown_inline("防具种类", "armor_weight", true)
+		_select_meta(_w_weight, _tag_in_cat(_current.get("tags", []), "armor_weight"))
+	# 其他标签（自由）
+	_free_tags = _collect_free_from(_current.get("tags", []))
+	_build_free_tag_ui("其他标签", _free_tags)
 
-	# 修正 mods（放在「标签」之后）
+	# 3. 修正 mods
 	_form.add_child(_section_label("修正 mods（每条加在装备者属性上）"))
 	_mods_box = VBoxContainer.new()
 	_mods_box.add_theme_constant_override("separation", 4)
@@ -341,11 +315,208 @@ func _build_form() -> void:
 		_refresh_preview())
 	_form.add_child(addmod)
 
-	_on_innate_toggled()   # 按天生状态显隐 握持/天生槽位
+	# 4. 基础攻击技能 BAS（仅武器，放底部）
+	if _current_kind == "weapon":
+		_build_bas_section()
+
+	if _current_kind == "weapon":
+		_on_wtype_changed()   # 级联 + 显隐初始化
 	_refresh_preview()
 
 
-# 立绘行：LineEdit + 浏览…（FileDialog 定位到该类别文件夹）
+# 武器标签：类型(级联) + 种类 + 握持 + 天生(+主副手)
+func _build_weapon_tags() -> void:
+	_w_wtype = _cat_dropdown_inline("武器类型", "wtype", false)
+	_select_meta(_w_wtype, _tag_in_cat(_current.get("tags", []), "wtype"))
+	_w_wtype.item_selected.connect(func(_i): _on_wtype_changed())
+
+	_w_wcat = OptionButton.new()   # 内容由 _refill_wcat 级联填充
+	_w_wcat.item_selected.connect(func(_i): _refresh_preview())
+	_wcat_row = _field_row("武器种类", _w_wcat)
+	_form.add_child(_wcat_row)
+
+	_w_handed = _cat_dropdown_inline("握持方式", "handedness", false)
+	_select_meta(_w_handed, _tag_in_cat(_current.get("tags", []), "handedness"))
+	_handed_row = _w_handed.get_parent()   # 其 field_row
+
+	_w_innate = _add_check(_form, "天生武器（永不卸下；无握持/不吃额外加成）", bool(_current.get("innate", false)))
+	_w_innate.toggled.connect(func(_v): _on_wtype_changed())
+	_w_innate_slot = OptionButton.new()
+	for s in ["main_hand", "off_hand"]:
+		_w_innate_slot.add_item(EquipSlots.SLOT_CN.get(s, s))
+		_w_innate_slot.set_item_metadata(_w_innate_slot.item_count - 1, s)
+	_select_meta(_w_innate_slot, str(_current.get("slot", "main_hand")))
+	_w_innate_slot.item_selected.connect(func(_i): _refresh_preview())
+	_innate_slot_row = _field_row("天生武器放在（主/副手）", _w_innate_slot)
+	_form.add_child(_innate_slot_row)
+
+
+# 类型变化（含天生）：级联种类 + 显隐
+func _on_wtype_changed() -> void:
+	if _w_wtype == null or not is_instance_valid(_w_wtype):
+		return
+	var wtype: String = str(_w_wtype.get_selected_metadata())
+	var innate := _innate_checked()
+	# 级联种类
+	var cur := _tag_in_cat(_current.get("tags", []), "wcat_" + wtype)
+	_fill_cat_dropdown(_w_wcat, "wcat_" + wtype, [], true)
+	_select_meta(_w_wcat, cur)
+	# 显隐：投掷无种类；盾/天生无握持
+	if _wcat_row != null and is_instance_valid(_wcat_row):
+		_wcat_row.visible = wtype != "thrown" and TagDB.ids_in_cat("wcat_" + wtype).size() > 0
+	if _handed_row != null and is_instance_valid(_handed_row):
+		_handed_row.visible = wtype != "shield" and not innate
+	if _innate_slot_row != null and is_instance_valid(_innate_slot_row):
+		_innate_slot_row.visible = innate
+	_refresh_preview()
+
+
+# 基础攻击技能（BAS）：底部段
+func _build_bas_section() -> void:
+	var atk = _current.get("attack", {})
+	if typeof(atk) != TYPE_DICTIONARY:
+		atk = {}
+	_form.add_child(_section_label("基础攻击技能 BAS（装备武器 = 设定该单位的基础攻击）"))
+	_w_atk_name = _add_line(_form, "攻击名", str(atk.get("name", "")))
+	_w_atk_icon = _add_line(_form, "攻击 icon", str(atk.get("icon", "")))
+	_w_atk_coeff = _add_spin(_form, "伤害系数 coeff", float(atk.get("coeff", 1.0)), 0.0, 10.0, 0.05)
+	_w_atk_range = _add_spin(_form, "射程 range", float(atk.get("range", 1)), 0, 20, 1)
+	_w_atk_ap = _add_spin(_form, "AP 消耗 ap_cost", float(atk.get("ap_cost", 1)), 0, 9, 1)
+	_w_atk_dmgkind = OptionButton.new()
+	for dk in DAMAGE_KINDS:
+		_w_atk_dmgkind.add_item(dk)
+		_w_atk_dmgkind.set_item_metadata(_w_atk_dmgkind.item_count - 1, dk)
+	_select_meta(_w_atk_dmgkind, str(atk.get("damage_kind", "physical")))
+	_w_atk_dmgkind.item_selected.connect(func(_i): _refresh_preview())
+	_form.add_child(_field_row("伤害类型 damage_kind", _w_atk_dmgkind))
+	_atk_tags = []
+	for t in atk.get("tags", []):
+		_atk_tags.append(str(t))
+	_build_free_tag_ui("攻击标签", _atk_tags)
+	var note := Label.new()
+	note.text = "（aoe / bonus / inflict / armor_pen 等高级字段本版不编辑，保存时原样保留）"
+	note.add_theme_color_override("font_color", Color(0.6, 0.62, 0.68))
+	note.add_theme_font_size_override("font_size", 12)
+	_form.add_child(note)
+
+
+# —— 通用：分类下拉（建并加进表单，返回 OptionButton）——
+func _cat_dropdown_inline(label: String, cat: String, with_none: bool, exclude: Array = []) -> OptionButton:
+	var ob := OptionButton.new()
+	_fill_cat_dropdown(ob, cat, exclude, with_none)
+	ob.item_selected.connect(func(_i): _refresh_preview())
+	_form.add_child(_field_row(label, ob))
+	return ob
+
+
+func _fill_cat_dropdown(ob: OptionButton, cat: String, exclude: Array, with_none: bool) -> void:
+	ob.clear()
+	if with_none:
+		ob.add_item("（无）")
+		ob.set_item_metadata(ob.item_count - 1, "")
+	for e in TagDB.by_cat(cat):
+		var id := str(e.get("id", ""))
+		if exclude.has(id):
+			continue
+		ob.add_item("%s（%s）" % [str(e.get("cn", id)), id])
+		ob.set_item_metadata(ob.item_count - 1, id)
+
+
+# —— 通用：自由标签 UI（下拉选中即加 + 手动输入需确认）——
+func _build_free_tag_ui(label: String, arr: Array) -> void:
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 3)
+	var adder := HBoxContainer.new()
+	adder.add_theme_constant_override("separation", 6)
+	var pick := OptionButton.new()
+	pick.custom_minimum_size = Vector2(170, 0)
+	_fill_all_tags(pick)
+	pick.item_selected.connect(func(idx):
+		var tg = pick.get_item_metadata(idx)
+		if tg != null and str(tg) != "" and not arr.has(str(tg)):
+			arr.append(str(tg))
+			_rebuild_free_box(box, arr)
+			_refresh_preview()
+		pick.select(0))
+	adder.add_child(pick)
+	var manual := LineEdit.new()
+	manual.placeholder_text = "手动 tag"
+	manual.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	adder.add_child(manual)
+	var addb := Button.new()
+	addb.text = "＋"
+	addb.pressed.connect(func():
+		var tt := manual.text.strip_edges()
+		if tt != "" and not arr.has(tt):
+			arr.append(tt)
+			_rebuild_free_box(box, arr)
+			_refresh_preview()
+		manual.clear())
+	adder.add_child(addb)
+	_form.add_child(_field_row(label, adder))
+	_form.add_child(box)
+	_rebuild_free_box(box, arr)
+
+
+func _rebuild_free_box(box: VBoxContainer, arr: Array) -> void:
+	if box == null or not is_instance_valid(box):
+		return
+	for c in box.get_children():
+		c.free()
+	if arr.is_empty():
+		var l := Label.new()
+		l.text = "（无）"
+		l.add_theme_color_override("font_color", Color(0.55, 0.6, 0.66))
+		l.add_theme_font_size_override("font_size", 12)
+		box.add_child(l)
+		return
+	for t in arr:
+		var row := HBoxContainer.new()
+		var l := Label.new()
+		l.text = "%s（%s）" % [TagDB.cn(t), t]
+		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(l)
+		var rm := Button.new()
+		rm.text = "✕"
+		var tag: String = str(t)
+		rm.pressed.connect(func():
+			arr.erase(tag)
+			_rebuild_free_box(box, arr)
+			_refresh_preview())
+		row.add_child(rm)
+		box.add_child(row)
+
+
+# 下拉填全部 tag（首项占位 + 按类别分隔），供「其他标签 / 攻击标签」挑
+func _fill_all_tags(ob: OptionButton) -> void:
+	ob.add_item("（下拉添加…）")
+	ob.set_item_metadata(ob.item_count - 1, "")
+	var cats := {}
+	var all := TagDB.all()
+	for id in all:
+		var c := str(all[id].get("cat", "其他"))
+		if not cats.has(c):
+			cats[c] = []
+		cats[c].append(id)
+	for c in cats:
+		ob.add_separator(c)
+		for id in cats[c]:
+			ob.add_item("%s（%s）" % [TagDB.cn(id), id])
+			ob.set_item_metadata(ob.item_count - 1, id)
+
+
+# 从物品 tags 取「其他标签」（排除所有自动管理的）
+func _collect_free_from(tags) -> Array:
+	var out := []
+	for t in tags:
+		var s := str(t)
+		if s == "innate":
+			continue   # innate 由勾选框管
+		if not _managed_tag_set.has(s):
+			out.append(s)
+	return out
+
+
 func _build_icon_row() -> void:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 6)
@@ -382,153 +553,6 @@ func _on_icon_picked(path: String) -> void:
 	if _w_icon != null and is_instance_valid(_w_icon):
 		_w_icon.text = path
 		_refresh_preview()
-
-
-func _build_attack_form() -> void:
-	var atk = _current.get("attack", {})
-	if typeof(atk) != TYPE_DICTIONARY:
-		atk = {}
-	_form.add_child(_section_label("基础攻击 skill（装备武器 = 设定该单位的基础攻击）"))
-	_w_atk_name = _add_line(_form, "攻击名", str(atk.get("name", "")))
-	_w_atk_icon = _add_line(_form, "攻击 icon", str(atk.get("icon", "")))
-	_w_atk_coeff = _add_spin(_form, "伤害系数 coeff", float(atk.get("coeff", 1.0)), 0.0, 10.0, 0.05)
-	_w_atk_range = _add_spin(_form, "射程 range", float(atk.get("range", 1)), 0, 20, 1)
-	_w_atk_ap = _add_spin(_form, "AP 消耗 ap_cost", float(atk.get("ap_cost", 1)), 0, 9, 1)
-	_w_atk_dmgkind = OptionButton.new()
-	for dk in DAMAGE_KINDS:
-		_w_atk_dmgkind.add_item(dk)
-		_w_atk_dmgkind.set_item_metadata(_w_atk_dmgkind.item_count - 1, dk)
-	_select_meta(_w_atk_dmgkind, str(atk.get("damage_kind", "physical")))
-	_w_atk_dmgkind.item_selected.connect(func(_i): _refresh_preview())
-	_form.add_child(_field_row("伤害类型 damage_kind", _w_atk_dmgkind))
-	_w_atk_tags = _add_line(_form, "攻击标签（逗号分隔）", _join(atk.get("tags", [])))
-	var note := Label.new()
-	note.text = "（aoe / bonus / inflict / armor_pen 等高级字段本版不编辑，保存时原样保留）"
-	note.add_theme_color_override("font_color", Color(0.6, 0.62, 0.68))
-	note.add_theme_font_size_override("font_size", 12)
-	_form.add_child(note)
-
-
-# —— 标签区：分类下拉（按 kind）+ 其他标签（下拉+手动）——
-func _build_tag_rows() -> void:
-	for cfg in TYPED_ROWS.get(_current_kind, []):
-		var label: String = cfg[0]
-		var cat: String = cfg[1]
-		var exclude: Array = cfg[2]
-		var ob := OptionButton.new()
-		ob.add_item("（无）")
-		ob.set_item_metadata(ob.item_count - 1, "")
-		for e in TagDB.by_cat(cat):
-			var id := str(e.get("id", ""))
-			if exclude.has(id):
-				continue
-			ob.add_item("%s（%s）" % [str(e.get("cn", id)), id])
-			ob.set_item_metadata(ob.item_count - 1, id)
-		_select_meta(ob, _tag_in_cat(_current.get("tags", []), cat))
-		ob.item_selected.connect(func(_i): _refresh_preview())
-		_typed[cat] = ob
-		var row := _field_row(label, ob)
-		_typed_rows[cat] = row
-		_form.add_child(row)
-
-	# 其他标签（不在上面分类里的）：下拉挑 + 手动输入
-	_free_tags = []
-	for t in _current.get("tags", []):
-		var s := str(t)
-		if not _managed_tag_set.has(s):
-			_free_tags.append(s)
-
-	var adder := HBoxContainer.new()
-	adder.add_theme_constant_override("separation", 6)
-	var pick := OptionButton.new()
-	pick.custom_minimum_size = Vector2(180, 0)
-	_fill_all_tags(pick)
-	adder.add_child(pick)
-	var add_pick := Button.new()
-	add_pick.text = "＋下拉"
-	add_pick.pressed.connect(func():
-		var t = pick.get_selected_metadata()
-		if t != null and str(t) != "":
-			_add_free_tag(str(t)))
-	adder.add_child(add_pick)
-	var manual := LineEdit.new()
-	manual.placeholder_text = "手动 tag"
-	manual.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	adder.add_child(manual)
-	var add_manual := Button.new()
-	add_manual.text = "＋手动"
-	add_manual.pressed.connect(func():
-		_add_free_tag(manual.text.strip_edges())
-		manual.clear())
-	adder.add_child(add_manual)
-	_form.add_child(_field_row("其他标签", adder))
-
-	_free_box = VBoxContainer.new()
-	_free_box.add_theme_constant_override("separation", 3)
-	_form.add_child(_free_box)
-	_refresh_free_box()
-
-
-# 下拉填全部 tag（按类别分隔，给「其他标签」挑）
-func _fill_all_tags(ob: OptionButton) -> void:
-	var cats := {}
-	for id in TagDB.all():
-		var c := str(TagDB.all()[id].get("cat", "其他"))
-		if not cats.has(c):
-			cats[c] = []
-		cats[c].append(id)
-	for c in cats:
-		ob.add_separator(c)
-		for id in cats[c]:
-			ob.add_item("%s（%s）" % [TagDB.cn(id), id])
-			ob.set_item_metadata(ob.item_count - 1, id)
-
-
-func _add_free_tag(t: String) -> void:
-	if t == "" or _free_tags.has(t):
-		return
-	_free_tags.append(t)
-	_refresh_free_box()
-	_refresh_preview()
-
-
-func _refresh_free_box() -> void:
-	if _free_box == null or not is_instance_valid(_free_box):
-		return
-	for c in _free_box.get_children():
-		c.free()
-	if _free_tags.is_empty():
-		var l := Label.new()
-		l.text = "（无其他标签）"
-		l.add_theme_color_override("font_color", Color(0.55, 0.6, 0.66))
-		l.add_theme_font_size_override("font_size", 12)
-		_free_box.add_child(l)
-		return
-	for t in _free_tags:
-		var row := HBoxContainer.new()
-		var l := Label.new()
-		l.text = "%s（%s）" % [TagDB.cn(t), t]
-		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		row.add_child(l)
-		var rm := Button.new()
-		rm.text = "✕"
-		var tag: String = str(t)
-		rm.pressed.connect(func():
-			_free_tags.erase(tag)
-			_refresh_free_box()
-			_refresh_preview())
-		row.add_child(rm)
-		_free_box.add_child(row)
-
-
-# 天生勾选变化：握持方式 + 天生槽位 显隐
-func _on_innate_toggled() -> void:
-	var innate := _innate_checked()
-	if _innate_slot_row != null and is_instance_valid(_innate_slot_row):
-		_innate_slot_row.visible = innate
-	if _typed_rows.has("handedness") and is_instance_valid(_typed_rows["handedness"]):
-		_typed_rows["handedness"].visible = not innate
-	_refresh_preview()
 
 
 # —— mods 动态行 ——
@@ -615,7 +639,7 @@ func _on_delete() -> void:
 	_msg.text = "✓ 已删除「%s」" % id
 
 
-# 从表单收集成物品 dict（以 _current 为底保留未编辑字段；tags 由 稀有度+分类下拉+innate+自由 组成；slot 自动派生）
+# 收集表单 → 物品 dict（tags 由 稀有度 + 类型/种类/握持(或部位/甲重) + innate + 自由 组成；slot 自动派生）
 func _collect() -> Dictionary:
 	var out: Dictionary = _current.duplicate(true)
 	out["id"] = _w_id.text.strip_edges()
@@ -626,21 +650,33 @@ func _collect() -> Dictionary:
 	var slot := ""
 	match _current_kind:
 		"weapon":
+			var wtype: String = str(_w_wtype.get_selected_metadata())
+			if wtype != "":
+				tags.append(wtype)
 			var innate := _innate_checked()
 			out["innate"] = innate
 			if innate:
 				tags.append("innate")
-				slot = _w_innate_slot.get_selected_metadata()
-				out["two_handed"] = false
+			# 种类（投掷无）
+			if wtype != "thrown":
+				var wc: String = str(_w_wcat.get_selected_metadata())
+				if wc != "":
+					tags.append(wc)
+			# 握持（盾/天生 无）
+			if wtype != "shield" and not innate:
+				var h: String = str(_w_handed.get_selected_metadata())
+				if h != "":
+					tags.append(h)
+				out["two_handed"] = h == "two_handed"
 			else:
-				var h = _typed.get("handedness", null)
-				var hv: String = str(h.get_selected_metadata()) if h != null else ""
-				if hv != "":
-					tags.append(hv)
-				out["two_handed"] = hv == "two_handed"
+				out["two_handed"] = false
+			# slot
+			if wtype == "shield":
+				slot = "off_hand"
+			elif innate:
+				slot = str(_w_innate_slot.get_selected_metadata())
+			else:
 				slot = "main_hand"
-			_append_typed(tags, "weapon_type")
-			_append_typed(tags, "weapon_range")
 			# attack
 			var atk: Dictionary = out.get("attack", {})
 			if typeof(atk) != TYPE_DICTIONARY:
@@ -651,16 +687,18 @@ func _collect() -> Dictionary:
 			atk["range"] = int(_w_atk_range.value)
 			atk["ap_cost"] = int(_w_atk_ap.value)
 			atk["damage_kind"] = _w_atk_dmgkind.get_selected_metadata()
-			atk["tags"] = _split(_w_atk_tags.text)
+			atk["tags"] = _atk_tags.duplicate()
 			out["attack"] = atk
 		"armor":
-			var gt = _typed.get("gear_type", null)
-			var gv: String = str(gt.get_selected_metadata()) if gt != null else ""
-			if gv != "":
-				tags.append(gv)
-				slot = gv
+			var g: String = str(_w_gear.get_selected_metadata())
+			if g != "":
+				tags.append(g)
+				slot = g
 			else:
 				slot = "armor"
+			var wt: String = str(_w_weight.get_selected_metadata())
+			if wt != "":
+				tags.append(wt)
 		_:
 			tags.append("accessory")
 			slot = "accessory_1"
@@ -678,16 +716,7 @@ func _collect() -> Dictionary:
 	return out
 
 
-func _append_typed(tags: Array, cat: String) -> void:
-	var ob = _typed.get(cat, null)
-	if ob == null:
-		return
-	var v: String = str(ob.get_selected_metadata())
-	if v != "" and not tags.has(v):
-		tags.append(v)
-
-
-# —— 即时预览（成品 tooltip）——
+# —— 即时预览 ——
 func _refresh_preview() -> void:
 	if _preview == null or not is_instance_valid(_preview):
 		return
@@ -844,7 +873,6 @@ func _icon_rect(tex, sz: int) -> TextureRect:
 	return ic
 
 
-# 加载图标（仿 UnitStatusPanel._load_portrait）
 func _load_icon(path: String):
 	if path == "":
 		return null
@@ -897,7 +925,6 @@ func _innate_checked() -> bool:
 func _num(v: float):
 	return int(v) if v == floor(v) else v
 
-# 物品 tags 里属于某类别的那个 tag（无则 ""）
 func _tag_in_cat(tags, cat: String) -> String:
 	var ids := TagDB.ids_in_cat(cat)
 	for t in tags:
@@ -914,12 +941,6 @@ func _rarity_of(item) -> String:
 func _rarity_color(rar: String) -> Color:
 	var c := TagDB.color(rar)
 	return Color(c) if c != "" else Color("#E0E0E0")
-
-func _join(arr) -> String:
-	var parts := []
-	for x in arr:
-		parts.append(str(x))
-	return ", ".join(parts)
 
 func _split(s: String) -> Array:
 	var out := []

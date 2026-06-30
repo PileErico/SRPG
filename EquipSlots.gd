@@ -40,7 +40,7 @@ static func intrinsic_tag(kind: String, slot: String, two_handed: bool, innate: 
 	return ""
 
 # 装备资格相关的内在 tag（判定物品够格进哪个槽）。
-const ELIGIBILITY_TAGS := ["one_handed", "two_handed", "weapon_shield", "helmet", "armor", "accessory"]
+const ELIGIBILITY_TAGS := ["one_handed", "two_handed", "shield", "helmet", "armor", "accessory"]
 
 # 物品（按内在 tag）能否进某槽——tag 驱动装备资格。
 #  · innate 天生武器：豁免 tag 资格（按其 slot 字段放置、永不卸下）。
@@ -59,7 +59,7 @@ static func accepts(slot: String, item: Dictionary) -> bool:
 		return _slot_field_fits(item, slot)
 	match slot:
 		"main_hand": return tags.has("one_handed") or tags.has("two_handed")
-		"off_hand": return tags.has("one_handed") or tags.has("weapon_shield")
+		"off_hand": return tags.has("one_handed") or tags.has("shield")
 		"helmet": return tags.has("helmet")
 		"armor": return tags.has("armor")
 		"accessory_1", "accessory_2": return tags.has("accessory")
