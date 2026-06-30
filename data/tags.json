@@ -1,0 +1,68 @@
+[
+  {"id": "player", "cn": "我方", "cat": "faction", "status": "in_use"},
+  {"id": "ally", "cn": "友方", "cat": "faction", "status": "in_use"},
+  {"id": "enemy", "cn": "敌方", "cat": "faction", "status": "in_use"},
+  {"id": "neutral", "cn": "中立", "cat": "faction", "status": "in_use"},
+
+  {"id": "ground", "cn": "地面", "cat": "movement", "status": "in_use", "desc": "默认兵种；按地块基础成本，不可进深水"},
+  {"id": "flying", "cn": "飞行", "cat": "movement", "status": "in_use", "desc": "地块成本恒1、可进深水、森林掩蔽不享受"},
+  {"id": "spectral", "cn": "灵体", "cat": "movement", "status": "planned"},
+
+  {"id": "open", "cn": "开阔", "cat": "terrain", "status": "in_use"},
+  {"id": "highland", "cn": "高地", "cat": "terrain", "status": "in_use"},
+  {"id": "barren", "cn": "贫瘠", "cat": "terrain", "status": "in_use"},
+  {"id": "rough", "cn": "崎岖", "cat": "terrain", "status": "in_use"},
+  {"id": "cover", "cn": "掩蔽", "cat": "terrain", "status": "in_use"},
+  {"id": "water", "cn": "水域", "cat": "terrain", "status": "in_use"},
+  {"id": "flammable", "cn": "可燃", "cat": "terrain", "status": "in_use"},
+  {"id": "shallow", "cn": "浅水", "cat": "terrain", "status": "in_use"},
+  {"id": "blocks_sight", "cn": "阻挡视线", "cat": "terrain", "status": "in_use"},
+  {"id": "deep", "cn": "深水", "cat": "terrain", "status": "in_use"},
+
+  {"id": "one_handed", "cn": "单手", "cat": "weapon_hold", "status": "in_use"},
+  {"id": "two_handed", "cn": "双手", "cat": "weapon_hold", "status": "in_use", "desc": "同时占用主手+副手；副手显示同图标+灰滤镜"},
+  {"id": "melee", "cn": "近战", "cat": "weapon_hold", "status": "in_use"},
+  {"id": "ranged", "cn": "远程", "cat": "weapon_hold", "status": "planned"},
+  {"id": "thrown", "cn": "投掷", "cat": "weapon_hold", "status": "planned"},
+
+  {"id": "weapon_spear", "cn": "矛", "cat": "weapon_type", "status": "in_use"},
+  {"id": "weapon_sword", "cn": "剑", "cat": "weapon_type", "status": "planned"},
+  {"id": "weapon_hammer", "cn": "锤", "cat": "weapon_type", "status": "planned"},
+  {"id": "weapon_axe", "cn": "斧", "cat": "weapon_type", "status": "planned"},
+  {"id": "weapon_shield", "cn": "盾", "cat": "weapon_type", "status": "planned"},
+  {"id": "weapon_claw", "cn": "爪", "cat": "weapon_type", "status": "in_use"},
+  {"id": "innate", "cn": "天生武器", "cat": "weapon_type", "status": "in_use", "desc": "豁免装备限制、永不卸下/缴械；无单/双手词条"},
+
+  {"id": "skill_spear", "cn": "矛技能", "cat": "skill_type", "status": "in_use"},
+  {"id": "skill_claw", "cn": "爪技能", "cat": "skill_type", "status": "in_use"},
+  {"id": "skill_sword", "cn": "剑技能", "cat": "skill_type", "status": "planned"},
+  {"id": "skill_hammer", "cn": "锤技能", "cat": "skill_type", "status": "planned"},
+  {"id": "skill_axe", "cn": "斧技能", "cat": "skill_type", "status": "planned"},
+  {"id": "skill_shield", "cn": "盾技能", "cat": "skill_type", "status": "planned"},
+
+  {"id": "single_target", "cn": "单体", "cat": "target", "status": "in_use"},
+  {"id": "multi_target", "cn": "群体", "cat": "target", "status": "planned"},
+  {"id": "aoe", "cn": "范围", "cat": "target", "status": "in_use"},
+
+  {"id": "piercing", "cn": "突刺", "cat": "damage", "status": "in_use"},
+  {"id": "bludgeoning", "cn": "打击", "cat": "damage", "status": "planned"},
+  {"id": "slashing", "cn": "斩击", "cat": "damage", "status": "in_use"},
+
+  {"id": "bleeding", "cn": "流血类", "cat": "effect", "status": "in_use", "desc": "回合末按最大生命%掉血；可被清流血类技能整批移除"},
+
+  {"id": "common", "cn": "普通", "cat": "rarity", "status": "in_use", "color": "#E0E0E0"},
+  {"id": "uncommon", "cn": "优秀", "cat": "rarity", "status": "in_use", "color": "#4FAE5A"},
+  {"id": "rare", "cn": "稀有", "cat": "rarity", "status": "in_use", "color": "#3A7BD5"},
+  {"id": "epic", "cn": "史诗", "cat": "rarity", "status": "in_use", "color": "#9B59B6"},
+  {"id": "legendary", "cn": "传说", "cat": "rarity", "status": "in_use", "color": "#EBBC04"},
+  {"id": "special", "cn": "特殊", "cat": "rarity", "status": "in_use", "color": "#D5453A"},
+
+  {"id": "char_veiken", "cn": "维肯", "cat": "char", "status": "in_use"},
+  {"id": "char_belooz", "cn": "比路兹", "cat": "char", "status": "in_use"},
+  {"id": "char_desmond", "cn": "戴斯蒙", "cat": "char", "status": "in_use"},
+
+  {"id": "human", "cn": "人类", "cat": "race", "status": "in_use"},
+  {"id": "harpy", "cn": "鸟人", "cat": "race", "status": "in_use"},
+  {"id": "monster", "cn": "怪物", "cat": "race", "status": "planned"},
+  {"id": "beast", "cn": "野兽", "cat": "race", "status": "planned"}
+]

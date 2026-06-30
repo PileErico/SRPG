@@ -8,6 +8,7 @@ const STANCE_TAGS := ["player", "ally", "enemy", "neutral"]   # 阵营立场 tag
 const ItemDB := preload("res://ItemDB.gd")                   # 物品注册表（装备查表）
 const TraitDB := preload("res://TraitDB.gd")                 # 特性注册表（特性查表）
 const SkillDB := preload("res://SkillDB.gd")                 # 技能注册表（技能查表）
+const EquipSlots := preload("res://EquipSlots.gd")          # 槽位 / 槽位资格（tag 驱动装备资格）
 
 var unit_name := "新兵"
 var col := 0
@@ -159,6 +160,10 @@ func can_equip(item: Dictionary) -> bool:
 			return false
 	return true
 
+# 物品能否装进指定槽（完整资格 = 特性/requires + tag 驱动的槽位资格）。供装备 UI 校验「拖到该槽是否合法」。
+func can_equip_in(item: Dictionary, slot: String) -> bool:
+	return can_equip(item) and EquipSlots.accepts(slot, item)
+
 # 设定特性（按 id）：换特性先清旧特性的修正，再把新特性的属性加成挂进修正管线（source="trait"）。
 func set_trait(id: String) -> void:
 	remove_modifiers_by_source("trait")
@@ -180,6 +185,8 @@ func equip(item_id: String) -> bool:
 		return false
 	var primary := str(item.get("slot", ""))
 	if primary == "":
+		return false
+	if not EquipSlots.accepts(primary, item):   # tag 驱动槽位资格（innate 豁免、旧物品回退 slot 字段）
 		return false
 	var slots := ["main_hand", "off_hand"] if item.get("two_handed", false) else [primary]
 	for s in slots:

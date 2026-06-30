@@ -1,0 +1,24 @@
+[
+  {
+    "icon": "res://icons/Items/Armors/Special_Desmond_1.png",
+    "id": "Desmond_Head",
+    "mods": [
+      {
+        "op": "flat",
+        "stat": "atk",
+        "value": 0
+      }
+    ],
+    "name": "狼人（头）",
+    "requires": [
+      "char_desmond"
+    ],
+    "slot": "helmet",
+    "tags": [
+      "special",
+      "helmet",
+      "armor",
+      "innate"
+    ]
+  }
+]
