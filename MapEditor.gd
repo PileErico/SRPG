@@ -77,6 +77,19 @@ var _unit_proto = null     # 当前要落子的原型（null=未选）
 var _unit_faction := "enemy"   # 落子阵营（关卡敌人居多，默认敌方）
 var _unit_protos := []     # 内置原型缓存（data/unit_prototypes.json）
 
+# —— 触发器层：authoring 关卡事件（when 条件 → do 动作），存进地图 triggers 字段 ——
+const TRIG_FACTIONS := [["player", "玩家"], ["any", "任意"]]
+const TRIG_ACTION_TYPES := [["show_message", "弹消息"], ["spawn_unit", "召唤单位"], ["activate_aggro", "激活AI组"]]
+var _trigger_panel: Control
+var _trigger_list: ItemList
+var _active_trigger_idx := -1
+var _trig_label_edit: LineEdit
+var _trig_region_opt: OptionButton
+var _trig_faction_opt: OptionButton
+var _trig_once_chk: CheckBox
+var _trig_do_box: VBoxContainer   # do 动作行容器
+var _trig_loading := false        # 填表单时抑制回写（避免 set 信号回写到错对象）
+
 var current_path := ""     # 当前地图对应的本地文件（空＝尚未存盘）
 var _dirty := false        # 自上次存/读以来是否有改动
 
@@ -316,6 +329,7 @@ func _build_brush_sidebar() -> Control:
 	layer_row.add_child(terr_btn)
 	layer_row.add_child(_layer_button("区域", "region", lg))
 	layer_row.add_child(_layer_button("单位", "unit", lg))
+	layer_row.add_child(_layer_button("触发", "trigger", lg))
 	sidebar.add_child(layer_row)
 	sidebar.add_child(HSeparator.new())
 
@@ -330,6 +344,10 @@ func _build_brush_sidebar() -> Control:
 	_unit_panel = _build_unit_tools()
 	_unit_panel.visible = false
 	sidebar.add_child(_unit_panel)
+	# 触发器工具区（当前层=触发器时显示）
+	_trigger_panel = _build_trigger_tools()
+	_trigger_panel.visible = false
+	sidebar.add_child(_trigger_panel)
 	return sidebar
 
 # 图层切换按钮（toggle，分组互斥）
@@ -349,11 +367,19 @@ func _set_layer(id: String) -> void:
 	if _terrain_panel: _terrain_panel.visible = (id == "terrain")
 	if _region_panel: _region_panel.visible = (id == "region")
 	if _unit_panel: _unit_panel.visible = (id == "unit")
+	if _trigger_panel: _trigger_panel.visible = (id == "trigger")
+	if id == "trigger":
+		_refresh_trigger_list()
+		if _active_trigger_idx < 0 and not map_triggers.is_empty():
+			_active_trigger_idx = 0
+		_load_trigger_form()
 	if canvas: canvas.queue_redraw()
 	if id == "region" and regions.is_empty():
 		set_status("区域层：点「＋ 新建区域」再左键画、右键擦")
 	elif id == "unit":
 		set_status("单位层：选原型 + 阵营 → 左键落子 / 右键删除（摆这一关的单位）")
+	elif id == "trigger":
+		set_status("触发器层：＋新建 → 选区域 + 事件 + 配 do 动作（关卡事件）")
 	else:
 		set_status("当前层：%s" % ("地形" if id == "terrain" else "区域"))
 
@@ -509,6 +535,288 @@ func _remove_unit(col: int, row: int) -> void:
 			map_units.remove_at(i)
 			_stroke_dirty = true
 	if canvas: canvas.queue_redraw()
+
+# ============ 触发器层（authoring 关卡事件：when 条件 → do 动作）============
+
+func _build_trigger_tools() -> Control:
+	var v := VBoxContainer.new()
+	v.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	v.add_child(_make_label("触发器"))
+	_trigger_list = ItemList.new()
+	_trigger_list.custom_minimum_size = Vector2(0, 84)
+	_trigger_list.item_selected.connect(_on_trigger_selected)
+	v.add_child(_trigger_list)
+	var brow := HBoxContainer.new()
+	var add_b := Button.new()
+	add_b.text = "＋新建"
+	add_b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	add_b.pressed.connect(_on_add_trigger)
+	brow.add_child(add_b)
+	var del_b := Button.new()
+	del_b.text = "删除"
+	del_b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	del_b.pressed.connect(_on_delete_trigger)
+	brow.add_child(del_b)
+	v.add_child(brow)
+	v.add_child(HSeparator.new())
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	var form := VBoxContainer.new()
+	form.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(form)
+	v.add_child(scroll)
+	form.add_child(_make_label("标签"))
+	_trig_label_edit = LineEdit.new()
+	_trig_label_edit.text_changed.connect(func(t: String): _set_trig_field("label", t))
+	form.add_child(_trig_label_edit)
+	form.add_child(_make_label("事件：踏入区域"))
+	form.add_child(_make_label("区域"))
+	_trig_region_opt = OptionButton.new()
+	_trig_region_opt.item_selected.connect(_on_trig_region_selected)
+	form.add_child(_trig_region_opt)
+	form.add_child(_make_label("触发方"))
+	_trig_faction_opt = OptionButton.new()
+	for i in TRIG_FACTIONS.size():
+		_trig_faction_opt.add_item(TRIG_FACTIONS[i][1], i)
+	_trig_faction_opt.item_selected.connect(func(idx: int): _set_trig_when("by_faction", TRIG_FACTIONS[idx][0]))
+	form.add_child(_trig_faction_opt)
+	_trig_once_chk = CheckBox.new()
+	_trig_once_chk.text = "只触发一次"
+	_trig_once_chk.toggled.connect(func(on: bool): _set_trig_when("once", on))
+	form.add_child(_trig_once_chk)
+	form.add_child(HSeparator.new())
+	form.add_child(_make_label("动作（do）"))
+	_trig_do_box = VBoxContainer.new()
+	_trig_do_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	form.add_child(_trig_do_box)
+	return v
+
+func active_trigger() -> Dictionary:
+	if _active_trigger_idx >= 0 and _active_trigger_idx < map_triggers.size():
+		return map_triggers[_active_trigger_idx] as Dictionary
+	return {}
+
+func _unique_trigger_id() -> String:
+	var used := {}
+	for t in map_triggers:
+		used[str(t.get("id", ""))] = true
+	var n := 1
+	while used.has("trig_%d" % n):
+		n += 1
+	return "trig_%d" % n
+
+func _on_add_trigger() -> void:
+	_push_undo(_snapshot(), "新建触发器")
+	map_triggers.append({"id": _unique_trigger_id(), "label": "触发器%d" % (map_triggers.size() + 1),
+		"when": {"event": "enter_region", "region": "", "by_faction": "player", "once": true}, "do": []})
+	_active_trigger_idx = map_triggers.size() - 1
+	_dirty = true
+	_refresh_trigger_list()
+	_load_trigger_form()
+
+func _on_delete_trigger() -> void:
+	if active_trigger().is_empty():
+		return
+	_push_undo(_snapshot(), "删除触发器")
+	map_triggers.remove_at(_active_trigger_idx)
+	_active_trigger_idx = mini(_active_trigger_idx, map_triggers.size() - 1)
+	_dirty = true
+	_refresh_trigger_list()
+	_load_trigger_form()
+
+func _on_trigger_selected(idx: int) -> void:
+	_active_trigger_idx = idx
+	_load_trigger_form()
+
+func _refresh_trigger_list() -> void:
+	if _trigger_list == null:
+		return
+	_trigger_list.clear()
+	for t in map_triggers:
+		_trigger_list.add_item(str(t.get("label", t.get("id", "触发器"))))
+	if _active_trigger_idx >= 0 and _active_trigger_idx < map_triggers.size():
+		_trigger_list.select(_active_trigger_idx)
+
+func _set_trig_field(key: String, val) -> void:
+	if _trig_loading:
+		return
+	var t := active_trigger()
+	if t.is_empty():
+		return
+	t[key] = val
+	_dirty = true
+	if key == "label" and _trigger_list != null and _active_trigger_idx >= 0:
+		_trigger_list.set_item_text(_active_trigger_idx, str(val))
+
+func _set_trig_when(key: String, val) -> void:
+	if _trig_loading:
+		return
+	var t := active_trigger()
+	if t.is_empty():
+		return
+	if typeof(t.get("when")) != TYPE_DICTIONARY:
+		t["when"] = {}
+	t["when"][key] = val
+	_dirty = true
+
+func _on_trig_region_selected(idx: int) -> void:
+	if _trig_loading:
+		return
+	if idx >= 0 and idx < regions.size():
+		_set_trig_when("region", str(regions[idx].get("id", "")))
+
+func _load_trigger_form() -> void:
+	_trig_loading = true
+	var t := active_trigger()
+	var has := not t.is_empty()
+	_trig_label_edit.editable = has
+	_trig_label_edit.text = str(t.get("label", "")) if has else ""
+	_trig_region_opt.clear()
+	if regions.is_empty():
+		_trig_region_opt.add_item("（无区域，先去区域层建）")
+	else:
+		for i in regions.size():
+			_trig_region_opt.add_item("%s (%s)" % [str(regions[i].get("label", "区域")), str(regions[i].get("id", ""))])
+	var when = t.get("when", {}) if has else {}
+	if typeof(when) == TYPE_DICTIONARY:
+		var rid := str(when.get("region", ""))
+		for i in regions.size():
+			if str(regions[i].get("id", "")) == rid:
+				_trig_region_opt.select(i)
+				break
+		var by := str(when.get("by_faction", "player"))
+		for i in TRIG_FACTIONS.size():
+			if TRIG_FACTIONS[i][0] == by:
+				_trig_faction_opt.select(i)
+		_trig_once_chk.button_pressed = bool(when.get("once", true))
+	_refresh_do_list()
+	_trig_loading = false
+
+func _refresh_do_list() -> void:
+	if _trig_do_box == null:
+		return
+	for c in _trig_do_box.get_children():
+		c.queue_free()
+	var t := active_trigger()
+	if t.is_empty():
+		_trig_do_box.add_child(_make_label("（先选 / 建一个触发器）"))
+		return
+	var dolist = t.get("do", [])
+	if typeof(dolist) == TYPE_ARRAY:
+		for i in dolist.size():
+			if typeof(dolist[i]) == TYPE_DICTIONARY:
+				_trig_do_box.add_child(_build_action_row(dolist[i], i))
+	var mb := MenuButton.new()
+	mb.text = "＋ 添加动作"
+	mb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var pop := mb.get_popup()
+	for i in TRIG_ACTION_TYPES.size():
+		pop.add_item(TRIG_ACTION_TYPES[i][1], i)
+	pop.id_pressed.connect(func(id: int): _on_add_action(TRIG_ACTION_TYPES[id][0]))
+	_trig_do_box.add_child(mb)
+
+func _action_cn(act: String) -> String:
+	for pair in TRIG_ACTION_TYPES:
+		if pair[0] == act:
+			return str(pair[1])
+	return act
+
+func _default_action(act: String) -> Dictionary:
+	match act:
+		"show_message":
+			return {"action": "show_message", "text": "消息"}
+		"spawn_unit":
+			return {"action": "spawn_unit", "proto_id": "", "faction": "enemy", "col": 0, "row": 0}
+		"activate_aggro":
+			return {"action": "activate_aggro", "group": ""}
+	return {"action": act}
+
+func _on_add_action(act: String) -> void:
+	var t := active_trigger()
+	if t.is_empty():
+		return
+	_push_undo(_snapshot(), "添加动作")
+	if typeof(t.get("do")) != TYPE_ARRAY:
+		t["do"] = []
+	t["do"].append(_default_action(act))
+	_dirty = true
+	_refresh_do_list()
+
+func _on_remove_action(idx: int) -> void:
+	var t := active_trigger()
+	if t.is_empty():
+		return
+	var dolist = t.get("do", [])
+	if typeof(dolist) == TYPE_ARRAY and idx >= 0 and idx < dolist.size():
+		_push_undo(_snapshot(), "删除动作")
+		dolist.remove_at(idx)
+		_dirty = true
+		_refresh_do_list()
+
+func _set_action_field(a: Dictionary, key: String, val) -> void:
+	a[key] = val
+	_dirty = true
+
+func _build_action_row(a: Dictionary, idx: int) -> Control:
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 2)
+	var head := HBoxContainer.new()
+	var lbl := _make_label("• " + _action_cn(str(a.get("action", ""))))
+	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(lbl)
+	var x := Button.new()
+	x.text = "✕"
+	x.pressed.connect(_on_remove_action.bind(idx))
+	head.add_child(x)
+	box.add_child(head)
+	match str(a.get("action", "")):
+		"show_message":
+			var le := LineEdit.new()
+			le.text = str(a.get("text", ""))
+			le.text_changed.connect(func(t: String): _set_action_field(a, "text", t))
+			box.add_child(le)
+		"activate_aggro":
+			var le := LineEdit.new()
+			le.placeholder_text = "组id（空=全敌方）"
+			le.text = str(a.get("group", ""))
+			le.text_changed.connect(func(t: String): _set_action_field(a, "group", t))
+			box.add_child(le)
+		"spawn_unit":
+			var protos := _load_unit_protos()
+			var po := OptionButton.new()
+			for i in protos.size():
+				po.add_item(str(protos[i].get("name", "")))
+			for i in protos.size():
+				if str(protos[i].get("id", "")) == str(a.get("proto_id", "")):
+					po.select(i)
+			po.item_selected.connect(func(i: int): _set_action_field(a, "proto_id", str(protos[i].get("id", ""))))
+			box.add_child(po)
+			var fo := OptionButton.new()
+			for i in UNIT_FACTIONS.size():
+				fo.add_item(UNIT_FACTIONS[i][1])
+				if UNIT_FACTIONS[i][0] == str(a.get("faction", "enemy")):
+					fo.select(i)
+			fo.item_selected.connect(func(i: int): _set_action_field(a, "faction", UNIT_FACTIONS[i][0]))
+			box.add_child(fo)
+			var cr := HBoxContainer.new()
+			cr.add_child(_make_label("col"))
+			var cs := SpinBox.new()
+			cs.min_value = 0
+			cs.max_value = MAX_W - 1
+			cs.value = int(a.get("col", 0))
+			cs.value_changed.connect(func(val: float): _set_action_field(a, "col", int(val)))
+			cr.add_child(cs)
+			cr.add_child(_make_label("row"))
+			var rs := SpinBox.new()
+			rs.min_value = 0
+			rs.max_value = MAX_H - 1
+			rs.value = int(a.get("row", 0))
+			rs.value_changed.connect(func(val: float): _set_action_field(a, "row", int(val)))
+			cr.add_child(rs)
+			box.add_child(cr)
+	box.add_child(HSeparator.new())
+	return box
 
 func _build_side_panel() -> Control:
 	var side := VBoxContainer.new()
@@ -1051,7 +1359,7 @@ func _update_file_label() -> void:
 # ------------------------------------------------------------------ 撤销 / 重做
 
 func _snapshot() -> Dictionary:
-	return {"width": width, "height": height, "tiles": _copy_tiles(tiles), "regions": _copy_regions(regions), "map_units": _copy_map_units(map_units)}
+	return {"width": width, "height": height, "tiles": _copy_tiles(tiles), "regions": _copy_regions(regions), "map_units": _copy_map_units(map_units), "map_triggers": _copy_map_triggers(map_triggers)}
 
 # 深拷贝单位层（含 proto 嵌套字典）——撤销快照要把单位层一起拷，否则落子/删单位无法撤销
 func _copy_map_units(src: Array) -> Array:
@@ -1059,6 +1367,14 @@ func _copy_map_units(src: Array) -> Array:
 	for e in src:
 		if typeof(e) == TYPE_DICTIONARY:
 			out.append({"proto": (e.get("proto", {}) as Dictionary).duplicate(true), "col": int(e.get("col", 0)), "row": int(e.get("row", 0)), "faction": str(e.get("faction", "enemy"))})
+	return out
+
+# 深拷贝触发器层（含 when/do 嵌套）——撤销快照一起拷，否则建/删触发器与动作无法撤销
+func _copy_map_triggers(src: Array) -> Array:
+	var out := []
+	for t in src:
+		if typeof(t) == TYPE_DICTIONARY:
+			out.append(t.duplicate(true))
 	return out
 
 func _copy_tiles(src: Array) -> Array:
@@ -1093,11 +1409,16 @@ func _apply_snapshot(snap: Dictionary) -> void:
 	tiles = snap.tiles
 	regions = snap.get("regions", [])
 	map_units = snap.get("map_units", [])
+	map_triggers = snap.get("map_triggers", map_triggers)
 	_active_region_idx = clampi(_active_region_idx, -1, regions.size() - 1)
+	_active_trigger_idx = clampi(_active_trigger_idx, -1, map_triggers.size() - 1)
 	if width_spin: width_spin.value = width
 	if height_spin: height_spin.value = height
 	_refresh_canvas()
 	_refresh_region_list()
+	if _trigger_panel != null and _trigger_panel.visible:
+		_refresh_trigger_list()
+		_load_trigger_form()
 
 func begin_stroke() -> void:
 	_stroke_snapshot = _snapshot()
