@@ -40,6 +40,9 @@ var units := []            # Unit 列表
 var aggro_regions := {}
 var _map_regions := []     # 地图文件 regions 原始数据：[{id,label,color,cells:[[x,y]…],kind?}]（schema v2，可空）
 var _map_units := []       # 地图文件 units 原始数据：[{proto,col,row,faction}]（schema v3，可空）→ _spawn_map_units 落子
+var _map_triggers := []    # 地图文件 triggers 原始数据：[{id,label,when,do}]（schema v3，可空）→ 运行时评估
+var _all_region_cells := {}   # 所有区域的格集合 {region_id: {Vector2i:true}}（不分 kind，供触发器引用）
+var _fired_triggers := {}  # 已触发过的 trigger id（when.once 用）；每场战斗开始清空
 var _deploy_cells := {}    # 部署区格集合 {Vector2i:true}：kind=="deploy" 的区域并集（玩家单位只能放这里）
 
 # —— 简陋回合框架（round/turn 双层，出手按速度；详见 docs/单位系统设计.md）——
@@ -144,6 +147,7 @@ func _ready() -> void:
 func _setup_regions() -> void:
 	aggro_regions = {}
 	_deploy_cells = {}
+	_all_region_cells = {}
 	for reg in _map_regions:
 		if typeof(reg) != TYPE_DICTIONARY:
 			continue
@@ -154,6 +158,8 @@ func _setup_regions() -> void:
 			# cells 项形如 [x, y]
 			if typeof(c) == TYPE_ARRAY and c.size() >= 2 and _cell_in_bounds(int(c[0]), int(c[1])):
 				cells[Vector2i(int(c[0]), int(c[1]))] = true
+		if id != "":
+			_all_region_cells[id] = cells   # 全区域格集合（不分 kind，供触发器 when.region 引用）
 		if kind == "deploy":
 			# 部署区（玩家布置区）：并入 _deploy_cells（faction 暂统一按玩家）
 			for cell in cells:
@@ -177,6 +183,7 @@ func _load_terrains() -> void:
 func _load_map() -> void:
 	_map_regions = []   # 默认无区域（旧 v1 图 / 加载失败）
 	_map_units = []     # 默认无预置单位（旧图 / 加载失败）
+	_map_triggers = []  # 默认无触发器
 	# 优先用「选地图」界面传入的路径（SandboxConfig.map_path）；空则用默认战斗图
 	var path: String = SandboxConfig.map_path if SandboxConfig.map_path != "" else MAP_PATH
 	var res := MapIO.read_file(path)   # 统一读 / 钳制（与 MapEditor 共用 MapIO）
@@ -186,6 +193,7 @@ func _load_map() -> void:
 		tiles = res["tiles"]
 		_map_regions = res["regions"]   # schema v2：命名区域（向后兼容，旧图无此键=空）
 		_map_units = res["units"]       # schema v3：预置单位（向后兼容，旧图无此键=空）
+		_map_triggers = res["triggers"] # schema v3：触发器（向后兼容，旧图无此键=空）
 		return
 	if FileAccess.file_exists(path):
 		push_warning("战斗地图 %s 格式无效，回退全草原" % path)
@@ -214,6 +222,7 @@ func load_from_memory(map_dict: Dictionary) -> void:
 	tiles = res["tiles"]
 	_map_regions = res["regions"]
 	_map_units = res["units"]
+	_map_triggers = res["triggers"]
 	_setup_regions()
 	# 场上清空、roster 收回待命（保留玩家自带军，跨试玩不丢）
 	units = []
@@ -323,10 +332,77 @@ func save_units_to_map() -> bool:
 		proto["ai_group"] = u.ai_group
 		units_json.append({"proto": proto, "col": u.col, "row": u.row, "faction": u.faction})
 	var path: String = SandboxConfig.map_path if SandboxConfig.map_path != "" else MAP_PATH
-	if MapIO.write_map(path, width, height, tiles, _map_regions, units_json):
+	if MapIO.write_map(path, width, height, tiles, _map_regions, units_json, _map_triggers):
 		_map_units = units_json   # 同步内存：R 重开 / exit_battle 从这里重建
 		return true
 	return false
+
+# ============ 触发器（schema v3：when 条件 → do 动作）============
+# 当前支持 when.event="enter_region"（玩家踏入某区域）；动作 show_message / spawn_unit / activate_aggro。
+# 编辑器侧的「触发器层」UI 待做（先支持运行时 + 手写/沙盒摆好后写回）。
+
+# 玩家单位 u 落位后评估所有 enter_region 触发器
+func _check_enter_triggers(u) -> void:
+	if _map_triggers.is_empty():
+		return
+	var cell := Vector2i(u.col, u.row)
+	for trig in _map_triggers:
+		if typeof(trig) != TYPE_DICTIONARY:
+			continue
+		var when = trig.get("when", {})
+		if typeof(when) != TYPE_DICTIONARY or str(when.get("event", "")) != "enter_region":
+			continue
+		var tid := str(trig.get("id", ""))
+		if bool(when.get("once", true)) and _fired_triggers.has(tid):
+			continue
+		var by := str(when.get("by_faction", "player"))   # 缺省＝仅玩家踏入触发
+		if by != "" and by != "any" and u.faction != by:
+			continue
+		var cells: Dictionary = _all_region_cells.get(str(when.get("region", "")), {})
+		if cells.has(cell):
+			_fire_trigger(trig)
+
+func _fire_trigger(trig: Dictionary) -> void:
+	var tid := str(trig.get("id", ""))
+	if tid != "":
+		_fired_triggers[tid] = true
+	var label := str(trig.get("label", tid))
+	for a in trig.get("do", []):
+		if typeof(a) == TYPE_DICTIONARY:
+			_do_trigger_action(a, label)
+
+func _do_trigger_action(a: Dictionary, trig_label: String) -> void:
+	match str(a.get("action", "")):
+		"show_message":
+			_log_line("⚑ %s" % str(a.get("text", trig_label)))
+		"activate_aggro":
+			var grp := str(a.get("group", ""))   # 空＝激活全部敌方
+			for g in units:
+				if not _is_friendly(g) and (grp == "" or g.ai_group == grp) and not g.ai_aggroed:
+					_ai_set_aggro(g)
+		"spawn_unit":
+			var proto := _find_proto(str(a.get("proto_id", "")))
+			if proto.is_empty():
+				return
+			var col := clampi(int(a.get("col", 0)), 0, maxi(0, width - 1))
+			var row := clampi(int(a.get("row", 0)), 0, maxi(0, height - 1))
+			var fac := str(a.get("faction", proto.get("default_faction", "enemy")))
+			var nu = make_unit(proto, fac, col, row)
+			units.append(nu)
+			if phase == "battle" and not (nu in turn_order):
+				turn_order.append(nu)   # 战中召唤：排进本 round 末
+			_log_line("⚑ %s 出现！" % _cname(nu))
+			if canvas != null:
+				canvas.queue_redraw()
+
+# 按 id 查内置原型（data/unit_prototypes.json）；找不到返回 {}
+func _find_proto(pid: String) -> Dictionary:
+	if pid == "":
+		return {}
+	for p in _all_prototypes():
+		if str(p.get("id", "")) == pid:
+			return p
+	return {}
 
 # ============ 布置阶段（deploy）：调试侧栏生成/编辑单位，点开始游戏才开打 ============
 
@@ -868,6 +944,7 @@ func cancel_action() -> void:
 func _start_battle() -> void:
 	round_num = 1
 	zoc_triggered = {}
+	_fired_triggers = {}   # 新一场战斗：触发器「只触发一次」记录清零
 	for u in units:
 		u.refresh_for_turn()       # 开局所有单位面板满 AP（便于查看）
 		u.reset_skill_charges()    # 技能冷却清零、本战次数按智力重置
@@ -2075,6 +2152,8 @@ func _commit_move(col: int, row: int) -> void:
 	_clear_selection()
 	_refresh_info()
 	_animate_path(u, path)   # 沿路径平移（非瞬移）；玩家不 await（即发即忘）
+	if _is_friendly(u):
+		_check_enter_triggers(u)   # 玩家踏入新格 → 评估 enter_region 触发器
 
 # 沿 path（含起点的格序列）滑动单位 token；动画期间 _draw_unit 用 _anim_pos 绘制。
 # 可被 await（敌方 AI 串行走位用）；玩家提交移动则不 await。

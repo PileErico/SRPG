@@ -46,6 +46,9 @@ static func normalize(data) -> Dictionary:
 	var units = data.get("units", [])
 	if typeof(units) != TYPE_ARRAY:
 		units = []
+	var triggers = data.get("triggers", [])
+	if typeof(triggers) != TYPE_ARRAY:
+		triggers = []
 	return {
 		"ok": true,
 		"format_version": int(data.get("format_version", 0)),
@@ -53,6 +56,7 @@ static func normalize(data) -> Dictionary:
 		"tiles": _normalize_tiles(data["tiles"], w, h),
 		"regions": regions,
 		"units": units,
+		"triggers": triggers,
 	}
 
 # tiles 规整：建 h×w 二维数组，逐格取 {terrain,variant}，缺 / 坏格回退默认地形（草原）
@@ -75,8 +79,8 @@ static func _normalize_tiles(raw, w: int, h: int) -> Array:
 static func grassland(w: int, h: int) -> Array:
 	return _normalize_tiles([], maxi(1, w), maxi(1, h))
 
-# 组装完整 schema 字典（regions_json/units_json 是已序列化好的数组：cells=[[x,y]]、unit={proto,col,row,faction}）
-static func to_dict(w: int, h: int, tiles: Array, regions_json: Array, units_json: Array) -> Dictionary:
+# 组装完整 schema 字典（各 *_json 是已序列化好的数组：region cells=[[x,y]]、unit={proto,col,row,faction}、trigger={id,when,do}）
+static func to_dict(w: int, h: int, tiles: Array, regions_json: Array, units_json: Array, triggers_json: Array = []) -> Dictionary:
 	return {
 		"format_version": FORMAT_VERSION,
 		"grid": GRID,
@@ -85,13 +89,14 @@ static func to_dict(w: int, h: int, tiles: Array, regions_json: Array, units_jso
 		"tiles": tiles,
 		"regions": regions_json,
 		"units": units_json,
+		"triggers": triggers_json,
 	}
 
 # 写地图文件（2 空格缩进，与原编辑器一致）；成功返回 true
-static func write_map(path: String, w: int, h: int, tiles: Array, regions_json: Array, units_json: Array) -> bool:
+static func write_map(path: String, w: int, h: int, tiles: Array, regions_json: Array, units_json: Array, triggers_json: Array = []) -> bool:
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f == null:
 		return false
-	f.store_string(JSON.stringify(to_dict(w, h, tiles, regions_json, units_json), "  "))
+	f.store_string(JSON.stringify(to_dict(w, h, tiles, regions_json, units_json, triggers_json), "  "))
 	f.close()
 	return true

@@ -47,6 +47,7 @@ var width := 15
 var height := 15
 var tiles := []            # tiles[row][col] = {"terrain":..., "variant":...}
 var map_units := []        # 预置单位（地图 units 字段）原样透传：编辑器（α 期）不编辑、仅加载保留+存盘写回
+var map_triggers := []     # 触发器（地图 triggers 字段）原样透传：编辑器 UI 待做、先加载保留+存盘写回
 var brush_index := 0
 var embedded := false      # 嵌入 Game 统一宿主时为 true：隐藏自己的「主菜单」按钮（由 Game 顶栏统一提供）
 
@@ -1160,7 +1161,7 @@ func _refresh_history() -> void:
 # ------------------------------------------------------------------ 存档 / 读档
 
 func to_json_dict() -> Dictionary:
-	return MapIO.to_dict(width, height, tiles, _regions_to_json(), map_units)
+	return MapIO.to_dict(width, height, tiles, _regions_to_json(), map_units, map_triggers)
 
 # 区域 → JSON：cells 集合转 [[x,y],…]（确定性排序，利于 diff）
 func _regions_to_json() -> Array:
@@ -1195,7 +1196,7 @@ func _regions_from_json(raw, mw: int, mh: int) -> Array:
 	return out
 
 func save_to_file(path: String) -> void:
-	if not MapIO.write_map(path, width, height, tiles, _regions_to_json(), map_units):
+	if not MapIO.write_map(path, width, height, tiles, _regions_to_json(), map_units, map_triggers):
 		set_status("保存失败：无法写入文件")
 		return
 	current_path = path
@@ -1224,6 +1225,7 @@ func load_from_file(path: String) -> void:
 	tiles = new_tiles
 	regions = new_regions
 	map_units = res["units"]   # 预置单位原样保留（α 期编辑器不编辑，仅在存盘时写回，不丢）
+	map_triggers = res["triggers"]   # 触发器原样保留（编辑器 UI 待做，先不丢）
 	_active_region_idx = -1 if regions.is_empty() else 0
 	current_path = path
 	_dirty = false
