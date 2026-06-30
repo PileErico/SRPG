@@ -57,6 +57,8 @@
   {"id": "shield_medium", "cn": "中盾", "cat": "wcat_shield", "status": "planned"},
   {"id": "shield_large", "cn": "大盾", "cat": "wcat_shield", "status": "planned"},
 
+  {"id": "innate_weapon", "cn": "天生武器", "cat": "weapon_attr", "status": "in_use", "desc": "天生武器（永不卸下/缴械；不吃常规武器加成）；由编辑器「天生武器」勾选管理"},
+
   {"id": "skill_spear", "cn": "矛技能", "cat": "skill_type", "status": "in_use"},
   {"id": "skill_claw", "cn": "爪技能", "cat": "skill_type", "status": "in_use"},
   {"id": "skill_sword", "cn": "剑技能", "cat": "skill_type", "status": "planned"},
@@ -81,6 +83,7 @@
   {"id": "light_armor", "cn": "轻甲", "cat": "armor_weight", "status": "planned"},
   {"id": "medium_armor", "cn": "中甲", "cat": "armor_weight", "status": "planned"},
   {"id": "heavy_armor", "cn": "重甲", "cat": "armor_weight", "status": "planned"},
+  {"id": "innate_body", "cn": "天生肉体", "cat": "armor_weight", "status": "in_use", "desc": "天生肉体（狼人等变身肉体顶替防具；不吃防具精通加成）"},
 
   {"id": "common", "cn": "普通", "cat": "rarity", "status": "in_use", "color": "#E0E0E0"},
   {"id": "uncommon", "cn": "优秀", "cat": "rarity", "status": "in_use", "color": "#4FAE5A"},

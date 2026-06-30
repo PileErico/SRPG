@@ -90,7 +90,7 @@
       "special",
       "weapon_claw",
       "melee",
-      "innate"
+      "innate_weapon"
     ],
     "two_handed": false
   },
@@ -130,7 +130,7 @@
       "special",
       "weapon_claw",
       "melee",
-      "innate"
+      "innate_weapon"
     ],
     "two_handed": false
   },
@@ -172,7 +172,7 @@
       "special",
       "weapon_claw",
       "melee",
-      "innate"
+      "innate_weapon"
     ],
     "two_handed": false
   }

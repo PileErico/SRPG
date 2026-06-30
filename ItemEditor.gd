@@ -20,7 +20,7 @@ const OPS := [["flat", "固定"], ["pct", "百分比%"]]
 
 # 「自动管理」的 tag 类别（这些 tag 由专门控件管，从「其他标签」自由区排除）
 const MANAGED_CATS := ["rarity", "wtype", "wcat_melee", "wcat_ranged", "wcat_catalyst",
-	"wcat_shield", "handedness", "gear_type", "armor_weight"]
+	"wcat_shield", "handedness", "gear_type", "armor_weight", "weapon_attr"]
 
 const STAT_GROUPS := [
 	["四维", [["STR", "力量", true], ["DEX", "灵巧", true], ["INT", "智力", true], ["STA", "体力", true]]],
@@ -510,8 +510,8 @@ func _collect_free_from(tags) -> Array:
 	var out := []
 	for t in tags:
 		var s := str(t)
-		if s == "innate":
-			continue   # innate 由勾选框管
+		if s == "innate" or s == "innate_weapon":
+			continue   # 天生由勾选框管（旧 innate 同样剥离、再存换成 innate_weapon）
 		if not _managed_tag_set.has(s):
 			out.append(s)
 	return out
@@ -656,7 +656,7 @@ func _collect() -> Dictionary:
 			var innate := _innate_checked()
 			out["innate"] = innate
 			if innate:
-				tags.append("innate")
+				tags.append("innate_weapon")
 			# 种类（投掷无）
 			if wtype != "thrown":
 				var wc: String = str(_w_wcat.get_selected_metadata())
