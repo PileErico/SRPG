@@ -1150,13 +1150,26 @@ func _build_item_tooltip(item) -> Control:
 	v.add_theme_constant_override("separation", 5)
 	panel.add_child(v)   # 宽度自适应内容（不再固定 240）
 
-	# 名称（稀有度色，最大）
+	# 名称（稀有度色，最大）+ 物品图标（与下方攻击图标呼应、上下平衡）
+	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", 8)
+	var itex = _load_portrait(str(item.get("icon", "")))
+	if itex != null:
+		var iic := TextureRect.new()
+		iic.texture = itex
+		iic.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		iic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		iic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		iic.custom_minimum_size = Vector2(40, 40)
+		head.add_child(iic)
 	var name_l := Label.new()
 	name_l.text = str(item.get("name", ""))
 	name_l.add_theme_font_size_override("font_size", 19)
+	name_l.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	if rc != null:
 		name_l.add_theme_color_override("font_color", rc)
-	v.add_child(name_l)
+	head.add_child(name_l)
+	v.add_child(head)
 	_tip_tags(v, item.get("tags", []))
 
 	# 数值（mods）

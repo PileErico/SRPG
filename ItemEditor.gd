@@ -292,18 +292,27 @@ func _render_item_tooltip(item: Dictionary) -> Control:
 	v.add_theme_constant_override("separation", 4)
 	panel.add_child(v)
 
+	# 顶部：物品图标 + 名称/副标题
+	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", 8)
+	var itex = _load_icon(str(item.get("icon", "")))
+	if itex != null:
+		head.add_child(_icon_rect(itex, 44))
+	var headv := VBoxContainer.new()
+	headv.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var nm := str(item.get("name", ""))
 	var name_l := Label.new()
 	name_l.text = nm if nm != "" else "（未命名）"
 	name_l.add_theme_font_size_override("font_size", 18)
 	name_l.add_theme_color_override("font_color", rc)
-	v.add_child(name_l)
-
+	headv.add_child(name_l)
 	var sub := Label.new()
 	sub.text = "%s · %s" % [KIND_CN.get(_current_kind, _current_kind), EquipSlots.SLOT_CN.get(str(item.get("slot", "")), str(item.get("slot", "")))]
 	sub.add_theme_font_size_override("font_size", 12)
 	sub.add_theme_color_override("font_color", Color(0.66, 0.7, 0.78))
-	v.add_child(sub)
+	headv.add_child(sub)
+	head.add_child(headv)
+	v.add_child(head)
 
 	_preview_tags(v, item.get("tags", []))
 
@@ -325,11 +334,18 @@ func _render_item_tooltip(item: Dictionary) -> Control:
 	var atk = item.get("attack", null)
 	if typeof(atk) == TYPE_DICTIONARY:
 		v.add_child(HSeparator.new())
+		var ahb := HBoxContainer.new()
+		ahb.add_theme_constant_override("separation", 8)
+		var atex = _load_icon(str(atk.get("icon", "")))
+		if atex != null:
+			ahb.add_child(_icon_rect(atex, 34))
 		var an := Label.new()
 		an.text = "攻击：" + str(atk.get("name", ""))
 		an.add_theme_font_size_override("font_size", 15)
 		an.add_theme_color_override("font_color", Color("#EBBC04"))
-		v.add_child(an)
+		an.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		ahb.add_child(an)
+		v.add_child(ahb)
 		_preview_tags(v, atk.get("tags", []))
 		v.add_child(_kv("距离", "%d" % int(atk.get("range", 1))))
 		v.add_child(_kv("伤害系数", "%d%%" % int(round(float(atk.get("coeff", 1.0)) * 100.0))))
@@ -387,6 +403,31 @@ func _tag_chip(text: String) -> Control:
 	l.add_theme_font_size_override("font_size", 12)
 	p.add_child(l)
 	return p
+
+
+# 图标 TextureRect（最近邻、等比居中、固定尺寸方框）
+func _icon_rect(tex, sz: int) -> TextureRect:
+	var ic := TextureRect.new()
+	ic.texture = tex
+	ic.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	ic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	ic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	ic.custom_minimum_size = Vector2(sz, sz)
+	return ic
+
+
+# 加载图标（仿 UnitStatusPanel._load_portrait）：res:// 已导入资源用 load；否则 Image.load 兜底；空/失败→null
+func _load_icon(path: String):
+	if path == "":
+		return null
+	if ResourceLoader.exists(path):
+		var t = load(path)
+		if t is Texture2D:
+			return t
+	var img := Image.new()
+	if img.load(path) == OK:
+		return ImageTexture.create_from_image(img)
+	return null
 
 
 # 一条 mod → 「属性中文 +值[%]」，正绿负红
