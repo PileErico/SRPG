@@ -6,7 +6,6 @@ extends Control
 const Unit := preload("res://Unit.gd")
 const UnitFactory := preload("res://UnitFactory.gd")   # 造单位/序列化单一入口（与编辑器共用）
 const CombatResolver := preload("res://CombatResolver.gd")   # 伤害分量化 + 减伤链（纯数学）
-const HexGrid := preload("res://HexGrid.gd")               # 纯六边形几何前置（cube 互转/距离/邻居/连线/环）
 const SkillDB := preload("res://SkillDB.gd")
 const ItemInstances := preload("res://ItemInstances.gd")    # 物品实例门面（悬停单位卡经合成视图取武器）
 const TextureCache := preload("res://TextureCache.gd")      # 立绘/图标加载 + 缓存单一入口
@@ -36,8 +35,6 @@ const BattleState := preload("res://BattleState.gd")   # 战斗模型层（纯�
 # 战斗地图：默认与地图编辑器共享同一张图（编辑器改 → 这里读到）。
 # 实际打开哪张：优先 SandboxConfig.map_path（选地图界面传入），空则用此默认；缺失/损坏回退全草原。
 const MAP_PATH := "res://maps/sandbox.json"
-const DEFAULT_TERRAIN := "plain"
-const DEFAULT_VARIANT := "grassland"
 const AI_THINK_DELAY := 0.5            # 敌方 AI 回合开始的思考停顿
 const AI_ACT_GAP := 1.0                # 每个动作之间的停顿（移动→停 1 秒→攻击），便于观看
 # 语义色（判定/胜负）：成功绿 / 失败红——胜负横幅、col_html、_oc 共用，避免同一对色多处字面量
@@ -213,7 +210,7 @@ var _battle_ui: VBoxContainer   # 战斗期才显示的右栏（回合状态 + �
 # 原型/预设的读写与「proto ↔ Unit」往返统一在 UnitFactory（含路径常量）。
 # （数据住 _state.roster，此处同名转发——RosterBar 直读 host.roster 保真。）
 
-# 六边形邻居偏移表已迁 HexGrid（odd-q，single source）；本文件几何一律走 HexGrid.*。
+# 几何/规则一律经 _state（BattleState）——几何底层在 HexGrid（odd-q，single source）。
 # stat 键→中文 统一走 StatMeta.label（单一数据源、全量键），不再在此维护副本（已删除未使用的 STAT_LABELS）。
 
 func _ready() -> void:
@@ -241,27 +238,7 @@ func _setup_campaign_battle() -> void:
 # 仇恨触发区域（mode②）：从地图 regions 字段（_map_regions）构建 {region_id: {Vector2i:true}}。
 # 敌人挂 ai_region 引用某区域 id，玩家踏入即激活（消费见 _ai_update_aggro）。旧图无 regions = 空。
 func _setup_regions() -> void:
-	aggro_regions = {}
-	_deploy_cells = {}
-	_all_region_cells = {}
-	for reg in _map_regions:
-		if typeof(reg) != TYPE_DICTIONARY:
-			continue
-		var id := str(reg.get("id", ""))
-		var kind := str(reg.get("kind", "aggro"))   # 缺省＝仇恨触发区（向后兼容）
-		var cells := {}
-		for c in reg.get("cells", []):
-			# cells 项形如 [x, y]
-			if typeof(c) == TYPE_ARRAY and c.size() >= 2 and _cell_in_bounds(int(c[0]), int(c[1])):
-				cells[Vector2i(int(c[0]), int(c[1]))] = true
-		if id != "":
-			_all_region_cells[id] = cells   # 全区域格集合（不分 kind，供触发器 when.region 引用）
-		if kind == "deploy":
-			# 部署区（玩家布置区）：并入 _deploy_cells（faction 暂统一按玩家）
-			for cell in cells:
-				_deploy_cells[cell] = true
-		elif id != "":
-			aggro_regions[id] = cells   # 仇恨/触发区按 id 存（敌人 ai_region 引用）
+	_state._setup_regions()
 
 # 读编辑器存的战斗地图（MAP_PATH）；缺失/损坏则回退到全草原，保证沙盒永远能跑
 func _load_map() -> void:
@@ -291,14 +268,7 @@ func _load_map() -> void:
 	_new_grassland(width, height)
 
 func _new_grassland(w: int, h: int) -> void:
-	width = w
-	height = h
-	tiles = []
-	for row in height:
-		var line := []
-		for col in width:
-			line.append({"terrain": DEFAULT_TERRAIN, "variant": DEFAULT_VARIANT})
-		tiles.append(line)
+	_state._new_grassland(w, h)
 
 # 从内存地图字典装载战场（编辑器「一键试玩」用，免存盘）。dict = MapEditor.to_json_dict() 形。
 # 重置到布置阶段：保留 roster（玩家自带军，收回待命），按新地图重新落预置单位。
@@ -339,16 +309,7 @@ func load_from_memory(map_dict: Dictionary) -> void:
 # 每条 = {proto, col, row, faction}；直接进 units（不过部署区限制——这是关卡数据，非玩家临时布置）。
 # 出生点越界则钳进界内。make_unit 已收尾 recompute_derived + init_vitals。
 func _spawn_map_units() -> void:
-	for entry in _map_units:
-		if typeof(entry) != TYPE_DICTIONARY:
-			continue
-		var proto = entry.get("proto", {})
-		if typeof(proto) != TYPE_DICTIONARY or proto.is_empty():
-			continue
-		var fac := str(entry.get("faction", proto.get("default_faction", "enemy")))
-		var col := clampi(int(entry.get("col", 0)), 0, maxi(0, width - 1))
-		var row := clampi(int(entry.get("row", 0)), 0, maxi(0, height - 1))
-		units.append(make_unit(proto, fac, col, row))
+	_state._spawn_map_units()
 
 # 把当前场上所有单位存进地图文件的 units 字段（关卡预置）。复用 _unit_to_proto + 补 AI 字段；
 # 写回当前地图路径（保留 tiles/regions 不变）。返回是否成功。
@@ -796,12 +757,12 @@ func faction_color(f: String) -> Color:
 
 # 按 tile 的 terrain/variant 查地形定义（经 TerrainDB O(1) 查表，找不到返回 null）
 func _terrain_entry(tile):
-	return TerrainDB.entry_for(tile)
+	return _state._terrain_entry(tile)
 
 # 该 tile 的有效 move 块：图级覆盖 ?? 全局（合并规则单一实现在 TerrainDB.effective_move，大地图同用）。
 # 图级覆盖 = 编辑器「地形数据·本图」写的，只影响这张图（通行/成本），不动全局。
 func _effective_move(tile) -> Dictionary:
-	return TerrainDB.effective_move(tile, _map_terrain_overrides)
+	return _state._effective_move(tile)
 
 func color_for_tile(tile) -> Color:
 	var e = _terrain_entry(tile)
@@ -816,10 +777,7 @@ func accent_for_tile(tile) -> Color:
 	return Color.html(e.accent) if e != null else Color(1, 0, 1)
 
 func unit_at(col: int, row: int):
-	for u in units:
-		if u.col == col and u.row == row:
-			return u
-	return null
+	return _state.unit_at(col, row)
 
 # 通行性文字：可通行 / 不可通行 / 仅<tag1/tag2>（读有效 move.passable_by，含图级覆盖）
 func _passability_text(mv) -> String:
@@ -1106,70 +1064,20 @@ func _start_battle() -> void:
 	_begin_active_turn()
 
 func _rebuild_turn_order() -> void:
-	turn_order = _sorted_by_speed(units)
+	_state._rebuild_turn_order()
 
-# 按速度（effective_stat，含修正）大→小排序；同速我方/友方优先。
-func _sorted_by_speed(arr: Array) -> Array:
-	var out := arr.duplicate()
-	out.sort_custom(_speed_cmp)
-	return out
-
-func _speed_cmp(a, b) -> bool:
-	var sa: int = a.effective_stat("speed")
-	var sb: int = b.effective_stat("speed")
-	if sa != sb:
-		return sa > sb
-	var fa := _is_friendly(a)
-	var fb := _is_friendly(b)
-	if fa != fb:
-		return fa   # 同速：友方先
-	return false
-
-# 速度中途变化（buff/装备等）：保留已行动者与当前行动者，仅对「之后未行动」的重排，
-# 立刻反映到出手序列与行动顺序槽。任何改了 speed 修正的地方都应调用本函数。
-func _resort_pending() -> void:
-	if turn_order.is_empty() or active_index >= turn_order.size():
-		return
-	var acted := turn_order.slice(0, active_index)        # 本 round 已行动
-	var active = turn_order[active_index]                  # 当前行动者（保持最前）
-	var rest := turn_order.slice(active_index + 1)         # 之后未行动 → 重排
-	rest = _sorted_by_speed(rest)
-	var new_order := acted.duplicate()
-	new_order.append(active)
-	new_order.append_array(rest)
-	turn_order = new_order
-	# active_index 不变（= acted.size()）
-
+# 速度中途变化（buff/装备等）：模型重排 + 刷新槽/信息（任何改了 speed 修正的地方都应调用）。
 func notify_speed_changed() -> void:
-	_resort_pending()
+	_state._resort_pending()
 	_refresh_turn_bar()
 	_refresh_info()
 
-# 行动顺序槽要显示的条目序列：当前回合剩余（含标记）+ 下一回合全员（按当前速度）。
-func _turn_sequence() -> Array:
-	var seq := []
-	if turn_order.is_empty():
-		return seq
-	var active = active_unit()
-	if active_index < turn_order.size():
-		seq.append({"kind": "marker", "round": round_num})
-		for i in range(active_index, turn_order.size()):
-			var u = turn_order[i]
-			seq.append({"kind": "unit", "round": round_num, "unit": u, "active": (u == active)})
-	# 下一回合：全员按当前速度重排（尚未开始，无「当前行动者」）
-	seq.append({"kind": "marker", "round": round_num + 1})
-	for u in _sorted_by_speed(units):
-		seq.append({"kind": "unit", "round": round_num + 1, "unit": u, "active": false})
-	return seq
-
 func _refresh_turn_bar() -> void:
 	if _turn_bar != null:
-		_turn_bar.refresh(_turn_sequence())
+		_turn_bar.refresh(_state._turn_sequence())
 
 func active_unit():
-	if active_index < 0 or active_index >= turn_order.size():
-		return null
-	return turn_order[active_index]
+	return _state.active_unit()
 
 func _begin_active_turn() -> void:
 	if battle_over or phase != "battle":
@@ -1877,38 +1785,30 @@ func _can_attack(u) -> bool:
 	return u != null and u.ap >= int(u.basic_attack().get("ap_cost", 1))
 
 func _is_friendly(u) -> bool:
-	return u != null and u.faction in ["player", "ally"]
+	return _state._is_friendly(u)
 
 # 平顶 odd-q：从 c 沿方向 d（0–5）走一格
 func _neighbor_in_dir(c: Vector2i, d: int) -> Vector2i:
-	return HexGrid.neighbor_in_dir(c, d)
+	return _state._neighbor_in_dir(c, d)
 
 # 从 from 沿某方向直线走 length 格；返回“包含 target 的那条方向线”的格序列（找不到=[]）
 func _line_cells(from: Vector2i, target: Vector2i, length: int) -> Array:
-	return HexGrid.spoke_through(from, target, length)
+	return _state._line_cells(from, target, length)
 
 # ============ 移动力 / 寻路 ============
 
 func _cell_in_bounds(col: int, row: int) -> bool:
-	return col >= 0 and col < width and row >= 0 and row < height
+	return _state._cell_in_bounds(col, row)
 
 func _neighbors(col: int, row: int) -> Array:
-	return HexGrid.neighbors(Vector2i(col, row))
+	return _state._neighbors(col, row)
 
-# 单位进入该地块的移动消耗（tag 驱动）：-1 = 不可进入。
-# passable_by 决定能否进（"all"/"none"/[tag…]，按单位 tag 判定）；
-# cost 为基础成本，tag_cost 按单位 tag 取更优（最小）。
+# 单位进入该地块的移动消耗（tag 驱动）：-1 = 不可进入（规则在 BattleState._move_cost_at）。
 func _move_cost_at(col: int, row: int, unit) -> int:
-	if not _cell_in_bounds(col, row):
-		return -1
-	var mv = _effective_move(tiles[row][col])   # 图级覆盖 ?? 全局
-	return TerrainDB.move_cost(mv, unit.tags if unit != null else [])   # 通行/成本单一实现（大地图同用）
+	return _state._move_cost_at(col, row, unit)
 
 func _occupied_by_other(col: int, row: int, self_u) -> bool:
-	for u in units:
-		if u != self_u and u.col == col and u.row == row:
-			return true
-	return false
+	return _state._occupied_by_other(col, row, self_u)
 
 # 本次「移动」动作的可用预算（格数）：
 # 移动点>0 → 用剩余移动点；移动点=0 但有 AP → 用一次移动力（提交时才扣 AP）；否则 0。
@@ -1921,39 +1821,10 @@ func _move_budget(u) -> int:
 		return u.move_allowance()   # effective 口径（与预览范围一致）
 	return 0
 
-# Dijkstra：算 unit 在 budget 内可达的格 + 前驱树。返回 {best:{格:累计消耗,含起点0}, came_from:{格:前驱}}。
+# Dijkstra：算 unit 在 budget 内可达的格 + 前驱树（实现迁 BattleState._dijkstra）。
 # 玩家移动范围、敌方 AI 走位共用。
 func _dijkstra(unit, budget: int) -> Dictionary:
-	var start := Vector2i(unit.col, unit.row)
-	var best := {start: 0}
-	var came := {}
-	var open := [start]
-	while not open.is_empty():
-		var bi := 0
-		for i in range(1, open.size()):
-			if best[open[i]] < best[open[bi]]:
-				bi = i
-		var cur: Vector2i = open[bi]
-		open.remove_at(bi)
-		# ZOC：踏入敌对控制区即停（该格可达但不能从它继续外扩）；起点格除外
-		if cur != start and _in_hostile_zoc(cur, unit):
-			continue
-		for nb in _neighbors(cur.x, cur.y):
-			if not _cell_in_bounds(nb.x, nb.y):
-				continue
-			if _occupied_by_other(nb.x, nb.y, unit):
-				continue
-			var step := _move_cost_at(nb.x, nb.y, unit)
-			if step < 0:
-				continue
-			var nc: int = best[cur] + step
-			if nc > budget:
-				continue
-			if not best.has(nb) or nc < best[nb]:
-				best[nb] = nc
-				came[nb] = cur
-				open.append(nb)
-	return {"best": best, "came_from": came}
+	return _state._dijkstra(unit, budget)
 
 # 算 selected_unit 在 _move_budget 内可达的格 + 前驱树（供路径线重建）；再据此算极限可攻击格。
 func _recompute_reachable() -> void:
@@ -1978,51 +1849,26 @@ func _recompute_reachable() -> void:
 				attack_cells[c] = true
 	_update_overlays()
 
-# 单位的「理论最远」移动 + 攻击范围（预览用）：以一次「移动动作」(1 AP→一批移动力) 的可达格为移动范围，
-# 攻击范围 = (可达 ∪ 起点) 外扩武器攻击距离的威胁圈（= 移动 1 AP 后再攻击 1 AP 能触及处）。
+# 单位的「理论最远」移动 + 攻击范围（预览用；实现迁 BattleState._compute_ranges）。
 func _compute_ranges(unit) -> Dictionary:
-	var start := Vector2i(unit.col, unit.row)
-	var data := _dijkstra(unit, unit.move_allowance())
-	var best: Dictionary = data["best"]
-	best.erase(start)
-	var reach := best
-	var rng := int(unit.basic_attack().get("range", 1))
-	var standable := {start: true}
-	for c in reach:
-		standable[c] = true
-	var atk := {}
-	for c in _cells_within(standable, rng):
-		if not standable.has(c):
-			atk[c] = true
-	return {"reach": reach, "attack": atk}
+	return _state._compute_ranges(unit)
 
 # 单位的 ZOC（控制区）= 周围一圈在界内的格
 func _zoc_cells(unit) -> Dictionary:
-	var d := {}
-	for nb in _neighbors(unit.col, unit.row):
-		if _cell_in_bounds(nb.x, nb.y):
-			d[nb] = true
-	return d
+	return _state._zoc_cells(unit)
 
-# ============ ZOC 机制（控制区 + 借机）============
+# ============ ZOC 机制（控制区 + 借机；判定模型在 BattleState，借机结算链留宿主）============
 
 func _zoc_key(owner, mover) -> String:
-	return "%d_%d" % [owner.get_instance_id(), mover.get_instance_id()]
+	return _state._zoc_key(owner, mover)
 
 # cell 是否落在「敌对于 mover 的某单位」的 ZOC 内（= 与某敌对单位相邻）
 func _in_hostile_zoc(cell: Vector2i, mover) -> bool:
-	for u in units:
-		if u != mover and _is_hostile(mover, u) and _hex_dist(cell, Vector2i(u.col, u.row)) == 1:
-			return true
-	return false
+	return _state._in_hostile_zoc(cell, mover)
 
 # 取 cell 处第一个「本 round 尚未对 mover 触发过」的敌对 ZOC 拥有者（找不到=null）
 func _first_zoc_owner(cell: Vector2i, mover):
-	for u in units:
-		if u != mover and _is_hostile(mover, u) and _hex_dist(cell, Vector2i(u.col, u.row)) == 1:
-			if not zoc_triggered.has(_zoc_key(u, mover)):
-				return u
-	return null
+	return _state._first_zoc_owner(cell, mover)
 
 # 移动者从当前格「离开/在区内移动」前的借机判定。返回 true = 被钉住（本次移动作废）。
 # 因「踏入 ZOC 即终点」，一次移动里只有起点可能在 ZOC 内，故只需在离开起点时判一次。
@@ -2048,15 +1894,7 @@ func _resolve_aoo(owner, mover) -> bool:
 
 # 移动范围内、属于敌方 ZOC 的格（移动模式自动标红，提示「踏进会被控制」）
 func _enemy_zoc_in_range(mover, reach: Dictionary) -> Dictionary:
-	var out := {}
-	for u in units:
-		if u == mover or not _is_hostile(mover, u):
-			continue
-		for nb in _neighbors(u.col, u.row):
-			var c := Vector2i(nb.x, nb.y)
-			if reach.has(c):
-				out[c] = true
-	return out
+	return _state._enemy_zoc_in_range(mover, reach)
 
 # 组一个范围层：移动色按阵营（我方浅蓝 / 敌方浅黄），攻击色统一浅红；ZOC（仅敌方）红框标出
 func _overlay(unit, reach: Dictionary, attack: Dictionary) -> Dictionary:
@@ -2092,11 +1930,10 @@ func _update_overlays() -> void:
 #   当前可行动（active_unit）→ 绿描边；
 #   尚未行动（idx>active_index）→ 无装饰。
 func _has_acted(u) -> bool:
-	var idx := turn_order.find(u)
-	return idx >= 0 and idx < active_index
+	return _state._has_acted(u)
 
 func _is_active_unit(u) -> bool:
-	return u == active_unit()
+	return _state._is_active_unit(u)
 
 # 鼠标移到地图某格：若格上有单位则预览其移动/攻击范围（敌我皆可），离开则清除
 func update_unit_hover(cell: Vector2i) -> void:
@@ -2111,7 +1948,7 @@ func update_unit_hover(cell: Vector2i) -> void:
 
 # 把一组格按六边形几何外扩 radius 圈（仅几何、不管通行性）；返回含原格的集合
 func _cells_within(cells: Dictionary, radius: int) -> Dictionary:
-	return HexGrid.ring_within(cells, radius, func(v: Vector2i) -> bool: return _cell_in_bounds(v.x, v.y))
+	return _state._cells_within(cells, radius)
 
 # 进入移动模式：算范围、清路径线
 func _enter_move_mode() -> void:
@@ -2152,10 +1989,7 @@ func _enter_attack_mode() -> void:
 
 # 敌友判定：玩家/友军 为一方，敌方/中立 为另一方；跨方=敌对
 func _is_hostile(a, b) -> bool:
-	if a == null or b == null:
-		return false
-	var friendly := ["player", "ally"]
-	return (a.faction in friendly) != (b.faction in friendly)
+	return _state._is_hostile(a, b)
 
 # 执行攻击：取攻方基础攻击 skill → 算命中目标（直线 AoE 按方向、可友伤）→ 扣 skill AP、逐目标判定 + 记录。
 func _do_attack(attacker, cell: Vector2i) -> void:
@@ -2695,39 +2529,15 @@ func _load_audio(path: String):
 
 # 由前驱树 came 重建到 cell 的路径（起点 → cell，含两端）
 func _path_via(came: Dictionary, cell: Vector2i) -> Array:
-	var path := [cell]
-	var cur := cell
-	while came.has(cur):
-		cur = came[cur]
-		path.append(cur)
-	path.reverse()
-	return path
+	return _state._path_via(came, cell)
 
-# ============ 六边形距离 / 连线（纯几何一律委托 HexGrid，见 HexGrid.gd）============
+# ============ 六边形距离 / 连线 / 视线（模型在 BattleState，几何底层在 HexGrid）============
 func _hex_dist(a: Vector2i, b: Vector2i) -> int:
-	return HexGrid.distance(a, b)
+	return _state._hex_dist(a, b)
 
-# 两格间的连线采样（cube 插值，含端点）：LOS/寻路用。地形阻挡判定见 _has_los。
-func _hex_line(a: Vector2i, b: Vector2i) -> Array:
-	return HexGrid.line(a, b)
-
-# 该格地形是否阻挡视线（读地形 blocks_sight tag；越界＝挡）
-func _tile_blocks_sight(col: int, row: int) -> bool:
-	if not _cell_in_bounds(col, row):
-		return true
-	var e = _terrain_entry(tiles[row][col])
-	return e != null and ("blocks_sight" in e.get("tags", []))
-
-# a 能否看到 b：连线上「中间格」任一 blocks_sight 即挡。终点 b 自身的 blocks_sight 不挡（看得到森林边缘的人）。
+# a 能否看到 b：连线上「中间格」任一 blocks_sight 即挡（实现迁 BattleState._has_los）。
 func _has_los(a: Vector2i, b: Vector2i) -> bool:
-	if a == b:
-		return true
-	var line := _hex_line(a, b)
-	for i in range(1, line.size() - 1):   # 掐头去尾：只查中间格
-		var c: Vector2i = line[i]
-		if _tile_blocks_sight(c.x, c.y):
-			return false
-	return true
+	return _state._has_los(a, b)
 
 # 单个单位的可见格：以己为心、半径 sight（六边形距离）、逐格被 LOS 裁剪。
 func _unit_visible_cells(u) -> Dictionary:
@@ -2855,4 +2665,4 @@ func _update_env_overlays() -> void:
 # 单位当前【实际】视野半径 ＝ round( 面板 sight〔含天气/装备/技能等所有加减〕 × 日夜最终乘子 )，下限 0。
 # 日夜（夜×0.5）是最后一步乘算，符合「其余都是加减、夜晚最终减半」的口径。
 func _effective_sight(u) -> int:
-	return maxi(0, int(round(u.effective_stat("sight") * _time_sight_mult)))
+	return _state._effective_sight(u)
