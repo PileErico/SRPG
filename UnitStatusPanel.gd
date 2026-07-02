@@ -118,7 +118,7 @@ func _build(u) -> void:
 	status_page.name = "角色状态"
 	tabs.add_child(status_page)
 	# 通用技能：人人都有（即原「职业技能」页的 13 通用序列 + 进阶；命名修正——它一直是通用技能）
-	var common_page := _build_class_skill_page(u)
+	var common_page := _build_common_skill_page(u)
 	common_page.name = "通用技能"
 	tabs.add_child(common_page)
 	# 第三页二选一：具名角色（char_*）→ 专属技能；其余杂兵 → 职业技能（同类共享树）
@@ -303,24 +303,24 @@ func _build_status_page(u) -> Control:
 	_build_effects(fx, u)
 	return page
 
-# ====== 职业技能页 ======
+# ====== 通用技能页 ======
 # 布局（仿草图；图标待美术补、技能功能待规格，先搭结构）：
 #   ① 顶部 13 个「基础技能」——两行铺满整个顶部宽度（每格均分，不挤成一条）。
 #   ②③④ 三类「进阶技能」各一块彩色背景板（色=分类，作底、不画在边框上），左右成簇并排，下方留空（可增长）：
 #       红=力量/双手/重武器/进攻 · 蓝=体力/盾牌/铠甲/抗性/防御 · 绿=迅捷/远程/轻武器/精密。
 #   每格 = 图标 + 下方技能名（名现预留占位）。进阶每类先象征性摆 3 个。
 #   数据暂用常量占位，将来接 data/skills.json（见 docs/单位系统设计.md「技能系统」）。
-const CLASS_BASIC_COUNT := 13
-const CLASS_BASIC_ROWS := 2          # 基础技能铺成几行（13 → 7 + 6）
-const CLASS_ADVANCED := [
+const COMMON_BASIC_COUNT := 13
+const COMMON_BASIC_ROWS := 2          # 基础技能铺成几行（13 → 7 + 6）
+const COMMON_ADVANCED := [
 	{"label": "力量", "tip": "力量 · 双手 · 重武器 · 进攻", "bg": Color(0.80, 0.30, 0.25, 0.16), "fg": Color("#E8927A"), "count": 3},
 	{"label": "体力", "tip": "体力 · 盾牌 · 铠甲 · 抗性 · 防御", "bg": Color(0.23, 0.48, 0.84, 0.16), "fg": Color("#6FA8EA"), "count": 3},
 	{"label": "迅捷", "tip": "迅捷 · 远程 · 轻武器 · 精密动作", "bg": Color(0.31, 0.68, 0.35, 0.16), "fg": Color("#7FD98A"), "count": 3},
 ]
 
 # 「通用技能」页：所有角色都能学的通用技能（基础 13 通用序列数据驱动；进阶三色树仍占位）
-# 注：函数名沿用 _build_class_skill_page（历史名），但内容＝通用技能；勿与新「职业技能（同类共享树）」混淆。
-func _build_class_skill_page(u) -> Control:
+# 勿与「职业技能（同类共享树，class_*）」混淆——那是另一分类。
+func _build_common_skill_page(u) -> Control:
 	var page := VBoxContainer.new()
 	page.add_theme_constant_override("separation", 10)
 
@@ -329,16 +329,16 @@ func _build_class_skill_page(u) -> Control:
 	var basic := VBoxContainer.new()
 	basic.add_theme_constant_override("separation", 10)
 	page.add_child(basic)
-	var per_row := int(ceil(float(CLASS_BASIC_COUNT) / CLASS_BASIC_ROWS))   # 7
+	var per_row := int(ceil(float(COMMON_BASIC_COUNT) / COMMON_BASIC_ROWS))   # 7
 	var made := 0
-	for r in CLASS_BASIC_ROWS:
+	for r in COMMON_BASIC_ROWS:
 		var rowc := HBoxContainer.new()
 		rowc.add_theme_constant_override("separation", 6)
 		basic.add_child(rowc)
 		var offset := (r % 2) == 1   # 奇数行：两端各垫半格弹性占位 → 整排右移半格、错位嵌缝
 		if offset:
 			rowc.add_child(_hspacer(0.5))
-		for i in mini(per_row, CLASS_BASIC_COUNT - made):
+		for i in mini(per_row, COMMON_BASIC_COUNT - made):
 			rowc.add_child(_skill_cell(SkillDB.by_seq(made + 1), u))   # seq 从 1 起；该格无配置则 null=占位
 			made += 1
 		if offset:
@@ -351,7 +351,7 @@ func _build_class_skill_page(u) -> Control:
 	var adv := HBoxContainer.new()
 	adv.add_theme_constant_override("separation", 12)
 	page.add_child(adv)
-	for cat in CLASS_ADVANCED:
+	for cat in COMMON_ADVANCED:
 		adv.add_child(_advanced_block(cat, u))
 	return page
 
