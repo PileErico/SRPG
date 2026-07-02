@@ -32,6 +32,7 @@ const SaveIO := preload("res://SaveIO.gd")           # 战役战斗结算后自�
 const DialogueUI := preload("res://DialogueUI.gd")   # 通用对话模块：战场内触发（do: dialogue，M8）
 const FactionDB := preload("res://FactionDB.gd")     # 派系/声望：战场内触发器改声望（do: add_rep，M9；纯沙盒无档=跳过）
 const MapIO := preload("res://MapIO.gd")   # 地图读 / 写单一入口（与 MapEditor 共用）
+const BattleState := preload("res://BattleState.gd")   # 战斗模型层（纯数据+规则；见 docs/解耦规划.md）
 # 战斗地图：默认与地图编辑器共享同一张图（编辑器改 → 这里读到）。
 # 实际打开哪张：优先 SandboxConfig.map_path（选地图界面传入），空则用此默认；缺失/损坏回退全草原。
 const MAP_PATH := "res://maps/sandbox.json"
@@ -43,49 +44,106 @@ const AI_ACT_GAP := 1.0                # 每个动作之间的停顿（移动→
 const OK_GREEN := "#6FCF6F"
 const BAD_RED := "#E07A5A"
 
-var width := 15
-var height := 15
-var tiles := []            # tiles[row][col] = {"terrain":..,"variant":..}；sandbox 全草原
-var PALETTE := []
-var units := []            # Unit 列表
-# 仇恨触发区域（mode②）：{region_id: {Vector2i:true}}。关卡设计者在地图编辑器「区域层」绘制。
-# 由 _load_map 从地图 regions 字段读入 _map_regions，_setup_regions 转成 aggro_regions。
-var aggro_regions := {}
-var _map_regions := []     # 地图文件 regions 原始数据：[{id,label,color,cells:[[x,y]…],kind?}]（schema v2，可空）
-var _map_units := []       # 地图文件 units 原始数据：[{proto,col,row,faction}]（schema v3，可空）→ _spawn_map_units 落子
-var _map_triggers := []    # 地图文件 triggers 原始数据：[{id,label,when,do}]（schema v3，可空）→ 运行时评估
-var _map_terrain_overrides := {}   # 图级地形覆盖 { "terrain/variant": {move?,effects?} }：只改本图、不动全局 terrains.json
-var _map_locations := []   # 地图文件 locations 原始数据（大地图 M7）：战斗侧不消费、只透传保真（存图不丢字段）
-var _all_region_cells := {}   # 所有区域的格集合 {region_id: {Vector2i:true}}（不分 kind，供触发器引用）
-var _fired_triggers := {}  # 已触发过的 trigger id（when.once 用）；每场战斗开始清空
-var _battle_kills := []    # 本战击杀记录 [{proto_id, victim_uid, faction, by_uid}]——经验+情报解锁共用记录点（每战清零）
-var campaign_battle := false   # 战役战斗模式（SandboxConfig.battle_setup 注入）：roster=BattleIO 快照副本，胜负后回写并返回大地图
-var _battle_context := {}      # 战役战斗上下文（BattleSetup.context 透传：如 location_id——据点讨伐胜利后随结果回写，M7）
+# ============ 战斗模型层（BattleState）＋ 同名薄访问器 ============
+# 模型状态全部住在 _state（BattleState，纯 RefCounted）；下方属性只做同名转发——
+# 画布 editor.*、面板 host.*、测试 sb.* 的既有访问全部保真（含引用语义：返回同一集合对象）。
+# 各字段语义注释见 BattleState.gd（单一源，此处不复述）。
+var _state := BattleState.new()
+
+var width: int:
+	get: return _state.width
+	set(v): _state.width = v
+var height: int:
+	get: return _state.height
+	set(v): _state.height = v
+var tiles: Array:
+	get: return _state.tiles
+	set(v): _state.tiles = v
+var units: Array:
+	get: return _state.units
+	set(v): _state.units = v
+var roster: Array:
+	get: return _state.roster
+	set(v): _state.roster = v
+var aggro_regions: Dictionary:
+	get: return _state.aggro_regions
+	set(v): _state.aggro_regions = v
+var _map_regions: Array:
+	get: return _state._map_regions
+	set(v): _state._map_regions = v
+var _map_units: Array:
+	get: return _state._map_units
+	set(v): _state._map_units = v
+var _map_triggers: Array:
+	get: return _state._map_triggers
+	set(v): _state._map_triggers = v
+var _map_terrain_overrides: Dictionary:
+	get: return _state._map_terrain_overrides
+	set(v): _state._map_terrain_overrides = v
+var _map_locations: Array:
+	get: return _state._map_locations
+	set(v): _state._map_locations = v
+var _all_region_cells: Dictionary:
+	get: return _state._all_region_cells
+	set(v): _state._all_region_cells = v
+var _fired_triggers: Dictionary:
+	get: return _state._fired_triggers
+	set(v): _state._fired_triggers = v
+var _battle_kills: Array:
+	get: return _state._battle_kills
+	set(v): _state._battle_kills = v
+var campaign_battle: bool:
+	get: return _state.campaign_battle
+	set(v): _state.campaign_battle = v
+var _battle_context: Dictionary:
+	get: return _state._battle_context
+	set(v): _state._battle_context = v
+var _deploy_cells: Dictionary:
+	get: return _state._deploy_cells
+	set(v): _state._deploy_cells = v
+var _vis_visible: Dictionary:
+	get: return _state._vis_visible
+	set(v): _state._vis_visible = v
+var _vis_seen: Dictionary:
+	get: return _state._vis_seen
+	set(v): _state._vis_seen = v
+var omniscient: bool:
+	get: return _state.omniscient
+	set(v): _state.omniscient = v
+var _map_environment: Dictionary:
+	get: return _state._map_environment
+	set(v): _state._map_environment = v
+var _map_type: String:
+	get: return _state._map_type
+	set(v): _state._map_type = v
+var _cur_time: String:
+	get: return _state._cur_time
+	set(v): _state._cur_time = v
+var _cur_weather: String:
+	get: return _state._cur_weather
+	set(v): _state._cur_weather = v
+var _weather_left: int:
+	get: return _state._weather_left
+	set(v): _state._weather_left = v
+var _time_sight_mult: float:
+	get: return _state._time_sight_mult
+	set(v): _state._time_sight_mult = v
+var round_num: int:
+	get: return _state.round_num
+	set(v): _state.round_num = v
+var turn_order: Array:
+	get: return _state.turn_order
+	set(v): _state.turn_order = v
+var active_index: int:
+	get: return _state.active_index
+	set(v): _state.active_index = v
+var zoc_triggered: Dictionary:
+	get: return _state.zoc_triggered
+	set(v): _state.zoc_triggered = v
+
 var _dialogue = null           # 战场内对话（M8）：触发器 do:dialogue 打开，模态覆盖战斗 UI（唯一有接口成本的触发场景，需求 §1.8）
-var _deploy_cells := {}    # 部署区格集合 {Vector2i:true}：kind=="deploy" 的区域并集（玩家单位只能放这里）
-
-# —— 感知 / 战争迷雾（玩家侧；见 docs/感知系统.md 🔒）——
-# 三态＝黑(未探索)/灰(探索过·当前无观测)/常态(当前视野内)。数据模型：seen 决定黑vs非黑、visible 决定灰vs常态。
-var _vis_visible := {}    # 当前可见格 {Vector2i:true}＝我方/友方全体单位视野格并集（每次移动/开战重算）
-var _vis_seen := {}       # 曾看到过的格 {Vector2i:true}（只增不减）
-var omniscient := false   # 调试全知：默认 false＝迷雾生效（真实体验 🔒）；按 V 切换
-
-# —— 环境：日夜(静态) + 天气(动态)（Phase 2；见 docs/感知系统.md 🔒。近期只影响 sight）——
-var _map_environment := {}   # 地图 environment 字段 {time, weather_table:[{weather,weight,min_rounds,max_rounds}]}
-var _map_type := "battle"    # 地图类型（overworld/battle）：读入记住、存盘透传（沙盒不消费，防存图打回缺省）
-var _cur_time := "day"       # 当前日夜 id（战中不变）
-var _cur_weather := "clear"  # 当前天气 id
-var _weather_left := 0       # 当前天气剩余回合（<=0 ＝ 不自动变：表空 / 强制常驻）
-var _time_sight_mult := 1.0  # 日夜的视野【最终乘子】：在所有加减之后再乘（夜=0.5 减半）；见 _effective_sight
 var _weather_vfx             # 天气视觉叠层（WeatherVFX，挂在 canvas 下；随 _cur_weather 播放）
 var _night_overlay: ColorRect  # 夜晚整体变暗滤镜（挂 canvas 下、在天气 VFX 之下）
-
-# —— 简陋回合框架（round/turn 双层，出手按速度；详见 docs/单位系统设计.md）——
-var round_num := 1
-var turn_order := []       # 本 round 的出手序列（速度大→小；同速玩家优先）
-var active_index := 0      # 当前行动单位在 turn_order 的下标
-# ZOC 借机去重：本 round 内「拥有者→移动者」已触发过的集合（key=owner_id_mover_id），每 round 清空。
-var zoc_triggered := {}
 
 # —— 选中 / 移动指令状态 ——
 var selected_unit = null   # 左键选中的单位（用于唤出选单 / 移动）
@@ -137,11 +195,15 @@ var viewed_unit = null   # 角色状态页当前查看的单位（用于棋子�
 var hover_unit = null    # 鼠标扫过行动顺序槽头像时，要在地图上高亮所在格的单位
 
 # —— 遭遇战结束（胜负）——
-var battle_over := false
+var battle_over: bool:
+	get: return _state.battle_over
+	set(v): _state.battle_over = v
 var _banner: Label        # 胜利 / 失败 横幅（含「按 R 重开」）
 
 # —— 阶段：deploy=布置（调试侧栏摆单位、回合不跑）/ battle=战斗（回合+AI 正常）——
-var phase := "deploy"
+var phase: String:
+	get: return _state.phase
+	set(v): _state.phase = v
 var _deploy_panel         # DeployPanel（右侧：选中单位编辑器 + 保存预设 + 开始游戏）
 var _roster_bar           # RosterBar（底部横向栏：可用单位管理 + ＋ 添加）
 var _battle_ui: VBoxContainer   # 战斗期才显示的右栏（回合状态 + 战斗记录）
@@ -149,7 +211,7 @@ var _battle_ui: VBoxContainer   # 战斗期才显示的右栏（回合状态 + �
 # 可用单位 roster（底部栏全部已准备单位）。其中「已布置」的也在 units 里（= 上场参战的子集）。
 # roster 单位的配置（四维/装备/技能…）可存成「单位预设」，与场上位置无关。
 # 原型/预设的读写与「proto ↔ Unit」往返统一在 UnitFactory（含路径常量）。
-var roster := []
+# （数据住 _state.roster，此处同名转发——RosterBar 直读 host.roster 保真。）
 
 # 六边形邻居偏移表已迁 HexGrid（odd-q，single source）；本文件几何一律走 HexGrid.*。
 # stat 键→中文 统一走 StatMeta.label（单一数据源、全量键），不再在此维护副本（已删除未使用的 STAT_LABELS）。
@@ -157,7 +219,6 @@ var roster := []
 func _ready() -> void:
 	randomize()   # 战斗判定掷骰
 	_setup_campaign_battle()   # 战役战斗注入（须在 _load_map 前定地图路径；纯沙盒＝no-op）
-	_load_terrains()
 	_load_map()   # 读「选地图」传入或默认的战斗地图（缺失则回退全草原）
 	_setup_regions()
 	_build_ui()
@@ -201,10 +262,6 @@ func _setup_regions() -> void:
 				_deploy_cells[cell] = true
 		elif id != "":
 			aggro_regions[id] = cells   # 仇恨/触发区按 id 存（敌人 ai_region 引用）
-
-# —— 地形：经 TerrainDB 复用 terrains.json（与编辑器同一数据源、O(1) 查表）——
-func _load_terrains() -> void:
-	PALETTE = TerrainDB.palette()
 
 # 读编辑器存的战斗地图（MAP_PATH）；缺失/损坏则回退到全草原，保证沙盒永远能跑
 func _load_map() -> void:
