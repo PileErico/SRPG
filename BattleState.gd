@@ -774,6 +774,134 @@ func _ai_nearest_hostile(unit):
 			best = u
 	return best
 
+# ============ 序列化（战中 suspend 地基；见 docs/解耦规划.md §3 硬前置）============
+# 白名单原则：派生态不存——_vis_visible / aggro_regions·_all_region_cells·_deploy_cells（restore 重算），
+# _vis_seen＝唯一不可重建的历史必存；_time_sight_mult 随存（模型自洽），重入场景时宿主仍应重挂环境叠层。
+# 单位主键＝快照内「单位池下标」：uid 在沙盒/地图预置单位恒 0 且可重复，不能当战斗内主键 🔒。
+
+# Vector2i 键集合 ↔ JSON [[x,y]]（沿用 MapIO 的 region cells 约定）
+static func cells_to_json(cells: Dictionary) -> Array:
+	var out := []
+	for c in cells:
+		out.append([c.x, c.y])
+	return out
+
+static func cells_from_json(arr) -> Dictionary:
+	var out := {}
+	if typeof(arr) != TYPE_ARRAY:
+		return out
+	for c in arr:
+		if typeof(c) == TYPE_ARRAY and c.size() >= 2:
+			out[Vector2i(int(c[0]), int(c[1]))] = true
+	return out
+
+# 全量快照 → 纯 JSON 字典（可直接 JSON.stringify 落盘）。
+func to_dict() -> Dictionary:
+	# 单位池 = roster ∪ units（地图预置敌人不在 roster）；顺序即池下标
+	var pool := []
+	for u in roster:
+		pool.append(u)
+	for u in units:
+		if not (u in pool):
+			pool.append(u)
+	var idx := {}   # Unit 对象 → 池下标
+	for i in pool.size():
+		idx[pool[i]] = i
+	var snaps := []
+	var last_hit := []
+	for u in pool:
+		snaps.append(UnitFactory.unit_to_battle_snapshot(u))
+		last_hit.append(idx.get(u.last_hit_by, -1))   # 攻击者已离场→-1（uid=0 的归属本就不计，语义无损）
+	# zoc_triggered：运行时 key=instance_id 对 → 池下标对（映射不到的死者残留键丢弃——round 末本就清空）
+	var by_iid := {}
+	for u in pool:
+		by_iid[u.get_instance_id()] = idx[u]
+	var zoc := []
+	for k in zoc_triggered:
+		var parts: PackedStringArray = str(k).split("_")
+		if parts.size() == 2 and by_iid.has(int(parts[0])) and by_iid.has(int(parts[1])):
+			zoc.append([by_iid[int(parts[0])], by_iid[int(parts[1])]])
+	return {
+		"battle_v": 1,
+		"width": width, "height": height, "tiles": tiles,
+		"map_regions": _map_regions, "map_units": _map_units, "map_triggers": _map_triggers,
+		"map_terrain_overrides": _map_terrain_overrides, "map_locations": _map_locations,
+		"map_environment": _map_environment, "map_type": _map_type,
+		"unit_pool": snaps, "last_hit_by": last_hit,
+		"units": units.map(func(u): return idx[u]),
+		"roster": roster.map(func(u): return idx[u]),
+		"turn_order": turn_order.map(func(u): return idx[u]),
+		"active_index": active_index, "round_num": round_num,
+		"zoc_triggered": zoc,
+		"fired_triggers": _fired_triggers.duplicate(),
+		"battle_kills": _battle_kills.duplicate(true),
+		"campaign_battle": campaign_battle, "battle_context": _battle_context.duplicate(true),
+		"phase": phase, "battle_over": battle_over,
+		"cur_time": _cur_time, "cur_weather": _cur_weather, "weather_left": _weather_left,
+		"time_sight_mult": _time_sight_mult,
+		"vis_seen": cells_to_json(_vis_seen),
+		"omniscient": omniscient,
+	}
+
+# 从 to_dict 快照复原（含经 JSON 落盘往返：数值一律 int()/str()/bool() 钳制）。
+# 复原绕开 make_unit/init_vitals/learn_skill 的运行态重置（UnitFactory.unit_from_battle_snapshot 全量覆写 🔒）。
+# ⚠️ 装备实例本体不在快照内：战役域随档已存；纯沙盒 _transient 不落盘（沙盒 suspend 需另带实例库，可裁剪）。
+func restore(d: Dictionary) -> bool:
+	if int(d.get("battle_v", 0)) != 1:
+		return false
+	width = int(d.get("width", 15))
+	height = int(d.get("height", 15))
+	tiles = d.get("tiles", [])
+	_map_regions = d.get("map_regions", [])
+	_map_units = d.get("map_units", [])
+	_map_triggers = d.get("map_triggers", [])
+	_map_terrain_overrides = d.get("map_terrain_overrides", {})
+	_map_locations = d.get("map_locations", [])
+	_map_environment = d.get("map_environment", {})
+	_map_type = str(d.get("map_type", "battle"))
+	var pool := []
+	for s in d.get("unit_pool", []):
+		pool.append(UnitFactory.unit_from_battle_snapshot(s))
+	var lh: Array = d.get("last_hit_by", [])
+	for i in pool.size():
+		var j: int = int(lh[i]) if i < lh.size() else -1
+		pool[i].last_hit_by = pool[j] if j >= 0 and j < pool.size() else null
+	units = []
+	for i in d.get("units", []):
+		units.append(pool[int(i)])
+	roster = []
+	for i in d.get("roster", []):
+		roster.append(pool[int(i)])
+	turn_order = []
+	for i in d.get("turn_order", []):
+		turn_order.append(pool[int(i)])
+	active_index = int(d.get("active_index", 0))
+	round_num = int(d.get("round_num", 1))
+	zoc_triggered = {}
+	for pair in d.get("zoc_triggered", []):
+		if typeof(pair) == TYPE_ARRAY and pair.size() >= 2:
+			var a := int(pair[0])
+			var b := int(pair[1])
+			if a >= 0 and a < pool.size() and b >= 0 and b < pool.size():
+				zoc_triggered[_zoc_key(pool[a], pool[b])] = true   # 用复原对象的新 instance_id 重铸键
+	_fired_triggers = {}
+	for k in d.get("fired_triggers", {}):
+		_fired_triggers[str(k)] = true
+	_battle_kills = d.get("battle_kills", []) if typeof(d.get("battle_kills", [])) == TYPE_ARRAY else []
+	campaign_battle = bool(d.get("campaign_battle", false))
+	_battle_context = d.get("battle_context", {}) if typeof(d.get("battle_context", {})) == TYPE_DICTIONARY else {}
+	phase = str(d.get("phase", "deploy"))
+	battle_over = bool(d.get("battle_over", false))
+	_cur_time = str(d.get("cur_time", "day"))
+	_cur_weather = str(d.get("cur_weather", "clear"))
+	_weather_left = int(d.get("weather_left", 0))
+	_time_sight_mult = float(d.get("time_sight_mult", 1.0))
+	_vis_seen = cells_from_json(d.get("vis_seen", []))
+	omniscient = bool(d.get("omniscient", false))
+	_setup_regions()            # 区域派生（aggro/deploy/all_region_cells）＝重算不存
+	_recompute_vision_state()   # _vis_visible＝重算不存（visible 并回 seen，幂等）
+	return true
+
 # ============ Targeting ============
 
 # 点击格 → 命中单位列表：直线 AoE 取该方向直线上的单位（友伤按 friendly_fire），否则取该格的敌对单位

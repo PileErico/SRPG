@@ -160,6 +160,84 @@ static func unit_from_campaign(entry: Dictionary):
 	u.injured_until = int(entry.get("injured_until", 0))
 	return u
 
+# ============ battle 层（战中 suspend 快照，供 BattleState.to_dict/restore 调用）============
+# 与 proto/campaign 层的区别：**全量运行态**（位置/AP/移动点/effects/modifiers/死门条/技能 cd·uses/
+# ai_aggroed/tags 原样含 stance·flying·deaths_door）逐字段原样存，复原＝new 后整份覆写——
+# 刻意绕开 make_unit 的重置陷阱（init_vitals 注满 / learn_skill 充能重置 / set_trait·equip 重挂修正）🔒。
+# last_hit_by 是对象引用，不在此处理（BattleState 层按单位池下标另存）。
+static func unit_to_battle_snapshot(u) -> Dictionary:
+	return {
+		"uid": u.uid, "proto_id": u.proto_id, "unit_name": u.unit_name,
+		"portrait": u.portrait, "icon": u.icon, "trait_id": u.trait_id,
+		"level": u.level, "exp": u.exp, "exp_max": u.exp_max,
+		"attr_points": u.attr_points, "skill_points": u.skill_points, "injured_until": u.injured_until,
+		"col": u.col, "row": u.row,
+		"tags": u.tags.duplicate(),
+		"stats": u.stats.duplicate(),
+		"ap": u.ap, "move_points": u.move_points,
+		"door_gauge": u.door_gauge, "door_checks": u.door_checks,
+		"effects": u.effects.duplicate(true),
+		"modifiers": u.modifiers.duplicate(true),   # 整份含 trait/equip 烘焙条 + buff:/env: 临时条（source 配对保真 🔒）
+		"equipment": u.equipment.duplicate(),        # slot -> 实例 uid（实例本体：战役随档；沙盒 _transient 不落盘 ⚠️）
+		"skills": u.skills.duplicate(true),          # 含 cd/uses 运行态
+		"ai_threat": u.ai_threat, "ai_region": u.ai_region, "ai_group": u.ai_group, "ai_aggroed": u.ai_aggroed,
+	}
+
+# 快照 → Unit：new 后**全量覆写**（不跑 make_unit / recompute_derived / init_vitals——
+# stats 整份原样回写即自洽：同输入同输出，且避免「buff 改四维时 recompute 基线错位」）。
+# 数值经 JSON 往返变 float，语义为 int 的字段一律 int() 钳制。
+static func unit_from_battle_snapshot(d: Dictionary):
+	var u = Unit.new()
+	u.uid = int(d.get("uid", 0))
+	u.proto_id = str(d.get("proto_id", ""))
+	u.unit_name = str(d.get("unit_name", "新兵"))
+	u.portrait = str(d.get("portrait", ""))
+	u.icon = str(d.get("icon", ""))
+	u.trait_id = str(d.get("trait_id", ""))   # 直写不走 set_trait：其修正已在 modifiers 整份快照里
+	u.level = int(d.get("level", 1))
+	u.exp = int(d.get("exp", 0))
+	u.exp_max = int(d.get("exp_max", 100))
+	u.attr_points = int(d.get("attr_points", 0))
+	u.skill_points = int(d.get("skill_points", 0))
+	u.injured_until = int(d.get("injured_until", 0))
+	u.col = int(d.get("col", -1))
+	u.row = int(d.get("row", -1))
+	var tags := []
+	for t in d.get("tags", []):
+		tags.append(str(t))
+	u.tags = tags   # 原样含 stance/flying/deaths_door（faction 是 tags 的视图，自动复原）
+	var stats := {}
+	var src = d.get("stats", {})
+	if typeof(src) == TYPE_DICTIONARY:
+		for k in src:
+			stats[str(k)] = src[k]
+	u.stats = stats
+	u.ap = int(d.get("ap", 0))
+	u.move_points = int(d.get("move_points", 0))
+	u.door_gauge = int(d.get("door_gauge", 0))
+	u.door_checks = int(d.get("door_checks", 0))
+	u.effects = d.get("effects", []) if typeof(d.get("effects", [])) == TYPE_ARRAY else []
+	u.modifiers = d.get("modifiers", []) if typeof(d.get("modifiers", [])) == TYPE_ARRAY else []
+	var equip := {}
+	var esrc = d.get("equipment", {})
+	if typeof(esrc) == TYPE_DICTIONARY:
+		for slot in esrc:
+			equip[str(slot)] = int(esrc[slot])
+	u.equipment = equip
+	var skills := {}
+	var ssrc = d.get("skills", {})
+	if typeof(ssrc) == TYPE_DICTIONARY:
+		for sid in ssrc:
+			var e = ssrc[sid]
+			if typeof(e) == TYPE_DICTIONARY:
+				skills[str(sid)] = {"level": int(e.get("level", 1)), "cd": int(e.get("cd", 0)), "uses": int(e.get("uses", 0))}
+	u.skills = skills
+	u.ai_threat = bool(d.get("ai_threat", true))
+	u.ai_region = str(d.get("ai_region", ""))
+	u.ai_group = str(d.get("ai_group", ""))
+	u.ai_aggroed = bool(d.get("ai_aggroed", false))
+	return u
+
 # 读 unit_prototypes.json 的内置原型列表
 static func all_prototypes() -> Array:
 	var out := []
