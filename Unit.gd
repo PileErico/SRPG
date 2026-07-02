@@ -6,6 +6,7 @@ extends RefCounted
 
 const STANCE_TAGS := ["player", "ally", "enemy", "neutral"]   # 阵营立场 tag
 const ItemInstances := preload("res://ItemInstances.gd")     # 物品实例门面（每件装备独立实例；消费合成视图）
+const StatMeta := preload("res://StatMeta.gd")               # stat 元数据单一源（派生键/序列化白名单）
 const TraitDB := preload("res://TraitDB.gd")                 # 特性注册表（特性查表）
 const SkillDB := preload("res://SkillDB.gd")                 # 技能注册表（技能查表）
 const EquipSlots := preload("res://EquipSlots.gd")          # 槽位 / 槽位资格（tag 驱动装备资格）
@@ -172,8 +173,12 @@ func effective_stat(key: String) -> int:
 	return int(round(effective_stat_f(key)))
 
 # 由四维派生的第一层属性键（这些 stats 的“基础值”＝四维公式算出，装备/buff 的修正再叠在其上）。
-const DERIVED_KEYS := ["HP_max", "atk", "mag", "acc", "eva",
-	"block_rate", "block_power", "crit_rate", "crit_dmg", "res_status"]
+const DERIVED_KEYS := StatMeta.DERIVED_STATS   # 单一源在 StatMeta（序列化/编辑器白名单同处维护）
+
+# 一次「移动动作」（1 AP）获得的移动点——**唯一口径＝effective**（含装备/词条/buff 修正）。
+# 预览范围(_dijkstra)与实际购点(玩家/AI/_move_budget)都必须读这里，禁止再读裸 stats["move"]。
+func move_allowance() -> int:
+	return int(effective_stat("move"))
 
 # 重算「四维 → 第一层属性」基础值（写回 stats，作为该属性的 base；effective_stat 再叠修正）。
 # 用 effective 四维（含特性/装备对四维的修正）→ 特性加成能传导到派生属性。四维或其修正变化后须调用。

@@ -14,8 +14,7 @@ const TagDB := preload("res://TagDB.gd")          # faction→中文走单一源
 const FACTIONS := ["player", "ally", "enemy", "neutral"]   # 顺序=下拉顺序；中文走 TagDB.cn
 const FOUR_KEYS := ["STR", "DEX", "INT", "STA"]
 const FOUR_CN := {"STR": "力量", "DEX": "灵巧", "INT": "智力", "STA": "体力"}
-const EDIT_STATS := ["move", "speed", "AP_max", "armor_max", "atk_eff", "def_eff",
-	"res_phys", "res_fire", "res_thunder", "res_ice", "res_holy"]
+const EDIT_STATS := StatMeta.EDITOR_STATS   # 单一源（含 sight——原漏编：可存档却不可编辑）
 const RO_STATS := ["HP_max", "atk", "mag", "acc", "eva", "crit_rate", "crit_dmg",
 	"block_rate", "block_power", "res_status"]
 

@@ -21,7 +21,7 @@ func _ready() -> void:
 	box.add_child(title)
 
 	var subtitle := Label.new()
-	subtitle.text = "hex SRPG · 养成 · 肉鸽"
+	subtitle.text = "hex SRPG · 战术战斗 · 沙盒经营"
 	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	subtitle.add_theme_color_override("font_color", Color(0.7, 0.74, 0.82))
 	box.add_child(subtitle)

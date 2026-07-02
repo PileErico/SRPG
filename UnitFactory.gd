@@ -9,6 +9,7 @@ extends RefCounted
 
 const Unit := preload("res://Unit.gd")
 const ItemInstances := preload("res://ItemInstances.gd")   # 装备实例库（equipment 存 uid、proto 存模板 id，此处互转）
+const StatMeta := preload("res://StatMeta.gd")             # stat 序列化白名单单一源
 
 const PROTOS_PATH := "res://data/unit_prototypes.json"   # 内置原型
 const PRESETS_PATH := "user://unit_presets.json"         # 用户自存预设（跨次启动保留）
@@ -86,9 +87,11 @@ static func unit_to_proto(u) -> Dictionary:
 	var skill_lv := {}
 	for sid in u.skills:
 		skill_lv[sid] = u.skill_level(sid)
+	# 白名单单一源＝StatMeta.SERIALIZABLE_BASE_STATS；只写 stats 里实际存在的键（缺省键不写、旧档零影响）
 	var stat_ov := {}
-	for k in ["move", "speed", "sight", "AP_max", "armor_max", "atk_eff", "def_eff", "res_phys", "res_fire", "res_thunder", "res_ice", "res_holy"]:
-		stat_ov[k] = u.stats.get(k, 0)
+	for k in StatMeta.SERIALIZABLE_BASE_STATS:
+		if u.stats.has(k):
+			stat_ov[k] = u.stats[k]
 	return {
 		"name": u.unit_name,
 		"default_faction": u.faction,

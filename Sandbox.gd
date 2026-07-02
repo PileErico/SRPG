@@ -1218,7 +1218,7 @@ func _ai_step_toward(unit, target) -> bool:
 		if unit.ap <= 0:
 			return false
 		unit.ap -= 1
-		unit.move_points += int(unit.stats.get("move", 0))
+		unit.move_points += unit.move_allowance()   # effective 口径（与预览范围 _dijkstra 一致）
 	# ZOC 借机：离开起点前判定（敌方离开我方控制区也会被借机）；被钉住则本次没走成
 	if _zoc_on_leave(unit):
 		unit.move_points = 0
@@ -1721,7 +1721,7 @@ func _move_budget(u) -> int:
 	if u.move_points > 0:
 		return u.move_points
 	if u.ap > 0:
-		return int(u.stats.get("move", 0))
+		return u.move_allowance()   # effective 口径（与预览范围一致）
 	return 0
 
 # Dijkstra：算 unit 在 budget 内可达的格 + 前驱树。返回 {best:{格:累计消耗,含起点0}, came_from:{格:前驱}}。
@@ -1785,7 +1785,7 @@ func _recompute_reachable() -> void:
 # 攻击范围 = (可达 ∪ 起点) 外扩武器攻击距离的威胁圈（= 移动 1 AP 后再攻击 1 AP 能触及处）。
 func _compute_ranges(unit) -> Dictionary:
 	var start := Vector2i(unit.col, unit.row)
-	var data := _dijkstra(unit, unit.effective_stat("move"))
+	var data := _dijkstra(unit, unit.move_allowance())
 	var best: Dictionary = data["best"]
 	best.erase(start)
 	var reach := best
@@ -2285,7 +2285,7 @@ func _commit_move(col: int, row: int) -> void:
 		if u.ap <= 0:
 			return
 		u.ap -= 1
-		u.move_points += int(u.stats.get("move", 0))
+		u.move_points += u.move_allowance()   # effective 口径（与预览范围 _dijkstra 一致）
 	# ZOC 借机：离开起点前判定（起点在敌对控制区内才触发）；命中被钉住则本次移动作废
 	if _zoc_on_leave(u):
 		u.move_points = 0

@@ -26,6 +26,18 @@ var reputation := {}     # 派系声望 {faction_id: int}
 var roster := []         # 花名册：活 Unit 对象列表（存档时经 unit_to_campaign 快照、读档重建）
 var item_instances := {} # 本档物品实例库 {uid(int): inst}——ItemInstances 门面在 current==self 时路由到这
 
+# ============ 战役生命周期入口（场景入口层专用；底层模块别碰 current，改收显式参数）============
+
+# 新建战役：建档 + 激活，一步原子完成。返回新档。
+static func start_new():
+	var ws = new()
+	current = ws
+	return ws
+
+# 激活一个已构建的档（如 SaveIO.load_campaign 的返回值）。传 null＝退出战役（回沙盒/菜单语义）。
+static func activate(ws) -> void:
+	current = ws
+
 # 分配一个存档域唯一 uid。有战役走档内计数器；无战役给临时 uid（临时库独立，不与任何档相交）。
 static func mint_uid() -> int:
 	if current != null:

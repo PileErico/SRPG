@@ -162,7 +162,15 @@ func _initialize() -> void:
 		"roster": [{"uid": 3, "proto": {"name": "残卷"}, "hp": 1, "armor": 0, "equip_uids": {}}]})
 	ck(heal.next_uid == 6, "计数器自愈到 max(uid)+1（实得 %d）" % heal.next_uid)
 
-	# 13) slot 名净化：路径穿越被拒
+	# 13) P0-2 移动力口径：move_allowance＝effective（预览与实走同源；词条加移动力两边都涨）
+	var u9 = _fresh_unit("斥候")
+	var base_move: int = u9.move_allowance()
+	var boots := ItemInstances.create("breast_plate")
+	ItemInstances.add_affix(boots, {"name": "轻捷", "mods": [{"stat": "move", "op": "flat", "value": 2}]})
+	ck(u9.equip_instance(boots), "装移动词条件")
+	ck(u9.move_allowance() == base_move + 2, "move_allowance 吃到词条 +2（实得 %d，基 %d）" % [u9.move_allowance(), base_move])
+
+	# 14) slot 名净化：路径穿越被拒
 	ck(not SaveIO.save_campaign(WorldState.new(), "../evil"), "save ../ 被拒")
 	ck(SaveIO.load_campaign("..\\x") == null, "load ..\\ 被拒")
 	ck(not SaveIO.delete_slot("a/b"), "delete 带分隔符被拒")

@@ -79,8 +79,7 @@
 
 ## 7. 扫描顺手发现的既有 bug/债（做对应模块时一并还）
 
-- 🐛 **Sandbox 存图丢字段**：`save_units_to_map` 调 `MapIO.write_map` 没传 `terrain_overrides/environment`，沙盒侧存回会抹掉这两字段（Sandbox.gd:275）——**与 M 无关、宜尽快修**。
-- 🐛 **空 id 触发器 once 失效**：`tid==""` 不记 `_fired_triggers`、会重复触发（Sandbox.gd:305-308）。
+- ✅ ~~Sandbox 存图丢字段~~ / ✅ ~~空 id 触发器 once 失效~~（均已修，2026-07-02 提交 `7941bec`——外部复审曾误报前者仍在，实为本条记录未更新）。
 - 触发器评估仅友方 `_commit_move` 一处钩子，`by_faction:"any"` 对敌方是死键（敌方 AI 走位不评估，Sandbox.gd:1224-1228）——EventEngine 时决定是否补钩。
 - round 推进逻辑重复两处（见 §6.4）；`_apply_env_modifiers` 兼容清旧 `env:time` 可顺手删。
 - spawn_unit 后不调 `_recompute_vision`（新单位迷雾态延迟一拍，Sandbox.gd:330-343）。
