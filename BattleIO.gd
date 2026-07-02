@@ -84,7 +84,8 @@ static func apply_result(ws, result: Dictionary) -> void:
 		var pid := str(k.get("proto_id", ""))
 		if pid != "" and str(k.get("faction", "")) in ["enemy", "neutral"]:
 			ws.kill_stats[pid] = int(ws.kill_stats.get(pid, 0)) + 1
-	# 战斗来由落账（M7）：据点讨伐获胜 → 肃清计时（刷新判定在 LocationDB.site_ready，惰性）
+	# 战斗来由落账：据点讨伐获胜 → 肃清计时（M7）；动态单位交战获胜 → 该单位覆灭（WorldSim v1）
 	var ctx = result.get("context", {})
 	if bool(result.get("win", false)) and typeof(ctx) == TYPE_DICTIONARY:
 		ws.mark_location_cleared(str(ctx.get("location_id", "")))
+		ws.remove_world_unit(int(ctx.get("world_unit_uid", 0)))

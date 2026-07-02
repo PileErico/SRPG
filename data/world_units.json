@@ -1,0 +1,16 @@
+{
+  "_note": "大地图动态单位单一数据源（🟡 v1 框架，数值全占位，待验收调整——见 docs/大地图动态单位.md）。类型定义=本文件；实例（位置/状态）随档存 WorldState.world_units。behavior: trade_route=城村间往返（rest_hours 停靠）/ patrol=绕 home 巡逻·猎杀 hunts 派系单位·玩家敌对时也追 / wander=随机游荡 / hunt=绕 home 游荡·玩家敌对且进 sight 则追击。hours_per_cell=每格行进耗时（世界回合=玩家推进的小时数，玩家不动世界不动 🔒）；sight=发现半径；radius=活动半径（离 home）；power=单位间摩擦战强度（d4+power 高者胜）；catch 判定=同格或邻格。spawn 规则: count=开局随机布点数量 / per_city=每城一支 / home=固定巢穴（地点id）。",
+  "format_version": 1,
+  "types": [
+    {"id": "caravan", "label": "商队", "faction": "empire", "glyph": "◆", "behavior": "trade_route",
+      "hours_per_cell": 3, "rest_hours": 6, "count": 2, "power": 2},
+    {"id": "patrol", "label": "帝国巡逻队", "faction": "empire", "glyph": "▲", "behavior": "patrol",
+      "hours_per_cell": 2, "per_city": 1, "radius": 4, "sight": 3, "power": 5, "hunts": ["bandits"],
+      "battle_map": "res://maps/sandbox.json"},
+    {"id": "herd", "label": "兽群", "faction": "wildlife", "glyph": "●", "behavior": "wander",
+      "hours_per_cell": 4, "count": 2, "power": 1},
+    {"id": "marauders", "label": "劫道者游团", "faction": "bandits", "glyph": "✕", "behavior": "hunt",
+      "hours_per_cell": 2, "count": 2, "home": "lair_bandit", "radius": 5, "sight": 4, "power": 3,
+      "battle_map": "res://maps/sandbox.json"}
+  ]
+}

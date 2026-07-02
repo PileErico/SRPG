@@ -22,6 +22,8 @@ const JobDB := preload("res://JobDB.gd")   # 营地职务注册表（M6 框架�
 const DialogueUI := preload("res://DialogueUI.gd")   # 通用对话模块（M8）
 const LocationDB := preload("res://LocationDB.gd")   # 地点类型/服务注册表（M7）
 const FactionDB := preload("res://FactionDB.gd")     # 派系/声望注册表（M9）
+const WorldSim := preload("res://WorldSim.gd")       # 大地图动态单位模拟（🟡 v1：玩家移动=世界回合）
+const WorldUnitDB := preload("res://WorldUnitDB.gd") # 动态单位类型注册表
 
 const MAP_PATH := "res://maps/overworld/world.json"
 const HOURS_PER_COST := 2    # 占位：1 点地形通行成本 ＝ 2 小时行程（数值层后调）
@@ -52,6 +54,7 @@ func _ready() -> void:
 	_ensure_campaign()
 	_load_map()
 	_ensure_party_placed()
+	WorldSim.ensure_spawned(WorldState.current, self)   # 动态单位开局生成（幂等，flags 记账）
 	_build_ui()
 	_refresh_time_ui()
 	_log_line("抵达大地图。左键点击目标格移动；移动与扎营会推进时间。")
@@ -147,6 +150,14 @@ func hover_text(col: int, row: int) -> String:
 	var loc = _loc_by_cell.get(Vector2i(col, row))
 	if loc != null:
 		txt = "📍 %s（%s）%s\n%s" % [str(loc.get("label", "")), LocationDB.type_label(str(loc.get("type", ""))), _site_status_text(loc), txt]
+	var ws = WorldState.current
+	if ws != null:
+		for u in ws.world_units:
+			if int(u.get("col", -1)) == col and int(u.get("row", -1)) == row:
+				txt = "🚶 %s（%s%s）\n%s" % [WorldUnitDB.label(str(u.get("type", ""))),
+					FactionDB.label(str(u.get("faction", ""))),
+					"·敌对" if FactionDB.hostile(ws, str(u.get("faction", ""))) else "", txt]
+				break
 	return txt
 
 # 据点状态短文案（悬停/面板共用）："" ＝ 非据点；可挑战 / 刷新倒计时 / 已肃清不再刷新
@@ -232,7 +243,7 @@ func _travel(path: Array) -> void:
 		var cell: Vector2i = path[i]
 		ws.party_col = cell.x
 		ws.party_row = cell.y
-		WorldClock.advance(ws, _move_cost_at(cell.x, cell.y) * HOURS_PER_COST)
+		_advance_world(_move_cost_at(cell.x, cell.y) * HOURS_PER_COST)
 		_refresh_time_ui()
 		_check_cell_events(cell)
 		if _dialogue != null and is_inside_tree():
@@ -250,6 +261,26 @@ func _travel(path: Array) -> void:
 	var dest := Vector2i(ws.party_col, ws.party_row)
 	if _loc_by_cell.has(dest):
 		_open_location_panel(_loc_by_cell[dest])
+
+# 时钟推进统一入口：推钟（恢复调度）→ 世界回合（动态单位随玩家活动移动 🔒）→ 事件表现。
+# 战斗类事件（engage）由 _start_battle_with 收口；一次推进至多一场（WorldSim 保证）。
+func _advance_world(hours: int) -> void:
+	var ws = WorldState.current
+	WorldClock.advance(ws, hours)
+	for e in WorldSim.tick(ws, hours, self):
+		match str(e.get("kind", "")):
+			"engage_player":
+				var u: Dictionary = e["unit"]
+				var t = WorldUnitDB.type_def(str(u.get("type", "")))
+				_log_line("⚔ [b]%s[/b] 追上了你们！" % WorldUnitDB.label(str(u.get("type", ""))))
+				_start_battle_with(str(t.get("battle_map", "res://maps/sandbox.json")) if t != null else "res://maps/sandbox.json",
+					{"world_unit_uid": int(u.get("uid", 0)), "faction_id": str(u.get("faction", ""))})
+			"skirmish":
+				var hunter := WorldUnitDB.label(str((e["hunter"] as Dictionary).get("type", "")))
+				var prey := WorldUnitDB.label(str((e["prey"] as Dictionary).get("type", "")))
+				_log_line("🗡 %s%s了%s。" % [hunter, "击溃" if bool(e.get("prey_died", true)) else "反被击溃——输给", prey])
+			"caravan_arrive":
+				pass   # 商队到站：暂不播报（避免刷屏；交易接入后再表现）
 
 # 一格落位后的事件评估：地图触发器 enter_tile + 敌对派系遭伏（M9 伪触发器）+ timer（时钟刚被推进）
 func _check_cell_events(cell: Vector2i) -> void:
@@ -282,7 +313,7 @@ func _on_camp() -> void:
 	if _moving:
 		return
 	var ws = WorldState.current
-	WorldClock.advance(ws, CAMP_HOURS)
+	_advance_world(CAMP_HOURS)
 	_log_line("⛺ 扎营休整 %d 小时。" % CAMP_HOURS)
 	_refresh_time_ui()
 	EventEngine.check_timer(_map_triggers, ws, self)
@@ -333,6 +364,8 @@ func _start_battle_with(map_path: String, context: Dictionary) -> void:
 	var ws = WorldState.current
 	if ws == null:
 		return
+	if SandboxConfig.battle_setup != null:
+		return   # 已有战斗待切场景（同一步连环触发：遭伏+动态单位等）：先到先得，后来的不打
 	var uids := []
 	for u in ws.roster:
 		if int(u.injured_until) > ws.clock_hours:
@@ -362,7 +395,7 @@ func _do_rest(loc: Dictionary) -> bool:
 		_log_line("💰 盘缠不够（需 %d，有 %d）——住不起店。" % [cost, ws.gold])
 		return false
 	ws.gold -= cost
-	WorldClock.advance(ws, int(svc.get("hours", 8)))
+	_advance_world(int(svc.get("hours", 8)))
 	for u in ws.roster:
 		if float(u.stats.get("HP", 0)) > 0.0:
 			u.stats["HP"] = u.effective_stat("HP_max")
@@ -458,6 +491,24 @@ func party_cell() -> Vector2i:
 
 func move_target() -> Vector2i:
 	return _move_target
+
+# 动态单位标记数据（画布逐帧调；量级＝个位数）：敌对（对玩家）标红圈
+func world_units_for_draw() -> Array:
+	var out := []
+	var ws = WorldState.current
+	if ws == null:
+		return out
+	for u in ws.world_units:
+		var t = WorldUnitDB.type_def(str(u.get("type", "")))
+		if t == null:
+			continue
+		out.append({
+			"cell": Vector2i(int(u.get("col", 0)), int(u.get("row", 0))),
+			"color": FactionDB.color(str(u.get("faction", ""))),
+			"glyph": str(t.get("glyph", "?")),
+			"hostile": FactionDB.hostile(ws, str(u.get("faction", ""))),
+		})
+	return out
 
 # 地点标记数据（画布逐帧调；量级＝个位数地点，无需缓存）：active＝据点可挑战/服务型恒真（灰显已肃清据点）
 func locations_for_draw() -> Array:

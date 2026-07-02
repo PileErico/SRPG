@@ -34,6 +34,7 @@ var item_instances := {} # 本档物品实例库 {uid(int): inst}——ItemInsta
 var kill_stats := {}     # 击杀统计 {proto_id: 累计击杀数}——BattleIO 战后累计；情报解锁（图鉴）的输入源
 var camp_jobs := {}      # 营地职务指派 {job_id: unit_uid}（职务定义在 JobDB；0/缺键=空缺）
 var location_cleared_at := {}   # 据点上次肃清时刻 {loc_id: clock_hours}——刷新=LocationDB.site_ready 惰性判定（M7）
+var world_units := []    # 大地图动态单位实例（🟡 v1）：纯 dict 列表（类型定义在 WorldUnitDB、推进在 WorldSim）
 # —— 世界层事件状态（EventEngine 持久层；战斗局部 fired 在 Sandbox、每战清零，两层分离 🔒）——
 var event_fired := {}            # 已触发事件 {tid: true}（once 消费）
 var event_timer_last := {}       # timer 事件上次节拍时刻 {tid: clock_hours}
@@ -100,6 +101,18 @@ func mark_location_cleared(loc_id: String) -> void:
 	if loc_id != "":
 		location_cleared_at[loc_id] = clock_hours
 
+# 大地图动态单位：按 uid 查/移除（BattleIO 战胜回写、WorldSim 摩擦战用）
+func world_unit_by_uid(uid: int):
+	for u in world_units:
+		if int(u.get("uid", 0)) == uid:
+			return u
+	return null
+
+func remove_world_unit(uid: int) -> void:
+	var u = world_unit_by_uid(uid)
+	if u != null:
+		world_units.erase(u)
+
 # 收编：单位装备引用的实例若不在本档库（来自沙盒 transient 域），迁移进来并重铸 uid（修正 source 同步重写）。
 func _adopt_equipment(u) -> void:
 	var missing := {}
@@ -146,6 +159,7 @@ func to_dict() -> Dictionary:
 		"kill_stats": kill_stats.duplicate(true),
 		"camp_jobs": camp_jobs.duplicate(true),
 		"location_cleared_at": location_cleared_at.duplicate(true),
+		"world_units": world_units.duplicate(true),
 		"event_fired": event_fired.duplicate(true),
 		"event_timer_last": event_timer_last.duplicate(true),
 		"event_cooldown_until": event_cooldown_until.duplicate(true),
@@ -172,6 +186,11 @@ static func from_dict(d: Dictionary):
 	ws.kill_stats = _int_valued(d.get("kill_stats", {}))
 	ws.camp_jobs = _int_valued(d.get("camp_jobs", {}))
 	ws.location_cleared_at = _int_valued(d.get("location_cleared_at", {}))
+	var wu = d.get("world_units", [])
+	if typeof(wu) == TYPE_ARRAY:
+		for e in wu:
+			if typeof(e) == TYPE_DICTIONARY:
+				ws.world_units.append(e.duplicate(true))
 	var ef = d.get("event_fired", {})
 	ws.event_fired = ef if typeof(ef) == TYPE_DICTIONARY else {}
 	ws.event_timer_last = _int_valued(d.get("event_timer_last", {}))
@@ -192,6 +211,8 @@ static func from_dict(d: Dictionary):
 		mx = maxi(mx, int(iuid) + 1)
 	for u in ws.roster:
 		mx = maxi(mx, int(u.uid) + 1)
+	for u in ws.world_units:
+		mx = maxi(mx, int(u.get("uid", 0)) + 1)
 	ws.next_uid = mx
 	return ws
 

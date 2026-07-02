@@ -37,6 +37,18 @@ func _draw() -> void:
 			var tp := c2 + Vector2(-tw * 0.5, 19.0)
 			draw_string(font, tp + Vector2(0.8, 0.8), loc_label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0, 0, 0, 0.55))   # 阴影衬底
 			draw_string(font, tp, loc_label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0.98, 0.95, 0.85))
+	# 动态单位 token（WorldSim v1）：派系色圆 + 类型字形；敌对加红外环
+	for wu in editor.world_units_for_draw():
+		var wc: Vector2i = wu["cell"]
+		var wp := hex_center(wc.x, wc.y)
+		var wcol: Color = wu["color"]
+		draw_circle(wp, 8.0, wcol.darkened(0.15))
+		draw_arc(wp, 8.0, 0.0, TAU, 20, Color(0.12, 0.1, 0.06, 0.9), 1.8)
+		if wu["hostile"]:
+			draw_arc(wp, 11.0, 0.0, TAU, 20, Color(0.95, 0.3, 0.25, 0.9), 2.0)
+		var g: String = wu["glyph"]
+		var gw := font.get_string_size(g, HORIZONTAL_ALIGNMENT_CENTER, -1, 10).x
+		draw_string(font, wp + Vector2(-gw * 0.5, 3.5), g, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.99, 0.97, 0.9))
 	# 移动目的地标记（行进中显示）：目标格描金框
 	var tgt: Vector2i = editor.move_target()
 	if tgt.x >= 0:
