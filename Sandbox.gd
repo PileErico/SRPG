@@ -2205,10 +2205,6 @@ func _recompute_vision() -> void:
 func cell_fog(cell: Vector2i) -> int:
 	return _state.cell_fog(cell)
 
-# 玩家当前能否「看到」某格（用于 targeting：只能打可见格上的目标）
-func _can_see_cell(cell: Vector2i) -> bool:
-	return _state._can_see_cell(cell)
-
 # 该单位是否被迷雾藏起（画布契约，实现迁 BattleState._unit_hidden_by_fog）。
 func _unit_hidden_by_fog(u) -> bool:
 	return _state._unit_hidden_by_fog(u)
@@ -2264,7 +2260,7 @@ func _tick_weather() -> void:
 		_roll_weather_from_table(_map_environment.get("weather_table", []), true)
 		_apply_env_modifiers()   # 天气变 → 重挂 sight 修正 + 重算视野
 
-# 应用环境到视野：天气＝flat 加减（挂修正管线 source=env:weather）；日夜＝【最终乘子】_time_sight_mult（不走 flat，见 _effective_sight）。
+# 应用环境到视野：天气＝flat 加减（挂修正管线 source=env:weather）；日夜＝【最终乘子】_time_sight_mult（不走 flat，见 BattleState._effective_sight）。
 # 先清旧天气修正再挂新的；再刷新叠层（夜变暗 + 天气 VFX）+ 重算视野。
 func _apply_env_modifiers() -> void:
 	var w_mod := EnvDB.weather_sight(_cur_weather)
@@ -2284,8 +2280,3 @@ func _update_env_overlays() -> void:
 	EnvDB.apply_time_tint(_night_overlay, _cur_time)
 	if _weather_vfx != null:
 		_weather_vfx.set_weather(_cur_weather)
-
-# 单位当前【实际】视野半径 ＝ round( 面板 sight〔含天气/装备/技能等所有加减〕 × 日夜最终乘子 )，下限 0。
-# 日夜（夜×0.5）是最后一步乘算，符合「其余都是加减、夜晚最终减半」的口径。
-func _effective_sight(u) -> int:
-	return _state._effective_sight(u)
