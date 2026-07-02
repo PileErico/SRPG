@@ -110,16 +110,18 @@ func _finish() -> void:
 # ============ UI（进树才建；两侧立绘 + 中间文本 + 选项，全屏模态吞输入）============
 
 func _ready() -> void:
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	# ⚠️ 必须用 and_offsets 版：_ready 时已进树，set_anchors_preset 只改锚点、offsets 会保住当前 0×0 矩形
+	# ——曾致对话框零尺寸不可见+点不到，行进 await 它 finished 造成大地图假死（2026-07-02 实机复现修复）。
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_STOP   # 模态：对话期间点击不落到底下的地图/战斗
 	var dim := ColorRect.new()
 	dim.color = Color(0, 0, 0, 0.35)
-	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(dim)
 
 	var panel := PanelContainer.new()
-	panel.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	panel.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
 	panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	panel.custom_minimum_size = Vector2(0, 232)
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE   # 点击穿给自身（推进）；按钮自己会截
