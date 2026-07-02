@@ -60,7 +60,7 @@
 ## 5. 分期路线（依赖驱动，对齐需求 §3；每期可停、headless 回归）
 
 - **✅ M0 · 文档同步**（2026-07-02）：§4 四项 + 扫描发现的第 3 处陈旧（实现现状 412/414、路线图 91）全部改写。
-- **M1 · 根基（需求 §3.0）**：uid 体系 🔒 → WorldState 骨架 + SaveIO + campaign 存档 v1（roster 续存 HP/重伤位 + 时钟 + flag）→ **物品实例化**（ItemInstances + Unit.equipment 改 uid + 合成视图 + 三个雷逐一排掉；词条生成/铁匠 UI 属内容、后置）。
+- **✅ M1 · 根基（需求 §3.0，2026-07-02 完成）**：uid 体系 🔒 → WorldState 骨架 + SaveIO + campaign 存档 v1（roster 续存 HP + 时钟 + flag/声望/ironman）→ **物品实例化**（ItemInstances + Unit.equipment 改 uid + 合成视图 + **三个雷全部排掉**；`equip(模板id)` 保留为造新实例的兼容入口→原型/预设/沙盒零改动）。headless：`test_worldstate` + `test_iteminstances`（含 campaign 带词条全链往返）全 PASS。**剩**：词条生成 roll/铁匠 UI（内容层）、耐久消耗钩子（M2/M5）、重伤位字段（M5 定细则时加，schema 兼容免改档）。
 - **M2 · WorldClock（§3.1）**：时钟本体 + 调度表；恢复/冷却数值用占位（重伤细则待 §2.3）。
 - **M3 · EventEngine（§3.3）**：动作元数据注册表（先治编辑器/运行时分叉）→ 抽引擎、战斗侧四动作迁入 → when 扩 `timer/enter_tile` + 冷却/全局间隔 + fired 状态分层。
 - **M4 · Overworld（§3.4）**：map_type + 新场景 + 移动/扎营 + enter_tile 事件 + 日夜随时钟。
