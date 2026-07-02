@@ -8,7 +8,8 @@ const UnitFactory := preload("res://UnitFactory.gd")   # 造单位/序列化单�
 const CombatResolver := preload("res://CombatResolver.gd")   # 伤害分量化 + 减伤链（纯数学）
 const HexGrid := preload("res://HexGrid.gd")               # 纯六边形几何前置（cube 互转/距离/邻居/连线/环）
 const SkillDB := preload("res://SkillDB.gd")
-const ItemDB := preload("res://ItemDB.gd")                  # 悬停单位卡取武器图标/名
+const ItemDB := preload("res://ItemDB.gd")                  # 物品模板注册表
+const ItemInstances := preload("res://ItemInstances.gd")    # 物品实例库（悬停单位卡经合成视图取武器）
 const TextureCache := preload("res://TextureCache.gd")      # 立绘/图标加载 + 缓存单一入口
 
 # element → 抗性中文标签（战斗记录用）
@@ -884,18 +885,18 @@ func _hover_skill_section(u) -> Control:
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 3)
 	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var main_id := str(u.equipment.get("main_hand", ""))
-	_add_weapon_rows(v, main_id)
-	var off_id := str(u.equipment.get("off_hand", ""))
-	if off_id != "" and off_id != main_id:   # 双手武器占两槽、同一件 → 不重复列
-		_add_weapon_rows(v, off_id)
+	var main_uid := int(u.equipment.get("main_hand", 0))
+	_add_weapon_rows(v, main_uid)
+	var off_uid := int(u.equipment.get("off_hand", 0))
+	if off_uid != 0 and off_uid != main_uid:   # 双手武器占两槽、同一件（同 uid）→ 不重复列
+		_add_weapon_rows(v, off_uid)
 	return v if v.get_child_count() > 0 else null
 
 # 把一件武器（图标+名，白）及其技能（图标+名，金；第一个=基础攻击）逐行加进 parent。
-func _add_weapon_rows(parent: VBoxContainer, item_id: String) -> void:
-	if item_id == "":
+func _add_weapon_rows(parent: VBoxContainer, uid: int) -> void:
+	if uid == 0:
 		return
-	var item = ItemDB.get_item(item_id)
+	var item = ItemInstances.view(uid)
 	if item == null:
 		return
 	var wrow = _hover_named_icon(str(item.get("icon", "")), str(item.get("name", "")), Color(0.90, 0.90, 0.95))

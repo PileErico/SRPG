@@ -9,6 +9,7 @@ extends RefCounted
 ## 用法：const WorldState := preload("res://WorldState.gd") → WorldState.current / WorldState.mint_uid()。
 
 const UnitFactory := preload("res://UnitFactory.gd")
+const ItemInstances := preload("res://ItemInstances.gd")   # 物品实例整库随档序列化（roster 只存 uid 引用）
 
 const SAVE_VERSION := 1
 
@@ -61,6 +62,7 @@ func to_dict() -> Dictionary:
 		"ironman": ironman,
 		"flags": flags.duplicate(true),
 		"reputation": reputation.duplicate(true),
+		"item_instances": ItemInstances.to_json(),
 		"roster": roster_json,
 	}
 
@@ -74,6 +76,7 @@ static func from_dict(d: Dictionary):
 	ws.flags = fl if typeof(fl) == TYPE_DICTIONARY else {}
 	var rep = d.get("reputation", {})
 	ws.reputation = rep if typeof(rep) == TYPE_DICTIONARY else {}
+	ItemInstances.load_json(d.get("item_instances", []))   # 必须先于 roster：单位重挂装备要在库里找到实例
 	for e in d.get("roster", []):
 		if typeof(e) == TYPE_DICTIONARY:
 			ws.roster.append(UnitFactory.unit_from_campaign(e))

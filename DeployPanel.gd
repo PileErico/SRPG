@@ -5,6 +5,7 @@ extends VBoxContainer
 ## 战斗阶段 set_battle_mode(true) → 整个面板隐藏（编辑停用；只读查看走角色状态页）。
 
 const ItemDB := preload("res://ItemDB.gd")
+const ItemInstances := preload("res://ItemInstances.gd")   # 已装备摘要经合成视图取名（equipment 存实例 uid）
 const SkillDB := preload("res://SkillDB.gd")
 const TraitDB := preload("res://TraitDB.gd")
 const StatMeta := preload("res://StatMeta.gd")   # stat→中文（不再依赖 host.STAT_LABELS）
@@ -254,8 +255,8 @@ func _equipped_text() -> String:
 		return "（无）"
 	var parts := []
 	for slot in _sel.equipment:
-		var it = ItemDB.get_item(str(_sel.equipment[slot]))
-		parts.append(str(it.get("name", _sel.equipment[slot])) if it != null else str(_sel.equipment[slot]))
+		var it = ItemInstances.view(int(_sel.equipment[slot]))
+		parts.append(str(it.get("name", "")) if it != null else "?")
 	return "、".join(parts)
 
 # ---- 回调 ----

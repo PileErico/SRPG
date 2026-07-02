@@ -10,6 +10,7 @@ extends Control
 
 const DiagonalFrame := preload("res://DiagonalFrame.gd")
 const ItemDB := preload("res://ItemDB.gd")
+const ItemInstances := preload("res://ItemInstances.gd")   # 装备槽经合成视图取物品（equipment 存实例 uid）
 const ItemSlot := preload("res://ItemSlot.gd")
 const TraitDB := preload("res://TraitDB.gd")
 const SkillDB := preload("res://SkillDB.gd")
@@ -935,10 +936,10 @@ func _equip_cell(u, slot_label: String, slot_id: String) -> Control:
 
 # 槽内已装备 → 按稀有度上色边框 + 叠物品图标；双手武器占用的副手槽（非主槽）→ 灰色滤镜
 func _fill_equip_slot(box: Control, u, slot_id: String) -> void:
-	var item_id := str(u.equipment.get(slot_id, ""))
-	if item_id == "":
+	var iuid := int(u.equipment.get(slot_id, 0))
+	if iuid == 0:
 		return
-	var item = ItemDB.get_item(item_id)
+	var item = ItemInstances.view(iuid)
 	if item == null:
 		return
 	# 富 tooltip（名称/标签/数值/技能…）

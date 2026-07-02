@@ -8,6 +8,7 @@ extends RefCounted
 ##       var proto = UnitFactory.unit_to_proto(u)               # Unit → proto
 
 const Unit := preload("res://Unit.gd")
+const ItemInstances := preload("res://ItemInstances.gd")   # 装备实例库（equipment 存 uid、proto 存模板 id，此处互转）
 
 const PROTOS_PATH := "res://data/unit_prototypes.json"   # 内置原型
 const PRESETS_PATH := "user://unit_presets.json"         # 用户自存预设（跨次启动保留）
@@ -70,11 +71,18 @@ static func unit_to_proto(u) -> Dictionary:
 		if t in ["player", "ally", "enemy", "neutral", "flying"]:
 			continue
 		keep_tags.append(t)
+	# equipment 存实例 uid → proto 存模板 id（定义层）。按 uid 去重（双手占两槽=同一件），
+	# 两件同模板不同词条的实例在 proto 层各记一条模板 id（词条属实例态、campaign 层才保真）。
 	var equip_ids := []
+	var seen_uids := []
 	for slot in u.equipment:
-		var id = u.equipment[slot]
-		if not equip_ids.has(id):
-			equip_ids.append(id)
+		var uid: int = int(u.equipment[slot])
+		if seen_uids.has(uid):
+			continue
+		seen_uids.append(uid)
+		var tpl := ItemInstances.tpl_id(uid)
+		if tpl != "":
+			equip_ids.append(tpl)
 	var skill_lv := {}
 	for sid in u.skills:
 		skill_lv[sid] = u.skill_level(sid)
@@ -102,19 +110,36 @@ static func unit_to_proto(u) -> Dictionary:
 # campaign 条目 = proto（定义/养成）⊕ 跨战运行态（uid / 当前 HP / 当前护甲）。
 # 战斗内瞬态（AP/位置/buff/冷却）不入——那是战中临时存档（BattleState）的事。
 static func unit_to_campaign(u) -> Dictionary:
+	var equip_uids := {}   # slot -> 实例 uid（实例本体在 WorldState 的 item_instances 整库里，这里只存引用）
+	for slot in u.equipment:
+		equip_uids[slot] = int(u.equipment[slot])
 	return {
 		"uid": u.uid,
 		"proto": unit_to_proto(u),
+		"equip_uids": equip_uids,
 		"hp": int(u.stats.get("HP", 0)),
 		"armor": int(u.stats.get("armor", 0)),
 	}
 
 # 读档复原：make_unit 会 init_vitals 注满 —— 之后再覆写 HP/armor（绕开注满，战损跨存档保留）。
+# 装备走实例重挂（equip_uids → equip_instance，词条/耐久保真）；前提＝ItemInstances 已先于 roster 载入。
+# 旧档无 equip_uids 时回退 proto.equip 模板路径（造新实例）。
 static func unit_from_campaign(entry: Dictionary):
 	var proto = entry.get("proto", {})
 	if typeof(proto) != TYPE_DICTIONARY:
 		proto = {}
+	var has_inst: bool = typeof(entry.get("equip_uids", null)) == TYPE_DICTIONARY
+	if has_inst:
+		proto = proto.duplicate(true)
+		proto.erase("equip")   # 防 make_unit 按模板另造一套新实例
 	var u = make_unit(proto, str(proto.get("default_faction", "player")), -1, -1)   # col/row=-1＝待命（非战斗中）
+	if has_inst:
+		var done := []
+		for slot in entry["equip_uids"]:
+			var iuid := int(entry["equip_uids"][slot])
+			if iuid > 0 and not done.has(iuid):
+				done.append(iuid)
+				u.equip_instance(iuid)
 	u.uid = int(entry.get("uid", 0))
 	u.stats["HP"] = clampi(int(entry.get("hp", u.stats.get("HP", 0))), 0, int(u.effective_stat("HP_max")))
 	u.stats["armor"] = clampi(int(entry.get("armor", u.stats.get("armor", 0))), 0, int(u.effective_stat("armor_max")))

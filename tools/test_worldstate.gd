@@ -32,11 +32,14 @@ func _initialize() -> void:
 	var u2 = UnitFactory.make_unit(protos[protos.size() - 1], "ally", -1, -1)
 	ws.add_to_roster(u1)
 	ws.add_to_roster(u2)
-	ck(u1.uid == 1 and u2.uid == 2, "入册补发 uid 1/2（实得 %d/%d）" % [u1.uid, u2.uid])
+	# 注：make_unit 装备原型武器会创建物品实例、也消耗共享计数器（unit/item 共用 🔒）——
+	# 所以只断言「唯一 + 单调」，不硬编码具体值。
+	ck(u1.uid > 0 and u2.uid > 0 and u1.uid != u2.uid, "入册补发 uid 唯一（实得 %d/%d）" % [u1.uid, u2.uid])
 	ws.add_to_roster(u1)
 	ck(ws.roster.size() == 2, "重复入册忽略")
+	var before_mint: int = ws.next_uid
 	var m := WorldState.mint_uid()
-	ck(m == 3 and ws.next_uid == 4, "mint 走档内计数器（实得 %d, next=%d）" % [m, ws.next_uid])
+	ck(m == before_mint and ws.next_uid == before_mint + 1, "mint 走档内计数器且单调（实得 %d, next=%d）" % [m, ws.next_uid])
 
 	# 3) 模拟战后状态：战损 + 养成 + 世界状态
 	u1.stats["HP"] = maxi(1, int(u1.stats.get("HP", 10)) - 3)   # 带伤
@@ -56,14 +59,14 @@ func _initialize() -> void:
 	ck(ld != null, "load_campaign 非空")
 	if ld != null:
 		ck(ld.save_version == WorldState.SAVE_VERSION, "save_version")
-		ck(ld.next_uid == 4, "next_uid 续存（实得 %d）" % ld.next_uid)
+		ck(ld.next_uid == ws.next_uid, "next_uid 续存（要 %d 实得 %d）" % [ws.next_uid, ld.next_uid])
 		ck(ld.clock_hours == 37, "clock_hours")
 		ck(ld.ironman == true, "ironman flag")
 		ck(int(ld.flags.get("chapter", 0)) == 2 and bool(ld.flags.get("met_smith", false)), "flags")
 		ck(int(ld.reputation.get("empire", 0)) == 10 and int(ld.reputation.get("lizard", 0)) == -5, "reputation")
 		ck(ld.roster.size() == 2, "roster 数量")
-		var r1 = ld.roster_by_uid(1)
-		var r2 = ld.roster_by_uid(2)
+		var r1 = ld.roster_by_uid(u1.uid)
+		var r2 = ld.roster_by_uid(u2.uid)
 		ck(r1 != null and r2 != null, "按 uid 找回两单位")
 		if r1 != null:
 			ck(r1.unit_name == u1.unit_name, "u1 名字")

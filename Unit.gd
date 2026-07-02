@@ -5,7 +5,8 @@ extends RefCounted
 ## 属性口径见 docs/单位系统设计.md「第一层属性」：默认值可为 0（面板 + 修正）。
 
 const STANCE_TAGS := ["player", "ally", "enemy", "neutral"]   # 阵营立场 tag
-const ItemDB := preload("res://ItemDB.gd")                   # 物品注册表（装备查表）
+const ItemDB := preload("res://ItemDB.gd")                   # 物品模板注册表（模板查表）
+const ItemInstances := preload("res://ItemInstances.gd")     # 物品实例库（每件装备独立实例；消费合成视图）
 const TraitDB := preload("res://TraitDB.gd")                 # 特性注册表（特性查表）
 const SkillDB := preload("res://SkillDB.gd")                 # 技能注册表（技能查表）
 const EquipSlots := preload("res://EquipSlots.gd")          # 槽位 / 槽位资格（tag 驱动装备资格）
@@ -86,7 +87,8 @@ var effects := []
 # 每条 = {stat, op:"flat"/"pct"/"eff", value, source, nature?}；effective_stat 三层解析。
 var modifiers := []
 
-# —— 已装备：slot_id -> item_id（双手武器占 main_hand + off_hand 两槽）——
+# —— 已装备：slot_id -> 实例 uid(int)（双手武器占 main_hand + off_hand 两槽、同一 uid）——
+# 物品数据一律经 ItemInstances.view(uid) 取合成视图（模板 ⊕ 词条/耐久/状态）。
 var equipment := {}
 
 # —— 已学技能：skill_id -> {level:int(1..max), cd:int(剩余冷却,按本单位 turn), uses:int(本战剩余次数)} ——
@@ -225,9 +227,21 @@ func set_trait(id: String) -> void:
 		modifiers.append(mod)
 	recompute_derived()   # 特性可能改四维（如天性武者 +体力）→ 重算派生属性
 
-# 装备一件物品（按 id）；双手武器占 main_hand+off_hand。成功 true、被需求挡下 false。
+# 装备（模板 id 便捷入口）：从模板**造新实例**再装——原型/预设/沙盒路径零改动。
+# 装失败回收孤儿实例。成功 true。
 func equip(item_id: String) -> bool:
-	var item = ItemDB.get_item(item_id)
+	var uid := ItemInstances.create(item_id)
+	if uid == 0:
+		return false
+	if equip_instance(uid):
+		return true
+	ItemInstances.destroy(uid)
+	return false
+
+# 装备一件**已存在的实例**（按 uid）；双手武器占 main_hand+off_hand（同一 uid）。
+# campaign 读档重挂 / 将来背包·铁匠都走这条。
+func equip_instance(uid: int) -> bool:
+	var item = ItemInstances.view(uid)
 	if item == null or not can_equip(item):
 		return false
 	var primary := str(item.get("slot", ""))
@@ -240,26 +254,23 @@ func equip(item_id: String) -> bool:
 		if equipment.has(s):
 			unequip(s)
 	for s in slots:
-		equipment[s] = item_id
-	_apply_item_mods(item, "equip:" + primary)
+		equipment[s] = uid
+	_apply_item_mods(item, uid)
 	return true
 
-# 卸下某槽的物品（双手武器从任一槽卸都连带清两槽 + 去掉它的修正）。
-# 天生武器（innate）永不卸下/缴械——直接忽略。
+# 卸下某槽的物品（双手武器从任一槽卸都连带清两槽 + 去掉它的修正，按 uid 配对）。
+# 天生武器（innate）永不卸下/缴械——直接忽略。卸下不销毁实例（将来进背包）。
 func unequip(slot: String) -> void:
 	if not equipment.has(slot):
 		return
-	var item_id = equipment[slot]
-	var item = ItemDB.get_item(item_id)
+	var uid: int = int(equipment[slot])
+	var item = ItemInstances.view(uid)
 	if item != null and item.get("innate", false):
 		return
-	var primary := slot
-	if item != null:
-		primary = str(item.get("slot", slot))
-	remove_modifiers_by_source("equip:" + primary)
+	remove_modifiers_by_source_prefix("equip:%d:" % uid)
 	var to_clear := []
 	for s in equipment:
-		if equipment[s] == item_id:
+		if int(equipment[s]) == uid:
 			to_clear.append(s)
 	for s in to_clear:
 		equipment.erase(s)
@@ -290,24 +301,33 @@ func set_airborne(v: bool) -> void:
 			tags.append("ground")
 
 # 基础攻击：空中优先副手（足爪/抓取）、地面优先主手（翼爪/撕裂）；该手无武器则退另一手 / 徒手。
+# 经合成视图取（深拷）——调用方拿到的 attack 不再是共享模板引用。
 func basic_attack() -> Dictionary:
 	var primary := "off_hand" if is_airborne() else "main_hand"
 	for slot in [primary, "main_hand", "off_hand"]:
-		var item = ItemDB.get_item(str(equipment.get(slot, "")))
+		var item = ItemInstances.view(int(equipment.get(slot, 0)))
 		if item != null and item.has("attack"):
 			return item["attack"]
 	return UNARMED_ATTACK
 
-func _apply_item_mods(item: Dictionary, source: String) -> void:
-	var label := str(item.get("name", source))
+# 挂装备修正：每条 mod 唯一 source（"equip:<uid>:<序号>"）——同件装备的模板 mod 与词条 mod
+# 即使同 stat 同 op 也各自生效（effective_stat 的「同 source 去重取高」只该压重复 buff，不该吃词条）。
+func _apply_item_mods(item: Dictionary, uid: int) -> void:
+	var label := str(item.get("name", ""))
+	var idx := 0
 	for m in item.get("mods", []):
 		var mod: Dictionary = m.duplicate()
-		mod["source"] = source
+		mod["source"] = "equip:%d:%d" % [uid, idx]
 		mod["source_label"] = label   # 人类可读来源名（tooltip 用）
 		modifiers.append(mod)
+		idx += 1
 
 func remove_modifiers_by_source(source: String) -> void:
 	modifiers = modifiers.filter(func(m): return m.get("source", "") != source)
+
+# 按前缀摘修正（装备实例的多条 mod 共享 "equip:<uid>:" 前缀）
+func remove_modifiers_by_source_prefix(prefix: String) -> void:
+	modifiers = modifiers.filter(func(m): return not str(m.get("source", "")).begins_with(prefix))
 
 # ============ 技能（已学状态 / 学习 / 冷却 / 本战次数）============
 # 数值口径：冷却 = floor(base + 智力×per_int)（≥0）；本战次数 = floor(base + 智力×per_int)（≥1）。
