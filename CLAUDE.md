@@ -4,9 +4,22 @@
 平顶六边形战场 + 角色养成。**定位 🔒（2026-07-02）：火焰纹章式战术战斗 + 战场兄弟式沙盒经营**——大地图区域解锁 + 自由移动的长线单周目（肉鸽短局循环已放弃；保留开局身份/随机词条/随机特性池这类随机性要素）。
 
 ## 现在做到哪
-- **地图编辑器**：已成型可用（地形层绘制 / 存读 / 撤销 / 平移缩放 / **区域层**〔部署区·触发区〕/ 地图库 / 地形配置外置）。
-- **战斗 sandbox**：已相当完整——四维派生第一层属性、装备 + 修正管线、命中/格挡/暴击判定、ZOC+借机、敌方 AI（警觉/仇恨）、行动顺序槽、攻击动画+音效、胜负+重开、主动技能首条（战场救治）。剩各动作 AP 消耗、各兵种基础值、元素系统等待接。战斗数学（回合结构、单 AP+移动力、命中/伤害/护甲/抗性）均已敲定 🔒。详见实现现状 / 单位系统设计。
-- **🟢 当前主线 ＝ 编辑器关卡创作能力**（见 [docs/编辑器合并规划.md](docs/编辑器合并规划.md)）。**定位校正 🔒：编辑器＝创作可玩关卡(authoring) / 沙盒＝自由测试场，共用底层、不并成一个。** 已落地：`MapIO` 统一读写 + 地图 v3 `units` + `Game.tscn` 双模式内存试玩 + **编辑器四图层齐**（地形 / 区域 / 单位 / 触发器，均可编辑+存盘+试玩）。**🟢 编辑器关卡创作已大致完成**（四图层〔地形/区域/单位含深编/触发器〕+ 全局/图级地形数据 + 试玩）。**✅ 战斗数值地基管线已通**（2026-07-01：eff 效能桶 + `CombatResolver` 伤害分量化减伤链 + buff↔modifier 桥；对上 spec 验算，键约定 `res_*`/`armor_res_*`/`dr_flat_*`）。**✅ 感知系统已落地**（2026-07-01）：**Phase 1**＝视野 `sight` + 视线 LOS + 三态战争迷雾 + AI 视野驱动 + 重塑 targeting/悬停；**Phase 2 环境**＝日夜 + 天气（运行时天气机 + `set_weather` 触发器 + 编辑器「环境」面板）+ **天气 VFX 视觉叠层**（`WeatherVFX`，Alenia Studios 素材·CC BY 4.0 见 [CREDITS.md](CREDITS.md)）；headless 全 PASS；见 [docs/感知系统.md](docs/感知系统.md)。**当前主线 🟢＝Meta 层**（需求 → [docs/meta层需求提炼_1.md](docs/meta层需求提炼_1.md)，架构 → [docs/meta架构规划.md](docs/meta架构规划.md)）。**✅ M1 根基已完成**（2026-07-02）：`WorldState`(campaign 聚合根+uid 计数器)/`SaveIO`(user://saves)/`ItemInstances`(物品实例化：词条/耐久载体，合成视图 `view(uid)`，`Unit.equipment` 存实例 uid)——headless 测试全 PASS。**✅ M2 WorldClock 已完成**（2026-07-02）：`WorldClock.gd` 战外时间单一源（`advance(ws,hours)` 逐小时调度表+恢复占位结算）+ 日夜映射外置（environment.json `from_hour`→`EnvDB.time_for_hour`）+ Sandbox 日夜接线（地图显式>战役时钟>昼，退战回读时钟 🔒）——headless 全 PASS。**✅ M3 EventEngine 已完成**（2026-07-02）：`EventEngine.gd` when/do 事件单一源（动作元数据注册表〔编辑器/运行时同源〕+ 宿主原语转发 + `enter_region/enter_tile/timer` 评估 + once/chance/冷却/全局间隔闸门 + fired 两层分离〔战斗局部 vs `WorldState.event_*` 持久〕）——headless 全 PASS。**✅ M4 Overworld 已完成**（2026-07-02）：`Overworld.tscn` 大地图（移动=Dijkstra+推时钟 🔒/扎营/enter_tile·timer 事件/日夜 tint/自动存档 auto 槽）+ StartMenu 战役入口（新开局/继续）+ `map_type` schema + `TerrainDB.move_cost` 单一实现——headless 全 PASS。**✅ M5 死门+重伤+BattleIO 已完成**（2026-07-02）：`Checks` d20 原语 + 死门全套（资格=友方+敌 elite/检定 15+5·回合/被命中−1/−3 重伤·铁人真死/+3 爬回/死门算存活）+ `BattleIO` 快照进·结果出（双所有权根治）+ 经验升级（每级+3属性+1技能点）+ `kill_stats` + **战役战斗闭环**（大地图 start_battle→出战→结算回写→回大地图）——headless 全 PASS。**✅ M6 营地职务框架已完成**（2026-07-02）：`jobs.json`+`JobDB`+`WorldState.camp_jobs/job_holder`（重伤不在岗）+ 医生恢复速率×2 占位（承载=改每小时速率 🔒）+ Overworld 指派面板——headless 全 PASS。**✅ M7 地点系统已完成**（2026-07-02）：`locations.json`+`LocationDB`（城/村=服务集合，遗迹/据点=site+respawn_hours）+ 地图 `locations` 字段（编辑器/沙盒透传保真）+ `WorldState.gold`/`location_cleared_at` + 据点刷新=惰性判定 + 讨伐闭环（`BattleSetup.context`→胜后落肃清账）+ Overworld 旗帜标记与地点面板（休整已接入；交易/招募/铁匠 ⏳planned）——headless 全 PASS。**✅ M8 对话系统已完成**（2026-07-02）：`dialogues.json`+`DialogueDB`+`DialogueUI`（两侧立绘+文本+选项；纯演出/分支两类；set_flags+rep 效果、无档跳过）+ EventEngine `dialogue` 动作（编辑器表单自动跟上）+ 三触发场景齐（大地图事件·据点交谈·**战场内**）——headless 全 PASS。**✅ M9 派系声望已完成**（2026-07-02）：`factions.json`+`FactionDB`（声望唯一读写口 rep_of/add_rep±100 钳制+hostile 阈值）+ 敌对遭伏（敌对派系→enter_tile 伪触发器复用 EventEngine 闸门）+ `add_rep`/`set_flag` 动作 + 声望面板——**meta 主线 M1~M9 全部完成**，headless 全 PASS。**➕ WorldSim 动态单位 🟡 v1**（2026-07-02）：商队/巡逻队/兽群/劫道者游团随「**玩家移动=世界回合**」在大地图活动（`world_units.json`+`WorldUnitDB`+`WorldSim.tick`，实例随档），敌对单位追击→战斗→战胜覆灭闭环——设计与待定 → [docs/大地图动态单位.md](docs/大地图动态单位.md)。**✅ 物品编辑器修复+UX 批**（2026-07-02）：改 id=复制/✕按钮 free-during-signal/写盘不设防 三 bug 修 + D6 小件合并 + EquipSlots 死码清 + 搜索/副本/Ctrl+S/脏守卫/id 校验/图标缩略图；⚠️ **DB 铁律：刷新函数叫 `reload_data` 不叫 `reload`**（脚本资源上外部 reload() 命中原生 Script.reload，见架构.md）。**🟡 地块美术升级待拍板** → [docs/地块美术升级.md](docs/地块美术升级.md)（边线河流 mock+地形刷 scope 分层+P1~P3）。**✅ Sandbox 解耦 Phase 0~4 完成**（2026-07-02）：`BattleState.gd` 战斗模型层（RefCounted：30 字段+53 规则方法+**战中 suspend 快照 `to_dict/restore`**〔单位主键=池下标 🔒〕）；Sandbox=视图/输入/编排宿主、同名薄访问器保 画布/EventEngine/测试 三方契约零破坏；模型层可脱离场景独立测（`tools/test_battlestate.gd`，基线 14 套全 PASS）——见 [docs/解耦规划.md](docs/解耦规划.md)。下一步候选＝WorldSim/美术 待定项验收、任务线内容层、suspend 存档 UI 接线；技术债见 [docs/路线图.md](docs/路线图.md)。
+> 逐条实录在 [docs/实现现状.md](docs/实现现状.md)、未做项与技术债在 [docs/路线图.md](docs/路线图.md)。本段只给里程碑总览，别在此展开细节。
+
+**✅ 已完成（截至 2026-07-02）**
+- **地图编辑器**：四图层齐（地形 / 区域〔部署·触发〕/ 单位〔含深编〕/ 触发器，均可编辑+存盘+试玩）+ 全局/图级地形数据 + 地图库 + 物品编辑器。**编辑器关卡创作大致完成**。
+- **战斗 sandbox**：四维派生属性、装备+修正管线、命中/格挡/暴击判定、ZOC+借机、敌方 AI（警觉/仇恨）、行动顺序槽、攻击动画+音效、胜负+重开、主动技能首条。战斗数学（回合结构·单 AP+移动力·命中/伤害/护甲/抗性）已敲定 🔒。
+- **战斗数值地基**（管线已通）：eff 效能桶 + `CombatResolver` 伤害分量化减伤链 + buff↔modifier 桥。剩元素系统**内容**待填（管线就绪）。
+- **感知系统 P1+P2**：视野 `sight` + LOS + 三态战争迷雾 + AI 视野驱动；日夜 + 天气 + 天气 VFX 叠层。⚠️ VFX 用 Alenia Studios 素材（CC BY 4.0），**上线前须游戏内署名** → [CREDITS.md](CREDITS.md)。
+- **Meta 层 M1~M9 全部完成**：M1 持久化+物品实例化 / M2 WorldClock / M3 EventEngine / M4 Overworld 大地图 / M5 死门+BattleIO+战役战斗闭环 / M6 营地职务 / M7 地点系统 / M8 对话 / M9 派系声望。需求真值 🔒 → [docs/meta层需求提炼_1.md](docs/meta层需求提炼_1.md)。
+- **Sandbox 解耦 Phase 0~4**：`HexGrid` 纯几何 + `BattleState` 战斗模型层（RefCounted，30 字段+53 规则方法+战中 suspend 快照 `to_dict/restore`）；Sandbox=视图/输入/编排宿主。战略与决策 → [docs/解耦规划.md](docs/解耦规划.md)。
+- **测试基线**：14 套 headless 全 PASS（`tools/test_*.gd`）。
+
+**🟡 待拍板 / 验收**
+- **WorldSim 动态单位 v1**（框架已落地）：六项待定等验收 → [docs/大地图动态单位.md](docs/大地图动态单位.md) §4。
+- **地块美术升级**（设计草案）→ [docs/地块美术升级.md](docs/地块美术升级.md)。
+
+**🟢 下一步候选**：WorldSim/美术待定项验收、任务线内容层（主线+支线）、元素系统内容、suspend 存档 UI 接线。
 
 ## 工程结构
 - 引擎：`D:\godot\Godot_v4.6.2-stable_mono_win64.exe`（带控制台的 `..._console.exe` 用于看日志/跑测试）。
@@ -22,9 +35,9 @@
 - [docs/词条系统.md](docs/词条系统.md) —— 🟡草案：**装备词条 / 生成 roll / 重铸 / 铁匠（稀有度＝正面词条 · 状态＝负面·无·正面）** 设计（远期锻造/肉鸽那轮做；关键前置＝物品实例化）。
 - [docs/情报与烹饪系统.md](docs/情报与烹饪系统.md) —— 🟡设计记录（2026-07-02）：**敌方信息解锁/图鉴 + 烹饪食物 buff**（远期实现；⚠️ 其 §3.1 三处铺垫须埋进 M5：BattleResult 击杀统计 / permanent 透传 / BattleSetup 可序列化+provisions 挂点）。
 - [docs/标签词典.md](docs/标签词典.md) —— **tag 唯一查阅处**（阵营 / 移动型 / 地形 / 武器 / 技能 / 稀有度 / 角色身份…）。
-- [docs/编辑器合并规划.md](docs/编辑器合并规划.md) —— 编辑器创作路线：已完成里程碑 + **活跃余项**（placed 单位深编 / 图级 terrain_overrides）+ 决策状态 + schema 草案。
-- [docs/meta层需求提炼_1.md](docs/meta层需求提炼_1.md) —— **Meta 层需求真值 🔒**：大地图/事件/营地/人员/装备实例化/派系/对话/技能成长/魔法/死门（§1 已确认 / §2 待定勿实现 / §3 实现顺序 / §4 文档冲突清单）。
-- [docs/meta架构规划.md](docs/meta架构规划.md) —— 🟡草案：为实现 meta 层的**架构整理 + 新增支持**规划（分层/持久化/前置模块/分期）。
+- [docs/编辑器合并规划.md](docs/编辑器合并规划.md) —— 编辑器创作路线（✅ 主体完成）：定位 🔒 + 决策状态 + **前瞻 schema 草案**（effect_templates/cell_tags）。
+- [docs/meta层需求提炼_1.md](docs/meta层需求提炼_1.md) —— **Meta 层需求真值 🔒**：大地图/事件/营地/人员/装备实例化/派系/对话/技能成长/魔法/死门（§1 已确认 / §2 待定勿实现 / §3 实现顺序 / §4 文档冲突〔已同步〕）。
+- [docs/meta架构规划.md](docs/meta架构规划.md) —— Meta 层架构（✅ M0~M9 已实现）：留 **§1 分层图 + §6 🔒 架构决策**（uid/时间粒度/存档/战斗不耗时/沙盒边界）。
 - [docs/解耦规划.md](docs/解耦规划.md) —— Sandbox 解耦战略：**✅ Phase 0~4 全部完成**（HexGrid + BattleState 模型层 + suspend 快照层）；留决策依据/护栏/后续排期。
 
 > 旧的 `地图编辑器规划.md` 已过时、不再维护，忽略它。
