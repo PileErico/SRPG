@@ -297,15 +297,11 @@ func _ellipse_pts(center: Vector2, rx: float, ry: float) -> PackedVector2Array:
 func _draw_icon(u, c: Vector2, r: float, modulate: Color = Color.WHITE) -> void:
 	if u.icon == "":
 		return
-	var tex = _get_icon(u.icon)
+	var tex = TextureCache.get_tex(u.icon)
 	if tex == null:
 		return
 	var s := r * 1.6
 	draw_texture_rect(tex, Rect2(c - Vector2(s, s) * 0.5, Vector2(s, s)), false, modulate)
-
-# 按路径取纹理并缓存（统一走 TextureCache，跨实例共享缓存）
-func _get_icon(path: String):
-	return TextureCache.get_tex(path)
 
 # 血条/护甲条共用尺寸：底黑窄条（同长同宽，护甲条叠在血条正上方）
 const BAR_W_MUL := 1.8       # 条宽 = r·该系数

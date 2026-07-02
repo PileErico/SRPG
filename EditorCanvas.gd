@@ -39,14 +39,10 @@ func _draw_units() -> void:
 		draw_arc(c, r, 0.0, TAU, 28, Color(0, 0, 0, 0.7), 2.0)
 		var proto = e.get("proto", {})
 		var icon := str(proto.get("icon", "")) if typeof(proto) == TYPE_DICTIONARY else ""
-		var tex = _get_icon(icon)
+		var tex = TextureCache.get_tex(icon)
 		if tex != null:
 			var s := r * 1.6
 			draw_texture_rect(tex, Rect2(c - Vector2(s, s) * 0.5, Vector2(s, s)), false, Color(1, 1, 1, 1.0 if on_unit else 0.6))
-
-# 按路径取纹理并缓存（统一走 TextureCache，跨实例共享缓存）
-func _get_icon(path: String):
-	return TextureCache.get_tex(path)
 
 # 区域层：每个区域一片半透明色块。当前层＝区域时正常显示、当前区域更亮 + 描边；
 # 当前层＝地形时整体压淡（让你画地形时仍看得见区域、但不抢眼）。

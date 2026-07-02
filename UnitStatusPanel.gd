@@ -629,7 +629,7 @@ func _build_info(info: VBoxContainer, u) -> void:
 	var top := HBoxContainer.new()
 	top.add_theme_constant_override("separation", 14)
 	info.add_child(top)
-	var tex = _load_portrait(u.portrait)
+	var tex = TextureCache.get_tex(u.portrait)
 	if tex != null:
 		var av := TextureRect.new()
 		av.texture = tex
@@ -960,7 +960,7 @@ func _fill_equip_slot(box: Control, u, slot_id: String) -> void:
 		if sb is StyleBoxFlat:
 			sb.border_color = rc
 			sb.set_border_width_all(2)
-	var tex = _load_portrait(str(item.get("icon", "")))   # 复用通用纹理加载
+	var tex = TextureCache.get_tex(str(item.get("icon", "")))   # 复用通用纹理加载
 	if tex == null:
 		return
 	var ic := TextureRect.new()
@@ -1204,18 +1204,6 @@ func _is_pct_stat(key: String) -> bool:
 func _build_item_tooltip(item) -> Control:
 	return ItemTooltip.render(item)
 
-# tooltip 里的标签：每个 tag 一个浅灰圆角 chip（中文显示），自动换行
-func _tip_tags(parent: Node, tags) -> void:
-	if typeof(tags) != TYPE_ARRAY or tags.is_empty():
-		return
-	var flow := HFlowContainer.new()
-	flow.add_theme_constant_override("h_separation", 4)
-	flow.add_theme_constant_override("v_separation", 4)
-	flow.custom_minimum_size = Vector2(150, 0)   # 给个宽度让 chip 换行、整体不至太宽
-	for t in tags:
-		flow.add_child(_tag_chip(TagDB.cn(str(t))))
-	parent.add_child(flow)
-
 # 单个标签 chip：浅灰圆角方底 + 中文
 func _tag_chip(text: String) -> Control:
 	var p := PanelContainer.new()
@@ -1288,7 +1276,3 @@ func _locked_slot(sz: Vector2) -> Control:
 	x.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	p.add_child(x)
 	return p
-
-# 立绘/图标加载（统一走 TextureCache，跨实例共享缓存）
-func _load_portrait(path: String):
-	return TextureCache.get_tex(path)

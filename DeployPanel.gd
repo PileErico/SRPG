@@ -83,7 +83,7 @@ func _ready() -> void:
 	_name_dlg.ok_button_text = "保存"
 	_name_dlg.get_cancel_button().text = "取消"
 	var box := VBoxContainer.new()
-	box.add_child(_mklabel("预设名"))
+	box.add_child(_lbl("预设名"))
 	_name_edit = LineEdit.new()
 	_name_edit.custom_minimum_size = Vector2(260, 0)
 	box.add_child(_name_edit)
@@ -394,9 +394,6 @@ func _lblw(t: String, w: int) -> Label:
 	var l := _lbl(t)
 	l.custom_minimum_size = Vector2(w, 0)
 	return l
-
-func _mklabel(t: String) -> Label:
-	return _lbl(t)
 
 func _label_for(key: String) -> String:
 	if FOUR_CN.has(key):
