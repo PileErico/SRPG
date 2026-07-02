@@ -534,11 +534,8 @@ func _build_ui() -> void:
 	canvas.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	main.add_child(canvas)
 	# 环境叠层（都挂 canvas 下 → 覆盖战场视口、不盖侧栏、点击穿透）：
-	# ① 夜晚变暗滤镜（先加＝在下层，压暗地形/单位/迷雾）
-	_night_overlay = ColorRect.new()
-	_night_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_night_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_night_overlay.visible = false
+	# ① 夜晚变暗滤镜（先加＝在下层，压暗地形/单位/迷雾；构造/刷新单一实现在 EnvDB，大地图同用）
+	_night_overlay = EnvDB.make_time_overlay()
 	canvas.add_child(_night_overlay)
 	# ② 天气 VFX（后加＝在上层，雨雪雾画在变暗之上）
 	_weather_vfx = WeatherVFX.new()
@@ -690,16 +687,10 @@ func faction_color(f: String) -> Color:
 func _terrain_entry(tile):
 	return TerrainDB.entry_for(tile)
 
-# 该 tile 的有效 move 块：优先本图 terrain_overrides（整块覆盖），否则全局 terrains.json。
+# 该 tile 的有效 move 块：图级覆盖 ?? 全局（合并规则单一实现在 TerrainDB.effective_move，大地图同用）。
 # 图级覆盖 = 编辑器「地形数据·本图」写的，只影响这张图（通行/成本），不动全局。
 func _effective_move(tile) -> Dictionary:
-	if not _map_terrain_overrides.is_empty():
-		var key := "%s/%s" % [str(tile.get("terrain", "")), str(tile.get("variant", ""))]
-		var ov = _map_terrain_overrides.get(key)
-		if typeof(ov) == TYPE_DICTIONARY and typeof(ov.get("move")) == TYPE_DICTIONARY:
-			return ov["move"]
-	var e = _terrain_entry(tile)
-	return e.get("move", {}) if e != null else {}
+	return TerrainDB.effective_move(tile, _map_terrain_overrides)
 
 func color_for_tile(tile) -> Color:
 	var e = _terrain_entry(tile)
@@ -1204,6 +1195,8 @@ func _ai_step_toward(unit, target) -> bool:
 	unit.row = pick.y
 	_refresh_info()
 	await _animate_path(unit, path)
+	if phase != "battle" or battle_over:
+		return true   # 动画期间战斗被退出/结束（exit_battle 无 _animating 守卫）：别把触发器动作打进已重建的布置状态
 	# AI 走位也评估触发器（还旧债：by_faction:"any"/"enemy" 曾是死键——只有玩家侧 _commit_move 一处钩子）
 	EventEngine.check_enter_region(_map_triggers, unit, _all_region_cells, _fired_triggers, self)
 	return true
@@ -2558,15 +2551,9 @@ func _apply_env_modifiers() -> void:
 	if phase == "battle":
 		_recompute_vision()
 
-# 刷新环境视觉叠层：夜晚全屏变暗滤镜（读日夜 tint）+ 天气 VFX（读 _cur_weather）。
+# 刷新环境视觉叠层：夜晚全屏变暗滤镜（EnvDB.apply_time_tint 单一实现）+ 天气 VFX（读 _cur_weather）。
 func _update_env_overlays() -> void:
-	if _night_overlay != null:
-		var tint := EnvDB.time_tint(_cur_time)
-		if tint != "":
-			_night_overlay.color = Color.html(tint)
-			_night_overlay.visible = true
-		else:
-			_night_overlay.visible = false
+	EnvDB.apply_time_tint(_night_overlay, _cur_time)
 	if _weather_vfx != null:
 		_weather_vfx.set_weather(_cur_weather)
 

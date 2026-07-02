@@ -6,9 +6,10 @@ extends Control
 const WorldState := preload("res://WorldState.gd")
 const SaveIO := preload("res://SaveIO.gd")
 
-const AUTO_SLOT := "auto"   # 与 Overworld.AUTO_SLOT 一致（自动存档槽名）
-
 func _ready() -> void:
+	# 回到菜单＝退出战役语义：清 current（活档已由 Overworld 落盘、「继续」从磁盘重读，保留无收益）。
+	# 不清则 current 泄漏进沙盒/编辑器——日夜跟战役时钟走、实例/uid 写进战役档，违反「沙盒不挂档 🔒」。
+	WorldState.activate(null)
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 
 	var center := CenterContainer.new()
@@ -33,7 +34,7 @@ func _ready() -> void:
 
 	box.add_child(_spacer(18))
 	box.add_child(_menu_button("战役 · 新开局", _on_new_campaign, false))
-	box.add_child(_menu_button("战役 · 继续", _on_continue_campaign, not SaveIO.list_slots().has(AUTO_SLOT)))
+	box.add_child(_menu_button("战役 · 继续", _on_continue_campaign, not SaveIO.list_slots().has(SaveIO.AUTO_SLOT)))
 	box.add_child(_menu_button("编辑器（编辑 · 试玩）", _on_game, false))
 	box.add_child(_menu_button("沙盒模式", _on_sandbox, false))
 	box.add_child(_menu_button("地图编辑", _on_map_editor, false))
@@ -61,7 +62,7 @@ func _on_new_campaign() -> void:
 	get_tree().change_scene_to_file("res://Overworld.tscn")
 
 func _on_continue_campaign() -> void:
-	var ws = SaveIO.load_campaign(AUTO_SLOT)
+	var ws = SaveIO.load_campaign(SaveIO.AUTO_SLOT)
 	if ws == null:
 		push_warning("StartMenu：自动档读取失败")
 		return

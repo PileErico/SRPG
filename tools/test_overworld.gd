@@ -7,6 +7,7 @@ const MapIO := preload("res://MapIO.gd")
 const TerrainDB := preload("res://TerrainDB.gd")
 const WorldState := preload("res://WorldState.gd")
 const SaveIO := preload("res://SaveIO.gd")
+const EnvDB := preload("res://EnvDB.gd")
 const OverworldScript := preload("res://Overworld.gd")
 
 const SLOT := "_test_m4"
@@ -75,6 +76,50 @@ func _initialize() -> void:
 	ck(ow.hover_text(19, 2).contains("不可通行"), "悬停：深水显示不可通行")
 	ck(ow.hover_text(8, 8).contains("小时"), "悬停：可走格显示行程耗时")
 	ow.free()   # Control 是 Node：手动释放（未进树无人管）
+
+	# 6) _travel/_on_camp 闭环（M4 审查补：核心语义逐格推钟+事件钩+自动存档；注入独立槽，绝不碰玩家 auto 档）
+	var ow2 = OverworldScript.new()
+	var ws2 = WorldState.start_new()
+	ow2._save_slot = "_test_m4_travel"
+	ow2._ensure_campaign()   # current 已有 → 非 transient（真存档路径）
+	ck(not ow2._transient, "已有档不标 transient")
+	ow2._load_map()
+	# 换成受控触发器：every_hours=1 的 timer——每格推 2h 必触发，验证行进中事件评估在跑
+	ow2._map_triggers = [{"id": "t_test", "when": {"event": "timer", "every_hours": 1}, "do": [{"action": "show_message", "text": "tick"}]}]
+	ws2.party_col = 8
+	ws2.party_row = 8
+	var tpath: Array = ow2.find_path(Vector2i(8, 8), Vector2i(11, 8))   # 沿道路 3 格（cost 1/格）
+	ck(tpath.size() == 4, "道路 3 格路径（含起点 4 节点）")
+	var t0: int = ws2.clock_hours
+	await ow2._travel(tpath)
+	ck(ws2.party_col == 11 and ws2.party_row == 8, "travel 落终点")
+	ck(ws2.clock_hours == t0 + 3 * 1 * ow2.HOURS_PER_COST, "travel 逐格推钟（3 格×cost1×%dh，实得 +%d）" % [ow2.HOURS_PER_COST, ws2.clock_hours - t0])
+	ck(ws2.event_timer_last.has("t_test"), "行进中 timer 事件被评估（timer_last 记账）")
+	ck(SaveIO.list_slots().has("_test_m4_travel"), "travel 完成自动存档写入注入槽")
+	var t1: int = ws2.clock_hours
+	ow2._on_camp()
+	ck(ws2.clock_hours == t1 + ow2.CAMP_HOURS, "扎营 +%dh" % ow2.CAMP_HOURS)
+	SaveIO.delete_slot("_test_m4_travel")
+	ow2.free()
+
+	# 7) 无档兜底＝transient：绝不自动落盘（审查确认的「兜底档覆盖玩家 auto 真档」防线）
+	WorldState.current = null
+	var ow3 = OverworldScript.new()
+	ow3._save_slot = "_test_m4_transient"
+	ow3._ensure_campaign()
+	ck(ow3._transient, "无档兜底标记 transient")
+	ow3._autosave()
+	ck(not SaveIO.list_slots().has("_test_m4_transient"), "transient 档不落盘")
+	ow3.free()
+
+	# 8) EnvDB.time_for_hour 数据分支（临时替换静态表、测完恢复）
+	EnvDB.time_for_hour(0)   # 触发 _ensure 加载
+	var bak_times: Array = EnvDB._times
+	EnvDB._times = [{"id": "special", "label": "特"}, {"id": "day", "label": "昼", "from_hour": 6}]
+	ck(EnvDB.time_for_hour(3) == "day", "无 from_hour 时段不参与映射（3 点环回唯一有效时段）")
+	EnvDB._times = [{"id": "special", "label": "特"}]
+	ck(EnvDB.time_for_hour(12) == "special", "全无 from_hour → 第一个时段兜底")
+	EnvDB._times = bak_times
 
 	WorldState.current = null
 	if _fail == 0:

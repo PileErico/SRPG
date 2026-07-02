@@ -69,6 +69,17 @@ static func label_of(tile) -> String:
 	var e = entry_for(tile)
 	return str(e.label) if e != null else "未知"
 
+# tile 的有效 move 块：图级覆盖（overrides["terrain/variant"].move 整块替换）?? 全局表兜底。
+# 覆盖键格式/合并规则的单一实现——战斗（Sandbox._effective_move）与大地图（Overworld）共用，防两端解释分叉。
+static func effective_move(tile, overrides: Dictionary = {}) -> Dictionary:
+	if typeof(tile) == TYPE_DICTIONARY and not overrides.is_empty():
+		var key := "%s/%s" % [str(tile.get("terrain", "")), str(tile.get("variant", ""))]
+		var ov = overrides.get(key)
+		if typeof(ov) == TYPE_DICTIONARY and typeof(ov.get("move")) == TYPE_DICTIONARY:
+			return ov["move"]
+	var e = entry_for(tile)
+	return e.get("move", {}) if e != null else {}
+
 # move 块 → 对带 tags 单位的通行成本；-1＝不可通行（战斗寻路与大地图移动共用的单一实现）。
 # passable_by："all"＝任意 / "none"＝禁行 / [tag…]＝含其一可进；cost＝基础成本；tag_cost 按单位 tag 取更优（最小）。
 static func move_cost(mv, tags: Array) -> int:

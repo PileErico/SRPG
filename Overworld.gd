@@ -20,7 +20,7 @@ const OverworldCanvas := preload("res://OverworldCanvas.gd")
 const MAP_PATH := "res://maps/overworld/world.json"
 const HOURS_PER_COST := 2    # 占位：1 点地形通行成本 ＝ 2 小时行程（数值层后调）
 const CAMP_HOURS := 8        # 占位：扎营一次休整 8 小时（临时据点/职务＝M6）
-const AUTO_SLOT := "auto"    # 自动存档槽
+# 自动存档槽名单一源＝SaveIO.AUTO_SLOT（实例注入见 _save_slot）
 const STEP_DELAY := 0.12     # 行进逐格停顿（秒）
 const PARTY_TAGS: Array = [] # 队伍通行 tag（暂无船/坐骑——深水/墙 passable_by 列表对空 tags 关闭＝天然屏障）
 
@@ -36,6 +36,8 @@ var _log: RichTextLabel
 var _night_overlay: ColorRect
 var _moving := false                    # 行进中（忽略新指令）
 var _move_target := Vector2i(-1, -1)    # 当前行进目的地（画布标记用）
+var _save_slot: String = SaveIO.AUTO_SLOT   # 自动存档槽（单一源在 SaveIO；测试可注入独立槽）
+var _transient := false                 # 兜底建的调试档：只活内存、绝不自动落盘（防覆盖玩家 auto 真档）
 
 func _ready() -> void:
 	_ensure_campaign()
@@ -44,11 +46,14 @@ func _ready() -> void:
 	_build_ui()
 	_refresh_time_ui()
 	_log_line("抵达大地图。左键点击目标格移动；移动与扎营会推进时间。")
+	_autosave()   # 新开局立即落盘（否则首次移动前关窗＝战役无痕消失）；调试兜底档在 _autosave 内被拦
 
-# 无档兜底（直接跑本场景调试/headless 冒烟）：正常入口是 StartMenu 建/读档后进来
+# 无档兜底（直接跑本场景调试/headless 冒烟）：正常入口是 StartMenu 建/读档后进来。
+# 兜底档标记 transient——不自动落盘，防止调试直跑一步移动就覆盖玩家的 auto 真档。
 func _ensure_campaign() -> void:
 	if WorldState.current == null:
 		WorldState.start_new()
+		_transient = true
 
 func _load_map() -> void:
 	var res := MapIO.read_file(MAP_PATH)
@@ -60,6 +65,12 @@ func _load_map() -> void:
 		_map_terrain_overrides = res.get("terrain_overrides", {})
 		if str(res.get("map_type", "battle")) != "overworld":
 			push_warning("Overworld：地图 %s 的 map_type 不是 overworld（照常加载）" % MAP_PATH)
+		# 世界层触发器必须有 id：once/冷却/timer 状态按 id 随档持久，无 id 会退化成数组下标 key（"#N"），
+		# 地图改版增删触发器后旧档状态会错位到别的触发器（战斗侧每战清零无此患）。
+		for i in _map_triggers.size():
+			var t = _map_triggers[i]
+			if typeof(t) == TYPE_DICTIONARY and str(t.get("id", "")) == "":
+				push_warning("Overworld：triggers[%d]「%s」无 id——世界层持久状态将按下标记档，地图改版会错位；请补 id" % [i, str(t.get("label", "?"))])
 	else:
 		push_warning("Overworld：读不到 %s，回退全草原 %d×%d" % [MAP_PATH, width, height])
 		tiles = MapIO.grassland(width, height)
@@ -133,21 +144,11 @@ func left_click_cell(col: int, row: int) -> void:
 func _cell_in_bounds(col: int, row: int) -> bool:
 	return col >= 0 and col < width and row >= 0 and row < height
 
-# 队伍在该格的通行成本（-1=不可通行）：图级覆盖 ?? 全局 terrains.json，经 TerrainDB.move_cost 单一实现
+# 队伍在该格的通行成本（-1=不可通行）：覆盖合并 + 成本计算都走 TerrainDB 单一实现（与战斗侧同源）
 func _move_cost_at(col: int, row: int) -> int:
 	if not _cell_in_bounds(col, row):
 		return -1
-	var tile = tiles[row][col]
-	var mv = null
-	if not _map_terrain_overrides.is_empty():
-		var key := "%s/%s" % [str(tile.get("terrain", "")), str(tile.get("variant", ""))]
-		var ov = _map_terrain_overrides.get(key)
-		if typeof(ov) == TYPE_DICTIONARY and typeof(ov.get("move")) == TYPE_DICTIONARY:
-			mv = ov["move"]
-	if mv == null:
-		var e = TerrainDB.entry_for(tile)
-		mv = e.get("move", {}) if e != null else {}
-	return TerrainDB.move_cost(mv, PARTY_TAGS)
+	return TerrainDB.move_cost(TerrainDB.effective_move(tiles[row][col], _map_terrain_overrides), PARTY_TAGS)
 
 # Dijkstra 最小成本路径（含起终点的格序列）；不可达返回 []
 func find_path(from: Vector2i, to: Vector2i) -> Array:
@@ -203,7 +204,7 @@ func _travel(path: Array) -> void:
 	_move_target = Vector2i(-1, -1)
 	if canvas != null:
 		canvas.queue_redraw()
-	SaveIO.save_campaign(ws, AUTO_SLOT)
+	_autosave()
 
 # 一格落位后的事件评估：enter_tile（含概率/冷却/全局间隔）+ timer（时钟刚被推进）
 func _check_cell_events(cell: Vector2i) -> void:
@@ -222,7 +223,7 @@ func _on_camp() -> void:
 	EventEngine.check_timer(_map_triggers, ws, self)
 	if canvas != null:
 		canvas.queue_redraw()
-	SaveIO.save_campaign(ws, AUTO_SLOT)
+	_autosave()
 
 # ============ EventEngine 宿主原语 ============
 
@@ -269,11 +270,8 @@ func _build_ui() -> void:
 	canvas.editor = self
 	root.add_child(canvas)
 	canvas.request_fit()
-	# 夜晚变暗滤镜：盖画布（不吃输入）；随时钟 tint 显隐
-	_night_overlay = ColorRect.new()
-	_night_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_night_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_night_overlay.visible = false
+	# 夜晚变暗滤镜：盖画布（不吃输入）；构造/刷新单一实现在 EnvDB（战斗侧同用）
+	_night_overlay = EnvDB.make_time_overlay()
 	canvas.add_child(_night_overlay)
 
 	_log = RichTextLabel.new()
@@ -288,19 +286,21 @@ func _refresh_time_ui() -> void:
 		return
 	if _time_label != null:
 		_time_label.text = "  🕐 %s" % WorldClock.describe(ws.clock_hours)
-	if _night_overlay != null:
-		var tint := EnvDB.time_tint(WorldClock.time_of_day(ws.clock_hours))
-		if tint != "":
-			_night_overlay.color = Color.html(tint)
-			_night_overlay.visible = true
-		else:
-			_night_overlay.visible = false
+	EnvDB.apply_time_tint(_night_overlay, WorldClock.time_of_day(ws.clock_hours))
 
 func _log_line(text: String) -> void:
 	if _log != null:
 		_log.append_text(text + "\n")
 
-# 返回菜单：先自动存档（current 保留——菜单「继续」可无缝回来）
+# 自动存档统一入口：调试兜底档（_transient）不落盘；写失败红字提示（否则玩家以为一直在存、退出才发现丢档）
+func _autosave() -> void:
+	if _transient:
+		return
+	if not SaveIO.save_campaign(WorldState.current, _save_slot):
+		_log_line("[color=#E07A5A]⚠ 自动存档失败（磁盘/占用/权限？）——本段进度未写入「%s」槽[/color]" % _save_slot)
+		push_warning("Overworld：自动存档失败（槽=%s）" % _save_slot)
+
+# 返回菜单：先自动存档（current 由 StartMenu._ready 统一清——「继续」从磁盘重读，保留只会泄漏进沙盒）
 func _on_back_to_menu() -> void:
-	SaveIO.save_campaign(WorldState.current, AUTO_SLOT)
+	_autosave()
 	get_tree().change_scene_to_file("res://StartMenu.tscn")

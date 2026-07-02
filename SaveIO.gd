@@ -7,6 +7,7 @@ extends RefCounted
 const WorldState := preload("res://WorldState.gd")
 
 const SAVE_DIR := "user://saves"
+const AUTO_SLOT := "auto"   # 自动存档槽名单一源（Overworld 写 / StartMenu「继续」读；⚠️ 测试铁律：测试不得写此槽）
 
 static func slot_path(slot: String) -> String:
 	return "%s/%s.json" % [SAVE_DIR, slot]

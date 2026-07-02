@@ -110,3 +110,24 @@ static func time_sight_mult(id: String) -> float:
 static func time_tint(id: String) -> String:
 	var e = time(id)
 	return str(e.get("tint", "")) if e != null else ""
+
+# —— 日夜变暗叠层小工具（战斗/大地图共用；「tint 空串＝无叠层」语义的唯一实现处）——
+
+# 造一个标准变暗叠层（满铺、点击穿透、初始隐藏）；调用方自行 add_child 定层级
+static func make_time_overlay() -> ColorRect:
+	var rect := ColorRect.new()
+	rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+	rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	rect.visible = false
+	return rect
+
+# 按日夜 id 刷新叠层：有 tint 上色显示、无 tint 隐藏
+static func apply_time_tint(rect: ColorRect, id: String) -> void:
+	if rect == null:
+		return
+	var tint := time_tint(id)
+	if tint != "":
+		rect.color = Color.html(tint)
+		rect.visible = true
+	else:
+		rect.visible = false

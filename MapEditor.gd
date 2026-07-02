@@ -1266,8 +1266,10 @@ func _build_env_section() -> Control:
 	trow.add_child(_make_label("日夜"))
 	_env_time_opt = OptionButton.new()
 	_env_time_opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# 第 0 项＝跟随时钟（不写 time 键＝战役按世界时钟推导，M2 语义）；显式昼/夜从下标 1 起
+	_env_time_opt.add_item("跟随时钟（战役日夜）")
 	for t in EnvDB.all_times():
-		_env_time_opt.add_item("%s (%s)" % [str(t.get("label", "")), str(t.get("id", ""))])
+		_env_time_opt.add_item("锁定：%s (%s)" % [str(t.get("label", "")), str(t.get("id", ""))])
 	_env_time_opt.item_selected.connect(_on_env_time_selected)
 	trow.add_child(_env_time_opt)
 	v.add_child(trow)
@@ -1285,16 +1287,21 @@ func _env_weather_table() -> Array:
 	var t = map_environment.get("weather_table", [])
 	return t if typeof(t) == TYPE_ARRAY else []
 
-# 刷新整个环境面板（载入 / 撤销 / 新图后调）：同步日夜下拉 + 重建天气行
+# 刷新整个环境面板（载入 / 撤销 / 新图后调）：同步日夜下拉 + 重建天气行。
+# 无 time 键＝跟随时钟（第 0 项）；有键＝锁定态（1+i）——UI 呈现与 M2 运行时语义一致，不再「显示昼实为跟随」。
 func _refresh_env_panel() -> void:
 	if _env_time_opt == null:
 		return
-	var cur_time := str(map_environment.get("time", "day")) if typeof(map_environment) == TYPE_DICTIONARY else "day"
-	var times := EnvDB.all_times()
-	for i in times.size():
-		if str(times[i].get("id", "")) == cur_time:
-			_env_time_opt.select(i)
-			break
+	var has_time: bool = typeof(map_environment) == TYPE_DICTIONARY and map_environment.has("time")
+	if not has_time:
+		_env_time_opt.select(0)
+	else:
+		var cur_time := str(map_environment.get("time", "day"))
+		var times := EnvDB.all_times()
+		for i in times.size():
+			if str(times[i].get("id", "")) == cur_time:
+				_env_time_opt.select(i + 1)
+				break
 	_refresh_env_weather_rows()
 
 # 重建天气表行控件（每行：天气下拉 / 权重 / 最短·最长回合 / 删）
@@ -1345,12 +1352,21 @@ func _env_ensure() -> void:
 		map_environment["weather_table"] = []
 
 func _on_env_time_selected(idx: int) -> void:
+	var has_time: bool = typeof(map_environment) == TYPE_DICTIONARY and map_environment.has("time")
+	if idx <= 0:   # 选「跟随时钟」＝删 time 键（战役按世界时钟推导）
+		if not has_time:
+			return   # 本就跟随：无变化
+		_push_undo(_snapshot(), "环境·日夜")
+		map_environment.erase("time")
+		_dirty = true
+		_update_file_label()
+		return
 	var times := EnvDB.all_times()
-	if idx < 0 or idx >= times.size():
+	if idx - 1 >= times.size():
 		return
-	var id := str(times[idx].get("id", "day"))
-	if str(map_environment.get("time", "day")) == id:
-		return
+	var id := str(times[idx - 1].get("id", "day"))
+	if has_time and str(map_environment.get("time", "")) == id:
+		return   # 已锁定同值：无变化（跟随态选「昼」也会真正落键——修「显式选昼被判无变化」）
 	_push_undo(_snapshot(), "环境·日夜")
 	_env_ensure()
 	map_environment["time"] = id
