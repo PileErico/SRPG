@@ -18,6 +18,7 @@ static var current = null           # 当前战役（WorldState 实例）或 nul
 static var _transient_next_uid := 1 # 无战役时的临时计数（沙盒等；与档内 uid 域天然隔离——库也各是一个）
 
 const START_HOUR := 8    # 新战役开局时刻：第 1 天 8 点（白天开局；0 点=夜，见 WorldClock.day_number 注）
+const START_GOLD := 200  # 开局资金（占位：经济数值层后调；金钱是 §1.3 交易/招募、§1.6 词条转移的共同货币）
 
 var save_version := SAVE_VERSION
 var next_uid := 1        # 存档域自增 uid 计数器（unit/item 共用）
@@ -25,12 +26,14 @@ var clock_hours := 0     # 世界时钟：单调小时计数（日夜=小时区�
 var party_col := -1      # 大地图队伍位置（-1=未落位，Overworld 首进时按地图找可走格）
 var party_row := -1
 var ironman := false     # 铁人模式 flag（强制单槽覆盖；SaveIO 第一版即预留）
+var gold := 0            # 队伍资金（M7 起：休整消费；交易/招募/铁匠后续同用）
 var flags := {}          # 世界 flag {key: value}——任务/事件状态起步先用它兜底
 var reputation := {}     # 派系声望 {faction_id: int}
 var roster := []         # 花名册：活 Unit 对象列表（存档时经 unit_to_campaign 快照、读档重建）
 var item_instances := {} # 本档物品实例库 {uid(int): inst}——ItemInstances 门面在 current==self 时路由到这
 var kill_stats := {}     # 击杀统计 {proto_id: 累计击杀数}——BattleIO 战后累计；情报解锁（图鉴）的输入源
 var camp_jobs := {}      # 营地职务指派 {job_id: unit_uid}（职务定义在 JobDB；0/缺键=空缺）
+var location_cleared_at := {}   # 据点上次肃清时刻 {loc_id: clock_hours}——刷新=LocationDB.site_ready 惰性判定（M7）
 # —— 世界层事件状态（EventEngine 持久层；战斗局部 fired 在 Sandbox、每战清零，两层分离 🔒）——
 var event_fired := {}            # 已触发事件 {tid: true}（once 消费）
 var event_timer_last := {}       # timer 事件上次节拍时刻 {tid: clock_hours}
@@ -44,6 +47,7 @@ var last_world_event_hours := -1000000   # 上次 global_gap 事件时刻（全�
 static func start_new():
 	var ws = new()
 	ws.clock_hours = START_HOUR
+	ws.gold = START_GOLD
 	current = ws
 	for p in UnitFactory.all_prototypes():
 		if str(p.get("default_faction", "")) == "player":
@@ -91,6 +95,11 @@ func job_holder(job_id: String):
 		return null
 	return u
 
+# 据点肃清落账（BattleIO 战后按 context 调；刷新判定在 LocationDB.site_ready）
+func mark_location_cleared(loc_id: String) -> void:
+	if loc_id != "":
+		location_cleared_at[loc_id] = clock_hours
+
 # 收编：单位装备引用的实例若不在本档库（来自沙盒 transient 域），迁移进来并重铸 uid（修正 source 同步重写）。
 func _adopt_equipment(u) -> void:
 	var missing := {}
@@ -131,10 +140,12 @@ func to_dict() -> Dictionary:
 		"party_col": party_col,
 		"party_row": party_row,
 		"ironman": ironman,
+		"gold": gold,
 		"flags": flags.duplicate(true),
 		"reputation": reputation.duplicate(true),
 		"kill_stats": kill_stats.duplicate(true),
 		"camp_jobs": camp_jobs.duplicate(true),
+		"location_cleared_at": location_cleared_at.duplicate(true),
 		"event_fired": event_fired.duplicate(true),
 		"event_timer_last": event_timer_last.duplicate(true),
 		"event_cooldown_until": event_cooldown_until.duplicate(true),
@@ -153,12 +164,14 @@ static func from_dict(d: Dictionary):
 	ws.party_col = int(d.get("party_col", -1))
 	ws.party_row = int(d.get("party_row", -1))
 	ws.ironman = bool(d.get("ironman", false))
+	ws.gold = int(d.get("gold", 0))
 	var fl = d.get("flags", {})
 	ws.flags = fl if typeof(fl) == TYPE_DICTIONARY else {}
 	var rep = d.get("reputation", {})
 	ws.reputation = rep if typeof(rep) == TYPE_DICTIONARY else {}
 	ws.kill_stats = _int_valued(d.get("kill_stats", {}))
 	ws.camp_jobs = _int_valued(d.get("camp_jobs", {}))
+	ws.location_cleared_at = _int_valued(d.get("location_cleared_at", {}))
 	var ef = d.get("event_fired", {})
 	ws.event_fired = ef if typeof(ef) == TYPE_DICTIONARY else {}
 	ws.event_timer_last = _int_valued(d.get("event_timer_last", {}))

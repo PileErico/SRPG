@@ -10,7 +10,8 @@ extends RefCounted
 ## 冷却与全局间隔按世界时间（clock_hours）计，仅传入 ws 时生效——战斗侧 ws=null＝只有 once/chance 闸门。
 ## once 缺省值按事件类型：enter_region/enter_tile＝true（现状契约），timer＝false（周期语义）。
 ## 宿主原语约定（实现即支持该动作）：event_log(text) / event_activate_aggro(group)
-##   / event_set_weather(weather, duration) / event_spawn_unit(proto_id, faction, col, row)。
+##   / event_set_weather(weather, duration) / event_spawn_unit(proto_id, faction, col, row)
+##   / event_start_battle(map_path) / event_dialogue(dialogue_id)。
 
 const GLOBAL_EVENT_GAP_HOURS := 24   # 全局事件间隔（BB 式防世界事件刷屏）：占位值，将来挪难度/设定层
 
@@ -36,6 +37,9 @@ const ACTIONS := [
 	]},
 	{"id": "start_battle", "label": "进入战斗", "fields": [
 		{"key": "map", "label": "战斗地图路径", "type": "text", "default": "res://maps/sandbox.json"},
+	]},
+	{"id": "dialogue", "label": "开对话", "fields": [
+		{"key": "dialogue_id", "label": "对话id（data/dialogues.json）", "type": "text", "default": ""},
 	]},
 ]
 
@@ -85,6 +89,11 @@ static func execute_action(a: Dictionary, host, fallback_text := "") -> void:
 			_host_call(host, "event_spawn_unit", [pid, str(a.get("faction", "")), int(a.get("col", 0)), int(a.get("row", 0))])
 		"start_battle":
 			_host_call(host, "event_start_battle", [str(a.get("map", ""))])
+		"dialogue":
+			var did := str(a.get("dialogue_id", ""))
+			if did == "":
+				return
+			_host_call(host, "event_dialogue", [did])
 		var unknown:
 			push_warning("EventEngine：未知动作「%s」跳过" % unknown)
 

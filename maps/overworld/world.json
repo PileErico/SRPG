@@ -5,6 +5,39 @@
   "format_version": 3,
   "grid": "hex_flat_oddq",
   "height": 16,
+  "locations": [
+    {
+      "col": 8,
+      "dialogue_id": "dlg_elder_astra",
+      "id": "city_astra",
+      "label": "阿斯特拉",
+      "row": 8,
+      "type": "city"
+    },
+    {
+      "col": 15,
+      "id": "village_luowei",
+      "label": "洛苇村",
+      "row": 5,
+      "type": "village"
+    },
+    {
+      "battle_map": "res://maps/sandbox.json",
+      "col": 20,
+      "id": "ruin_sand",
+      "label": "沙没之殿",
+      "row": 14,
+      "type": "ruin"
+    },
+    {
+      "battle_map": "res://maps/sandbox.json",
+      "col": 11,
+      "id": "lair_bandit",
+      "label": "劫道者营地",
+      "row": 11,
+      "type": "lair"
+    }
+  ],
   "map_type": "overworld",
   "regions": [],
   "terrain_overrides": {
@@ -1584,8 +1617,8 @@
     {
       "do": [
         {
-          "action": "show_message",
-          "text": "路遇游商驼队，短暂寒暄后各自赶路。"
+          "action": "dialogue",
+          "dialogue_id": "dlg_merchant"
         }
       ],
       "id": "ow_merchant",
@@ -1609,22 +1642,6 @@
       "when": {
         "event": "timer",
         "every_hours": 24
-      }
-    },
-    {
-      "do": [
-        {
-          "action": "show_message",
-          "text": "沙丘间露出一处古代遗迹的入口……（后续开放）"
-        }
-      ],
-      "id": "ow_ruin",
-      "label": "古代遗迹",
-      "when": {
-        "col": 20,
-        "event": "enter_tile",
-        "once": true,
-        "row": 14
       }
     },
     {

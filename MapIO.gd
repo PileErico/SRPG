@@ -11,7 +11,8 @@ extends RefCounted
 ##     units:  [{proto, col, row, faction}],          —— 预置单位（proto = UnitFactory.unit_to_proto 输出）
 ##     triggers:[{id,label,when,do}],                 —— 关卡触发器（enter_region → show_message/spawn_unit/activate_aggro/set_weather）
 ##     terrain_overrides:{ "terrain/variant": {move?,effects?} },  —— 图级地形覆盖（只改本图、不动全局 terrains.json）
-##     environment:{ time, weather_table:[{weather,weight,min_rounds,max_rounds}] } }  —— 环境（日夜/天气，见 docs/感知系统.md）
+##     environment:{ time, weather_table:[{weather,weight,min_rounds,max_rounds}] },  —— 环境（日夜/天气，见 docs/感知系统.md）
+##     locations:[{id,type,label,col,row,battle_map?,dialogue_id?}] }  —— 地点实例（大地图 M7；类型定义在 data/locations.json）
 
 const FORMAT_VERSION := 3
 const GRID := "hex_flat_oddq"
@@ -58,6 +59,9 @@ static func normalize(data) -> Dictionary:
 	var environment = data.get("environment", {})
 	if typeof(environment) != TYPE_DICTIONARY:
 		environment = {}
+	var locations = data.get("locations", [])
+	if typeof(locations) != TYPE_ARRAY:
+		locations = []
 	return {
 		"ok": true,
 		"format_version": int(data.get("format_version", 0)),
@@ -69,6 +73,7 @@ static func normalize(data) -> Dictionary:
 		"triggers": triggers,
 		"terrain_overrides": terrain_overrides,   # 图级地形覆盖：{ "terrain/variant": {move?, effects?} }（只改本图，向后兼容默认{}）
 		"environment": environment,   # 环境：{time, weather_table:[{weather,weight,min_rounds,max_rounds}]}（向后兼容默认{}）
+		"locations": locations,   # 地点实例（大地图 M7；向后兼容默认[]）
 	}
 
 # tiles 规整：建 h×w 二维数组，逐格取 {terrain,variant}，缺 / 坏格回退默认地形（草原）
@@ -93,7 +98,7 @@ static func grassland(w: int, h: int) -> Array:
 
 # 组装完整 schema 字典（各 *_json 是已序列化好的数组：region cells=[[x,y]]、unit={proto,col,row,faction}、trigger={id,when,do}；
 # terrain_overrides = { "terrain/variant": {move?, effects?} } 图级地形覆盖，默认 {}）
-static func to_dict(w: int, h: int, tiles: Array, regions_json: Array, units_json: Array, triggers_json: Array = [], terrain_overrides: Dictionary = {}, environment: Dictionary = {}, map_type: String = "battle") -> Dictionary:
+static func to_dict(w: int, h: int, tiles: Array, regions_json: Array, units_json: Array, triggers_json: Array = [], terrain_overrides: Dictionary = {}, environment: Dictionary = {}, map_type: String = "battle", locations_json: Array = []) -> Dictionary:
 	return {
 		"format_version": FORMAT_VERSION,
 		"grid": GRID,
@@ -106,13 +111,14 @@ static func to_dict(w: int, h: int, tiles: Array, regions_json: Array, units_jso
 		"triggers": triggers_json,
 		"terrain_overrides": terrain_overrides,
 		"environment": environment,
+		"locations": locations_json,
 	}
 
 # 写地图文件（2 空格缩进，与原编辑器一致）；成功返回 true
-static func write_map(path: String, w: int, h: int, tiles: Array, regions_json: Array, units_json: Array, triggers_json: Array = [], terrain_overrides: Dictionary = {}, environment: Dictionary = {}, map_type: String = "battle") -> bool:
+static func write_map(path: String, w: int, h: int, tiles: Array, regions_json: Array, units_json: Array, triggers_json: Array = [], terrain_overrides: Dictionary = {}, environment: Dictionary = {}, map_type: String = "battle", locations_json: Array = []) -> bool:
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f == null:
 		return false
-	f.store_string(JSON.stringify(to_dict(w, h, tiles, regions_json, units_json, triggers_json, terrain_overrides, environment, map_type), "  "))
+	f.store_string(JSON.stringify(to_dict(w, h, tiles, regions_json, units_json, triggers_json, terrain_overrides, environment, map_type, locations_json), "  "))
 	f.close()
 	return true

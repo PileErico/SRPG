@@ -56,6 +56,7 @@ var map_triggers := []     # 触发器（地图 triggers 字段）：触发器�
 var map_terrain_overrides := {}   # 图级地形覆盖 { "terrain/variant": {move} }：地形数据「本图」范围写的，只改这张图；存盘写回、含撤销
 var map_environment := {}   # 环境 { time, weather_table:[{weather,weight,min_rounds,max_rounds}] }：环境面板写的；存盘写回、含撤销
 var map_type := "battle"    # 地图类型（battle/overworld）：读入记住、存盘透传（编辑 UI 暂无——overworld 图先由脚本/手改 json 定型）
+var map_locations := []     # 地点实例（地图 locations 字段，大地图 M7）：读入记住、存盘透传（编辑 UI 暂无，同 map_type 待遇）
 var brush_index := 0
 var embedded := false      # 嵌入 Game 统一宿主时为 true：隐藏自己的「主菜单」按钮（由 Game 顶栏统一提供）
 
@@ -1855,6 +1856,7 @@ func new_map(w: int, h: int) -> void:
 	map_terrain_overrides = {}   # 新图：清空图级地形覆盖
 	map_environment = {}         # 新图：清空环境
 	map_type = "battle"          # 新图：回缺省战斗图
+	map_locations = []           # 新图：清空地点
 	_active_region_idx = -1
 	current_path = ""
 	_dirty = false
@@ -2057,7 +2059,7 @@ func _refresh_history() -> void:
 # ------------------------------------------------------------------ 存档 / 读档
 
 func to_json_dict() -> Dictionary:
-	return MapIO.to_dict(width, height, tiles, _regions_to_json(), map_units, map_triggers, map_terrain_overrides, map_environment, map_type)
+	return MapIO.to_dict(width, height, tiles, _regions_to_json(), map_units, map_triggers, map_terrain_overrides, map_environment, map_type, map_locations)
 
 # 区域 → JSON：cells 集合转 [[x,y],…]（确定性排序，利于 diff）
 func _regions_to_json() -> Array:
@@ -2096,7 +2098,7 @@ func _regions_from_json(raw, mw: int, mh: int) -> Array:
 	return out
 
 func save_to_file(path: String) -> void:
-	if not MapIO.write_map(path, width, height, tiles, _regions_to_json(), map_units, map_triggers, map_terrain_overrides, map_environment, map_type):
+	if not MapIO.write_map(path, width, height, tiles, _regions_to_json(), map_units, map_triggers, map_terrain_overrides, map_environment, map_type, map_locations):
 		set_status("保存失败：无法写入文件")
 		return
 	current_path = path
@@ -2130,6 +2132,7 @@ func load_from_file(path: String) -> void:
 	map_terrain_overrides = res.get("terrain_overrides", {})   # 图级地形覆盖（地形数据「本图」范围）
 	map_environment = res.get("environment", {})   # 环境（日夜/天气）
 	map_type = str(res.get("map_type", "battle"))   # 地图类型（透传保真，防存盘打回缺省）
+	map_locations = res.get("locations", [])   # 地点实例（透传保真，防存盘丢字段）
 	_active_region_idx = -1 if regions.is_empty() else 0
 	current_path = path
 	_dirty = false

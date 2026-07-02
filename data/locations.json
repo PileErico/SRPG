@@ -1,0 +1,16 @@
+{
+  "_note": "地点单一数据源（M7）。types=地点类型：城市/村落（services 服务集合）与遗迹/野外据点（site=true 可讨伐；respawn_hours>0=肃清后定期刷新、0=一次性）。services=服务注册表（status: in_use=已接入 / planned=占位待各自系统——trade/recruit 待经济·招募池、smith 待词条系统铁匠轮；rest 的 gold/hours 为占位数值）。地点实例（id/type/label/col/row/battle_map/dialogue_id）放地图 locations 字段（MapIO schema）；运行时状态（据点肃清时刻）在 WorldState.location_cleared_at。LocationDB 读本文件。",
+  "format_version": 1,
+  "types": [
+    {"id": "city", "label": "城市", "color": "#E8C15A", "services": ["rest", "trade", "recruit", "smith"], "desc": "补给、交易、招募、装备维护一应俱全的大城。"},
+    {"id": "village", "label": "村落", "color": "#A8C878", "services": ["rest", "trade"], "desc": "可休整补给的小村落。"},
+    {"id": "ruin", "label": "遗迹", "color": "#9A8FB8", "site": true, "respawn_hours": 0, "desc": "野外遗迹：可进入探索；肃清后不再刷新。"},
+    {"id": "lair", "label": "野外据点", "color": "#C25B4E", "site": true, "respawn_hours": 72, "desc": "敌对据点：定期聚集人手，可重复讨伐。"}
+  ],
+  "services": [
+    {"id": "rest", "label": "休整（旅店）", "status": "in_use", "gold": 20, "hours": 8, "desc": "花钱住店：推进时间并回满全员生命（重伤休整照旧按时计）。"},
+    {"id": "trade", "label": "交易", "status": "planned", "desc": "买卖物品（待经济/背包系统）。"},
+    {"id": "recruit", "label": "招募", "status": "planned", "desc": "招募新成员（待招募池/经济系统）。"},
+    {"id": "smith", "label": "铁匠", "status": "planned", "desc": "修复耐久、修复负面状态、词条转移（待词条系统铁匠轮，见 docs/词条系统.md）。"}
+  ]
+}

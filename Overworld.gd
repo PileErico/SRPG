@@ -3,7 +3,7 @@ extends Control
 ## 复用底层：HexCanvas(经 OverworldCanvas)/MapIO/TerrainDB/HexGrid——与战斗地图同构（flat-top odd-q）。
 ## 事件：每落一格评估 EventEngine 的 enter_tile + timer（fired/冷却＝WorldState.event_* 世界持久层）。
 ## 日夜：随时钟推导（WorldClock.time_of_day → 标签 + EnvDB tint 变暗叠层）；战斗侧日夜注入见 Sandbox._world_time。
-## 宿主原语：只实现 event_log（大地图不支持战斗动作 spawn/aggro/set_weather——EventEngine 守卫警告跳过）。
+## 宿主原语：event_log / event_start_battle / event_dialogue（大地图不支持战斗动作 spawn/aggro/set_weather——EventEngine 守卫警告跳过）。
 ## 存档：移动完成/扎营后自动写 AUTO_SLOT；「继续战役」从 StartMenu 读它。
 ## 可测性：寻路/耗时/事件评估不依赖 UI 节点（UI 刷新全走 null 守卫）——headless new() 即可测纯逻辑。
 
@@ -19,6 +19,8 @@ const OverworldCanvas := preload("res://OverworldCanvas.gd")
 const BattleIO := preload("res://BattleIO.gd")
 const SandboxConfig := preload("res://SandboxConfig.gd")
 const JobDB := preload("res://JobDB.gd")   # 营地职务注册表（M6 框架）
+const DialogueUI := preload("res://DialogueUI.gd")   # 通用对话模块（M8）
+const LocationDB := preload("res://LocationDB.gd")   # 地点类型/服务注册表（M7）
 
 const MAP_PATH := "res://maps/overworld/world.json"
 const HOURS_PER_COST := 2    # 占位：1 点地形通行成本 ＝ 2 小时行程（数值层后调）
@@ -32,6 +34,8 @@ var height := 15
 var tiles := []
 var _map_triggers := []
 var _map_terrain_overrides := {}
+var _map_locations := []      # 地图 locations 字段（M7）：地点实例 [{id,type,label,col,row,battle_map?,dialogue_id?}]
+var _loc_by_cell := {}        # {Vector2i: loc} 落格索引（悬停/点击/抵达 O(1) 查）
 
 var canvas
 var _time_label: Label
@@ -41,6 +45,7 @@ var _moving := false                    # 行进中（忽略新指令）
 var _move_target := Vector2i(-1, -1)    # 当前行进目的地（画布标记用）
 var _save_slot: String = SaveIO.AUTO_SLOT   # 自动存档槽（单一源在 SaveIO；测试可注入独立槽）
 var _transient := false                 # 兜底建的调试档：只活内存、绝不自动落盘（防覆盖玩家 auto 真档）
+var _dialogue = null                    # 打开中的对话（DialogueUI；行进遇事件对话＝暂停等它播完）
 
 func _ready() -> void:
 	_ensure_campaign()
@@ -66,6 +71,7 @@ func _load_map() -> void:
 		tiles = res["tiles"]
 		_map_triggers = res.get("triggers", [])
 		_map_terrain_overrides = res.get("terrain_overrides", {})
+		_setup_locations(res.get("locations", []))
 		if str(res.get("map_type", "battle")) != "overworld":
 			push_warning("Overworld：地图 %s 的 map_type 不是 overworld（照常加载）" % MAP_PATH)
 		# 世界层触发器必须有 id：once/冷却/timer 状态按 id 随档持久，无 id 会退化成数组下标 key（"#N"），
@@ -77,6 +83,20 @@ func _load_map() -> void:
 	else:
 		push_warning("Overworld：读不到 %s，回退全草原 %d×%d" % [MAP_PATH, width, height])
 		tiles = MapIO.grassland(width, height)
+
+# 装地点实例：校验（id/类型/在界内）+ 建落格索引。状态（据点肃清时刻）在档里，这里只有静态定义。
+func _setup_locations(raw: Array) -> void:
+	_map_locations = []
+	_loc_by_cell = {}
+	for loc in raw:
+		if typeof(loc) != TYPE_DICTIONARY:
+			continue
+		var cell := Vector2i(int(loc.get("col", -1)), int(loc.get("row", -1)))
+		if str(loc.get("id", "")) == "" or LocationDB.type_def(str(loc.get("type", ""))) == null or not _cell_in_bounds(cell.x, cell.y):
+			push_warning("Overworld：地点「%s」缺 id/类型未登记/越界，跳过" % str(loc.get("label", loc.get("id", "?"))))
+			continue
+		_map_locations.append(loc)
+		_loc_by_cell[cell] = loc
 
 # 首进战役：party 未落位 → 从地图中心 BFS 外扩找第一个可走格
 func _ensure_party_placed() -> void:
@@ -122,7 +142,20 @@ func hover_text(col: int, row: int) -> String:
 	var tile = tiles[row][col]
 	var cost := _move_cost_at(col, row)
 	var pass_txt := "不可通行" if cost < 0 else "行程 %d 小时/格" % (cost * HOURS_PER_COST)
-	return "地形：%s（%d, %d）\n%s" % [TerrainDB.label_of(tile), col, row, pass_txt]
+	var txt := "地形：%s（%d, %d）\n%s" % [TerrainDB.label_of(tile), col, row, pass_txt]
+	var loc = _loc_by_cell.get(Vector2i(col, row))
+	if loc != null:
+		txt = "📍 %s（%s）%s\n%s" % [str(loc.get("label", "")), LocationDB.type_label(str(loc.get("type", ""))), _site_status_text(loc), txt]
+	return txt
+
+# 据点状态短文案（悬停/面板共用）："" ＝ 非据点；可挑战 / 刷新倒计时 / 已肃清不再刷新
+func _site_status_text(loc: Dictionary) -> String:
+	if not LocationDB.is_site(str(loc.get("type", ""))):
+		return ""
+	if LocationDB.site_ready(loc, WorldState.current):
+		return "——可挑战"
+	var left := LocationDB.site_respawn_in(loc, WorldState.current)
+	return "——已肃清（%s）" % ("约 %d 小时后刷新" % left if left > 0 else "不再刷新")
 
 func cancel_action() -> void:
 	pass   # 行进不可中断（每格结算已落账）；预留给将来的选目标模式
@@ -135,6 +168,8 @@ func left_click_cell(col: int, row: int) -> void:
 	var from := Vector2i(ws.party_col, ws.party_row)
 	var to := Vector2i(col, row)
 	if from == to:
+		if _loc_by_cell.has(to):
+			_open_location_panel(_loc_by_cell[to])   # 原地点自己脚下的地点＝重新进入
 		return
 	var path := find_path(from, to)
 	if path.size() < 2:
@@ -199,6 +234,8 @@ func _travel(path: Array) -> void:
 		WorldClock.advance(ws, _move_cost_at(cell.x, cell.y) * HOURS_PER_COST)
 		_refresh_time_ui()
 		_check_cell_events(cell)
+		if _dialogue != null and is_inside_tree():
+			await _dialogue.finished   # 事件对话：行进暂停到播完（headless 无 UI 不等）
 		if canvas != null:
 			canvas.queue_redraw()
 		if is_inside_tree():
@@ -208,6 +245,10 @@ func _travel(path: Array) -> void:
 	if canvas != null:
 		canvas.queue_redraw()
 	_autosave()
+	# 抵达地点＝自动进入（面板；途经不进——BB 式点到才停靠）。change_scene 已在途（事件开战）则不弹。
+	var dest := Vector2i(ws.party_col, ws.party_row)
+	if _loc_by_cell.has(dest):
+		_open_location_panel(_loc_by_cell[dest])
 
 # 一格落位后的事件评估：enter_tile（含概率/冷却/全局间隔）+ timer（时钟刚被推进）
 func _check_cell_events(cell: Vector2i) -> void:
@@ -233,9 +274,25 @@ func _on_camp() -> void:
 func event_log(text: String) -> void:
 	_log_line("⚑ %s" % text)
 
-# 进入战斗（do: start_battle）：健康 roster 全员自动出战（战前选人 UI/预设队伍后置——长在 BattleSetup 上）。
-# 快照进/结果出契约见 BattleIO；胜负后 Sandbox 回写并送回本场景。
+# 开对话（do: dialogue）：模态覆盖大地图；行进中触发＝_travel 暂停等 finished（M8）
+func event_dialogue(dialogue_id: String) -> void:
+	if _dialogue != null and is_instance_valid(_dialogue):
+		push_warning("Overworld：已有对话进行中，跳过「%s」" % dialogue_id)
+		return
+	var ui = DialogueUI.new()
+	_dialogue = ui
+	add_child(ui)
+	ui.finished.connect(func(): _dialogue = null)   # 先连再 start：start 失败同步 finished 也能清引用
+	ui.start(dialogue_id, WorldState.current)
+
+# 进入战斗（do: start_battle）：事件遭遇战，无来由上下文
 func event_start_battle(map_path: String) -> void:
+	_start_battle_with(map_path, {})
+
+# 进战斗单一实现：健康 roster 全员自动出战（战前选人 UI/预设队伍后置——长在 BattleSetup 上）。
+# context=战斗来由（{location_id}＝据点讨伐，胜后 BattleIO.apply_result 落肃清账）。
+# 快照进/结果出契约见 BattleIO；胜负后 Sandbox 回写并送回本场景。
+func _start_battle_with(map_path: String, context: Dictionary) -> void:
 	var ws = WorldState.current
 	if ws == null:
 		return
@@ -247,9 +304,114 @@ func event_start_battle(map_path: String) -> void:
 	if uids.is_empty():
 		_log_line("⚔ 全员重伤休整中，无人可战——遭遇不了了之。")
 		return
-	SandboxConfig.battle_setup = BattleIO.make_setup(map_path, uids)
+	SandboxConfig.battle_setup = BattleIO.make_setup(map_path, uids, [], context)
 	_autosave()   # 进战斗前落盘（战斗不耗世界时间 🔒，回来时钟原样）
-	get_tree().change_scene_to_file("res://Sandbox.tscn")
+	if is_inside_tree():
+		get_tree().change_scene_to_file("res://Sandbox.tscn")
+
+# ============ 地点（M7）：城市/村落服务面板 + 遗迹/据点讨伐（定义 LocationDB / 状态 ws.location_cleared_at）============
+
+var _loc_popup: PopupPanel
+
+# 休整（rest 服务，首个已接入的城市功能）：扣钱 → 推进时钟（走 WorldClock 调度）→ 全员回满 HP（占位数值在
+# locations.json services.rest；重伤 injured_until 照旧按时计，不被旅店治好）。返回是否成交（钱不够=false）。
+func _do_rest(loc: Dictionary) -> bool:
+	var ws = WorldState.current
+	var svc = LocationDB.service("rest")
+	if ws == null or svc == null:
+		return false
+	var cost := int(svc.get("gold", 0))
+	if ws.gold < cost:
+		_log_line("💰 盘缠不够（需 %d，有 %d）——住不起店。" % [cost, ws.gold])
+		return false
+	ws.gold -= cost
+	WorldClock.advance(ws, int(svc.get("hours", 8)))
+	for u in ws.roster:
+		if float(u.stats.get("HP", 0)) > 0.0:
+			u.stats["HP"] = u.effective_stat("HP_max")
+	_log_line("🛏 在「%s」休整 %d 小时（-%d💰）：全员生命回满。" % [str(loc.get("label", "")), int(svc.get("hours", 8)), cost])
+	_refresh_time_ui()
+	EventEngine.check_timer(_map_triggers, ws, self)
+	if canvas != null:
+		canvas.queue_redraw()
+	_autosave()
+	return true
+
+# 讨伐据点：可挑战才开打（带 location_id 上下文——胜后 BattleIO 落肃清账、按类型 respawn_hours 刷新）
+func _challenge_site(loc: Dictionary) -> void:
+	if not LocationDB.site_ready(loc, WorldState.current):
+		_log_line("此处已被肃清，暂无敌踪。")
+		return
+	_start_battle_with(str(loc.get("battle_map", "res://maps/sandbox.json")), {"location_id": str(loc.get("id", ""))})
+
+# 地点面板：城市/村落＝服务列表（rest 已接入；planned 灰显 ⏳）+ 可选交谈；遗迹/据点＝状态 + 进攻。
+func _open_location_panel(loc: Dictionary) -> void:
+	if not is_inside_tree():
+		return   # headless：面板纯 UI，逻辑走 _do_rest/_challenge_site 直测
+	if _loc_popup != null:
+		_loc_popup.queue_free()
+	_loc_popup = PopupPanel.new()
+	add_child(_loc_popup)
+	var v := VBoxContainer.new()
+	v.custom_minimum_size = Vector2(380, 0)
+	v.add_theme_constant_override("separation", 6)
+	_loc_popup.add_child(v)
+	var type_id := str(loc.get("type", ""))
+	var title := Label.new()
+	title.text = "📍 %s（%s）" % [str(loc.get("label", "")), LocationDB.type_label(type_id)]
+	title.add_theme_font_size_override("font_size", 18)
+	title.add_theme_color_override("font_color", LocationDB.type_color(type_id))
+	v.add_child(title)
+	var desc := Label.new()
+	desc.text = str(LocationDB.type_def(type_id).get("desc", ""))
+	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	desc.add_theme_color_override("font_color", Color(0.65, 0.68, 0.75))
+	v.add_child(desc)
+	if LocationDB.is_site(type_id):
+		_build_site_rows(v, loc)
+	else:
+		_build_service_rows(v, loc)
+	_loc_popup.popup_centered()
+
+# 据点区：状态行 + 进攻按钮
+func _build_site_rows(v: VBoxContainer, loc: Dictionary) -> void:
+	var st := Label.new()
+	st.text = "状态：%s" % _site_status_text(loc).trim_prefix("——")
+	v.add_child(st)
+	var b := Button.new()
+	b.text = "⚔ 进攻"
+	b.disabled = not LocationDB.site_ready(loc, WorldState.current)
+	b.pressed.connect(func():
+		_loc_popup.hide()
+		_challenge_site(loc))
+	v.add_child(b)
+
+# 服务区：注册表驱动（LocationDB.services_of）——rest 已接入、planned 灰显；有 dialogue_id 加「交谈」
+func _build_service_rows(v: VBoxContainer, loc: Dictionary) -> void:
+	var ws = WorldState.current
+	for svc in LocationDB.services_of(str(loc.get("type", ""))):
+		var sid := str(svc.get("id", ""))
+		var b := Button.new()
+		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		b.tooltip_text = str(svc.get("desc", ""))
+		if sid == "rest" and str(svc.get("status", "")) == "in_use":
+			b.text = "🛏 %s　-%d💰 / +%d 小时" % [str(svc.get("label", sid)), int(svc.get("gold", 0)), int(svc.get("hours", 8))]
+			b.disabled = ws == null or ws.gold < int(svc.get("gold", 0))
+			b.pressed.connect(func():
+				if _do_rest(loc):
+					_open_location_panel(loc))   # 重建面板：金钱/时间变了
+		else:
+			b.text = "%s ⏳" % str(svc.get("label", sid))
+			b.disabled = true   # planned：效果待各自系统（经济/招募池/词条铁匠）
+		v.add_child(b)
+	if str(loc.get("dialogue_id", "")) != "":
+		var t := Button.new()
+		t.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		t.text = "💬 交谈"
+		t.pressed.connect(func():
+			_loc_popup.hide()
+			event_dialogue(str(loc.get("dialogue_id", ""))))
+		v.add_child(t)
 
 # ============ 画布数据源 ============
 
@@ -259,6 +421,19 @@ func party_cell() -> Vector2i:
 
 func move_target() -> Vector2i:
 	return _move_target
+
+# 地点标记数据（画布逐帧调；量级＝个位数地点，无需缓存）：active＝据点可挑战/服务型恒真（灰显已肃清据点）
+func locations_for_draw() -> Array:
+	var out := []
+	for loc in _map_locations:
+		var type_id := str(loc.get("type", ""))
+		out.append({
+			"cell": Vector2i(int(loc.get("col", -1)), int(loc.get("row", -1))),
+			"color": LocationDB.type_color(type_id),
+			"label": str(loc.get("label", "")),
+			"active": not LocationDB.is_site(type_id) or LocationDB.site_ready(loc, WorldState.current),
+		})
+	return out
 
 # ============ UI（纯代码建，仿工程惯例；headless new() 不建 UI 也能跑逻辑）============
 
@@ -310,7 +485,7 @@ func _refresh_time_ui() -> void:
 	if ws == null:
 		return
 	if _time_label != null:
-		_time_label.text = "  🕐 %s" % WorldClock.describe(ws.clock_hours)
+		_time_label.text = "  🕐 %s　💰 %d" % [WorldClock.describe(ws.clock_hours), ws.gold]
 	EnvDB.apply_time_tint(_night_overlay, WorldClock.time_of_day(ws.clock_hours))
 
 func _log_line(text: String) -> void:

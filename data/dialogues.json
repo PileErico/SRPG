@@ -1,0 +1,27 @@
+{
+  "_note": "对话单一数据源（M8）。dialogue={id,label,nodes[]}；node={id,speaker,side:left|right(缺省left),portrait(res://路径,可省),text, next|choices}。无 choices=纯演出节点（点击推进 next；next 空/缺省=结束）；choices=[{text,next,set_flags?,rep?}]——set_flags 写 WorldState.flags、rep 按 {faction:delta} 累加声望（无战役档=效果跳过）。首节点=nodes[0]。DialogueDB 读本文件。",
+  "format_version": 1,
+  "dialogues": [
+    {
+      "id": "dlg_merchant",
+      "label": "游商寒暄",
+      "nodes": [
+        {"id": "n1", "speaker": "游商", "side": "right", "text": "哟，路上的朋友！要不要看看货？……开玩笑的，驼队赶路呢。", "next": "n2"},
+        {"id": "n2", "speaker": "贝露兹", "side": "left", "portrait": "res://icons/Characters/Plyer_Special_Belooz.png", "text": "一路顺风。", "next": ""}
+      ]
+    },
+    {
+      "id": "dlg_elder_astra",
+      "label": "阿斯特拉长老",
+      "nodes": [
+        {"id": "n1", "speaker": "城中长老", "side": "right", "text": "远来的佣兵，阿斯特拉欢迎你。东南沙地里那座古殿最近很不太平——你们要是有意，可以去探一探。", "next": "n2"},
+        {"id": "n2", "speaker": "城中长老", "side": "right", "text": "帝国的巡骑最近也在打听你们的来历。要我替你们美言几句吗？", "choices": [
+          {"text": "有劳长老美言。", "next": "n_yes", "set_flags": {"astra_elder_favor": true}, "rep": {"empire": 5}},
+          {"text": "不必，我们行事自有分寸。", "next": "n_no", "set_flags": {"astra_elder_favor": false}}
+        ]},
+        {"id": "n_yes", "speaker": "城中长老", "side": "right", "text": "好说。帝国那边我自会知会一声。", "next": ""},
+        {"id": "n_no", "speaker": "城中长老", "side": "right", "text": "呵，年轻人有志气。那便各凭本事吧。", "next": ""}
+      ]
+    }
+  ]
+}

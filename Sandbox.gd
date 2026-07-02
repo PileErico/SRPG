@@ -29,6 +29,7 @@ const EventEngine := preload("res://EventEngine.gd") # when/do 事件引擎：�
 const Checks := preload("res://Checks.gd")           # d20 检定原语（死门每回合检定用）
 const BattleIO := preload("res://BattleIO.gd")       # 战斗进出契约：战役模式快照进/结果出（M5）
 const SaveIO := preload("res://SaveIO.gd")           # 战役战斗结算后自动存档
+const DialogueUI := preload("res://DialogueUI.gd")   # 通用对话模块：战场内触发（do: dialogue，M8）
 const MapIO := preload("res://MapIO.gd")   # 地图读 / 写单一入口（与 MapEditor 共用）
 # 战斗地图：默认与地图编辑器共享同一张图（编辑器改 → 这里读到）。
 # 实际打开哪张：优先 SandboxConfig.map_path（选地图界面传入），空则用此默认；缺失/损坏回退全草原。
@@ -53,10 +54,13 @@ var _map_regions := []     # 地图文件 regions 原始数据：[{id,label,colo
 var _map_units := []       # 地图文件 units 原始数据：[{proto,col,row,faction}]（schema v3，可空）→ _spawn_map_units 落子
 var _map_triggers := []    # 地图文件 triggers 原始数据：[{id,label,when,do}]（schema v3，可空）→ 运行时评估
 var _map_terrain_overrides := {}   # 图级地形覆盖 { "terrain/variant": {move?,effects?} }：只改本图、不动全局 terrains.json
+var _map_locations := []   # 地图文件 locations 原始数据（大地图 M7）：战斗侧不消费、只透传保真（存图不丢字段）
 var _all_region_cells := {}   # 所有区域的格集合 {region_id: {Vector2i:true}}（不分 kind，供触发器引用）
 var _fired_triggers := {}  # 已触发过的 trigger id（when.once 用）；每场战斗开始清空
 var _battle_kills := []    # 本战击杀记录 [{proto_id, victim_uid, faction, by_uid}]——经验+情报解锁共用记录点（每战清零）
 var campaign_battle := false   # 战役战斗模式（SandboxConfig.battle_setup 注入）：roster=BattleIO 快照副本，胜负后回写并返回大地图
+var _battle_context := {}      # 战役战斗上下文（BattleSetup.context 透传：如 location_id——据点讨伐胜利后随结果回写，M7）
+var _dialogue = null           # 战场内对话（M8）：触发器 do:dialogue 打开，模态覆盖战斗 UI（唯一有接口成本的触发场景，需求 §1.8）
 var _deploy_cells := {}    # 部署区格集合 {Vector2i:true}：kind=="deploy" 的区域并集（玩家单位只能放这里）
 
 # —— 感知 / 战争迷雾（玩家侧；见 docs/感知系统.md 🔒）——
@@ -168,6 +172,8 @@ func _setup_campaign_battle() -> void:
 	SandboxConfig.battle_setup = null   # 读后即清：下次进沙盒不误入战役模式
 	campaign_battle = true
 	SandboxConfig.map_path = str(setup.get("map_path", ""))
+	var ctx = setup.get("context", {})
+	_battle_context = ctx if typeof(ctx) == TYPE_DICTIONARY else {}   # 战斗来由（据点讨伐等）：结算时随 result 回写
 	roster = BattleIO.spawn_battle_units(WorldState.current, setup)
 
 # 仇恨触发区域（mode②）：从地图 regions 字段（_map_regions）构建 {region_id: {Vector2i:true}}。
@@ -204,6 +210,7 @@ func _load_map() -> void:
 	_map_regions = []   # 默认无区域（旧 v1 图 / 加载失败）
 	_map_units = []     # 默认无预置单位（旧图 / 加载失败）
 	_map_triggers = []  # 默认无触发器
+	_map_locations = [] # 默认无地点（旧图 / 加载失败）
 	_map_terrain_overrides = {}   # 默认无图级地形覆盖
 	_map_environment = {}   # 默认无环境设定（＝昼·晴）
 	# 优先用「选地图」界面传入的路径（SandboxConfig.map_path）；空则用默认战斗图
@@ -219,6 +226,7 @@ func _load_map() -> void:
 		_map_terrain_overrides = res.get("terrain_overrides", {})   # 图级地形覆盖（向后兼容，旧图无此键=空）
 		_map_environment = res.get("environment", {})   # 环境（日夜/天气；向后兼容，旧图无此键=空）
 		_map_type = str(res.get("map_type", "battle"))
+		_map_locations = res.get("locations", [])   # 地点实例（大地图 M7；战斗侧不消费、存图透传保真）
 		return
 	if FileAccess.file_exists(path):
 		push_warning("战斗地图 %s 格式无效，回退全草原" % path)
@@ -251,6 +259,7 @@ func load_from_memory(map_dict: Dictionary) -> void:
 	_map_terrain_overrides = res.get("terrain_overrides", {})
 	_map_environment = res.get("environment", {})
 	_map_type = str(res.get("map_type", "battle"))
+	_map_locations = res.get("locations", [])
 	_setup_regions()
 	# 场上清空、roster 收回待命（保留玩家自带军，跨试玩不丢）
 	units = []
@@ -295,7 +304,7 @@ func save_units_to_map() -> bool:
 		proto["ai_group"] = u.ai_group
 		units_json.append({"proto": proto, "col": u.col, "row": u.row, "faction": u.faction})
 	var path: String = SandboxConfig.map_path if SandboxConfig.map_path != "" else MAP_PATH
-	if MapIO.write_map(path, width, height, tiles, _map_regions, units_json, _map_triggers, _map_terrain_overrides, _map_environment, _map_type):
+	if MapIO.write_map(path, width, height, tiles, _map_regions, units_json, _map_triggers, _map_terrain_overrides, _map_environment, _map_type, _map_locations):
 		_map_units = units_json   # 同步内存：R 重开 / exit_battle 从这里重建
 		return true
 	return false
@@ -338,6 +347,17 @@ func event_spawn_unit(proto_id: String, faction: String, col: int, row: int) -> 
 		_recompute_vision()   # 新单位立刻纳入迷雾计算（旧债：曾延迟一拍到下次移动）
 	if canvas != null:
 		canvas.queue_redraw()
+
+# 开对话（do: dialogue，M8 战场内触发）：模态覆盖战斗 UI；ws 有档＝选项效果落战役、纯沙盒＝效果跳过
+func event_dialogue(dialogue_id: String) -> void:
+	if _dialogue != null and is_instance_valid(_dialogue):
+		push_warning("Sandbox：已有对话进行中，跳过「%s」" % dialogue_id)
+		return
+	var ui = DialogueUI.new()
+	_dialogue = ui
+	add_child(ui)
+	ui.finished.connect(func(): _dialogue = null)   # 先连再 start：start 失败同步 finished 也能清引用
+	ui.start(dialogue_id, WorldState.current)
 
 # 按 id 查内置原型（data/unit_prototypes.json）；找不到返回 {}
 func _find_proto(pid: String) -> Dictionary:
@@ -1381,7 +1401,7 @@ func _finish_campaign_battle(win: bool) -> void:
 	var ws = WorldState.current
 	if ws == null:
 		return
-	BattleIO.apply_result(ws, BattleIO.collect_result(roster, _battle_kills, win))
+	BattleIO.apply_result(ws, BattleIO.collect_result(roster, _battle_kills, win, _battle_context))
 	SaveIO.save_campaign(ws, SaveIO.AUTO_SLOT)
 	_log_line("战果已结算并存档（经验 / 战损 / 重伤休整 / 击杀统计已回写战役）。")
 
