@@ -1157,7 +1157,12 @@ func _run_enemy_ai(unit) -> void:
 func _ai_update_aggro(unit) -> bool:
 	if unit.ai_aggroed:
 		return true
-	var trig := false
+	if _ai_should_aggro(unit):
+		_ai_set_aggro(unit)
+	return unit.ai_aggroed
+
+# 模型侧纯判定：该单位此刻是否应激活仇恨（三通道），不改任何状态。
+func _ai_should_aggro(unit) -> bool:
 	var here := Vector2i(unit.col, unit.row)
 	# ① 视野感知：敌人进入本单位视野(sight)且视线(LOS)不被地形挡（六边形战棋：只有地形挡、单位不挡）
 	if unit.ai_threat:
@@ -1165,35 +1170,37 @@ func _ai_update_aggro(unit) -> bool:
 		for h in units:
 			var hp := Vector2i(h.col, h.row)
 			if _is_hostile(unit, h) and _hex_dist(here, hp) <= sight and _has_los(here, hp):
-				trig = true
-				break
+				return true
 	# ② 区域触发：敌人踏进该单位挂的区域（关卡设计者指定）
-	if not trig and unit.ai_region != "" and aggro_regions.has(unit.ai_region):
+	if unit.ai_region != "" and aggro_regions.has(unit.ai_region):
 		var cells: Dictionary = aggro_regions[unit.ai_region]
 		for h in units:
 			if _is_hostile(unit, h) and cells.has(Vector2i(h.col, h.row)):
-				trig = true
-				break
+				return true
 	# ③ 连锁：同组任一已激活
-	if not trig and unit.ai_group != "":
+	if unit.ai_group != "":
 		for g in units:
 			if g != unit and g.ai_group == unit.ai_group and g.ai_aggroed:
-				trig = true
-				break
-	if trig:
-		_ai_set_aggro(unit)
-	return unit.ai_aggroed
+				return true
+	return false
 
-# 激活仇恨：本体 + 连锁同组全部敌方；首次激活记一行日志。
+# 宿主包装：激活仇恨并逐个记日志（顺序＝本体先、连锁后，与旧行为一致）。
 func _ai_set_aggro(unit) -> void:
+	for u in _ai_set_aggro_state(unit):
+		_log_line("%s 进入战斗！" % _cname(u))
+
+# 模型侧：激活仇恨——本体 + 连锁同组全部敌方；返回本次新激活的单位列表（已激活＝空）。不写日志。
+func _ai_set_aggro_state(unit) -> Array:
+	var newly := []
 	if unit.ai_aggroed:
-		return
+		return newly
 	unit.ai_aggroed = true
-	_log_line("%s 进入战斗！" % _cname(unit))
+	newly.append(unit)
 	if unit.ai_group != "":
 		for g in units:
 			if g != unit and not _is_friendly(g) and g.ai_group == unit.ai_group and not g.ai_aggroed:
-				_ai_set_aggro(g)   # 连锁仇恨
+				newly.append_array(_ai_set_aggro_state(g))   # 连锁仇恨
+	return newly
 
 # 一个 AI 动作：能打就打、否则靠近；返回是否做了事
 func _ai_one_action(unit) -> bool:
@@ -1282,7 +1289,36 @@ func _ai_nearest_hostile(unit):
 # 死门规格 🔒（需求 §1.11）：资格＝我方/友方全体 + 敌方 elite tag；胜负判定口径＝死门单位算存活
 # （检定/补刀自动推进条数、回合会继续流转不死锁，保留 +3 翻盘；−3 离场才计入败）。
 func _handle_deaths() -> void:
+	var res := _handle_deaths_state()
+	for u in res["entered_door"]:
+		_log_line("[b][color=#C86BD5]%s 踏入死门！[/color][/b]（占格可被攻击；每回合 1d20+体力 检定 ±1、被命中 −1；−3 倒下 / +3 爬回）" % _cname(u))
+	var dead: Array = res["dead"]
+	if dead.is_empty():
+		return
+	for u in dead:
+		_log_line("[b]%s 倒下！[/b]" % _cname(u))
+		if viewed_unit == u:
+			viewed_unit = null
+		if hover_unit == u:
+			hover_unit = null
+		if selected_unit == u:
+			selected_unit = null
+	if res["new_round"]:
+		_tick_weather()   # 新 round：天气计时 −1，到期重摇
+	_check_battle_over()
+	if res["active_died"] and not battle_over:
+		call_deferred("_begin_active_turn")   # 延后开始下一单位的 turn（避免在借机结算中重入）
+	_refresh_info()
+	_refresh_turn_bar()   # 单位变动（阵亡）→ 更新行动顺序槽
+	_recompute_vision()   # 单位阵亡 → 重算视野（友方阵亡收缩视野）
+	if canvas != null:
+		canvas.queue_redraw()
+
+# 模型侧收尸：死门资格者转入死门、门条 −3/无资格者移出战斗（含击杀账、出手序列剔除、active 下标推进/进新 round）。
+# 返回 {dead, entered_door, active_died, new_round}；日志/选中清理/天气·胜负·下一 turn 编排留宿主。
+func _handle_deaths_state() -> Dictionary:
 	var dead := []
+	var entered_door := []
 	for u in units:
 		if int(u.stats.get("HP", 0)) > 0:
 			continue
@@ -1293,48 +1329,35 @@ func _handle_deaths() -> void:
 				u.stats["HP"] = 0   # 门内挺着：HP 钳 0（不再负血），条数结算在命中/检定处
 			continue
 		if _door_eligible(u):
-			_enter_deaths_door(u)
+			_enter_deaths_door_state(u)
+			entered_door.append(u)
 			continue
 		dead.append(u)   # 无死门资格（常规敌兵）：原路径即死
 	# 击杀记录（经验结算 + 情报解锁共用一份；铺垫见 docs/情报与烹饪系统.md §3.1）
 	for u in dead:
 		_battle_kills.append({"proto_id": u.proto_id, "victim_uid": u.uid, "faction": u.faction,
 			"by_uid": (u.last_hit_by.uid if u.last_hit_by != null else 0)})
+	var res := {"dead": dead, "entered_door": entered_door, "active_died": false, "new_round": false}
 	if dead.is_empty():
-		return
+		return res
 	var cur = active_unit()
-	var active_died: bool = cur != null and cur in dead   # 当前行动者阵亡（借机可致）
+	res["active_died"] = cur != null and cur in dead   # 当前行动者阵亡（借机可致）
 	for u in dead:
-		_log_line("[b]%s 倒下！[/b]" % _cname(u))
 		units.erase(u)
-		if viewed_unit == u:
-			viewed_unit = null
-		if hover_unit == u:
-			hover_unit = null
-		if selected_unit == u:
-			selected_unit = null
 	# 从出手序列剔除死者
 	turn_order = turn_order.filter(func(x): return not (x in dead))
-	if active_died:
+	if res["active_died"]:
 		# 行动者阵亡 → 其 turn 结束；下一个已被 filter 前移到同下标（越界则进新 round）
 		if active_index >= turn_order.size():
 			active_index = 0
 			round_num += 1
 			_rebuild_turn_order()
 			zoc_triggered = {}
-			_tick_weather()   # 新 round：天气计时 −1，到期重摇
-		_check_battle_over()
-		if not battle_over:
-			call_deferred("_begin_active_turn")   # 延后开始下一单位的 turn（避免在借机结算中重入）
+			res["new_round"] = true
 	else:
 		var idx: int = turn_order.find(cur)
 		active_index = idx if idx >= 0 else clampi(active_index, 0, max(turn_order.size() - 1, 0))
-		_check_battle_over()
-	_refresh_info()
-	_refresh_turn_bar()   # 单位变动（阵亡）→ 更新行动顺序槽
-	_recompute_vision()   # 单位阵亡 → 重算视野（友方阵亡收缩视野）
-	if canvas != null:
-		canvas.queue_redraw()
+	return res
 
 # ============ 死门（需求 §1.11 🔒；插入点=_handle_deaths 收集循环 + 命中结算 + turn 开始）============
 
@@ -1342,8 +1365,8 @@ func _handle_deaths() -> void:
 func _door_eligible(u) -> bool:
 	return _is_friendly(u) or u.tags.has("elite")
 
-# 转入死门：HP 钳 0、条归 0；挂 tag（统一判断）+ permanent effect（闪避/防御效能 ×50%＝pct −50，走修正管线）
-func _enter_deaths_door(u) -> void:
+# 模型侧：转入死门——HP 钳 0、条归 0；挂 tag（统一判断）+ permanent effect（闪避/防御效能 ×50%＝pct −50，走修正管线）。踏入日志由 _handle_deaths 宿主段记。
+func _enter_deaths_door_state(u) -> void:
 	u.stats["HP"] = 0
 	u.door_gauge = 0
 	u.door_checks = 0
@@ -1353,7 +1376,6 @@ func _enter_deaths_door(u) -> void:
 		u.tags.append("deaths_door")
 	_add_effect(u, {"name": "死门", "kind": "debuff", "permanent": true, "tags": ["deaths_door"],
 		"mods": [{"stat": "eva", "op": "pct", "value": -50}, {"stat": "def_eff", "op": "pct", "value": -50}]})
-	_log_line("[b][color=#C86BD5]%s 踏入死门！[/color][/b]（占格可被攻击；每回合 1d20+体力 检定 ±1、被命中 −1；−3 倒下 / +3 爬回）" % _cname(u))
 
 # 死门每回合检定（该单位 turn 自动执行）：1d20+体力 vs 难度（首回合 15、之后每回合 +5）。过 +1 / 不过 −1。
 func _door_turn_check(u) -> void:
@@ -1367,19 +1389,34 @@ func _door_turn_check(u) -> void:
 	_door_settle(u)
 	_handle_deaths()   # −3 时经统一收尸路径离场（active 推进/胜负判定都在那）
 
-# 门条 ±3 结算（只改状态、不移除——移除统一走 _handle_deaths）：
-# −3＝倒下（非铁人挂 injured 重伤离场 / 铁人挂 dead 真死，共用路径仅标记不同 🔒）；+3＝爬回（HP 保底占位 1，挂重伤 debuff 至战斗结束）。
+# 宿主包装：门条结算 + 记日志（移除统一走 _handle_deaths）。
 func _door_settle(u) -> void:
+	_log_door_settle(u, _door_settle_state(u))
+
+# 模型侧：门条 ±3 结算（只改状态、不移除、不写日志）。返回 ""=未触发 / "down_dead"（铁人真死）/ "down_injured"（重伤离场）/ "climb"（爬回）。
+# −3＝倒下（非铁人挂 injured 重伤离场 / 铁人挂 dead 真死，共用路径仅标记不同 🔒）；+3＝爬回（HP 保底占位 1，挂重伤 debuff 至战斗结束）。
+func _door_settle_state(u) -> String:
 	if u.door_gauge <= -3:
 		var ironman: bool = WorldState.current != null and WorldState.current.ironman
 		u.tags.append("dead" if ironman else "injured")
 		u.stats["HP"] = 0
-		_log_line("[b]%s 死门 −3：%s[/b]" % [_cname(u), "阵亡（铁人）" if ironman else "重伤倒下，被拖离战场"])
+		return "down_dead" if ironman else "down_injured"
 	elif u.door_gauge >= 3:
 		_door_clear(u)
 		u.stats["HP"] = 1   # 自爬保底占位（细则待需求 §2.3）
 		_add_effect(u, {"name": "重伤", "kind": "debuff", "permanent": true, "tags": ["injured"]})   # 战斗内效果待 §2.3，先只挂名
-		_log_line("[b][color=%s]%s 从死门爬了回来！[/color][/b]（重伤，HP 1）" % [OK_GREEN, _cname(u)])
+		return "climb"
+	return ""
+
+# 门条结算结果 → 战斗日志（纯展示）。
+func _log_door_settle(u, result: String) -> void:
+	match result:
+		"down_dead":
+			_log_line("[b]%s 死门 −3：阵亡（铁人）[/b]" % _cname(u))
+		"down_injured":
+			_log_line("[b]%s 死门 −3：重伤倒下，被拖离战场[/b]" % _cname(u))
+		"climb":
+			_log_line("[b][color=%s]%s 从死门爬了回来！[/color][/b]（重伤，HP 1）" % [OK_GREEN, _cname(u)])
 
 # 清死门状态：摘 tag + 死门 effect（连带其 eva/def_eff 修正）
 func _door_clear(u) -> void:
@@ -1537,9 +1574,19 @@ func end_turn() -> void:
 # 单位自己 turn 末：结算个人 DoT（按最大生命百分比直接掉 HP，无视护甲）+ 时长递减（按 round）+ 到期移除。
 # 返回是否造成了伤害（用于触发死亡检查）。
 func _tick_turn_end_effects(u) -> bool:
-	if u == null or not ("effects" in u) or u.effects.is_empty():
-		return false
 	var dmg_done := false
+	for ev in _apply_turn_end_effects(u):
+		if str(ev.get("type", "")) == "dot":
+			dmg_done = true
+			_log_line("%s %s：-%d（最大生命%s%%）" % [_cname(u), str(ev["name"]), int(ev["dmg"]), _numf(ev["pct"])])
+	return dmg_done
+
+# 模型侧：结算回合末效果——DoT 落血 + 非 permanent 时长递减、到期连带摘修正。
+# 返回结构化事件 [{type:"dot", name, dmg, pct} | {type:"expired", name}]；不写日志。
+func _apply_turn_end_effects(u) -> Array:
+	var events := []
+	if u == null or not ("effects" in u) or u.effects.is_empty():
+		return events
 	var keep := []
 	for e in u.effects:
 		var pct := float(e.get("dot_pct_max_hp", 0))
@@ -1547,8 +1594,7 @@ func _tick_turn_end_effects(u) -> bool:
 			var d := int(round(float(u.effective_stat("HP_max")) * pct / 100.0))
 			if d > 0:
 				u.stats["HP"] = int(u.stats.get("HP", 0)) - d
-				dmg_done = true
-				_log_line("%s %s：-%d（最大生命%s%%）" % [_cname(u), str(e.get("name", "流血")), d, _numf(pct)])
+				events.append({"type": "dot", "name": str(e.get("name", "流血")), "dmg": d, "pct": pct})
 		if e.get("permanent", false):
 			keep.append(e)
 		else:
@@ -1558,8 +1604,9 @@ func _tick_turn_end_effects(u) -> bool:
 				keep.append(e)
 			else:
 				_remove_mods_by_source(u, str(e.get("source", "buff:" + str(e.get("name", "")))))   # 到期：连带摘掉其挂的修正
+				events.append({"type": "expired", "name": str(e.get("name", ""))})
 	u.effects = keep
-	return dmg_done
+	return events
 
 func _on_context_menu(id: int) -> void:
 	match id:
@@ -2114,50 +2161,82 @@ func _resolve_attack(attacker, skill, targets: Array) -> void:
 # 对单个目标的判定序，全程读 effective_stat + 技能伤害系数；输出 = 攻击 × 系数 × 暴击 × 效能。
 # 精简记录：有什么写什么——没暴击不写暴击系数、效能 100% 不写、没减伤写「无」。
 # 返回 {"hit": 是否命中(未被闪避), "blocked": 是否被格挡}，供借机判定用。
+# 宿主包装：结算一次攻击（计算在 _resolve_compute），把结构化结果渲染成 战斗日志 + 飘字。
 func _resolve_one(attacker, target, skill, show_target := false) -> Dictionary:
+	var r := _resolve_compute(attacker, target, skill)
 	var lines := []
 	if show_target:   # 多目标(AoE)才标目标名分隔；单体时抬头已含目标 → 不重复
 		lines.append("→ %s" % _cname(target))
+	lines.append("命中%d-闪避%d=%d%%（骰%d）" % [r["acc"], r["eva"], r["hc"], r["roll"]])
+	lines.append("→ %s" % _oc(r["hit"], "已命中", "未命中"))
+	if not r["hit"]:
+		_spawn_hit_feedback(target, false, false, false, 0, 0)   # 飘字：未命中/闪避（看目标阵营）
+		_push_log(lines)
+		return {"hit": false, "blocked": false}
+	lines.append("暴击率%s%%" % _numf(r["cr"]))
+	lines.append("→ %s" % _oc(r["crit"], "暴击", "未暴击"))
+	var formula := "攻击%s×系数%s" % [_numf(r["atk"]), _numf(r["coeff"])]
+	if r["crit"]:
+		formula += "×暴击%s" % _numf(r["cmult"])
+	if float(r["aeff"]) != 1.0:
+		formula += "×效能%s%%" % _numf(float(r["aeff"]) * 100.0)
+	if float(r["bonus"]) > 0.0:
+		formula += "＋补正%s" % _numf(r["bonus"])
+	lines.append("伤害：%s=%s" % [formula, _numf(r["out"])])
+	lines.append("格挡率%s%%" % _numf(r["br"]))
+	lines.append("→ %s" % _oc(r["blocked"], "格挡", "未格挡"))
+	# 减伤日志：有什么写什么（格挡性能 / 减伤效能≠1 / 对应元素人抗 / 甲抗(有甲时) / 穿甲）
+	var reductions := []
+	if float(r["bp"]) > 0.0: reductions.append("格挡性能%s%%" % _numf(r["bp"]))
+	if float(r["def_factor"]) != 1.0: reductions.append("防御效能×%s" % _numf(r["def_factor"]))
+	if float(r["res_pct"]) != 0.0: reductions.append("%s%s%%" % [str(ELEM_RES_CN.get(r["elem"], "抗")), _numf(r["res_pct"])])
+	if float(r["armor_res_pct"]) != 0.0 and r["had_armor"]: reductions.append("甲抗%s%%" % _numf(r["armor_res_pct"]))
+	if float(r["pen"]) > 0.0: reductions.append("穿甲%s%%" % _numf(float(r["pen"]) * 100.0))
+	lines.append("减伤：%s" % ("、".join(reductions) if reductions.size() > 0 else "无"))
+	var tail := "%s 剩余血量：%d（-%d）" % [_cname(target), int(r["hp_after"]), int(r["hp_loss"])]
+	if int(r["armor_loss"]) > 0:
+		tail += "，护甲 -%d" % int(r["armor_loss"])
+	lines.append(tail)
+	_spawn_hit_feedback(target, true, r["crit"], r["blocked"], int(r["armor_loss"]), int(r["hp_loss"]))   # 飘字：格挡 + 护甲/生命伤（暴击加粗）
+	if r.has("door_gauge"):
+		lines.append("[color=#C86BD5]%s 死门 −1（条 %+d）[/color]" % [_cname(target), int(r["door_gauge"])])
+		_log_door_settle(target, str(r["door_result"]))
+	var inf: Dictionary = r.get("inflict", {})
+	if not inf.is_empty():
+		lines.append("%s %s%%（异抗%s%%→%s%%·骰%s）→ %s" % [
+			str(inf["name"]), _numf(inf["base_ch"]), _numf(inf["resist"]), _numf(inf["ch"]), _numf(inf["roll"]),
+			_oc(inf["applied"], "施加", "抵抗")])
+	_push_log(lines)
+	return {"hit": true, "blocked": r["blocked"]}
+
+# 模型侧：单次攻击完整结算——命中/暴击/格挡掷骰、伤害分量落血、死门条 −1+结算、异常施加。
+# 只改单位状态，不写日志/飘字；返回展示所需全部数值（未命中时只有 hit/roll/hc/acc/eva）。
+func _resolve_compute(attacker, target, skill) -> Dictionary:
 	# 命中
 	var acc := int(attacker.effective_stat("acc"))
 	var eva := int(target.effective_stat("eva"))
 	var hc := _hit_chance(attacker, target)   # 命中公式单一来源（见 _hit_chance）
 	var roll := int(randf() * 100.0)
 	var hit := roll < hc
-	lines.append("命中%d-闪避%d=%d%%（骰%d）" % [acc, eva, hc, roll])
-	lines.append("→ %s" % _oc(hit, "已命中", "未命中"))
+	var r := {"hit": hit, "roll": roll, "hc": hc, "acc": acc, "eva": eva}
 	if not hit:
-		_spawn_hit_feedback(target, false, false, false, 0, 0)   # 飘字：未命中/闪避（看目标阵营）
-		_push_log(lines)
-		return {"hit": false, "blocked": false}
+		return r
 	# 暴击（属性吃 1 位小数：crit_rate 等可为 X.5）
 	var cr := float(attacker.effective_stat_f("crit_rate"))
 	var crit := randf() * 100.0 < cr
-	lines.append("暴击率%s%%" % _numf(cr))
-	lines.append("→ %s" % _oc(crit, "暴击", "未暴击"))
 	# 伤害 = 攻击 × 系数 [× 暴击] [× 效能≠100%]
 	var coeff := float(skill.get("coeff", 1.0))
 	var cmult := (float(attacker.effective_stat_f("crit_dmg")) / 100.0) if crit else 1.0
 	var aeff: float = attacker.eff_mult("atk_eff")   # 攻击效能桶：面板 atk_eff/100 × Π效能修正（无修正=atk_eff/100，同旧）
 	var atk := float(attacker.effective_stat_f("atk"))
 	var out := atk * coeff * cmult * aeff
-	var formula := "攻击%s×系数%s" % [_numf(atk), _numf(coeff)]
-	if crit:
-		formula += "×暴击%s" % _numf(cmult)
-	if aeff != 1.0:
-		formula += "×效能%s%%" % _numf(aeff * 100.0)
 	# 伤害补正：额外 flat 伤害，不吃效能（如撕裂/抓取的 (力量+灵巧)×0.5）
 	var bonus := _skill_bonus(attacker, skill)
 	if bonus > 0.0:
 		out += bonus
-		formula += "＋补正%s" % _numf(bonus)
-	lines.append("伤害：%s=%s" % [formula, _numf(out)])
-	# 格挡
+	# 格挡 + 全域减伤 G = max(0, 1−格挡性能/100) × 防御效能因子（下限 clamp🔒）
 	var br := float(target.effective_stat_f("block_rate"))
 	var blocked := randf() * 100.0 < br
-	lines.append("格挡率%s%%" % _numf(br))
-	lines.append("→ %s" % _oc(blocked, "格挡", "未格挡"))
-	# 全域减伤 G = max(0, 1−格挡性能/100) × 防御效能因子（下限 clamp🔒）
 	var bp := float(target.effective_stat_f("block_power")) if blocked else 0.0
 	# 防御效能 def_eff：base 100=中性、越高越减伤。def_factor = max(0, 2 − def_eff/100)（100→×1.0 / 120→×0.8 / ≥200→×0免疫；下限0安全）
 	var deff: float = float(target.effective_stat_f("def_eff"))
@@ -2172,16 +2251,6 @@ func _resolve_one(attacker, target, skill, show_target := false) -> Dictionary:
 		components.append({"lane": "armor_first", "element": elem, "ratio": 1.0 - pen})
 	else:
 		components.append({"lane": "armor_first", "element": elem, "ratio": 1.0})
-	# 减伤日志：有什么写什么（格挡性能 / 减伤效能≠1 / 对应元素人抗 / 甲抗(有甲时) / 穿甲）
-	var reductions := []
-	if bp > 0.0: reductions.append("格挡性能%s%%" % _numf(bp))
-	if def_factor != 1.0: reductions.append("防御效能×%s" % _numf(def_factor))
-	var rp := float(target.effective_stat_f("res_" + CombatResolver.res_suffix(elem)))
-	if rp != 0.0: reductions.append("%s%s%%" % [str(ELEM_RES_CN.get(elem, "抗")), _numf(rp)])
-	var ar := float(target.effective_stat_f("armor_res_" + CombatResolver.res_suffix(elem)))
-	if ar != 0.0 and int(target.stats.get("armor", 0)) > 0: reductions.append("甲抗%s%%" % _numf(ar))
-	if pen > 0.0: reductions.append("穿甲%s%%" % _numf(pen * 100.0))
-	lines.append("减伤：%s" % ("、".join(reductions) if reductions.size() > 0 else "无"))
 	# 结算落血（分量减伤链在 CombatResolver：逐分量 甲抗/人抗/固减 + 破甲溢出保留元素）
 	var dres := CombatResolver.resolve(target, out, g, components)
 	var hp_loss := int(round(float(dres["hp_loss"])))
@@ -2191,21 +2260,35 @@ func _resolve_one(attacker, target, skill, show_target := false) -> Dictionary:
 	if hp_loss > 0:
 		target.stats["HP"] = int(target.stats.get("HP", 0)) - hp_loss
 	target.last_hit_by = attacker   # 击杀归属记录点（死者收尸时读；经验+情报解锁共用）
-	var tail := "%s 剩余血量：%d（-%d）" % [_cname(target), int(target.stats.get("HP", 0)), hp_loss]
-	if armor_loss > 0:
-		tail += "，护甲 -%d" % armor_loss
-	lines.append(tail)
-	_spawn_hit_feedback(target, true, crit, blocked, armor_loss, hp_loss)   # 飘字：格挡 + 护甲/生命伤（暴击加粗）
+	r["crit"] = crit
+	r["cr"] = cr
+	r["atk"] = atk
+	r["coeff"] = coeff
+	r["cmult"] = cmult
+	r["aeff"] = aeff
+	r["bonus"] = bonus
+	r["out"] = out
+	r["blocked"] = blocked
+	r["br"] = br
+	r["bp"] = bp
+	r["def_factor"] = def_factor
+	r["elem"] = elem
+	r["pen"] = pen
+	r["res_pct"] = float(target.effective_stat_f("res_" + CombatResolver.res_suffix(elem)))
+	r["armor_res_pct"] = float(target.effective_stat_f("armor_res_" + CombatResolver.res_suffix(elem)))
+	r["had_armor"] = int(target.stats.get("armor", 0)) > 0 or armor_loss > 0   # 展示口径：结算时有甲（含本次被打光）
+	r["hp_loss"] = hp_loss
+	r["armor_loss"] = armor_loss
+	r["hp_after"] = int(target.stats.get("HP", 0))
 	# 死门单位被命中：门条 −1（无论伤害多少，HP 恒钳 0）；−3 由外层攻击流程的 _handle_deaths 统一收尸
 	if target.tags.has("deaths_door"):
 		target.door_gauge -= 1
 		target.stats["HP"] = 0
-		lines.append("[color=#C86BD5]%s 死门 −1（条 %+d）[/color]" % [_cname(target), target.door_gauge])
-		_door_settle(target)
+		r["door_gauge"] = target.door_gauge
+		r["door_result"] = _door_settle_state(target)
 	# 施加异常（如撕裂的流血）：基础概率 × (1 − 异常抵抗)，命中即挂效果
-	_try_inflict(attacker, target, skill, lines)
-	_push_log(lines)
-	return {"hit": true, "blocked": blocked}
+	r["inflict"] = _try_inflict_state(target, skill)
+	return r
 
 # 技能伤害补正（flat、不吃效能）：bonus = Σ(指定四维/属性) × mult。无则 0。
 func _skill_bonus(attacker, skill) -> float:
@@ -2217,21 +2300,20 @@ func _skill_bonus(attacker, skill) -> float:
 		sum += attacker.effective_stat_f(str(s))
 	return Unit.round1(sum * float(b.get("mult", 0.0)))
 
-# 命中后尝试施加异常（流血等）：概率 × (1−异常抵抗)；成功则挂进 target.effects（同名刷新时长）。
-func _try_inflict(attacker, target, skill, lines: Array) -> void:
+# 模型侧：命中后尝试施加异常（流血等）：概率 × (1−异常抵抗)；成功则挂进 target.effects（同名刷新时长）。
+# 返回掷骰事件 {name, base_ch, resist, ch, roll, applied}；skill 无 inflict ＝ 空 {}。不写日志。
+func _try_inflict_state(target, skill) -> Dictionary:
 	var inf = skill.get("inflict", null)
 	if typeof(inf) != TYPE_DICTIONARY:
-		return
+		return {}
 	var base_ch := float(inf.get("chance", 0))
 	var resist := float(target.effective_stat_f("res_status"))
 	var ch := base_ch * (1.0 - resist / 100.0)
 	var iroll := randf() * 100.0
 	var applied := iroll < ch
-	lines.append("%s %s%%（异抗%s%%→%s%%·骰%s）→ %s" % [
-		str(inf.get("name", "")), _numf(base_ch), _numf(resist), _numf(ch), _numf(iroll),
-		_oc(applied, "施加", "抵抗")])
 	if applied:
 		_add_effect(target, inf)
+	return {"name": str(inf.get("name", "")), "base_ch": base_ch, "resist": resist, "ch": ch, "roll": iroll, "applied": applied}
 
 # 给单位挂一个效果（同名则刷新时长/数值、不叠层）。
 # **buff↔modifier 桥 🔒**：若 inf 带 mods（[{stat,op,value}]），同时往 target.modifiers 挂（source="buff:名"）——
@@ -2605,6 +2687,12 @@ func _unit_visible_cells(u) -> Dictionary:
 
 # 重算玩家侧团队视野（我方/友方全体单位可见格并集）→ 更新 visible，并入 seen。位置/单位集变化后调用。
 func _recompute_vision() -> void:
+	_recompute_vision_state()
+	if canvas != null:
+		canvas.queue_redraw()
+
+# 模型侧：重算 _vis_visible（我方/友方可见格并集）、并入 _vis_seen（历史累积）。不碰渲染。
+func _recompute_vision_state() -> void:
 	_vis_visible = {}
 	for u in units:
 		if _is_friendly(u):
@@ -2612,8 +2700,6 @@ func _recompute_vision() -> void:
 				_vis_visible[cell] = true
 	for cell in _vis_visible:
 		_vis_seen[cell] = true
-	if canvas != null:
-		canvas.queue_redraw()
 
 # 某格对玩家的迷雾态：0=黑(未探索) / 1=灰(探索过·无观测) / 2=常态(可见)。全知或非战斗阶段一律常态。
 func cell_fog(cell: Vector2i) -> int:
