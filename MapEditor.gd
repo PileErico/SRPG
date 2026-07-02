@@ -13,6 +13,7 @@ const UnitFactory := preload("res://UnitFactory.gd")   # 造单位/序列化单�
 const DeployPanel := preload("res://DeployPanel.gd")   # 复用单位编辑器（editor_mode 编 placed 单位）
 const EnvDB := preload("res://EnvDB.gd")   # 环境注册表（天气/日夜，环境面板下拉数据源）
 const TagDB := preload("res://TagDB.gd")   # faction→中文走单一源
+const EventEngine := preload("res://EventEngine.gd")   # 动作元数据注册表单一源：触发器动作菜单/缺省值/表单全据此生成
 
 const MAX_W := 50
 const MAX_H := 50
@@ -87,7 +88,6 @@ var _unit_stroke_action := ""        # 单位层一次拖动的动作锁（""未
 
 # —— 触发器层：authoring 关卡事件（when 条件 → do 动作），存进地图 triggers 字段 ——
 const TRIG_FACTIONS := [["player", "玩家"], ["any", "任意"]]
-const TRIG_ACTION_TYPES := [["show_message", "弹消息"], ["spawn_unit", "召唤单位"], ["activate_aggro", "激活AI组"]]
 var _trigger_panel: Control
 var _trigger_list: ItemList
 var _active_trigger_idx := -1
@@ -1100,26 +1100,11 @@ func _refresh_do_list() -> void:
 	mb.text = "＋ 添加动作"
 	mb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var pop := mb.get_popup()
-	for i in TRIG_ACTION_TYPES.size():
-		pop.add_item(TRIG_ACTION_TYPES[i][1], i)
-	pop.id_pressed.connect(func(id: int): _on_add_action(TRIG_ACTION_TYPES[id][0]))
+	var defs := EventEngine.action_defs()   # 动作菜单＝注册表驱动（新动作登记 EventEngine 即自动出现在这）
+	for i in defs.size():
+		pop.add_item(str(defs[i]["label"]), i)
+	pop.id_pressed.connect(func(id: int): _on_add_action(str(EventEngine.action_defs()[id]["id"])))
 	_trig_do_box.add_child(mb)
-
-func _action_cn(act: String) -> String:
-	for pair in TRIG_ACTION_TYPES:
-		if pair[0] == act:
-			return str(pair[1])
-	return act
-
-func _default_action(act: String) -> Dictionary:
-	match act:
-		"show_message":
-			return {"action": "show_message", "text": "消息"}
-		"spawn_unit":
-			return {"action": "spawn_unit", "proto_id": "", "faction": "enemy", "col": 0, "row": 0}
-		"activate_aggro":
-			return {"action": "activate_aggro", "group": ""}
-	return {"action": act}
 
 func _on_add_action(act: String) -> void:
 	var t := active_trigger()
@@ -1128,7 +1113,7 @@ func _on_add_action(act: String) -> void:
 	_push_undo(_snapshot(), "添加动作")
 	if typeof(t.get("do")) != TYPE_ARRAY:
 		t["do"] = []
-	t["do"].append(_default_action(act))
+	t["do"].append(EventEngine.default_action(act))
 	_dirty = true
 	_refresh_do_list()
 
@@ -1151,7 +1136,7 @@ func _build_action_row(a: Dictionary, idx: int) -> Control:
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 2)
 	var head := HBoxContainer.new()
-	var lbl := _make_label("• " + _action_cn(str(a.get("action", ""))))
+	var lbl := _make_label("• " + EventEngine.action_label(str(a.get("action", ""))))
 	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(lbl)
 	var x := Button.new()
@@ -1159,53 +1144,60 @@ func _build_action_row(a: Dictionary, idx: int) -> Control:
 	x.pressed.connect(_on_remove_action.bind(idx))
 	head.add_child(x)
 	box.add_child(head)
-	match str(a.get("action", "")):
-		"show_message":
-			var le := LineEdit.new()
-			le.text = str(a.get("text", ""))
-			le.text_changed.connect(func(t: String): _set_action_field(a, "text", t))
-			box.add_child(le)
-		"activate_aggro":
-			var le := LineEdit.new()
-			le.placeholder_text = "组id（空=全敌方）"
-			le.text = str(a.get("group", ""))
-			le.text_changed.connect(func(t: String): _set_action_field(a, "group", t))
-			box.add_child(le)
-		"spawn_unit":
+	# 参数表单＝注册表 fields 数据驱动（不再每动作手写分支；新动作登记 EventEngine.ACTIONS 即自动有表单）
+	for f in EventEngine.action_def(str(a.get("action", ""))).get("fields", []):
+		box.add_child(_build_action_field(a, f))
+	box.add_child(HSeparator.new())
+	return box
+
+# 注册表字段 → 控件（type：text/int/proto/faction/weather）。int 的 max 是宽泛上限，越界值运行时按地图 clamp。
+func _build_action_field(a: Dictionary, f: Dictionary) -> Control:
+	var key := str(f.get("key", ""))
+	var flabel := str(f.get("label", key))
+	match str(f.get("type", "text")):
+		"int":
+			var row := HBoxContainer.new()
+			row.add_child(_make_label(flabel))
+			var sp := SpinBox.new()
+			sp.min_value = int(f.get("min", 0))
+			sp.max_value = int(f.get("max", 999))
+			sp.value = int(a.get(key, f.get("default", 0)))
+			sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			sp.value_changed.connect(func(val: float): _set_action_field(a, key, int(val)))
+			row.add_child(sp)
+			return row
+		"proto":
 			var protos := UnitFactory.all_prototypes()
 			var po := OptionButton.new()
 			for i in protos.size():
 				po.add_item(str(protos[i].get("name", "")))
-			for i in protos.size():
-				if str(protos[i].get("id", "")) == str(a.get("proto_id", "")):
+				if str(protos[i].get("id", "")) == str(a.get(key, "")):
 					po.select(i)
-			po.item_selected.connect(func(i: int): _set_action_field(a, "proto_id", str(protos[i].get("id", ""))))
-			box.add_child(po)
+			po.item_selected.connect(func(i: int): _set_action_field(a, key, str(protos[i].get("id", ""))))
+			return po
+		"faction":
 			var fo := OptionButton.new()
 			for i in UNIT_FACTIONS.size():
 				fo.add_item(TagDB.cn(UNIT_FACTIONS[i]))
-				if UNIT_FACTIONS[i] == str(a.get("faction", "enemy")):
+				if UNIT_FACTIONS[i] == str(a.get(key, f.get("default", ""))):
 					fo.select(i)
-			fo.item_selected.connect(func(i: int): _set_action_field(a, "faction", UNIT_FACTIONS[i]))
-			box.add_child(fo)
-			var cr := HBoxContainer.new()
-			cr.add_child(_make_label("col"))
-			var cs := SpinBox.new()
-			cs.min_value = 0
-			cs.max_value = MAX_W - 1
-			cs.value = int(a.get("col", 0))
-			cs.value_changed.connect(func(val: float): _set_action_field(a, "col", int(val)))
-			cr.add_child(cs)
-			cr.add_child(_make_label("row"))
-			var rs := SpinBox.new()
-			rs.min_value = 0
-			rs.max_value = MAX_H - 1
-			rs.value = int(a.get("row", 0))
-			rs.value_changed.connect(func(val: float): _set_action_field(a, "row", int(val)))
-			cr.add_child(rs)
-			box.add_child(cr)
-	box.add_child(HSeparator.new())
-	return box
+			fo.item_selected.connect(func(i: int): _set_action_field(a, key, UNIT_FACTIONS[i]))
+			return fo
+		"weather":
+			var weathers := EnvDB.all_weathers()
+			var wo := OptionButton.new()
+			for i in weathers.size():
+				wo.add_item(str(weathers[i].get("label", weathers[i].get("id", ""))))
+				if str(weathers[i].get("id", "")) == str(a.get(key, f.get("default", "clear"))):
+					wo.select(i)
+			wo.item_selected.connect(func(i: int): _set_action_field(a, key, str(weathers[i].get("id", ""))))
+			return wo
+		_:   # "text"
+			var le := LineEdit.new()
+			le.placeholder_text = flabel
+			le.text = str(a.get(key, ""))
+			le.text_changed.connect(func(t: String): _set_action_field(a, key, t))
+			return le
 
 func _build_side_panel() -> Control:
 	var side := VBoxContainer.new()

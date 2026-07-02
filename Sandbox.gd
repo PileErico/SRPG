@@ -25,6 +25,7 @@ const RosterBar := preload("res://RosterBar.gd")
 const SandboxConfig := preload("res://SandboxConfig.gd")
 const WorldState := preload("res://WorldState.gd")   # 战役档静态引用（沙盒不建档 🔒；有档＝战役战斗，时钟供日夜）
 const WorldClock := preload("res://WorldClock.gd")   # 世界时钟：小时→日夜映射（战斗不耗世界时间 🔒，战中日夜冻结）
+const EventEngine := preload("res://EventEngine.gd") # when/do 事件引擎：触发器评估/执行迁入（本类只做宿主原语 event_*）
 const MapIO := preload("res://MapIO.gd")   # 地图读 / 写单一入口（与 MapEditor 共用）
 # 战斗地图：默认与地图编辑器共享同一张图（编辑器改 → 这里读到）。
 # 实际打开哪张：优先 SandboxConfig.map_path（选地图界面传入），空则用此默认；缺失/损坏回退全草原。
@@ -280,76 +281,43 @@ func save_units_to_map() -> bool:
 	return false
 
 # ============ 触发器（schema v3：when 条件 → do 动作）============
-# 当前支持 when.event="enter_region"（玩家踏入某区域）；动作 show_message / spawn_unit / activate_aggro。
-# 编辑器侧的「触发器层」UI 待做（先支持运行时 + 手写/沙盒摆好后写回）。
+# 评估/执行已迁入 EventEngine（M3）；本类只保留宿主原语 event_*（引擎经鸭子类型转发）。
+# 战斗侧 fired 记录＝_fired_triggers（每战清零）、无冷却（ws=null）——世界层持久状态在 WorldState（大地图 M4 用）。
 
-# 玩家单位 u 落位后评估所有 enter_region 触发器
-func _check_enter_triggers(u) -> void:
-	if _map_triggers.is_empty():
+# —— EventEngine 宿主原语（实现即声明支持该动作）——
+
+func event_log(text: String) -> void:
+	_log_line("⚑ %s" % text)
+
+func event_activate_aggro(group: String) -> void:
+	for g in units:   # 空组＝激活全部敌方
+		if not _is_friendly(g) and (group == "" or g.ai_group == group) and not g.ai_aggroed:
+			_ai_set_aggro(g)
+
+# 定点变天：duration>0 ＝ 持续该回合数后回天气表随机，0 ＝ 常驻不变
+func event_set_weather(weather: String, duration: int) -> void:
+	_cur_weather = weather
+	_weather_left = maxi(0, duration)
+	_apply_env_modifiers()
+	var dur_txt := ("%d 回合" % _weather_left) if _weather_left > 0 else "持续"
+	_log_line("⚑ 天气转为 [b]%s[/b]（%s）" % [EnvDB.weather_label(_cur_weather), dur_txt])
+
+func event_spawn_unit(proto_id: String, faction: String, col: int, row: int) -> void:
+	var proto := _find_proto(proto_id)
+	if proto.is_empty():
 		return
-	var cell := Vector2i(u.col, u.row)
-	for i in _map_triggers.size():
-		var trig = _map_triggers[i]
-		if typeof(trig) != TYPE_DICTIONARY:
-			continue
-		var when = trig.get("when", {})
-		if typeof(when) != TYPE_DICTIONARY or str(when.get("event", "")) != "enter_region":
-			continue
-		var tid := _trigger_key(trig, i)
-		if bool(when.get("once", true)) and _fired_triggers.has(tid):
-			continue
-		var by := str(when.get("by_faction", "player"))   # 缺省＝仅玩家踏入触发
-		if by != "" and by != "any" and u.faction != by:
-			continue
-		var cells: Dictionary = _all_region_cells.get(str(when.get("region", "")), {})
-		if cells.has(cell):
-			_fire_trigger(trig, tid)
-
-# 触发器去重 key：有 id 用 id；无 id 用数组下标兜底（否则 once 对无 id 触发器失效、会重复触发）
-func _trigger_key(trig: Dictionary, index: int) -> String:
-	var tid := str(trig.get("id", ""))
-	return tid if tid != "" else "#%d" % index
-
-func _fire_trigger(trig: Dictionary, tid: String = "") -> void:
-	if tid == "":
-		tid = str(trig.get("id", ""))
-	if tid != "":
-		_fired_triggers[tid] = true
-	var label := str(trig.get("label", tid))
-	for a in trig.get("do", []):
-		if typeof(a) == TYPE_DICTIONARY:
-			_do_trigger_action(a, label)
-
-func _do_trigger_action(a: Dictionary, trig_label: String) -> void:
-	match str(a.get("action", "")):
-		"show_message":
-			_log_line("⚑ %s" % str(a.get("text", trig_label)))
-		"activate_aggro":
-			var grp := str(a.get("group", ""))   # 空＝激活全部敌方
-			for g in units:
-				if not _is_friendly(g) and (grp == "" or g.ai_group == grp) and not g.ai_aggroed:
-					_ai_set_aggro(g)
-		"set_weather":
-			# 定点变天：设为指定天气；duration>0 ＝ 持续该回合数后回天气表随机，<=0/缺 ＝ 常驻不变
-			_cur_weather = str(a.get("weather", "clear"))
-			_weather_left = maxi(0, int(a.get("duration", 0)))
-			_apply_env_modifiers()
-			var dur_txt := ("%d 回合" % _weather_left) if _weather_left > 0 else "持续"
-			_log_line("⚑ 天气转为 [b]%s[/b]（%s）" % [EnvDB.weather_label(_cur_weather), dur_txt])
-		"spawn_unit":
-			var proto := _find_proto(str(a.get("proto_id", "")))
-			if proto.is_empty():
-				return
-			var col := clampi(int(a.get("col", 0)), 0, maxi(0, width - 1))
-			var row := clampi(int(a.get("row", 0)), 0, maxi(0, height - 1))
-			var fac := str(a.get("faction", proto.get("default_faction", "enemy")))
-			var nu = make_unit(proto, fac, col, row)
-			units.append(nu)
-			if phase == "battle" and not (nu in turn_order):
-				turn_order.append(nu)   # 战中召唤：排进本 round 末
-			_log_line("⚑ %s 出现！" % _cname(nu))
-			if canvas != null:
-				canvas.queue_redraw()
+	var c := clampi(col, 0, maxi(0, width - 1))
+	var r := clampi(row, 0, maxi(0, height - 1))
+	var fac := faction if faction != "" else str(proto.get("default_faction", "enemy"))
+	var nu = make_unit(proto, fac, c, r)
+	units.append(nu)
+	if phase == "battle" and not (nu in turn_order):
+		turn_order.append(nu)   # 战中召唤：排进本 round 末
+	_log_line("⚑ %s 出现！" % _cname(nu))
+	if phase == "battle":
+		_recompute_vision()   # 新单位立刻纳入迷雾计算（旧债：曾延迟一拍到下次移动）
+	if canvas != null:
+		canvas.queue_redraw()
 
 # 按 id 查内置原型（data/unit_prototypes.json）；找不到返回 {}
 func _find_proto(pid: String) -> Dictionary:
@@ -1233,6 +1201,8 @@ func _ai_step_toward(unit, target) -> bool:
 	unit.row = pick.y
 	_refresh_info()
 	await _animate_path(unit, path)
+	# AI 走位也评估触发器（还旧债：by_faction:"any"/"enemy" 曾是死键——只有玩家侧 _commit_move 一处钩子）
+	EventEngine.check_enter_region(_map_triggers, unit, _all_region_cells, _fired_triggers, self)
 	return true
 
 # 最近的敌对单位（按六边形距离）
@@ -2303,8 +2273,8 @@ func _commit_move(col: int, row: int) -> void:
 	_refresh_info()
 	_recompute_vision()   # 单位落位 → 重算玩家视野（友方移动揭开/关闭迷雾）
 	_animate_path(u, path)   # 沿路径平移（非瞬移）；玩家不 await（即发即忘）
-	if _is_friendly(u):
-		_check_enter_triggers(u)   # 玩家踏入新格 → 评估 enter_region 触发器
+	# 落位 → 评估 enter_region 触发器（不再限友方：by_faction 缺省 player 仍只玩家触发，"any" 对谁都生效）
+	EventEngine.check_enter_region(_map_triggers, u, _all_region_cells, _fired_triggers, self)
 
 # 沿 path（含起点的格序列）滑动单位 token；动画期间 _draw_unit 用 _anim_pos 绘制。
 # 可被 await（敌方 AI 串行走位用）；玩家提交移动则不 await。

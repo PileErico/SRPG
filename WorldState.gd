@@ -25,6 +25,11 @@ var flags := {}          # 世界 flag {key: value}——任务/事件状态起�
 var reputation := {}     # 派系声望 {faction_id: int}
 var roster := []         # 花名册：活 Unit 对象列表（存档时经 unit_to_campaign 快照、读档重建）
 var item_instances := {} # 本档物品实例库 {uid(int): inst}——ItemInstances 门面在 current==self 时路由到这
+# —— 世界层事件状态（EventEngine 持久层；战斗局部 fired 在 Sandbox、每战清零，两层分离 🔒）——
+var event_fired := {}            # 已触发事件 {tid: true}（once 消费）
+var event_timer_last := {}       # timer 事件上次节拍时刻 {tid: clock_hours}
+var event_cooldown_until := {}   # 事件冷却到期时刻 {tid: clock_hours}
+var last_world_event_hours := -1000000   # 上次 global_gap 事件时刻（全局事件间隔用；极小初值＝开局不卡）
 
 # ============ 战役生命周期入口（场景入口层专用；底层模块别碰 current，改收显式参数）============
 
@@ -104,6 +109,10 @@ func to_dict() -> Dictionary:
 		"ironman": ironman,
 		"flags": flags.duplicate(true),
 		"reputation": reputation.duplicate(true),
+		"event_fired": event_fired.duplicate(true),
+		"event_timer_last": event_timer_last.duplicate(true),
+		"event_cooldown_until": event_cooldown_until.duplicate(true),
+		"last_world_event_hours": last_world_event_hours,
 		"item_instances": items_json,
 		"roster": roster_json,
 	}
@@ -120,6 +129,11 @@ static func from_dict(d: Dictionary):
 	ws.flags = fl if typeof(fl) == TYPE_DICTIONARY else {}
 	var rep = d.get("reputation", {})
 	ws.reputation = rep if typeof(rep) == TYPE_DICTIONARY else {}
+	var ef = d.get("event_fired", {})
+	ws.event_fired = ef if typeof(ef) == TYPE_DICTIONARY else {}
+	ws.event_timer_last = _int_valued(d.get("event_timer_last", {}))
+	ws.event_cooldown_until = _int_valued(d.get("event_cooldown_until", {}))
+	ws.last_world_event_hours = int(d.get("last_world_event_hours", -1000000))
 	ws.item_instances = ItemInstances.parse_json(d.get("item_instances", []))
 	var prev = current
 	current = ws
@@ -137,3 +151,11 @@ static func from_dict(d: Dictionary):
 		mx = maxi(mx, int(u.uid) + 1)
 	ws.next_uid = mx
 	return ws
+
+# 值 int 化的字典兜底（JSON 数字一律 float；键是 tid 字符串、天然无损）
+static func _int_valued(v) -> Dictionary:
+	var out := {}
+	if typeof(v) == TYPE_DICTIONARY:
+		for k in v:
+			out[str(k)] = int(v[k])
+	return out
