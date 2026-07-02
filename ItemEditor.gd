@@ -115,7 +115,8 @@ func _ready() -> void:
 	var back := Button.new()
 	back.text = "返回主菜单"
 	back.custom_minimum_size = Vector2(120, 0)
-	back.pressed.connect(func(): get_tree().change_scene_to_file("res://StartMenu.tscn"))
+	# 返回也走未保存守卫（切换/新建已有，唯独这里漏了会静默丢改动）
+	back.pressed.connect(func(): _confirm_discard(func(): get_tree().change_scene_to_file("res://StartMenu.tscn")))
 	titlebar.add_child(back)
 	root.add_child(titlebar)
 

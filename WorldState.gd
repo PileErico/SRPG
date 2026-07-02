@@ -101,8 +101,11 @@ func mark_location_cleared(loc_id: String) -> void:
 	if loc_id != "":
 		location_cleared_at[loc_id] = clock_hours
 
-# 大地图动态单位：按 uid 查/移除（BattleIO 战胜回写、WorldSim 摩擦战用）
+# 大地图动态单位：按 uid 查/移除（BattleIO 战胜回写、WorldSim 摩擦战用）。
+# uid<=0＝无效（未分配/坏档），直接 null——防 context 缺键时 get 默认 0 误中坏数据单位。
 func world_unit_by_uid(uid: int):
+	if uid <= 0:
+		return null
 	for u in world_units:
 		if int(u.get("uid", 0)) == uid:
 			return u
