@@ -8,8 +8,9 @@ const ItemDB := preload("res://ItemDB.gd")
 const SkillDB := preload("res://SkillDB.gd")
 const TraitDB := preload("res://TraitDB.gd")
 const StatMeta := preload("res://StatMeta.gd")   # stat→中文（不再依赖 host.STAT_LABELS）
+const TagDB := preload("res://TagDB.gd")          # faction→中文走单一源
 
-const FACTIONS := [["player", "我方"], ["ally", "友方"], ["enemy", "敌方"], ["neutral", "中立"]]
+const FACTIONS := ["player", "ally", "enemy", "neutral"]   # 顺序=下拉顺序；中文走 TagDB.cn
 const FOUR_KEYS := ["STR", "DEX", "INT", "STA"]
 const FOUR_CN := {"STR": "力量", "DEX": "灵巧", "INT": "智力", "STA": "体力"}
 const EDIT_STATS := ["move", "speed", "AP_max", "armor_max", "atk_eff", "def_eff",
@@ -154,8 +155,8 @@ func _rebuild_editor() -> void:
 	fr.add_child(_lblw("阵营", 110))
 	var fo := OptionButton.new()
 	for i in FACTIONS.size():
-		fo.add_item(FACTIONS[i][1], i)
-		if FACTIONS[i][0] == _sel.faction:
+		fo.add_item(TagDB.cn(FACTIONS[i]), i)
+		if FACTIONS[i] == _sel.faction:
 			fo.select(i)
 	fo.item_selected.connect(_on_faction_changed)
 	fr.add_child(fo)
@@ -262,7 +263,7 @@ func _on_name_changed(t: String) -> void:
 
 func _on_faction_changed(idx: int) -> void:
 	if _sel == null: return
-	_sel.faction = FACTIONS[idx][0]
+	_sel.faction = FACTIONS[idx]
 	if host:
 		host.set_viewed_unit(_sel)
 		host._refresh_roster_bar()

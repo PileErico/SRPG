@@ -15,6 +15,7 @@ const TextureCache := preload("res://TextureCache.gd")      # 立绘/图标加�
 const ELEM_RES_CN := {"physical": "物抗", "fire": "火抗", "ice": "冰抗", "thunder": "雷抗", "holy": "神圣抗"}
 const TerrainDB := preload("res://TerrainDB.gd")
 const EnvDB := preload("res://EnvDB.gd")   # 环境注册表（天气/日夜 → sight 修正）
+const TagDB := preload("res://TagDB.gd")   # tag 中文/颜色单一源
 const WeatherVFX := preload("res://WeatherVFX.gd")   # 天气视觉叠层（屏幕空间氛围）
 const SandboxCanvas := preload("res://SandboxCanvas.gd")
 const UnitStatusPanel := preload("res://UnitStatusPanel.gd")
@@ -138,8 +139,6 @@ var roster := []
 
 # 六边形邻居偏移表已迁 HexGrid（odd-q，single source）；本文件几何一律走 HexGrid.*。
 # stat 键→中文 统一走 StatMeta.label（单一数据源、全量键），不再在此维护副本（已删除未使用的 STAT_LABELS）。
-# tag → 中文标签（通行性/效果文字用）
-const TAG_LABELS := {"flying": "飞行", "spectral": "灵体", "ground": "地面"}
 
 func _ready() -> void:
 	randomize()   # 战斗判定掷骰
@@ -752,7 +751,7 @@ func _passability_text(mv) -> String:
 			return "不可通行"
 		var names := []
 		for tg in pb:
-			names.append(TAG_LABELS.get(tg, str(tg)))
+			names.append(TagDB.cn(str(tg)))
 		return "仅<%s>" % "/".join(names)
 	if pb == "none":
 		return "不可通行"

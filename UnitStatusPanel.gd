@@ -168,7 +168,7 @@ func _make_header(u) -> Control:
 	row.add_child(_nav_button(">", 1, "下一个同阵营单位"))
 
 	var title := Label.new()
-	title.text = "%s · %s" % [_faction_label(u.faction), str(u.unit_name)]
+	title.text = "%s · %s" % [TagDB.cn(u.faction), str(u.unit_name)]
 	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(title)
 
@@ -226,14 +226,6 @@ func _cycle(dir: int) -> void:
 # 阵营归边：我方/友方 同侧，敌方/中立 同侧（< > 在同侧内循环）
 func _side(faction: String) -> String:
 	return "friend" if faction in ["player", "ally"] else "foe"
-
-func _faction_label(f: String) -> String:
-	match f:
-		"player": return "我方"
-		"ally": return "友方"
-		"enemy": return "敌方"
-		"neutral": return "中立"
-		_: return f
 
 # 初次居中；之后沿用上次拖到的位置
 func _place_card() -> void:

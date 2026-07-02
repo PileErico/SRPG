@@ -12,6 +12,7 @@ const MapIO := preload("res://MapIO.gd")   # 地图读 / 写单一入口（与 S
 const UnitFactory := preload("res://UnitFactory.gd")   # 造单位/序列化单一入口（与 Sandbox 共用）
 const DeployPanel := preload("res://DeployPanel.gd")   # 复用单位编辑器（editor_mode 编 placed 单位）
 const EnvDB := preload("res://EnvDB.gd")   # 环境注册表（天气/日夜，环境面板下拉数据源）
+const TagDB := preload("res://TagDB.gd")   # faction→中文走单一源
 
 const MAX_W := 50
 const MAX_H := 50
@@ -70,7 +71,7 @@ const REGION_KINDS := [["aggro", "触发区"], ["deploy", "部署区"]]
 
 # —— 单位层：在编辑器里摆「这一关的单位」（authoring 关卡内容，存进地图 units 字段）——
 # 与沙盒「自由测试」不同：这里摆的是关卡固定内容（敌人/预置友军/中立），随地图持久化。
-const UNIT_FACTIONS := [["enemy", "敌方"], ["player", "我方"], ["ally", "友方"], ["neutral", "中立"]]
+const UNIT_FACTIONS := ["enemy", "player", "ally", "neutral"]   # 顺序=下拉顺序；中文走 TagDB.cn
 const FACTION_COLORS := {
 	"player": Color(0.30, 0.55, 0.95), "ally": Color(0.30, 0.55, 0.95),
 	"enemy": Color(0.90, 0.30, 0.30), "neutral": Color(0.90, 0.80, 0.30),
@@ -748,9 +749,9 @@ func _build_unit_tools() -> Control:
 	frow.add_child(_make_label("阵营"))
 	var fopt := OptionButton.new()
 	for i in UNIT_FACTIONS.size():
-		fopt.add_item(UNIT_FACTIONS[i][1], i)
+		fopt.add_item(TagDB.cn(UNIT_FACTIONS[i]), i)
 	fopt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	fopt.item_selected.connect(func(idx: int): _unit_faction = UNIT_FACTIONS[idx][0])
+	fopt.item_selected.connect(func(idx: int): _unit_faction = UNIT_FACTIONS[idx])
 	frow.add_child(fopt)
 	v.add_child(frow)
 	v.add_child(_make_label("原型（选一个再落子）"))
@@ -769,19 +770,14 @@ func _refresh_unit_protos() -> void:
 		return
 	_unit_list.clear()
 	for p in _unit_protos:
-		_unit_list.add_item("%s（%s）" % [str(p.get("name", "单位")), _faction_cn(str(p.get("default_faction", "enemy")))])
+		_unit_list.add_item("%s（%s）" % [str(p.get("name", "单位")), TagDB.cn(str(p.get("default_faction", "enemy")))])
 
 func _on_unit_proto_selected(idx: int) -> void:
 	if idx >= 0 and idx < _unit_protos.size():
 		_unit_proto = _unit_protos[idx]
 		_unit_faction = str(_unit_proto.get("default_faction", _unit_faction))   # 选原型即取其默认阵营（仍可改）
-		set_status("将落子：%s（%s）— 左键放到格上" % [str(_unit_proto.get("name", "单位")), _faction_cn(_unit_faction)])
+		set_status("将落子：%s（%s）— 左键放到格上" % [str(_unit_proto.get("name", "单位")), TagDB.cn(_unit_faction)])
 
-func _faction_cn(fac: String) -> String:
-	for pair in UNIT_FACTIONS:
-		if pair[0] == fac:
-			return str(pair[1])
-	return fac
 
 # 单位层棋子色（供 EditorCanvas 画 token；与战斗一致：我方/友方蓝、敌方红、中立黄）
 func faction_color(fac: String) -> Color:
@@ -1189,10 +1185,10 @@ func _build_action_row(a: Dictionary, idx: int) -> Control:
 			box.add_child(po)
 			var fo := OptionButton.new()
 			for i in UNIT_FACTIONS.size():
-				fo.add_item(UNIT_FACTIONS[i][1])
-				if UNIT_FACTIONS[i][0] == str(a.get("faction", "enemy")):
+				fo.add_item(TagDB.cn(UNIT_FACTIONS[i]))
+				if UNIT_FACTIONS[i] == str(a.get("faction", "enemy")):
 					fo.select(i)
-			fo.item_selected.connect(func(i: int): _set_action_field(a, "faction", UNIT_FACTIONS[i][0]))
+			fo.item_selected.connect(func(i: int): _set_action_field(a, "faction", UNIT_FACTIONS[i]))
 			box.add_child(fo)
 			var cr := HBoxContainer.new()
 			cr.add_child(_make_label("col"))
