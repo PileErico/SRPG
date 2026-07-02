@@ -18,6 +18,7 @@ const SaveIO := preload("res://SaveIO.gd")
 const OverworldCanvas := preload("res://OverworldCanvas.gd")
 const BattleIO := preload("res://BattleIO.gd")
 const SandboxConfig := preload("res://SandboxConfig.gd")
+const JobDB := preload("res://JobDB.gd")   # 营地职务注册表（M6 框架）
 
 const MAP_PATH := "res://maps/overworld/world.json"
 const HOURS_PER_COST := 2    # 占位：1 点地形通行成本 ＝ 2 小时行程（数值层后调）
@@ -280,6 +281,10 @@ func _build_ui() -> void:
 	camp_b.text = "⛺ 扎营（+%d 小时）" % CAMP_HOURS
 	camp_b.pressed.connect(_on_camp)
 	top.add_child(camp_b)
+	var jobs_b := Button.new()
+	jobs_b.text = "🏕 职务"
+	jobs_b.pressed.connect(_open_jobs_panel)
+	top.add_child(jobs_b)
 	var menu_b := Button.new()
 	menu_b.text = "返回菜单"
 	menu_b.pressed.connect(_on_back_to_menu)
@@ -319,6 +324,69 @@ func _autosave() -> void:
 	if not SaveIO.save_campaign(WorldState.current, _save_slot):
 		_log_line("[color=#E07A5A]⚠ 自动存档失败（磁盘/占用/权限？）——本段进度未写入「%s」槽[/color]" % _save_slot)
 		push_warning("Overworld：自动存档失败（槽=%s）" % _save_slot)
+
+# ============ 营地职务（M6 框架：槽位+指派；加成载体待 §2.2——除医生〔恢复速率×2 占位〕外效果后续接）============
+
+var _jobs_popup: PopupPanel
+
+# 职务面板：每职务一行（名称 + 人选下拉）。指派即写档；一人一职（兼任自动撤原职）。
+func _open_jobs_panel() -> void:
+	if _jobs_popup != null:
+		_jobs_popup.queue_free()
+	_jobs_popup = PopupPanel.new()
+	add_child(_jobs_popup)
+	var v := VBoxContainer.new()
+	v.custom_minimum_size = Vector2(360, 0)
+	v.add_theme_constant_override("separation", 6)
+	_jobs_popup.add_child(v)
+	var title := Label.new()
+	title.text = "营地职务（一人一职；重伤休整者视为不在岗）"
+	v.add_child(title)
+	var ws = WorldState.current
+	for jdef in JobDB.all_jobs():
+		var jid := str(jdef["id"])
+		var row := HBoxContainer.new()
+		var lbl := Label.new()
+		lbl.text = str(jdef.get("label", jid)) + ("" if str(jdef.get("effect_status", "")) == "in_use" else " ⏳")
+		lbl.tooltip_text = str(jdef.get("desc", ""))
+		lbl.custom_minimum_size = Vector2(110, 0)
+		row.add_child(lbl)
+		var opt := OptionButton.new()
+		opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		opt.add_item("— 空缺 —")
+		opt.set_item_metadata(0, 0)
+		var cur_uid := int(ws.camp_jobs.get(jid, 0))
+		var idx := 1
+		for u in ws.roster:
+			var uname := str(u.unit_name)
+			if int(u.injured_until) > ws.clock_hours:
+				uname += "（重伤休整中）"
+			opt.add_item(uname)
+			opt.set_item_metadata(idx, u.uid)
+			if int(u.uid) == cur_uid:
+				opt.select(idx)
+			idx += 1
+		opt.item_selected.connect(func(i: int): _assign_job(jid, int(opt.get_item_metadata(i))))
+		row.add_child(opt)
+		v.add_child(row)
+	var hint := Label.new()
+	hint.text = "⏳＝效果待接入（加成数值待定）；医生已生效：全队恢复速率提升"
+	hint.add_theme_color_override("font_color", Color(0.65, 0.68, 0.75))
+	v.add_child(hint)
+	_jobs_popup.popup_centered()
+
+# 指派职务：一人一职（兼任自动从原职撤下）；写档。面板重建保证各行下拉同步。
+func _assign_job(jid: String, uid: int) -> void:
+	var ws = WorldState.current
+	if uid > 0:
+		for k in ws.camp_jobs.keys():
+			if str(k) != jid and int(ws.camp_jobs[k]) == uid:
+				ws.camp_jobs[k] = 0
+	ws.camp_jobs[jid] = uid
+	var holder = ws.roster_by_uid(uid) if uid > 0 else null
+	_log_line("🏕 %s ← %s" % [JobDB.job_label(jid), (holder.unit_name if holder != null else "空缺")])
+	_autosave()
+	_open_jobs_panel()   # 重建面板（兼任撤职后其它行下拉同步）
 
 # 返回菜单：先自动存档（current 由 StartMenu._ready 统一清——「继续」从磁盘重读，保留只会泄漏进沙盒）
 func _on_back_to_menu() -> void:

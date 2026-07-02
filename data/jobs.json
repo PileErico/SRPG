@@ -1,0 +1,11 @@
+{
+  "_note": "营地职务单一数据源（M6 框架）。id=职务键（camp_jobs 字典键）；label/desc=UI 文案；effect_status: in_use=效果已接入消费端 / planned=登记占位、效果后续接（加成承载方式待需求 §2.2，除医生外先不实现数值）。JobDB 读本文件。",
+  "format_version": 1,
+  "jobs": [
+    {"id": "medic", "label": "医生", "desc": "全队每小时生命恢复速率提升（承载=改 WorldClock 每小时速率 🔒；倍率占位 ×2）", "effect_status": "in_use"},
+    {"id": "cook", "label": "厨师", "desc": "烹饪食物、战前配餐（效果待烹饪系统接入，见 docs/情报与烹饪系统.md）", "effect_status": "planned"},
+    {"id": "smith", "label": "工匠", "desc": "扎营期间修复装备耐久（效果待耐久消耗钩子接入）", "effect_status": "planned"},
+    {"id": "guard", "label": "警卫", "desc": "降低扎营/行军遇袭概率（效果待遭遇系统接入）", "effect_status": "planned"},
+    {"id": "scout", "label": "情报官", "desc": "解锁图鉴查阅入口（解锁引擎独立运作；图鉴 UI 后续，见 docs/情报与烹饪系统.md）", "effect_status": "planned"}
+  ]
+}

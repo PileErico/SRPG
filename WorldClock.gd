@@ -11,7 +11,8 @@ extends RefCounted
 const EnvDB := preload("res://EnvDB.gd")
 
 const HOURS_PER_DAY := 24
-const REGEN_HP_PER_HOUR := 1.0   # 占位：战外每小时自然恢复 HP（医生职务改速率＝M6；重伤/恢复细则＝需求 §2.3）
+const REGEN_HP_PER_HOUR := 1.0   # 占位：战外每小时自然恢复 HP（重伤/恢复细则＝需求 §2.3）
+const MEDIC_REGEN_MULT := 2.0    # 占位：医生在岗的恢复倍率（承载=改每小时速率 🔒 §6.2；数值待 §2.2）
 
 # 推进世界时间 n 小时（n<=0 / 无档＝no-op）。逐小时调度：恢复/冷却/刷新全按「每小时」节拍结算。
 static func advance(ws, hours: int) -> void:
@@ -25,13 +26,15 @@ static func advance(ws, hours: int) -> void:
 static func _tick_hour(ws) -> void:
 	_settle_recovery(ws)
 
-# 恢复结算（占位）：roster 全员每小时回 REGEN_HP_PER_HOUR、不超上限；HP<=0（倒下）不自然恢复——细则待 M5 死门/重伤。
+# 恢复结算（占位）：roster 全员每小时回 REGEN_HP_PER_HOUR、不超上限；HP<=0（倒下）不自然恢复。
+# 医生在岗（M6 职务框架首个消费端）＝速率 ×MEDIC_REGEN_MULT——职务加成一律走「改每小时速率」🔒。
 static func _settle_recovery(ws) -> void:
+	var rate := REGEN_HP_PER_HOUR * (MEDIC_REGEN_MULT if ws.job_holder("medic") != null else 1.0)
 	for u in ws.roster:
 		var mx: float = u.effective_stat("HP_max")
 		var cur := float(u.stats.get("HP", mx))
 		if cur > 0.0 and cur < mx:
-			u.stats["HP"] = minf(cur + REGEN_HP_PER_HOUR, mx)
+			u.stats["HP"] = minf(cur + rate, mx)
 
 # ============ 计数换算（纯函数，直接喂 clock_hours；不依赖档）============
 

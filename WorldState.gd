@@ -30,6 +30,7 @@ var reputation := {}     # 派系声望 {faction_id: int}
 var roster := []         # 花名册：活 Unit 对象列表（存档时经 unit_to_campaign 快照、读档重建）
 var item_instances := {} # 本档物品实例库 {uid(int): inst}——ItemInstances 门面在 current==self 时路由到这
 var kill_stats := {}     # 击杀统计 {proto_id: 累计击杀数}——BattleIO 战后累计；情报解锁（图鉴）的输入源
+var camp_jobs := {}      # 营地职务指派 {job_id: unit_uid}（职务定义在 JobDB；0/缺键=空缺）
 # —— 世界层事件状态（EventEngine 持久层；战斗局部 fired 在 Sandbox、每战清零，两层分离 🔒）——
 var event_fired := {}            # 已触发事件 {tid: true}（once 消费）
 var event_timer_last := {}       # timer 事件上次节拍时刻 {tid: clock_hours}
@@ -79,6 +80,17 @@ func roster_by_uid(uid: int):
 			return u
 	return null
 
+# 职务在任者：uid 有效、人在册、且不在重伤休整中（重伤=无法参与任何活动 §1.11）才算在岗；否则 null。
+# 消费端按 job_id 读（首个＝WorldClock 恢复结算读 medic；加成承载=改每小时速率 🔒）。
+func job_holder(job_id: String):
+	var uid := int(camp_jobs.get(job_id, 0))
+	if uid <= 0:
+		return null
+	var u = roster_by_uid(uid)
+	if u == null or int(u.injured_until) > clock_hours:
+		return null
+	return u
+
 # 收编：单位装备引用的实例若不在本档库（来自沙盒 transient 域），迁移进来并重铸 uid（修正 source 同步重写）。
 func _adopt_equipment(u) -> void:
 	var missing := {}
@@ -122,6 +134,7 @@ func to_dict() -> Dictionary:
 		"flags": flags.duplicate(true),
 		"reputation": reputation.duplicate(true),
 		"kill_stats": kill_stats.duplicate(true),
+		"camp_jobs": camp_jobs.duplicate(true),
 		"event_fired": event_fired.duplicate(true),
 		"event_timer_last": event_timer_last.duplicate(true),
 		"event_cooldown_until": event_cooldown_until.duplicate(true),
@@ -145,6 +158,7 @@ static func from_dict(d: Dictionary):
 	var rep = d.get("reputation", {})
 	ws.reputation = rep if typeof(rep) == TYPE_DICTIONARY else {}
 	ws.kill_stats = _int_valued(d.get("kill_stats", {}))
+	ws.camp_jobs = _int_valued(d.get("camp_jobs", {}))
 	var ef = d.get("event_fired", {})
 	ws.event_fired = ef if typeof(ef) == TYPE_DICTIONARY else {}
 	ws.event_timer_last = _int_valued(d.get("event_timer_last", {}))
