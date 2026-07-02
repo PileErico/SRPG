@@ -674,3 +674,123 @@ func _handle_deaths_state() -> Dictionary:
 		var idx: int = turn_order.find(cur)
 		active_index = idx if idx >= 0 else clampi(active_index, 0, max(turn_order.size() - 1, 0))
 	return res
+
+# ============ 视野 / 战争迷雾（玩家侧；见 docs/感知系统.md 🔒）============
+
+# 单个单位的可见格：以己为心、半径 sight（六边形距离）、逐格被 LOS 裁剪。
+func _unit_visible_cells(u) -> Dictionary:
+	var out := {}
+	var here := Vector2i(u.col, u.row)
+	out[here] = true
+	var sight: int = _effective_sight(u)   # 含天气加减 + 日夜最终乘子（夜×0.5）
+	if sight <= 0:
+		return out
+	for cell in _cells_within({here: true}, sight):
+		if _has_los(here, cell):
+			out[cell] = true
+	return out
+
+# 重算 _vis_visible（我方/友方可见格并集）、并入 _vis_seen（历史累积）。不碰渲染。
+func _recompute_vision_state() -> void:
+	_vis_visible = {}
+	for u in units:
+		if _is_friendly(u):
+			for cell in _unit_visible_cells(u):
+				_vis_visible[cell] = true
+	for cell in _vis_visible:
+		_vis_seen[cell] = true
+
+# 某格对玩家的迷雾态：0=黑(未探索) / 1=灰(探索过·无观测) / 2=常态(可见)。全知或非战斗阶段一律常态。
+func cell_fog(cell: Vector2i) -> int:
+	if omniscient or phase != "battle":
+		return 2
+	if _vis_visible.has(cell):
+		return 2
+	if _vis_seen.has(cell):
+		return 1
+	return 0
+
+# 玩家当前能否「看到」某格（用于 targeting：只能打可见格上的目标）
+func _can_see_cell(cell: Vector2i) -> bool:
+	return omniscient or phase != "battle" or _vis_visible.has(cell)
+
+# 该单位是否被迷雾藏起（不该渲染）：战斗中、非全知、敌对且其所在格不在当前视野内。我方/友方永远可见。
+func _unit_hidden_by_fog(u) -> bool:
+	if omniscient or phase != "battle":
+		return false
+	if _is_friendly(u):
+		return false
+	return not _vis_visible.has(Vector2i(u.col, u.row))
+
+# ============ AI 判定（走位/动作编排在宿主；这里只有纯判定与状态翻转）============
+
+# 该单位此刻是否应激活仇恨（三通道），不改任何状态。
+func _ai_should_aggro(unit) -> bool:
+	var here := Vector2i(unit.col, unit.row)
+	# ① 视野感知：敌人进入本单位视野(sight)且视线(LOS)不被地形挡（六边形战棋：只有地形挡、单位不挡）
+	if unit.ai_threat:
+		var sight: int = _effective_sight(unit)   # 含天气加减 + 日夜最终乘子
+		for h in units:
+			var hp := Vector2i(h.col, h.row)
+			if _is_hostile(unit, h) and _hex_dist(here, hp) <= sight and _has_los(here, hp):
+				return true
+	# ② 区域触发：敌人踏进该单位挂的区域（关卡设计者指定）
+	if unit.ai_region != "" and aggro_regions.has(unit.ai_region):
+		var cells: Dictionary = aggro_regions[unit.ai_region]
+		for h in units:
+			if _is_hostile(unit, h) and cells.has(Vector2i(h.col, h.row)):
+				return true
+	# ③ 连锁：同组任一已激活
+	if unit.ai_group != "":
+		for g in units:
+			if g != unit and g.ai_group == unit.ai_group and g.ai_aggroed:
+				return true
+	return false
+
+# 激活仇恨——本体 + 连锁同组全部敌方；返回本次新激活的单位列表（已激活＝空）。不写日志。
+func _ai_set_aggro_state(unit) -> Array:
+	var newly := []
+	if unit.ai_aggroed:
+		return newly
+	unit.ai_aggroed = true
+	newly.append(unit)
+	if unit.ai_group != "":
+		for g in units:
+			if g != unit and not _is_friendly(g) and g.ai_group == unit.ai_group and not g.ai_aggroed:
+				newly.append_array(_ai_set_aggro_state(g))   # 连锁仇恨
+	return newly
+
+# 最近的敌对单位（按六边形距离）
+func _ai_nearest_hostile(unit):
+	var best = null
+	var bd := 1 << 30
+	var here := Vector2i(unit.col, unit.row)
+	for u in units:
+		if not _is_hostile(unit, u):
+			continue
+		var d := _hex_dist(here, Vector2i(u.col, u.row))
+		if d < bd:
+			bd = d
+			best = u
+	return best
+
+# ============ Targeting ============
+
+# 点击格 → 命中单位列表：直线 AoE 取该方向直线上的单位（友伤按 friendly_fire），否则取该格的敌对单位
+func _attack_targets(attacker, cell: Vector2i, skill) -> Array:
+	var out := []
+	var aoe = skill.get("aoe", null)
+	if typeof(aoe) == TYPE_DICTIONARY and aoe.get("shape", "") == "line":
+		var cells = _line_cells(Vector2i(attacker.col, attacker.row), cell, int(aoe.get("length", 1)))
+		var ff = bool(aoe.get("friendly_fire", false))
+		for u in units:
+			var p := Vector2i(u.col, u.row)
+			if p in cells and (ff or _is_hostile(attacker, u)):
+				out.append(u)
+	else:
+		var t = unit_at(cell.x, cell.y)
+		# 只能打「看得到的」：目标在当前视野内(非迷雾) + 攻方到目标有视线
+		if t != null and _is_hostile(attacker, t) \
+			and _can_see_cell(cell) and _has_los(Vector2i(attacker.col, attacker.row), cell):
+			out.append(t)
+	return out
