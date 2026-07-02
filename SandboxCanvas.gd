@@ -265,6 +265,9 @@ func _draw_unit(u) -> void:
 		fill = Color(0.95, 0.20, 0.20)
 	draw_circle(c, r, fill)
 	draw_arc(c, r, 0.0, TAU, 28, Color(0, 0, 0, 0.7), 2.0)
+	# 死门中：紫红外环（占格垂死；条数看左下单位卡的「死门」效果与战斗记录）
+	if u.tags.has("deaths_door"):
+		draw_arc(c, r + 2.0, 0.0, TAU, 36, Color(0.78, 0.42, 0.84, 0.95), 3.0)
 	# 当前可行动的单位：圆外浅绿描边（尚未行动者无装饰、已行动者已整体变灰）
 	if editor._is_active_unit(u):
 		draw_arc(c, r + 2.0, 0.0, TAU, 36, CAN_ACT_RING, 2.5)

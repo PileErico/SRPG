@@ -29,6 +29,7 @@ var flags := {}          # 世界 flag {key: value}——任务/事件状态起�
 var reputation := {}     # 派系声望 {faction_id: int}
 var roster := []         # 花名册：活 Unit 对象列表（存档时经 unit_to_campaign 快照、读档重建）
 var item_instances := {} # 本档物品实例库 {uid(int): inst}——ItemInstances 门面在 current==self 时路由到这
+var kill_stats := {}     # 击杀统计 {proto_id: 累计击杀数}——BattleIO 战后累计；情报解锁（图鉴）的输入源
 # —— 世界层事件状态（EventEngine 持久层；战斗局部 fired 在 Sandbox、每战清零，两层分离 🔒）——
 var event_fired := {}            # 已触发事件 {tid: true}（once 消费）
 var event_timer_last := {}       # timer 事件上次节拍时刻 {tid: clock_hours}
@@ -37,11 +38,15 @@ var last_world_event_hours := -1000000   # 上次 global_gap 事件时刻（全�
 
 # ============ 战役生命周期入口（场景入口层专用；底层模块别碰 current，改收显式参数）============
 
-# 新建战役：建档（含开局默认值）+ 激活，一步原子完成。返回新档。
+# 新建战役：建档（含开局默认值 + 初始队伍）+ 激活，一步原子完成。返回新档。
+# 初始队伍＝全部 player 原型各一（占位阵容；正式开局/招募流程后置）。先激活再造单位——装备实例经门面路由进本档库。
 static func start_new():
 	var ws = new()
 	ws.clock_hours = START_HOUR
 	current = ws
+	for p in UnitFactory.all_prototypes():
+		if str(p.get("default_faction", "")) == "player":
+			ws.add_to_roster(UnitFactory.make_unit(p, "player", -1, -1))
 	return ws
 
 # 激活一个已构建的档（如 SaveIO.load_campaign 的返回值）。传 null＝退出战役（回沙盒/菜单语义）。
@@ -116,6 +121,7 @@ func to_dict() -> Dictionary:
 		"ironman": ironman,
 		"flags": flags.duplicate(true),
 		"reputation": reputation.duplicate(true),
+		"kill_stats": kill_stats.duplicate(true),
 		"event_fired": event_fired.duplicate(true),
 		"event_timer_last": event_timer_last.duplicate(true),
 		"event_cooldown_until": event_cooldown_until.duplicate(true),
@@ -138,6 +144,7 @@ static func from_dict(d: Dictionary):
 	ws.flags = fl if typeof(fl) == TYPE_DICTIONARY else {}
 	var rep = d.get("reputation", {})
 	ws.reputation = rep if typeof(rep) == TYPE_DICTIONARY else {}
+	ws.kill_stats = _int_valued(d.get("kill_stats", {}))
 	var ef = d.get("event_fired", {})
 	ws.event_fired = ef if typeof(ef) == TYPE_DICTIONARY else {}
 	ws.event_timer_last = _int_valued(d.get("event_timer_last", {}))

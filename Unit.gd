@@ -35,9 +35,18 @@ var faction: String:
 
 # —— 身份 / 养成（非战斗数值，显示在角色状态页左区）——
 var uid := 0                 # 存档域唯一 id 🔒（WorldState.mint_uid 分配，unit/item 共用计数器；0=未分配＝临时对象，如沙盒测试单位）
+var proto_id := ""           # 来源原型 id（图鉴编号/击杀统计按它归类；空=手捏单位）
 var level := 1               # 等级
 var exp := 0                 # 当前经验
 var exp_max := 100           # 升级所需经验
+var attr_points := 0         # 未分配属性点（升级 +3 🔒 §1.9；分配 UI 后置）
+var skill_points := 0        # 未分配技能点（升级 +1 🔒 §1.9；消费待技能树轮）
+var injured_until := 0       # 重伤休整到期时刻（clock_hours；0/过期=健康。战后 BattleIO 写；时长细则待 §2.3）
+
+# —— 死门（战斗运行时态，不入档；规格见需求 §1.11 🔒）——
+var door_gauge := 0          # 死门条 -3~+3（-3 倒下〔非铁人重伤离场/铁人真死〕；+3 自爬回）
+var door_checks := 0         # 已检定次数（每回合难度 15+5×次数）
+var last_hit_by = null       # 最后命中本单位的攻击者（击杀归属用；运行时引用、不入档）
 var trait_id := ""           # 特性 id（空=无；具名角色固定专属、通用角色随机，见 docs）。注：trait 是 GDScript 保留字，故用 trait_id；改用 set_trait() 设定以挂上加成
 var portrait := ""           # 头像图片路径（res://...，角色状态页大图），空=占位
 var icon := ""               # 棋子图标路径（res://...，叠在圆形 token 上），空=不画
@@ -202,6 +211,20 @@ func recompute_derived() -> void:
 func init_vitals() -> void:
 	stats["HP"] = effective_stat("HP_max")
 	stats["armor"] = effective_stat("armor_max")
+
+# 获得经验（战后结算/击杀归属）：升级循环——每级 +3 属性点 +1 技能点 🔒（需求 §1.9）。返回升了几级。
+# exp_max 成长曲线占位（×1.2 向上取整）；点数只积累、分配 UI 后置。
+func gain_exp(n: int) -> int:
+	var levels := 0
+	exp += maxi(0, n)
+	while exp >= exp_max and exp_max > 0:
+		exp -= exp_max
+		level += 1
+		levels += 1
+		attr_points += 3
+		skill_points += 1
+		exp_max = int(ceil(exp_max * 1.2))   # 占位曲线（数值层后调）
+	return levels
 
 # 能否装备：①特性限制（如「天性武者」no_weapon → 不能装带 attack 的武器；**天生武器 innate 豁免**）②物品 requires 的 tag 须全有。
 func can_equip(item: Dictionary) -> bool:

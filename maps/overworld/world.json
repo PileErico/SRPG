@@ -1626,6 +1626,27 @@
         "once": true,
         "row": 14
       }
+    },
+    {
+      "do": [
+        {
+          "action": "show_message",
+          "text": "劫道者从路旁的灌木里窜了出来！"
+        },
+        {
+          "action": "start_battle",
+          "map": "res://maps/sandbox.json"
+        }
+      ],
+      "id": "ow_ambush",
+      "label": "劫道者",
+      "when": {
+        "col": 14,
+        "cooldown_hours": 24,
+        "event": "enter_tile",
+        "once": false,
+        "row": 8
+      }
     }
   ],
   "units": [],

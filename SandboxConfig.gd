@@ -6,3 +6,7 @@ extends RefCounted
 
 # 进入沙盒要打开的地图路径。空 = 用 Sandbox 默认 MAP_PATH（兼容 .bat 直接跑 Sandbox.tscn）。
 static var map_path := ""
+
+# 战役战斗通道（M5 BattleIO）：Overworld 写、Sandbox _ready 读后即清。
+# null＝纯沙盒模式；非 null＝{"map_path", "unit_uids":[uid…], "provisions":[]}（BattleIO.make_setup 产物）。
+static var battle_setup = null

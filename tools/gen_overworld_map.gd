@@ -43,6 +43,8 @@ func _initialize() -> void:
 			"do": [{"action": "show_message", "text": "又是新的一天。"}]},
 		{"id": "ow_ruin", "label": "古代遗迹", "when": {"event": "enter_tile", "col": 20, "row": 14, "once": true},
 			"do": [{"action": "show_message", "text": "沙丘间露出一处古代遗迹的入口……（后续开放）"}]},
+		{"id": "ow_ambush", "label": "劫道者", "when": {"event": "enter_tile", "col": 14, "row": 8, "once": false, "cooldown_hours": 24},
+			"do": [{"action": "show_message", "text": "劫道者从路旁的灌木里窜了出来！"}, {"action": "start_battle", "map": "res://maps/sandbox.json"}]},
 	]
 	DirAccess.make_dir_recursive_absolute("res://maps/overworld")
 	# environment 留空＝日夜不显式指定 → 消费端走「战役时钟推导」（M2 优先级的正确演示）

@@ -99,5 +99,11 @@
   {"id": "human", "cn": "人类", "cat": "race", "status": "in_use"},
   {"id": "harpy", "cn": "鸟人", "cat": "race", "status": "in_use"},
   {"id": "monster", "cn": "怪物", "cat": "race", "status": "planned"},
-  {"id": "beast", "cn": "野兽", "cat": "race", "status": "planned"}
+  {"id": "beast", "cn": "野兽", "cat": "race", "status": "planned"},
+
+  {"id": "elite", "cn": "精锐", "cat": "char", "status": "in_use", "color": "#C86BD5", "desc": "精锐/特殊单位标记：敌方带此 tag 才有死门资格（我方/友方全体天然有）；见需求 §1.11"},
+
+  {"id": "deaths_door", "cn": "死门", "cat": "unit_status", "status": "in_use", "color": "#C86BD5", "desc": "死门中：占格可被攻击、无法行动；每回合 1d20+体力 检定 ±1、被命中 −1；条 −3 倒下 / +3 爬回"},
+  {"id": "injured", "cn": "重伤", "cat": "unit_status", "status": "in_use", "color": "#D5453A", "desc": "重伤：死门 −3 离场（非铁人）或 +3 爬回的 debuff 载体；战后休整 injured_until 前不可出战"},
+  {"id": "dead", "cn": "阵亡", "cat": "unit_status", "status": "in_use", "color": "#555555", "desc": "真死标记（铁人死门 −3）：BattleResult 回写时从 roster 移除"}
 ]

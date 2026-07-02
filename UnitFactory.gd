@@ -17,6 +17,7 @@ const PRESETS_PATH := "user://unit_presets.json"         # 用户自存预设（
 # proto 字典 → 配置完毕的 Unit（四维/特性/装备/技能/AI 全组装，收尾 recompute_derived + init_vitals）。
 static func make_unit(proto: Dictionary, fac: String, col: int, row: int):
 	var u = Unit.new(str(proto.get("name", "新兵")), fac, col, row)
+	u.proto_id = str(proto.get("id", ""))   # 模板身份（图鉴/击杀统计按它归类；手捏单位=空）
 	u.portrait = str(proto.get("portrait", ""))
 	u.icon = str(proto.get("icon", ""))
 	for t in proto.get("tags", []):
@@ -65,11 +66,11 @@ static func set_four(u, strv: int, dex: int, intl: int, sta: int) -> void:
 	u.stats["INT"] = intl
 	u.stats["STA"] = sta
 
-# Unit → proto 字典（可被 make_unit 复原）。阵营立场/flying 不入 tags（单独存/运行时态）。
+# Unit → proto 字典（可被 make_unit 复原）。阵营立场/flying/死门 不入 tags（单独存/运行时态）。
 static func unit_to_proto(u) -> Dictionary:
 	var keep_tags := []
 	for t in u.tags:
-		if t in ["player", "ally", "enemy", "neutral", "flying"]:
+		if t in ["player", "ally", "enemy", "neutral", "flying", "deaths_door"]:
 			continue
 		keep_tags.append(t)
 	# equipment 存实例 uid → proto 存模板 id（定义层）。按 uid 去重（双手占两槽=同一件），
@@ -94,6 +95,7 @@ static func unit_to_proto(u) -> Dictionary:
 			stat_ov[k] = u.stats[k]
 	return {
 		"name": u.unit_name,
+		"id": u.proto_id,
 		"default_faction": u.faction,
 		"portrait": u.portrait,
 		"icon": u.icon,
@@ -122,6 +124,9 @@ static func unit_to_campaign(u) -> Dictionary:
 		"equip_uids": equip_uids,
 		"hp": int(u.stats.get("HP", 0)),
 		"armor": int(u.stats.get("armor", 0)),
+		"attr_points": u.attr_points,
+		"skill_points": u.skill_points,
+		"injured_until": u.injured_until,
 	}
 
 # 读档复原：make_unit 会 init_vitals 注满 —— 之后再覆写 HP/armor（绕开注满，战损跨存档保留）。
@@ -150,6 +155,9 @@ static func unit_from_campaign(entry: Dictionary):
 	u.uid = int(entry.get("uid", 0))
 	u.stats["HP"] = clampi(int(entry.get("hp", u.stats.get("HP", 0))), 0, int(u.effective_stat("HP_max")))
 	u.stats["armor"] = clampi(int(entry.get("armor", u.stats.get("armor", 0))), 0, int(u.effective_stat("armor_max")))
+	u.attr_points = int(entry.get("attr_points", 0))
+	u.skill_points = int(entry.get("skill_points", 0))
+	u.injured_until = int(entry.get("injured_until", 0))
 	return u
 
 # 读 unit_prototypes.json 的内置原型列表

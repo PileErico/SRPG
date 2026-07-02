@@ -16,6 +16,8 @@ const WorldClock := preload("res://WorldClock.gd")
 const EventEngine := preload("res://EventEngine.gd")
 const SaveIO := preload("res://SaveIO.gd")
 const OverworldCanvas := preload("res://OverworldCanvas.gd")
+const BattleIO := preload("res://BattleIO.gd")
+const SandboxConfig := preload("res://SandboxConfig.gd")
 
 const MAP_PATH := "res://maps/overworld/world.json"
 const HOURS_PER_COST := 2    # 占位：1 点地形通行成本 ＝ 2 小时行程（数值层后调）
@@ -229,6 +231,24 @@ func _on_camp() -> void:
 
 func event_log(text: String) -> void:
 	_log_line("⚑ %s" % text)
+
+# 进入战斗（do: start_battle）：健康 roster 全员自动出战（战前选人 UI/预设队伍后置——长在 BattleSetup 上）。
+# 快照进/结果出契约见 BattleIO；胜负后 Sandbox 回写并送回本场景。
+func event_start_battle(map_path: String) -> void:
+	var ws = WorldState.current
+	if ws == null:
+		return
+	var uids := []
+	for u in ws.roster:
+		if int(u.injured_until) > ws.clock_hours:
+			continue   # 重伤休整中不可出战（需求 §1.11「战后持续一段时间无法参与任何活动」）
+		uids.append(u.uid)
+	if uids.is_empty():
+		_log_line("⚔ 全员重伤休整中，无人可战——遭遇不了了之。")
+		return
+	SandboxConfig.battle_setup = BattleIO.make_setup(map_path, uids)
+	_autosave()   # 进战斗前落盘（战斗不耗世界时间 🔒，回来时钟原样）
+	get_tree().change_scene_to_file("res://Sandbox.tscn")
 
 # ============ 画布数据源 ============
 

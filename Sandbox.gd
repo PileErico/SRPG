@@ -26,6 +26,9 @@ const SandboxConfig := preload("res://SandboxConfig.gd")
 const WorldState := preload("res://WorldState.gd")   # 战役档静态引用（沙盒不建档 🔒；有档＝战役战斗，时钟供日夜）
 const WorldClock := preload("res://WorldClock.gd")   # 世界时钟：小时→日夜映射（战斗不耗世界时间 🔒，战中日夜冻结）
 const EventEngine := preload("res://EventEngine.gd") # when/do 事件引擎：触发器评估/执行迁入（本类只做宿主原语 event_*）
+const Checks := preload("res://Checks.gd")           # d20 检定原语（死门每回合检定用）
+const BattleIO := preload("res://BattleIO.gd")       # 战斗进出契约：战役模式快照进/结果出（M5）
+const SaveIO := preload("res://SaveIO.gd")           # 战役战斗结算后自动存档
 const MapIO := preload("res://MapIO.gd")   # 地图读 / 写单一入口（与 MapEditor 共用）
 # 战斗地图：默认与地图编辑器共享同一张图（编辑器改 → 这里读到）。
 # 实际打开哪张：优先 SandboxConfig.map_path（选地图界面传入），空则用此默认；缺失/损坏回退全草原。
@@ -52,6 +55,8 @@ var _map_triggers := []    # 地图文件 triggers 原始数据：[{id,label,whe
 var _map_terrain_overrides := {}   # 图级地形覆盖 { "terrain/variant": {move?,effects?} }：只改本图、不动全局 terrains.json
 var _all_region_cells := {}   # 所有区域的格集合 {region_id: {Vector2i:true}}（不分 kind，供触发器引用）
 var _fired_triggers := {}  # 已触发过的 trigger id（when.once 用）；每场战斗开始清空
+var _battle_kills := []    # 本战击杀记录 [{proto_id, victim_uid, faction, by_uid}]——经验+情报解锁共用记录点（每战清零）
+var campaign_battle := false   # 战役战斗模式（SandboxConfig.battle_setup 注入）：roster=BattleIO 快照副本，胜负后回写并返回大地图
 var _deploy_cells := {}    # 部署区格集合 {Vector2i:true}：kind=="deploy" 的区域并集（玩家单位只能放这里）
 
 # —— 感知 / 战争迷雾（玩家侧；见 docs/感知系统.md 🔒）——
@@ -146,12 +151,24 @@ var roster := []
 
 func _ready() -> void:
 	randomize()   # 战斗判定掷骰
+	_setup_campaign_battle()   # 战役战斗注入（须在 _load_map 前定地图路径；纯沙盒＝no-op）
 	_load_terrains()
 	_load_map()   # 读「选地图」传入或默认的战斗地图（缺失则回退全草原）
 	_setup_regions()
 	_build_ui()
 	_spawn_map_units()   # 落地图预置单位（关卡设计的敌 / 中立 / 固定单位）；旧图无 units = 空
 	_enter_deploy()   # 停在布置阶段：侧栏摆单位、回合不跑；点「开始游戏」才 _start_battle
+
+# 战役战斗模式（M5 BattleIO）：Overworld 经 SandboxConfig.battle_setup 送入出战配置——
+# roster＝campaign 快照副本（快照进 🔒：战斗改副本、exit_battle 回满不再抹 campaign 战损）；读后即清通道。
+func _setup_campaign_battle() -> void:
+	if SandboxConfig.battle_setup == null or WorldState.current == null:
+		return
+	var setup: Dictionary = SandboxConfig.battle_setup
+	SandboxConfig.battle_setup = null   # 读后即清：下次进沙盒不误入战役模式
+	campaign_battle = true
+	SandboxConfig.map_path = str(setup.get("map_path", ""))
+	roster = BattleIO.spawn_battle_units(WorldState.current, setup)
 
 # 仇恨触发区域（mode②）：从地图 regions 字段（_map_regions）构建 {region_id: {Vector2i:true}}。
 # 敌人挂 ai_region 引用某区域 id，玩家踏入即激活（消费见 _ai_update_aggro）。旧图无 regions = 空。
@@ -984,6 +1001,7 @@ func _start_battle() -> void:
 	round_num = 1
 	zoc_triggered = {}
 	_fired_triggers = {}   # 新一场战斗：触发器「只触发一次」记录清零
+	_battle_kills = []     # 击杀记录清零（经验/情报按整场收集）
 	for u in units:
 		u.refresh_for_turn()       # 开局所有单位面板满 AP（便于查看）
 		u.reset_skill_charges()    # 技能冷却清零、本战次数按智力重置
@@ -1065,6 +1083,14 @@ func _begin_active_turn() -> void:
 	var u = active_unit()
 	if u != null:
 		u.refresh_for_turn()   # AP 刷新、移动点清零
+	# 死门单位：无法移动/行动——自动检定后跳过 turn（仿 AI 未激活即过；call_deferred 断递归链防全员死门爆栈）
+	if u != null and u.tags.has("deaths_door"):
+		u.ap = 0
+		u.move_points = 0
+		_door_turn_check(u)
+		if not battle_over and active_unit() == u:   # 检定 −3 离场时 _handle_deaths 已推进，不再 end_turn
+			call_deferred("end_turn")
+		return
 	_clear_selection()         # 清掉上一单位的选中/移动状态
 	_refresh_info()
 	_refresh_turn_bar()        # 行动者换人 → 更新顶部行动顺序槽（当前者下落、后续补位）
@@ -1215,12 +1241,28 @@ func _ai_nearest_hostile(unit):
 			best = u
 	return best
 
-# 死亡处理：HP<=0 的单位移出战斗（不再重生）。攻击/伤害落地后调用。
+# 死亡处理：HP<=0 的单位——死门资格者转入死门（占格挺着），门条 −3 或无资格者移出战斗。
+# 死门规格 🔒（需求 §1.11）：资格＝我方/友方全体 + 敌方 elite tag；胜负判定口径＝死门单位算存活
+# （检定/补刀自动推进条数、回合会继续流转不死锁，保留 +3 翻盘；−3 离场才计入败）。
 func _handle_deaths() -> void:
 	var dead := []
 	for u in units:
-		if int(u.stats.get("HP", 0)) <= 0:
-			dead.append(u)
+		if int(u.stats.get("HP", 0)) > 0:
+			continue
+		if u.tags.has("deaths_door"):
+			if u.door_gauge <= -3:
+				dead.append(u)   # 死门倒下：离场（重伤/真死标记已由 _door_settle 挂）
+			else:
+				u.stats["HP"] = 0   # 门内挺着：HP 钳 0（不再负血），条数结算在命中/检定处
+			continue
+		if _door_eligible(u):
+			_enter_deaths_door(u)
+			continue
+		dead.append(u)   # 无死门资格（常规敌兵）：原路径即死
+	# 击杀记录（经验结算 + 情报解锁共用一份；铺垫见 docs/情报与烹饪系统.md §3.1）
+	for u in dead:
+		_battle_kills.append({"proto_id": u.proto_id, "victim_uid": u.uid, "faction": u.faction,
+			"by_uid": (u.last_hit_by.uid if u.last_hit_by != null else 0)})
 	if dead.is_empty():
 		return
 	var cur = active_unit()
@@ -1257,7 +1299,58 @@ func _handle_deaths() -> void:
 	if canvas != null:
 		canvas.queue_redraw()
 
-# 胜负判定：敌全灭=胜 / 友方全灭=负
+# ============ 死门（需求 §1.11 🔒；插入点=_handle_deaths 收集循环 + 命中结算 + turn 开始）============
+
+# 死门资格：我方/友方全体 + 敌方精锐（elite tag，数据标记）；常规敌兵无资格＝HP 归零即死
+func _door_eligible(u) -> bool:
+	return _is_friendly(u) or u.tags.has("elite")
+
+# 转入死门：HP 钳 0、条归 0；挂 tag（统一判断）+ permanent effect（闪避/防御效能 ×50%＝pct −50，走修正管线）
+func _enter_deaths_door(u) -> void:
+	u.stats["HP"] = 0
+	u.door_gauge = 0
+	u.door_checks = 0
+	u.ap = 0
+	u.move_points = 0
+	if not u.tags.has("deaths_door"):
+		u.tags.append("deaths_door")
+	_add_effect(u, {"name": "死门", "kind": "debuff", "permanent": true, "tags": ["deaths_door"],
+		"mods": [{"stat": "eva", "op": "pct", "value": -50}, {"stat": "def_eff", "op": "pct", "value": -50}]})
+	_log_line("[b][color=#C86BD5]%s 踏入死门！[/color][/b]（占格可被攻击；每回合 1d20+体力 检定 ±1、被命中 −1；−3 倒下 / +3 爬回）" % _cname(u))
+
+# 死门每回合检定（该单位 turn 自动执行）：1d20+体力 vs 难度（首回合 15、之后每回合 +5）。过 +1 / 不过 −1。
+func _door_turn_check(u) -> void:
+	var dc: int = 15 + 5 * u.door_checks
+	u.door_checks += 1
+	var r: Dictionary = Checks.check(u, "STA", dc)
+	u.door_gauge += 1 if bool(r["ok"]) else -1
+	_log_line("%s 死门检定：1d20(%d)+体力(%d)=%d vs %d → %s（条 %+d）" % [
+		_cname(u), int(r["roll"]), int(r["bonus"]), int(r["total"]), dc,
+		_oc(bool(r["ok"]), "挺住", "恶化"), u.door_gauge])
+	_door_settle(u)
+	_handle_deaths()   # −3 时经统一收尸路径离场（active 推进/胜负判定都在那）
+
+# 门条 ±3 结算（只改状态、不移除——移除统一走 _handle_deaths）：
+# −3＝倒下（非铁人挂 injured 重伤离场 / 铁人挂 dead 真死，共用路径仅标记不同 🔒）；+3＝爬回（HP 保底占位 1，挂重伤 debuff 至战斗结束）。
+func _door_settle(u) -> void:
+	if u.door_gauge <= -3:
+		var ironman: bool = WorldState.current != null and WorldState.current.ironman
+		u.tags.append("dead" if ironman else "injured")
+		u.stats["HP"] = 0
+		_log_line("[b]%s 死门 −3：%s[/b]" % [_cname(u), "阵亡（铁人）" if ironman else "重伤倒下，被拖离战场"])
+	elif u.door_gauge >= 3:
+		_door_clear(u)
+		u.stats["HP"] = 1   # 自爬保底占位（细则待需求 §2.3）
+		_add_effect(u, {"name": "重伤", "kind": "debuff", "permanent": true, "tags": ["injured"]})   # 战斗内效果待 §2.3，先只挂名
+		_log_line("[b][color=%s]%s 从死门爬了回来！[/color][/b]（重伤，HP 1）" % [OK_GREEN, _cname(u)])
+
+# 清死门状态：摘 tag + 死门 effect（连带其 eva/def_eff 修正）
+func _door_clear(u) -> void:
+	u.tags.erase("deaths_door")
+	_cleanse_effects_with_tag(u, "deaths_door")
+	u.recompute_derived()
+
+# 胜负判定：敌全灭=胜 / 友方全灭=负（死门单位算存活——条数自动推进不死锁、保留 +3 翻盘）
 func _check_battle_over() -> void:
 	if battle_over:
 		return
@@ -1279,7 +1372,18 @@ func _end_battle(win: bool) -> void:
 	var col := OK_GREEN if win else BAD_RED
 	var msg := "胜利！" if win else "失败…"
 	_log_line("[b][color=%s]══ %s ══[/color][/b]" % [col, msg])
+	if campaign_battle:
+		_finish_campaign_battle(win)   # 结果出：此刻幸存者/击杀全可得，必须早于 exit_battle 的 init_vitals 回满 🔒
 	_show_banner(msg, win)
+
+# 战役战斗结算（BattleIO 结果出）：收集 → 回写 campaign（HP/经验/重伤/真死/击杀统计）→ 自动存档
+func _finish_campaign_battle(win: bool) -> void:
+	var ws = WorldState.current
+	if ws == null:
+		return
+	BattleIO.apply_result(ws, BattleIO.collect_result(roster, _battle_kills, win))
+	SaveIO.save_campaign(ws, SaveIO.AUTO_SLOT)
+	_log_line("战果已结算并存档（经验 / 战损 / 重伤休整 / 击杀统计已回写战役）。")
 
 # 居中大横幅（按 R 重开）
 func _show_banner(msg: String, win: bool) -> void:
@@ -1295,7 +1399,7 @@ func _show_banner(msg: String, win: bool) -> void:
 		_banner.add_theme_stylebox_override("normal", box)
 		add_child(_banner)
 	_banner.add_theme_color_override("font_color", Color(col_html(win)))
-	_banner.text = "%s\n（按 R 重开）" % msg
+	_banner.text = "%s\n（按 R %s）" % [msg, "返回大地图" if campaign_battle else "重开"]
 	_banner.visible = true
 	_banner.reset_size()
 	var vp := get_viewport_rect().size
@@ -1304,8 +1408,12 @@ func _show_banner(msg: String, win: bool) -> void:
 func col_html(win: bool) -> String:
 	return OK_GREEN if win else BAD_RED
 
-# 退出战斗 / 重开：回到布置阶段（战斗期点「退出战斗」按钮，或胜负后按 R）
+# 退出战斗 / 重开：回到布置阶段（战斗期点「退出战斗」按钮，或胜负后按 R）。
+# 战役模式＝返回大地图（结算已在 _end_battle 落账；中途退出=弃战，无结算直接回——占位语义，弃战惩罚待定）。
 func exit_battle() -> void:
+	if campaign_battle:
+		get_tree().change_scene_to_file("res://Overworld.tscn")
+		return
 	battle_over = false
 	if _banner != null:
 		_banner.visible = false
@@ -2045,11 +2153,18 @@ func _resolve_one(attacker, target, skill, show_target := false) -> Dictionary:
 		target.stats["armor"] = maxi(0, int(target.stats.get("armor", 0)) - armor_loss)
 	if hp_loss > 0:
 		target.stats["HP"] = int(target.stats.get("HP", 0)) - hp_loss
+	target.last_hit_by = attacker   # 击杀归属记录点（死者收尸时读；经验+情报解锁共用）
 	var tail := "%s 剩余血量：%d（-%d）" % [_cname(target), int(target.stats.get("HP", 0)), hp_loss]
 	if armor_loss > 0:
 		tail += "，护甲 -%d" % armor_loss
 	lines.append(tail)
 	_spawn_hit_feedback(target, true, crit, blocked, armor_loss, hp_loss)   # 飘字：格挡 + 护甲/生命伤（暴击加粗）
+	# 死门单位被命中：门条 −1（无论伤害多少，HP 恒钳 0）；−3 由外层攻击流程的 _handle_deaths 统一收尸
+	if target.tags.has("deaths_door"):
+		target.door_gauge -= 1
+		target.stats["HP"] = 0
+		lines.append("[color=#C86BD5]%s 死门 −1（条 %+d）[/color]" % [_cname(target), target.door_gauge])
+		_door_settle(target)
 	# 施加异常（如撕裂的流血）：基础概率 × (1 − 异常抵抗)，命中即挂效果
 	_try_inflict(attacker, target, skill, lines)
 	_push_log(lines)
@@ -2099,7 +2214,7 @@ func _add_effect(target, inf: Dictionary) -> void:
 		target.effects.append({
 			"name": nm,
 			"kind": str(inf.get("kind", "debuff")),
-			"permanent": false,
+			"permanent": bool(inf.get("permanent", false)),   # 透传：死门/重伤/食物 buff 等「至战斗结束」效果用
 			"duration": int(inf.get("duration", 1)),
 			"dot_pct_max_hp": float(inf.get("dot_pct_max_hp", 0)),
 			"tags": inf.get("tags", []),   # 效果 tag（如 bleeding）：供「按 tag 驱散/清除」用

@@ -34,6 +34,9 @@ const ACTIONS := [
 		{"key": "weather", "label": "天气", "type": "weather", "default": "clear"},
 		{"key": "duration", "label": "持续回合（0=常驻）", "type": "int", "default": 0, "min": 0, "max": 99},
 	]},
+	{"id": "start_battle", "label": "进入战斗", "fields": [
+		{"key": "map", "label": "战斗地图路径", "type": "text", "default": "res://maps/sandbox.json"},
+	]},
 ]
 
 static func action_defs() -> Array:
@@ -80,6 +83,8 @@ static func execute_action(a: Dictionary, host, fallback_text := "") -> void:
 				return
 			# faction 传空＝宿主按原型 default_faction 兜底；col/row 由宿主按地图尺寸 clamp
 			_host_call(host, "event_spawn_unit", [pid, str(a.get("faction", "")), int(a.get("col", 0)), int(a.get("row", 0))])
+		"start_battle":
+			_host_call(host, "event_start_battle", [str(a.get("map", ""))])
 		var unknown:
 			push_warning("EventEngine：未知动作「%s」跳过" % unknown)
 
