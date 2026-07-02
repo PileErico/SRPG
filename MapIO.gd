@@ -5,7 +5,7 @@ extends RefCounted
 ## 用法：const MapIO := preload("res://MapIO.gd")；MapIO.read_file(path) / MapIO.write_map(...)。
 ##
 ## schema（format_version 3，向后兼容：读端全用 .get 兜底，旧 v1/v2 图照常读）：
-##   { format_version, grid:"hex_flat_oddq", width, height,
+##   { format_version, grid:"hex_flat_oddq", map_type:"battle"|"overworld"（缺省 battle，旧图兼容）, width, height,
 ##     tiles:  [[{terrain,variant}]]  —— 行优先 [row][col]，每格只两键，其余按 terrains.json 查表,
 ##     regions:[{id,label,color,kind,cells:[[x,y]]}]  —— 命名区域（kind: aggro 触发区 / deploy 部署区）,
 ##     units:  [{proto, col, row, faction}],          —— 预置单位（proto = UnitFactory.unit_to_proto 输出）
@@ -61,6 +61,7 @@ static func normalize(data) -> Dictionary:
 	return {
 		"ok": true,
 		"format_version": int(data.get("format_version", 0)),
+		"map_type": str(data.get("map_type", "battle")),   # overworld / battle（缺省 battle：旧图全兼容）
 		"width": w, "height": h,
 		"tiles": _normalize_tiles(data["tiles"], w, h),
 		"regions": regions,
@@ -92,10 +93,11 @@ static func grassland(w: int, h: int) -> Array:
 
 # 组装完整 schema 字典（各 *_json 是已序列化好的数组：region cells=[[x,y]]、unit={proto,col,row,faction}、trigger={id,when,do}；
 # terrain_overrides = { "terrain/variant": {move?, effects?} } 图级地形覆盖，默认 {}）
-static func to_dict(w: int, h: int, tiles: Array, regions_json: Array, units_json: Array, triggers_json: Array = [], terrain_overrides: Dictionary = {}, environment: Dictionary = {}) -> Dictionary:
+static func to_dict(w: int, h: int, tiles: Array, regions_json: Array, units_json: Array, triggers_json: Array = [], terrain_overrides: Dictionary = {}, environment: Dictionary = {}, map_type: String = "battle") -> Dictionary:
 	return {
 		"format_version": FORMAT_VERSION,
 		"grid": GRID,
+		"map_type": map_type,
 		"width": w,
 		"height": h,
 		"tiles": tiles,
@@ -107,10 +109,10 @@ static func to_dict(w: int, h: int, tiles: Array, regions_json: Array, units_jso
 	}
 
 # 写地图文件（2 空格缩进，与原编辑器一致）；成功返回 true
-static func write_map(path: String, w: int, h: int, tiles: Array, regions_json: Array, units_json: Array, triggers_json: Array = [], terrain_overrides: Dictionary = {}, environment: Dictionary = {}) -> bool:
+static func write_map(path: String, w: int, h: int, tiles: Array, regions_json: Array, units_json: Array, triggers_json: Array = [], terrain_overrides: Dictionary = {}, environment: Dictionary = {}, map_type: String = "battle") -> bool:
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f == null:
 		return false
-	f.store_string(JSON.stringify(to_dict(w, h, tiles, regions_json, units_json, triggers_json, terrain_overrides, environment), "  "))
+	f.store_string(JSON.stringify(to_dict(w, h, tiles, regions_json, units_json, triggers_json, terrain_overrides, environment, map_type), "  "))
 	f.close()
 	return true

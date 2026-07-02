@@ -69,6 +69,30 @@ static func label_of(tile) -> String:
 	var e = entry_for(tile)
 	return str(e.label) if e != null else "未知"
 
+# move 块 → 对带 tags 单位的通行成本；-1＝不可通行（战斗寻路与大地图移动共用的单一实现）。
+# passable_by："all"＝任意 / "none"＝禁行 / [tag…]＝含其一可进；cost＝基础成本；tag_cost 按单位 tag 取更优（最小）。
+static func move_cost(mv, tags: Array) -> int:
+	if typeof(mv) != TYPE_DICTIONARY:
+		return -1
+	var pb = mv.get("passable_by", "all")
+	if typeof(pb) == TYPE_ARRAY:
+		var ok := false
+		for tg in pb:
+			if tg in tags:
+				ok = true
+				break
+		if not ok:
+			return -1
+	elif pb == "none":
+		return -1
+	var cost := int(mv.get("cost", 1))
+	var tag_cost = mv.get("tag_cost", {})
+	if typeof(tag_cost) == TYPE_DICTIONARY:
+		for tg in tags:
+			if tag_cost.has(tg):
+				cost = mini(cost, int(tag_cost[tg]))
+	return cost
+
 # —— 写回 / 热重载（编辑器「地形数据」编辑用；仿 ItemDB 的 reload/save 范式）——
 # palette() 返回的是 _palette 的 live 引用：编辑器原地改 entry.move 即改这里，沙盒同进程立即可见；
 # save() 把整张表写回 terrains.json（持久化，影响所有地图）。

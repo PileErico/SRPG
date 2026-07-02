@@ -62,6 +62,7 @@ var omniscient := false   # 调试全知：默认 false＝迷雾生效（真实�
 
 # —— 环境：日夜(静态) + 天气(动态)（Phase 2；见 docs/感知系统.md 🔒。近期只影响 sight）——
 var _map_environment := {}   # 地图 environment 字段 {time, weather_table:[{weather,weight,min_rounds,max_rounds}]}
+var _map_type := "battle"    # 地图类型（overworld/battle）：读入记住、存盘透传（沙盒不消费，防存图打回缺省）
 var _cur_time := "day"       # 当前日夜 id（战中不变）
 var _cur_weather := "clear"  # 当前天气 id
 var _weather_left := 0       # 当前天气剩余回合（<=0 ＝ 不自动变：表空 / 强制常驻）
@@ -200,6 +201,7 @@ func _load_map() -> void:
 		_map_triggers = res["triggers"] # schema v3：触发器（向后兼容，旧图无此键=空）
 		_map_terrain_overrides = res.get("terrain_overrides", {})   # 图级地形覆盖（向后兼容，旧图无此键=空）
 		_map_environment = res.get("environment", {})   # 环境（日夜/天气；向后兼容，旧图无此键=空）
+		_map_type = str(res.get("map_type", "battle"))
 		return
 	if FileAccess.file_exists(path):
 		push_warning("战斗地图 %s 格式无效，回退全草原" % path)
@@ -231,6 +233,7 @@ func load_from_memory(map_dict: Dictionary) -> void:
 	_map_triggers = res["triggers"]
 	_map_terrain_overrides = res.get("terrain_overrides", {})
 	_map_environment = res.get("environment", {})
+	_map_type = str(res.get("map_type", "battle"))
 	_setup_regions()
 	# 场上清空、roster 收回待命（保留玩家自带军，跨试玩不丢）
 	units = []
@@ -275,7 +278,7 @@ func save_units_to_map() -> bool:
 		proto["ai_group"] = u.ai_group
 		units_json.append({"proto": proto, "col": u.col, "row": u.row, "faction": u.faction})
 	var path: String = SandboxConfig.map_path if SandboxConfig.map_path != "" else MAP_PATH
-	if MapIO.write_map(path, width, height, tiles, _map_regions, units_json, _map_triggers, _map_terrain_overrides, _map_environment):
+	if MapIO.write_map(path, width, height, tiles, _map_regions, units_json, _map_triggers, _map_terrain_overrides, _map_environment, _map_type):
 		_map_units = units_json   # 同步内存：R 重开 / exit_battle 从这里重建
 		return true
 	return false
@@ -1657,27 +1660,7 @@ func _move_cost_at(col: int, row: int, unit) -> int:
 	if not _cell_in_bounds(col, row):
 		return -1
 	var mv = _effective_move(tiles[row][col])   # 图级覆盖 ?? 全局
-	var utags = unit.tags if unit != null else []
-	# 通行性门槛
-	var pb = mv.get("passable_by", "all")
-	if typeof(pb) == TYPE_ARRAY:
-		var ok := false
-		for tg in pb:
-			if tg in utags:
-				ok = true
-				break
-		if not ok:
-			return -1
-	elif pb == "none":
-		return -1
-	# 成本：基础 cost，被单位 tag 的 tag_cost 取更优（最小）
-	var cost := int(mv.get("cost", 1))
-	var tag_cost = mv.get("tag_cost", {})
-	if typeof(tag_cost) == TYPE_DICTIONARY:
-		for tg in utags:
-			if tag_cost.has(tg):
-				cost = min(cost, int(tag_cost[tg]))
-	return cost
+	return TerrainDB.move_cost(mv, unit.tags if unit != null else [])   # 通行/成本单一实现（大地图同用）
 
 func _occupied_by_other(col: int, row: int, self_u) -> bool:
 	for u in units:

@@ -17,9 +17,13 @@ const SAVE_VERSION := 1
 static var current = null           # 当前战役（WorldState 实例）或 null
 static var _transient_next_uid := 1 # 无战役时的临时计数（沙盒等；与档内 uid 域天然隔离——库也各是一个）
 
+const START_HOUR := 8    # 新战役开局时刻：第 1 天 8 点（白天开局；0 点=夜，见 WorldClock.day_number 注）
+
 var save_version := SAVE_VERSION
 var next_uid := 1        # 存档域自增 uid 计数器（unit/item 共用）
-var clock_hours := 0     # 世界时钟：单调小时计数（日夜=小时区间→EnvDB time 映射，WorldClock 于 M2 接管语义）
+var clock_hours := 0     # 世界时钟：单调小时计数（日夜=小时区间→EnvDB time 映射，WorldClock 语义 M2 起）
+var party_col := -1      # 大地图队伍位置（-1=未落位，Overworld 首进时按地图找可走格）
+var party_row := -1
 var ironman := false     # 铁人模式 flag（强制单槽覆盖；SaveIO 第一版即预留）
 var flags := {}          # 世界 flag {key: value}——任务/事件状态起步先用它兜底
 var reputation := {}     # 派系声望 {faction_id: int}
@@ -33,9 +37,10 @@ var last_world_event_hours := -1000000   # 上次 global_gap 事件时刻（全�
 
 # ============ 战役生命周期入口（场景入口层专用；底层模块别碰 current，改收显式参数）============
 
-# 新建战役：建档 + 激活，一步原子完成。返回新档。
+# 新建战役：建档（含开局默认值）+ 激活，一步原子完成。返回新档。
 static func start_new():
 	var ws = new()
+	ws.clock_hours = START_HOUR
 	current = ws
 	return ws
 
@@ -106,6 +111,8 @@ func to_dict() -> Dictionary:
 		"save_version": save_version,
 		"next_uid": next_uid,
 		"clock_hours": clock_hours,
+		"party_col": party_col,
+		"party_row": party_row,
 		"ironman": ironman,
 		"flags": flags.duplicate(true),
 		"reputation": reputation.duplicate(true),
@@ -124,6 +131,8 @@ static func from_dict(d: Dictionary):
 	ws.save_version = int(d.get("save_version", SAVE_VERSION))
 	ws.next_uid = int(d.get("next_uid", 1))
 	ws.clock_hours = int(d.get("clock_hours", 0))
+	ws.party_col = int(d.get("party_col", -1))
+	ws.party_row = int(d.get("party_row", -1))
 	ws.ironman = bool(d.get("ironman", false))
 	var fl = d.get("flags", {})
 	ws.flags = fl if typeof(fl) == TYPE_DICTIONARY else {}
