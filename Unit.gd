@@ -52,6 +52,7 @@ var stats := {
 	"AP_max": 2,                  # AP 上限：每 turn 开始刷新到此值（行动经济基础 2）
 	"move": 6,                    # 移动力：一次「移动动作」（花 1 AP）获得的移动点数
 	"speed": 5,                   # 速度：出手顺序（大→小；同速玩家优先）
+	"sight": 5,                   # 视野半径：能看多远（六边形距离）；被 LOS 裁剪。夜/天气等环境挂修正。见 docs/感知系统.md
 	# 进攻
 	"atk": 5,                     # 攻击 → 武器 skill 物理伤害
 	"mag": 0,                     # 理术 → 魔法 spell 伤害 + 施加异常强度
@@ -92,8 +93,7 @@ var equipment := {}
 var skills := {}
 
 # —— 敌方 AI 警觉 / 仇恨（友方单位忽略这些字段；三种触发任一满足即激活，可组合）——
-# ai_threat：①威胁感知——敌人进入它的「威胁范围 = 一批移动力 + 攻击距离」(它这回合能移动过去打到的范围)就激活。
-#            纯看本单位自己的移动/攻击能力，逐单位自动算（默认开）。
+# ai_threat：①视野感知——敌人进入它的「视野(sight) 且有视线(LOS)」就警觉（默认开）。见 docs/感知系统.md。
 # ai_region：②区域触发——关卡设计者指定的区域 id（如要塞某房间）；敌人进入该区域即激活，与本单位移动/攻击无关。空=不用。
 # ai_group：③连锁——仇恨编组 id（非空时组内任一被激活则全组一起被激活）。
 # ai_aggroed：运行时——是否已进入战斗（激活后持续追击，不再回到休眠）。
@@ -107,17 +107,63 @@ static func round1(v: float) -> float:
 	return round(v * 10.0) / 10.0
 
 # 有效属性（保留 1 位小数）= 基础面板 + 修正：base + Σflat + base×Σpct%。面板显示用这个。
+# 去重规则 🔒：同一 source（同名 buff/技能）对同一 (stat, op) 只算一次、**取高**（重复挂不叠加、数值不同取大）；
+# 不同 source 才互相累加。无 source 标识的修正各自独立计入。
 func effective_stat_f(key: String) -> float:
 	var base := float(stats.get(key, 0))
 	var flat := 0.0
 	var pct := 0.0
+	var flat_src := {}   # source → 该源对本 stat 的 flat 取高值
+	var pct_src := {}
 	for m in modifiers:
-		if m.get("stat", "") != key:
+		if str(m.get("stat", "")) != key:
 			continue
-		match m.get("op", "flat"):
-			"flat": flat += float(m.get("value", 0))
-			"pct": pct += float(m.get("value", 0))
+		var v := float(m.get("value", 0))
+		var src := str(m.get("source", ""))
+		match str(m.get("op", "flat")):
+			"flat":
+				if src == "": flat += v
+				else: flat_src[src] = maxf(flat_src.get(src, v), v)
+			"pct":
+				if src == "": pct += v
+				else: pct_src[src] = maxf(pct_src.get(src, v), v)
+	for s in flat_src: flat += flat_src[s]
+	for s in pct_src: pct += pct_src[s]
 	return round1(base + flat + base * pct / 100.0)
+
+# —— 效能层（修正三层的第三层 op:"eff"，乘算）——
+# 增益向效能桶（攻击效能/命中效能…）：面板基（该键是面板效能 stat 时取 值/100，否则 1.0）× Π(1 + 各源%/100)。
+# 规则 🔒：效能一律乘算；不同 source 互相乘算；同一 source 只计一次、取高（同名技能/buff 不叠加、取大）。
+# **下限 clamp 🔒**：每个因子 max(0,…)——单条 −100% 即封顶为 0（攻击效能归零＝不造成伤害），**永不为负**，
+# 防止负因子在减伤链里翻转伤害符号（＝治疗）。上限不封（高增伤合法）。
+func eff_mult(bucket: String) -> float:
+	var base := maxf(0.0, (effective_stat_f(bucket) / 100.0) if stats.has(bucket) else 1.0)
+	var by_src := {}
+	var prod := 1.0
+	for m in modifiers:
+		if str(m.get("op", "")) != "eff" or str(m.get("stat", "")) != bucket:
+			continue
+		var v := float(m.get("value", 0))
+		var src := str(m.get("source", ""))
+		if src == "": prod *= maxf(0.0, 1.0 + v / 100.0)
+		else: by_src[src] = maxf(by_src.get(src, v), v)
+	for s in by_src: prod *= maxf(0.0, 1.0 + by_src[s] / 100.0)
+	return base * prod
+
+# 减免向效能：Π(1 − 各源%/100)（守方闪避效能之于攻方命中、减伤效能之于伤害）。mod-only，无面板基；同源取高。
+# **下限 clamp 🔒**：每个因子 max(0,…)——单条减免 ≥100% 即封顶为 0（＝对该项免疫），**永不为负**（同上防翻转）。
+func eff_reduce(bucket: String) -> float:
+	var by_src := {}
+	var prod := 1.0
+	for m in modifiers:
+		if str(m.get("op", "")) != "eff" or str(m.get("stat", "")) != bucket:
+			continue
+		var v := float(m.get("value", 0))
+		var src := str(m.get("source", ""))
+		if src == "": prod *= maxf(0.0, 1.0 - v / 100.0)
+		else: by_src[src] = maxf(by_src.get(src, v), v)
+	for s in by_src: prod *= maxf(0.0, 1.0 - by_src[s] / 100.0)
+	return prod
 
 # 整数版（出手顺序 / AP / 可达 / 战斗判定等用）：有效值四舍五入到整数。
 func effective_stat(key: String) -> int:

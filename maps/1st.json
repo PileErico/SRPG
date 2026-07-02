@@ -32,6 +32,9 @@
       "label": "区域1"
     }
   ],
+  "terrain_overrides": {
+
+  },
   "tiles": [
     [
       {
@@ -965,6 +968,135 @@
     ]
   ],
   "triggers": [],
-  "units": [],
+  "units": [
+    {
+      "col": 4.0,
+      "faction": "enemy",
+      "proto": {
+        "ai_threat": true,
+        "default_faction": "enemy",
+        "icon": "res://icons/Unit_Icons/Empire_Light_Infantry.png",
+        "id": "empire_light_infantry",
+        "name": "帝国轻步兵",
+        "portrait": "res://icons/Characters/Empire_Light_Infantry.png",
+        "speed": 7.0,
+        "tags": [
+          "human"
+        ]
+      },
+      "row": 9.0
+    },
+    {
+      "col": 7.0,
+      "faction": "enemy",
+      "proto": {
+        "ai_threat": true,
+        "default_faction": "enemy",
+        "icon": "res://icons/Unit_Icons/Empire_Light_Infantry.png",
+        "id": "empire_light_infantry",
+        "name": "帝国轻步兵",
+        "portrait": "res://icons/Characters/Empire_Light_Infantry.png",
+        "speed": 7.0,
+        "tags": [
+          "human"
+        ]
+      },
+      "row": 11.0
+    },
+    {
+      "col": 10.0,
+      "faction": "enemy",
+      "proto": {
+        "ai_threat": true,
+        "default_faction": "enemy",
+        "icon": "res://icons/Unit_Icons/Empire_Light_Infantry.png",
+        "id": "empire_light_infantry",
+        "name": "帝国轻步兵",
+        "portrait": "res://icons/Characters/Empire_Light_Infantry.png",
+        "speed": 7.0,
+        "tags": [
+          "human"
+        ]
+      },
+      "row": 9.0
+    },
+    {
+      "col": 6.0,
+      "faction": "enemy",
+      "proto": {
+        "ai_threat": true,
+        "default_faction": "enemy",
+        "icon": "res://icons/Unit_Icons/Empire_Light_Infantry.png",
+        "id": "empire_light_infantry",
+        "name": "帝国轻步兵",
+        "portrait": "res://icons/Characters/Empire_Light_Infantry.png",
+        "speed": 7.0,
+        "tags": [
+          "human"
+        ]
+      },
+      "row": 5.0
+    },
+    {
+      "col": 3.0,
+      "faction": "enemy",
+      "proto": {
+        "ai_threat": true,
+        "default_faction": "enemy",
+        "icon": "res://icons/Unit_Icons/Empire_Light_Infantry.png",
+        "id": "empire_light_infantry",
+        "name": "帝国轻步兵",
+        "portrait": "res://icons/Characters/Empire_Light_Infantry.png",
+        "speed": 7.0,
+        "tags": [
+          "human"
+        ]
+      },
+      "row": 1.0
+    },
+    {
+      "col": 1.0,
+      "faction": "enemy",
+      "proto": {
+        "ai_threat": true,
+        "default_faction": "enemy",
+        "icon": "res://icons/Unit_Icons/Empire_Light_Infantry.png",
+        "id": "empire_light_infantry",
+        "name": "帝国轻步兵",
+        "portrait": "res://icons/Characters/Empire_Light_Infantry.png",
+        "speed": 7.0,
+        "tags": [
+          "human"
+        ]
+      },
+      "row": 4.0
+    },
+    {
+      "col": 1,
+      "faction": "player",
+      "proto": {
+        "default_faction": "player",
+        "equip": [
+          "spear_dragon_calamity"
+        ],
+        "four": {
+          "DEX": 6.0,
+          "INT": 4.0,
+          "STA": 8.0,
+          "STR": 8.0
+        },
+        "icon": "res://icons/Unit_Icons/Player_Special_Veiken.png",
+        "id": "veiken",
+        "name": "维肯",
+        "portrait": "res://icons/Characters/Plyer_Special_Veiken.png",
+        "tags": [
+          "char_veiken",
+          "human"
+        ],
+        "trait": "dragonslayer"
+      },
+      "row": 13
+    }
+  ],
   "width": 15
 }

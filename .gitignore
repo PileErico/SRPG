@@ -8,6 +8,8 @@ mono_crash.*.json
 # 临时 headless 自测脚本（命名约定 _*_test.gd，用完即删，兜底忽略）
 /_*_test.gd
 /_*_test.gd.uid
+# 素材源压缩包（解压后的 PNG 已入库，源 zip 不入库、避免仓库膨胀）
+*.zip
 # 系统 / 编辑器杂物
 Thumbs.db
 .DS_Store

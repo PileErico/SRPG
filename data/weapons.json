@@ -136,12 +136,12 @@
   },
   {
     "attack": {
-      "ap_cost": 1,
-      "coeff": 1,
+      "ap_cost": 1.0,
+      "coeff": 1.0,
       "damage_kind": "physical",
       "icon": "res://icons/Skills/WeaponSkills/Special_Desmond_skill_1.png",
       "name": "撕裂（戴斯蒙）",
-      "range": 1,
+      "range": 1.0,
       "tags": [
         "skill_claw",
         "slashing",
@@ -155,12 +155,12 @@
       {
         "op": "pct",
         "stat": "atk",
-        "value": 3
+        "value": 3.0
       },
       {
         "op": "pct",
         "stat": "acc",
-        "value": 3
+        "value": 3.0
       }
     ],
     "name": "戴斯蒙的狼爪",
@@ -173,6 +173,81 @@
       "weapon_claw",
       "melee",
       "innate_weapon"
+    ],
+    "two_handed": false
+  },
+  {
+    "attack": {
+      "ap_cost": 1.0,
+      "coeff": 1.0,
+      "damage_kind": "physical",
+      "icon": "",
+      "name": "斩击",
+      "range": 1.0,
+      "tags": [
+        "single_target"
+      ]
+    },
+    "icon": "res://icons/Items/Weapons/longsword.png",
+    "id": "long_sword",
+    "innate": false,
+    "mods": [
+      {
+        "op": "flat",
+        "stat": "atk",
+        "value": 5.0
+      },
+      {
+        "op": "flat",
+        "stat": "acc",
+        "value": 5.0
+      }
+    ],
+    "name": "长剑",
+    "requires": [],
+    "slot": "main_hand",
+    "tags": [
+      "common",
+      "melee",
+      "weapon_sword",
+      "one_handed"
+    ],
+    "two_handed": false
+  },
+  {
+    "attack": {
+      "ap_cost": 1,
+      "coeff": 1,
+      "damage_kind": "physical",
+      "icon": "",
+      "name": "普通攻击",
+      "range": 1,
+      "tags": [
+        "single_target"
+      ]
+    },
+    "icon": "res://icons/Items/Weapons/wood_kite_shield.png",
+    "id": "wood_kite_shield",
+    "innate": false,
+    "mods": [
+      {
+        "op": "flat",
+        "stat": "block_rate",
+        "value": 15
+      },
+      {
+        "op": "flat",
+        "stat": "block_power",
+        "value": 35
+      }
+    ],
+    "name": "斗盾",
+    "requires": [],
+    "slot": "off_hand",
+    "tags": [
+      "common",
+      "shield",
+      "shield_medium"
     ],
     "two_handed": false
   }

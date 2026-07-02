@@ -3,7 +3,7 @@ extends "res://HexCanvas.gd"
 ## 在地形之上叠画单位 token。输入沿用父类（中键平移、滚轮缩放、悬停）；
 ## 左右键在 sandbox 宿主里是空操作（不绘制地形）。
 
-var _icon_cache := {}   # 路径 → Texture2D（含 null，避免每帧重读）
+const TextureCache := preload("res://TextureCache.gd")   # 图标加载 + 缓存单一入口
 var _fly_phase := 0.0   # 飞行漂浮相位（_process 累加，仅在场上有飞行单位时推进+重绘）
 
 func _ready() -> void:
@@ -83,6 +83,7 @@ func _draw() -> void:
 	if editor == null:
 		return
 	# 此处 draw_set_transform 仍是父类设的视图变换，直接用世界坐标画单位即可对齐
+	_draw_fog()          # 战争迷雾：黑遮未探索 / 压暗探索过（盖在地形上、其余层之下）
 	_draw_regions()      # 仇恨触发区域（淡紫，最底层；调试可见）
 	_draw_deploy_zone()  # 部署区（布置阶段高亮，蓝色）：玩家单位只能放这里
 	# 范围层（移动/攻击）：先攻击(浅红)、后移动(我方浅蓝 / 敌方浅黄)，移动盖在攻击上
@@ -95,12 +96,27 @@ func _draw() -> void:
 		_draw_move_path()
 	_draw_hover_unit()   # 行动顺序槽悬停 → 高亮该单位所在格（在单位 token 之下）
 	for u in editor.units:
+		if editor._unit_hidden_by_fog(u):
+			continue     # 迷雾里的敌人不渲染（看不到）
 		_draw_unit(u)
 
 # 把一组格按给定色填充（范围层通用）
 func _draw_cells(cells: Dictionary, color: Color) -> void:
 	for cell in cells:
 		draw_colored_polygon(hex_corners(hex_center(cell.x, cell.y)), color)
+
+# 战争迷雾：黑(未探索)不透明全遮 / 灰(探索过·当前无观测)半透明压暗。仅战斗阶段且非全知才画（见 Sandbox.cell_fog）。
+const FOG_BLACK := Color(0.03, 0.03, 0.05, 1.0)   # 未探索：不透明，盖住地形
+const FOG_GRAY := Color(0.02, 0.02, 0.05, 0.55)   # 探索过·无观测：半透明压暗，地形透出
+func _draw_fog() -> void:
+	if editor.phase != "battle" or editor.omniscient:
+		return
+	for row in editor.height:
+		for col in editor.width:
+			var f: int = editor.cell_fog(Vector2i(col, row))
+			if f == 2:
+				continue
+			draw_colored_polygon(hex_corners(hex_center(col, row)), FOG_BLACK if f == 0 else FOG_GRAY)
 
 # 仇恨触发区域：淡紫填充（调试可见；将来正式关卡可隐藏）
 func _draw_regions() -> void:
@@ -127,8 +143,8 @@ func _draw_zoc(cells: Dictionary) -> void:
 # 行动顺序槽悬停的单位：在地图上高亮其所在格（青白填充 + 描边，区别于黄色地形悬停）
 func _draw_hover_unit() -> void:
 	var u = editor.hover_unit
-	if u == null:
-		return
+	if u == null or editor._unit_hidden_by_fog(u):
+		return   # 迷雾里的敌人不高亮位置（哪怕在行动顺序槽被扫到）
 	var center := hex_center(u.col, u.row)
 	var pts := hex_corners(center)
 	draw_colored_polygon(pts, Color(0.55, 0.85, 1.0, 0.22))
@@ -258,8 +274,8 @@ func _draw_unit(u) -> void:
 	_draw_icon(u, c, r, Color(1.0, 0.35, 0.35) if flashing else (ACTED_ICON if acted else Color.WHITE))
 	if flashing:   # 在图标之上再盖一层红，确保整颗棋子都红（含图标，不止露出的圆边）
 		draw_circle(c, r, Color(0.95, 0.12, 0.12, 0.55))
-	_draw_hp_bar(u, c, r)
-	_draw_armor_bar(u, c, r)   # 血条之上：有护甲上限才画
+	# 头顶血条/护甲条已移除——单位血量/护甲改在左下「光标信息栏」悬停单位卡里看（见 Sandbox.hover_extra）。
+	# _draw_hp_bar/_draw_armor_bar 函数保留（将来若想「受伤才显示」再按需调用）。
 	_draw_ap_pips(u, c, r)
 
 # 飞行单位的地面投影：固定贴在原格（不随漂浮上下动），抬得越高→略小略淡（透视感，但有下限保证看得见）
@@ -287,46 +303,32 @@ func _draw_icon(u, c: Vector2, r: float, modulate: Color = Color.WHITE) -> void:
 	var s := r * 1.6
 	draw_texture_rect(tex, Rect2(c - Vector2(s, s) * 0.5, Vector2(s, s)), false, modulate)
 
-# 按路径取纹理并缓存：优先已导入资源，否则直读原图（免依赖编辑器导入）
+# 按路径取纹理并缓存（统一走 TextureCache，跨实例共享缓存）
 func _get_icon(path: String):
-	if _icon_cache.has(path):
-		return _icon_cache[path]
-	var tex = null
-	if ResourceLoader.exists(path):
-		var t = load(path)
-		if t is Texture2D:
-			tex = t
-	if tex == null:
-		var img := Image.new()
-		if img.load(path) == OK:
-			tex = ImageTexture.create_from_image(img)
-	_icon_cache[path] = tex
-	return tex
+	return TextureCache.get_tex(path)
 
-# 血条/护甲条共用尺寸：底黑窄条（细，给上方护甲条腾位）
+# 血条/护甲条共用尺寸：底黑窄条（同长同宽，护甲条叠在血条正上方）
 const BAR_W_MUL := 1.8       # 条宽 = r·该系数
 const BAR_H := 2.5           # 条高（窄）
-const BAR_HP_DY := -8.0      # 血条上沿相对格心（紧贴 token 上方）
-const BAR_ARMOR_DY := -12.0  # 护甲条上沿（血条之上、留 1.5px 缝）
+const BAR_HP_DY := -10.0     # 血条上沿相对格心（往上挪一点、给护甲条腾位）
+const BAR_ARMOR_DY := -14.0  # 护甲条上沿（血条之上、同长宽、留 1.5px 缝）
 
-# token 上方一条血条：底黑 + 绿色按 HP/HP_max 充填
+# token 上方一条血条：底黑 + 绿色按 HP/HP_max 充填。上限读 effective（含装备/buff 对 HP_max 的加成）。
 func _draw_hp_bar(u, c: Vector2, r: float) -> void:
-	if not (u.stats.has("HP") and u.stats.has("HP_max")):
+	if not u.stats.has("HP"):
 		return
-	var maxhp := float(u.stats["HP_max"])
+	var maxhp := float(u.effective_stat("HP_max"))
 	if maxhp <= 0.0:
 		return
 	var frac := clampf(float(u.stats["HP"]) / maxhp, 0.0, 1.0)
 	_draw_stat_bar(c, r, BAR_HP_DY, frac, Color(0.30, 0.80, 0.30))
 
-# 血条之上一条护甲条：底黑 + 银色按 armor/armor_max 充填。
-# 无护甲上限（armor_max<=0）则不画——该槽位以后还会复用给某些角色的特殊机制。
+# 血条之上一条护甲条：底黑 + 银色按 armor/armor_max 充填。上限读 effective——
+# **护甲多来自装备 mod（如板胸甲 armor_max+75），裸 stats["armor_max"] 仍是0**，必须读 effective_stat 才画得出。
 func _draw_armor_bar(u, c: Vector2, r: float) -> void:
-	if not u.stats.has("armor_max"):
-		return
-	var maxv := float(u.stats["armor_max"])
+	var maxv := float(u.effective_stat("armor_max"))
 	if maxv <= 0.0:
-		return
+		return   # 无护甲上限则不画
 	var frac := clampf(float(u.stats.get("armor", 0)) / maxv, 0.0, 1.0)
 	_draw_stat_bar(c, r, BAR_ARMOR_DY, frac, Color(0.82, 0.83, 0.86))   # 银色（中性偏冷的金属灰）
 

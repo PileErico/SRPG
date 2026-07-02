@@ -1,0 +1,16 @@
+{
+  "_note": "环境单一数据源（天气 + 日夜）。天气：sight(视野加减,负=减,flat) + vfx(weather/individual_frames 文件夹名,48帧循环) + tint(叠层染色) + vfx_fps。日夜：sight_mult(视野【最终乘子】,在天气/装备/技能等所有加减之后再乘,夜=0.5减半) + tint(全屏变暗滤镜色,含alpha)。近期环境只影响视野(见 docs/感知系统.md Phase 2)。VFX 素材＝Alenia Studios〔CC BY 4.0，署名见 CREDITS.md〕。EnvDB 读本文件。",
+  "format_version": 1,
+  "weathers": [
+    {"id": "clear", "label": "晴", "sight": 0, "desc": "天气晴朗，视野正常"},
+    {"id": "rain", "label": "雨", "sight": -1, "desc": "降雨，视野略降", "vfx": "clima_lluvia_estetica", "vfx_fps": 16},
+    {"id": "fog", "label": "雾", "sight": -2, "desc": "浓雾弥漫，视野大降", "vfx": "clima_niebla_espesa", "vfx_fps": 10},
+    {"id": "snow", "label": "雪", "sight": -1, "desc": "落雪，视野略降", "vfx": "clima_nieve_cozy", "vfx_fps": 12},
+    {"id": "sandstorm", "label": "沙暴", "sight": -2, "desc": "风沙蔽日，视野大降", "vfx": "clima_viento_estetico", "tint": "#E8C98CFF", "vfx_fps": 18},
+    {"id": "storm", "label": "雷暴", "sight": -2, "desc": "雷暴闪电，视野受阻", "vfx": "clima_tormenta_electrica", "vfx_fps": 16}
+  ],
+  "times": [
+    {"id": "day", "label": "昼", "sight_mult": 1.0, "desc": "白昼，视野正常"},
+    {"id": "night", "label": "夜", "sight_mult": 0.5, "tint": "#0A16386E", "desc": "夜幕低垂，能见度减半（最终乘算，在所有加减之后）"}
+  ]
+}

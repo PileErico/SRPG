@@ -8,6 +8,8 @@ extends Control
 const ItemDB := preload("res://ItemDB.gd")
 const EquipSlots := preload("res://EquipSlots.gd")
 const TagDB := preload("res://TagDB.gd")
+const TextureCache := preload("res://TextureCache.gd")   # 图标加载 + 缓存单一入口
+const ItemTooltip := preload("res://ItemTooltip.gd")     # 物品富 tooltip 通用渲染组件（与角色状态页共用）
 
 const KIND_CN := {"weapon": "武器", "armor": "防具", "accessory": "饰品"}
 const ICON_DIR := {
@@ -27,9 +29,12 @@ const STAT_GROUPS := [
 	["进攻", [["atk", "攻击", true], ["acc", "命中", true], ["crit_rate", "暴击率", true],
 		["crit_dmg", "暴击威力", true], ["atk_eff", "攻击效能", true], ["mag", "理术", false]]],
 	["生存", [["HP_max", "生命上限", true], ["eva", "闪避", true], ["block_rate", "格挡率", true],
-		["block_power", "格挡性能", true], ["def_eff", "防御效能", false], ["armor_max", "护甲池", true]]],
-	["抗性", [["res_phys", "物理抗性", true], ["res_status", "异常抗性", true], ["res_fire", "火焰抗性", false],
-		["res_thunder", "雷电抗性", false], ["res_ice", "冰冻抗性", false], ["res_holy", "神圣抗性", false]]],
+		["block_power", "格挡性能", true], ["def_eff", "防御效能", true], ["armor_max", "护甲池", true]]],
+	["人抗（减对血量伤害·%）", [["res_phys", "物理抗性", true], ["res_status", "异常抗性", true], ["res_fire", "火焰抗性", true],
+		["res_thunder", "雷电抗性", true], ["res_ice", "冰冻抗性", true], ["res_holy", "神圣抗性", true]]],
+	["甲抗（减护甲承伤·防具专属·%）", [["armor_res_phys", "物理甲抗", true], ["armor_res_fire", "火焰甲抗", true],
+		["armor_res_thunder", "雷电甲抗", true], ["armor_res_ice", "冰冻甲抗", true], ["armor_res_holy", "神圣甲抗", true]]],
+	["固定减伤（承伤最后减固定值·非%）", [["dr_flat_armor", "甲固减", true], ["dr_flat_human", "人固减", true]]],
 	["行动", [["move", "移动力", true], ["speed", "速度", true], ["AP_max", "AP上限", true]]],
 ]
 
@@ -746,101 +751,7 @@ func _refresh_preview() -> void:
 
 
 func _render_item_tooltip(item: Dictionary) -> Control:
-	var rc := _rarity_color(_rarity_of(item))
-	var panel := PanelContainer.new()
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0, 0, 0, 1)
-	sb.border_color = rc
-	sb.set_border_width_all(2)
-	sb.set_corner_radius_all(4)
-	sb.set_content_margin_all(10)
-	panel.add_theme_stylebox_override("panel", sb)
-	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 4)
-	panel.add_child(v)
-
-	var head := HBoxContainer.new()
-	head.add_theme_constant_override("separation", 8)
-	var itex = _load_icon(str(item.get("icon", "")))
-	if itex != null:
-		head.add_child(_icon_rect(itex, 44))
-	var headv := VBoxContainer.new()
-	headv.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	var nm := str(item.get("name", ""))
-	var name_l := Label.new()
-	name_l.text = nm if nm != "" else "（未命名）"
-	name_l.add_theme_font_size_override("font_size", 18)
-	name_l.add_theme_color_override("font_color", rc)
-	headv.add_child(name_l)
-	var sub := Label.new()
-	sub.text = "%s · %s" % [KIND_CN.get(_current_kind, _current_kind), EquipSlots.SLOT_CN.get(str(item.get("slot", "")), str(item.get("slot", "")))]
-	sub.add_theme_font_size_override("font_size", 12)
-	sub.add_theme_color_override("font_color", Color(0.66, 0.7, 0.78))
-	headv.add_child(sub)
-	head.add_child(headv)
-	v.add_child(head)
-
-	_preview_tags(v, item.get("tags", []))
-
-	var req = item.get("requires", [])
-	if typeof(req) == TYPE_ARRAY and not req.is_empty():
-		var rn := []
-		for q in req:
-			rn.append(TagDB.cn(str(q)))
-		var rl := Label.new()
-		rl.text = "需求：" + "、".join(rn)
-		rl.add_theme_font_size_override("font_size", 12)
-		rl.add_theme_color_override("font_color", Color(0.95, 0.62, 0.5))
-		v.add_child(rl)
-
-	for m in item.get("mods", []):
-		if typeof(m) == TYPE_DICTIONARY:
-			v.add_child(_preview_mod_line(m))
-
-	var atk = item.get("attack", null)
-	if typeof(atk) == TYPE_DICTIONARY:
-		v.add_child(HSeparator.new())
-		var ahb := HBoxContainer.new()
-		ahb.add_theme_constant_override("separation", 8)
-		var atex = _load_icon(str(atk.get("icon", "")))
-		if atex != null:
-			ahb.add_child(_icon_rect(atex, 34))
-		var an := Label.new()
-		an.text = "攻击：" + str(atk.get("name", ""))
-		an.add_theme_font_size_override("font_size", 15)
-		an.add_theme_color_override("font_color", Color("#EBBC04"))
-		an.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		ahb.add_child(an)
-		v.add_child(ahb)
-		_preview_tags(v, atk.get("tags", []))
-		v.add_child(_kv("距离", "%d" % int(atk.get("range", 1))))
-		v.add_child(_kv("伤害系数", "%d%%" % int(round(float(atk.get("coeff", 1.0)) * 100.0))))
-		v.add_child(_kv("AP 消耗", "%d" % int(atk.get("ap_cost", 1))))
-		v.add_child(_kv("伤害类型", str(atk.get("damage_kind", "physical"))))
-		var bspec = atk.get("bonus", null)
-		if typeof(bspec) == TYPE_DICTIONARY:
-			var ns := []
-			for s in bspec.get("stats", []):
-				ns.append(_stat_cn(str(s)))
-			v.add_child(_kv("伤害补正", "（%s）×%s" % ["＋".join(ns), _numfmt(float(bspec.get("mult", 0)))]))
-		var pen := float(atk.get("armor_pen", 0))
-		if pen > 0.0:
-			v.add_child(_kv("穿甲", "%d%%" % int(round(pen * 100.0))))
-		var inf = atk.get("inflict", null)
-		if typeof(inf) == TYPE_DICTIONARY:
-			v.add_child(_kv("异常", "%d%% 施加 %s" % [int(float(inf.get("chance", 0))), str(inf.get("name", ""))]))
-		var aoe = atk.get("aoe", null)
-		if typeof(aoe) == TYPE_DICTIONARY:
-			var ff := "（友伤）" if bool(aoe.get("friendly_fire", false)) else ""
-			v.add_child(_kv("范围", "%s·长%d%s" % [str(aoe.get("shape", "")), int(aoe.get("length", 1)), ff]))
-		var prefer := str(atk.get("prefer", ""))
-		if prefer == "ground" or prefer == "air":
-			var note := Label.new()
-			note.text = "地面优先" if prefer == "ground" else "天空优先"
-			note.add_theme_font_size_override("font_size", 12)
-			note.add_theme_color_override("font_color", Color(0.7, 0.85, 1.0))
-			v.add_child(note)
-	return panel
+	return ItemTooltip.render(item)   # 通用组件（与角色状态页共用一份渲染）
 
 
 func _preview_tags(parent: Node, tags) -> void:
@@ -882,16 +793,7 @@ func _icon_rect(tex, sz: int) -> TextureRect:
 
 
 func _load_icon(path: String):
-	if path == "":
-		return null
-	if ResourceLoader.exists(path):
-		var t = load(path)
-		if t is Texture2D:
-			return t
-	var img := Image.new()
-	if img.load(path) == OK:
-		return ImageTexture.create_from_image(img)
-	return null
+	return TextureCache.get_tex(path)
 
 
 func _preview_mod_line(m) -> Label:

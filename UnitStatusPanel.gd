@@ -13,31 +13,14 @@ const ItemDB := preload("res://ItemDB.gd")
 const ItemSlot := preload("res://ItemSlot.gd")
 const TraitDB := preload("res://TraitDB.gd")
 const SkillDB := preload("res://SkillDB.gd")
+const TagDB := preload("res://TagDB.gd")                 # 稀有度→颜色单一数据源
+const TextureCache := preload("res://TextureCache.gd")   # 立绘/图标加载 + 缓存单一入口
+const ItemTooltip := preload("res://ItemTooltip.gd")     # 物品富 tooltip 通用渲染组件（与物品编辑器共用）
+const StatMeta := preload("res://StatMeta.gd")           # stat 键→中文 单一数据源（含甲抗/固减等全量键）
 
 const ROMAN := ["", "I", "II", "III", "IV", "V"]   # 技能等级 → 罗马数字（右下角金色徽标）
 
-# 属性键 → 中文（物品 tooltip 的数值行用）
-const STAT_CN := {
-	"STR": "力量", "DEX": "灵巧", "INT": "智力", "STA": "体力",
-	"HP_max": "生命上限", "armor_max": "护甲上限", "AP_max": "AP上限", "move": "行动力", "speed": "速度",
-	"atk": "攻击", "mag": "理术", "atk_eff": "攻击效能", "def_eff": "防御效能", "acc": "命中", "eva": "闪避",
-	"crit_rate": "暴击率", "crit_dmg": "暴击威力", "block_rate": "格挡率", "block_power": "格挡性能",
-	"res_phys": "物理抗性", "res_status": "异常抗性", "res_fire": "火焰抗性", "res_thunder": "雷电抗性",
-	"res_ice": "冰冻抗性", "res_holy": "神圣抗性",
-}
-
-# tag → 中文（物品 tooltip 的标签 chip 显示用；代码里仍用英文 tag）
-const TAG_CN := {
-	"one_handed": "单手", "two_handed": "双手", "main_hand": "主手", "off_hand": "副手",
-	"melee": "近战", "ranged": "远程", "thrown": "投掷",
-	"weapon_spear": "矛", "weapon_sword": "剑", "weapon_hammer": "锤", "weapon_axe": "斧", "weapon_shield": "盾", "weapon_claw": "爪",
-	"skill_spear": "矛技能", "skill_sword": "剑技能", "skill_hammer": "锤技能", "skill_axe": "斧技能", "skill_shield": "盾技能", "skill_claw": "爪技能",
-	"innate": "天生",
-	"common": "普通", "uncommon": "优秀", "rare": "稀有", "epic": "史诗", "legendary": "传说", "special": "特殊",
-	"single_target": "单体", "multi_target": "群体", "aoe": "范围",
-	"piercing": "突刺", "bludgeoning": "打击", "slashing": "斩击",
-	"human": "人类", "harpy": "鸟人", "monster": "怪物", "beast": "野兽",
-}
+# 属性键 / tag → 中文均走单一数据源：stat 用 StatMeta.label（全量、无漂移），tag 用 TagDB.cn。
 
 const CARD_SIZE := Vector2(900, 660)   # 卡片固定尺寸（含抬头区）
 const FRAME_SCALE := 3                 # 角饰放大倍数
@@ -51,10 +34,7 @@ const HEADER_H := 56                   # 抬头/拖动区高度（覆盖标题�
 const STAT_GREEN := Color("#6FCF6F")   # 属性被修正调高
 const STAT_RED := Color("#E07A5A")     # 属性被修正调低
 # 稀有度 → 槽位边框色（见 docs/标签词典.md）
-const RARITY_COLORS := {
-	"special": Color("#D5453A"), "common": Color("#E0E0E0"), "uncommon": Color("#4FAE5A"),
-	"rare": Color("#3A7BD5"), "epic": Color("#9B59B6"), "legendary": Color("#EBBC04"),
-}
+# 稀有度→颜色改从 TagDB 单一数据源读（见 _rarity_color_of），不再在此硬编码副本。
 
 # —— 拖动状态（非模态悬浮窗）——
 var _card: PanelContainer
@@ -782,7 +762,7 @@ func _trait_row(u) -> Control:
 	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	if t != null:
 		v.text = str(t.get("name", ""))
-		var rc = RARITY_COLORS.get(str(t.get("rarity", "")), null)
+		var rc = _rarity_color_of(str(t.get("rarity", "")))
 		if rc != null:
 			v.add_theme_color_override("font_color", rc)
 	else:
@@ -793,7 +773,9 @@ func _trait_row(u) -> Control:
 
 # 特性富 tooltip：黑底 + 稀有度边框；名称(稀有度色) + 属性加成(绿/红行，复用 _mod_line) + 性质描述。
 func _build_trait_tooltip(t) -> Control:
-	var rc = RARITY_COLORS.get(str(t.get("rarity", "")), Color(1, 1, 1, 0.5))
+	var rc = _rarity_color_of(str(t.get("rarity", "")))
+	if rc == null:
+		rc = Color(1, 1, 1, 0.5)
 	var panel := PanelContainer.new()
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = Color(0, 0, 0, 1)
@@ -856,7 +838,20 @@ const EQUIP_SLOTS := [
 ]
 
 func _build_equip(parent: VBoxContainer, u) -> void:
-	_section(parent, "装备")
+	# 抬头：「装备」金标题（左） + 右上角信息角标（悬停出「装备加成总计」tooltip）
+	var header := HBoxContainer.new()
+	var title := Label.new()
+	title.text = "装备"
+	title.add_theme_color_override("font_color", Color("#EBBC04"))
+	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	header.add_child(title)
+	var sp := Control.new()
+	sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sp.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	header.add_child(sp)
+	header.add_child(_equip_summary_badge(u))
+	parent.add_child(header)
+
 	var grid := GridContainer.new()
 	grid.columns = 3
 	grid.size_flags_horizontal = Control.SIZE_SHRINK_CENTER   # 整组槽位在本列内居中
@@ -865,6 +860,71 @@ func _build_equip(parent: VBoxContainer, u) -> void:
 	parent.add_child(grid)
 	for s in EQUIP_SLOTS:
 		grid.add_child(_equip_cell(u, s["label"], s["id"]))
+
+# 装备区右上角信息角标：金色「数据统计ⓘ」文本，悬停出「装备加成总计」富 tooltip（复用 ItemSlot 自定义 tooltip 机制）。
+func _equip_summary_badge(u) -> Control:
+	var host := ItemSlot.new()
+	host.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
+	host.mouse_filter = Control.MOUSE_FILTER_STOP    # 默认箭头光标，不作可点击提示
+	host.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	host.item = u                                   # tooltip_builder 收到的即当前单位
+	host.tooltip_builder = _build_equip_summary_tooltip
+	host.tooltip_text = "装备加成总计"                # 非空才会触发 tooltip
+	var icon := Label.new()
+	icon.text = "数据统计ⓘ"
+	icon.add_theme_color_override("font_color", Color("#EBBC04"))   # 与左侧「装备」同色同字号（均用主题默认字号）
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	host.add_child(icon)
+	return host
+
+# 聚合当前所有装备提供的修正：取 source 前缀 "equip:" 的修正，按 (stat, op) 合并求和；保持首次出现顺序。
+func _aggregate_equip_mods(u) -> Array:
+	var order := []
+	var sums := {}
+	for m in u.modifiers:
+		if not str(m.get("source", "")).begins_with("equip:"):
+			continue
+		var stat := str(m.get("stat", ""))
+		var op := str(m.get("op", "flat"))
+		var k := stat + "|" + op
+		if not sums.has(k):
+			sums[k] = {"stat": stat, "op": op, "value": 0.0}
+			order.append(k)
+		sums[k]["value"] += float(m.get("value", 0))
+	var out := []
+	for k in order:
+		out.append(sums[k])
+	return out
+
+# 「装备加成总计」富 tooltip：黑底 + 金边；标题 + 各装备加成合并后的绿/红数值行（无则提示）。
+func _build_equip_summary_tooltip(u) -> Control:
+	var panel := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0, 0, 0, 1)
+	sb.border_color = Color("#EBBC04")
+	sb.set_border_width_all(2)
+	sb.set_corner_radius_all(4)
+	sb.set_content_margin_all(12)
+	panel.add_theme_stylebox_override("panel", sb)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 5)
+	panel.add_child(v)
+	var title := Label.new()
+	title.text = "装备加成总计"
+	title.add_theme_font_size_override("font_size", 18)
+	title.add_theme_color_override("font_color", Color("#EBBC04"))
+	v.add_child(title)
+	v.add_child(HSeparator.new())
+	var agg := _aggregate_equip_mods(u)
+	if agg.is_empty():
+		var none := Label.new()
+		none.text = "（当前无装备加成）"
+		none.add_theme_color_override("font_color", Color(1, 1, 1, 0.5))
+		v.add_child(none)
+	else:
+		for m in agg:
+			v.add_child(_mod_line(m))
+	return panel
 
 # 单个装备槽：正方形空格（已装备则放物品图标）+ 下方名称（居中）
 func _equip_cell(u, slot_label: String, slot_id: String) -> Control:
@@ -1124,112 +1184,25 @@ func _section(parent: Node, text: String) -> void:
 	l.add_theme_color_override("font_color", Color("#EBBC04"))
 	parent.add_child(l)
 
+# 稀有度 id → 颜色（读 TagDB 单一数据源；非稀有度 / 无 color 的 tag 返回 null）
+func _rarity_color_of(rarity_id: String):
+	var hex := TagDB.color(rarity_id)
+	return Color(hex) if hex != "" else null
+
 # 物品稀有度 → 颜色（取 tags 里的稀有度 tag）；无则 null
 func _rarity_color(item):
 	for t in item.get("tags", []):
-		if RARITY_COLORS.has(t):
-			return RARITY_COLORS[t]
+		var c = _rarity_color_of(str(t))
+		if c != null:
+			return c
 	return null
 
 func _is_pct_stat(key: String) -> bool:
 	return key.begins_with("res_") or key.ends_with("_eff") or key.ends_with("_rate") or key in ["block_power", "crit_dmg"]
 
-# 物品富 tooltip：纯黑底 + 稀有边框；名称/标签/数值 + 技能(图标/名称/标签/数值)。字体偏大。
+# 物品富 tooltip → 通用组件 ItemTooltip.render（与物品编辑器共用一份渲染）
 func _build_item_tooltip(item) -> Control:
-	var rc = _rarity_color(item)
-	var panel := PanelContainer.new()
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0, 0, 0, 1)                          # 纯黑底（不透明）
-	sb.border_color = rc if rc != null else Color(1, 1, 1, 0.3)
-	sb.set_border_width_all(2)
-	sb.set_corner_radius_all(4)
-	sb.set_content_margin_all(12)
-	panel.add_theme_stylebox_override("panel", sb)
-
-	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 5)
-	panel.add_child(v)   # 宽度自适应内容（不再固定 240）
-
-	# 名称（稀有度色，最大）+ 物品图标（与下方攻击图标呼应、上下平衡）
-	var head := HBoxContainer.new()
-	head.add_theme_constant_override("separation", 8)
-	var itex = _load_portrait(str(item.get("icon", "")))
-	if itex != null:
-		var iic := TextureRect.new()
-		iic.texture = itex
-		iic.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-		iic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		iic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		iic.custom_minimum_size = Vector2(40, 40)
-		head.add_child(iic)
-	var name_l := Label.new()
-	name_l.text = str(item.get("name", ""))
-	name_l.add_theme_font_size_override("font_size", 19)
-	name_l.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	if rc != null:
-		name_l.add_theme_color_override("font_color", rc)
-	head.add_child(name_l)
-	v.add_child(head)
-	_tip_tags(v, item.get("tags", []))
-
-	# 数值（mods）
-	for m in item.get("mods", []):
-		v.add_child(_mod_line(m))
-
-	# 攻击 skill：图标 + 名称 + 技能标签 + 技能数值
-	var atk = item.get("attack", null)
-	if typeof(atk) == TYPE_DICTIONARY:
-		v.add_child(HSeparator.new())
-		var hb := HBoxContainer.new()
-		hb.add_theme_constant_override("separation", 8)
-		var stex = _load_portrait(str(atk.get("icon", "")))
-		if stex != null:
-			var ic := TextureRect.new()
-			ic.texture = stex
-			ic.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-			ic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-			ic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-			ic.custom_minimum_size = Vector2(36, 36)
-			hb.add_child(ic)
-		var sn := Label.new()
-		sn.text = str(atk.get("name", ""))
-		sn.add_theme_font_size_override("font_size", 17)
-		sn.add_theme_color_override("font_color", Color("#EBBC04"))
-		sn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		hb.add_child(sn)
-		v.add_child(hb)
-		_tip_tags(v, atk.get("tags", []))
-		v.add_child(_tip_line("距离", "%d" % int(atk.get("range", 1))))
-		v.add_child(_tip_line("伤害系数", "%d%%" % int(round(float(atk.get("coeff", 1.0)) * 100.0))))
-		v.add_child(_tip_line("AP 消耗", "%d" % int(atk.get("ap_cost", 1))))
-		# 伤害补正（Σ属性×倍率，不吃效能）
-		var bspec = atk.get("bonus", null)
-		if typeof(bspec) == TYPE_DICTIONARY:
-			var names := []
-			for s in bspec.get("stats", []):
-				names.append(STAT_CN.get(str(s), str(s)))
-			v.add_child(_tip_line("伤害补正", "（%s）×%s（不吃效能）" % ["＋".join(names), _fmt(float(bspec.get("mult", 0)))]))
-		# 穿甲
-		var pen := float(atk.get("armor_pen", 0))
-		if pen > 0.0:
-			v.add_child(_tip_line("穿甲", "%s%%（按比例无视护甲）" % _fmt(pen * 100.0)))
-		# 施加异常（流血等）
-		var inf = atk.get("inflict", null)
-		if typeof(inf) == TYPE_DICTIONARY:
-			var txt := "%s%% 施加 %s" % [_fmt(float(inf.get("chance", 0))), str(inf.get("name", ""))]
-			if float(inf.get("dot_pct_max_hp", 0)) > 0.0:
-				txt += "（回合末 最大生命%s%%·%d回合）" % [_fmt(float(inf.get("dot_pct_max_hp", 0))), int(inf.get("duration", 0))]
-			v.add_child(_tip_line("异常", txt))
-		# 地/空 优先提示
-		var prefer := str(atk.get("prefer", ""))
-		if prefer == "ground" or prefer == "air":
-			v.add_child(HSeparator.new())
-			var note := Label.new()
-			note.text = "地面战斗时优先使用" if prefer == "ground" else "天空战斗时优先使用"
-			note.add_theme_font_size_override("font_size", 13)
-			note.add_theme_color_override("font_color", Color(0.70, 0.85, 1.0))
-			v.add_child(note)
-	return panel
+	return ItemTooltip.render(item)
 
 # tooltip 里的标签：每个 tag 一个浅灰圆角 chip（中文显示），自动换行
 func _tip_tags(parent: Node, tags) -> void:
@@ -1240,7 +1213,7 @@ func _tip_tags(parent: Node, tags) -> void:
 	flow.add_theme_constant_override("v_separation", 4)
 	flow.custom_minimum_size = Vector2(150, 0)   # 给个宽度让 chip 换行、整体不至太宽
 	for t in tags:
-		flow.add_child(_tag_chip(TAG_CN.get(str(t), str(t))))
+		flow.add_child(_tag_chip(TagDB.cn(str(t))))
 	parent.add_child(flow)
 
 # 单个标签 chip：浅灰圆角方底 + 中文
@@ -1264,7 +1237,7 @@ func _tag_chip(text: String) -> Control:
 # tooltip 里的一条修正数值（绿=加/红=减）
 func _mod_line(m) -> Label:
 	var key := str(m.get("stat", ""))
-	var cn = STAT_CN.get(key, key)
+	var cn = StatMeta.label(key)
 	var vnum := float(m.get("value", 0))
 	var vstr := str(int(vnum)) if vnum == float(int(vnum)) else str(vnum)
 	var sgn := "+" if vnum >= 0.0 else ""
@@ -1316,15 +1289,6 @@ func _locked_slot(sz: Vector2) -> Control:
 	p.add_child(x)
 	return p
 
-# 立绘加载：优先已导入资源，否则直读原图（免依赖编辑器导入流程）
+# 立绘/图标加载（统一走 TextureCache，跨实例共享缓存）
 func _load_portrait(path: String):
-	if path == "":
-		return null
-	if ResourceLoader.exists(path):
-		var t = load(path)
-		if t is Texture2D:
-			return t
-	var img := Image.new()
-	if img.load(path) == OK:
-		return ImageTexture.create_from_image(img)
-	return null
+	return TextureCache.get_tex(path)

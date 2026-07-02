@@ -7,6 +7,7 @@ extends VBoxContainer
 const ItemDB := preload("res://ItemDB.gd")
 const SkillDB := preload("res://SkillDB.gd")
 const TraitDB := preload("res://TraitDB.gd")
+const StatMeta := preload("res://StatMeta.gd")   # stat→中文（不再依赖 host.STAT_LABELS）
 
 const FACTIONS := [["player", "我方"], ["ally", "友方"], ["enemy", "敌方"], ["neutral", "中立"]]
 const FOUR_KEYS := ["STR", "DEX", "INT", "STA"]
@@ -19,7 +20,9 @@ const RO_STATS := ["HP_max", "atk", "mag", "acc", "eva", "crit_rate", "crit_dmg"
 var host
 var _sel = null
 var _battle := false
+var editor_mode := false   # true=嵌在地图编辑器里编辑 placed 单位（隐藏「开始游戏/存单位进地图」等战斗宿主专属钮）
 var _editor_box: VBoxContainer
+var _hint: Label
 var _msg: Label
 var _save_btn: Button
 var _save_map_btn: Button
@@ -37,11 +40,11 @@ func _ready() -> void:
 	title.text = "● 单位编辑器"
 	title.add_theme_font_size_override("font_size", 18)
 	add_child(title)
-	var hint := Label.new()
-	hint.text = "在底部栏点单位来编辑；拖到地图布置"
-	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	hint.add_theme_color_override("font_color", Color(0.7, 0.74, 0.82))
-	add_child(hint)
+	_hint = Label.new()
+	_hint.text = "在底部栏点单位来编辑；拖到地图布置"
+	_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_hint.add_theme_color_override("font_color", Color(0.7, 0.74, 0.82))
+	add_child(_hint)
 
 	var ms := ScrollContainer.new()
 	ms.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -90,6 +93,15 @@ func _ready() -> void:
 	add_child(_name_dlg)
 
 	_rebuild_editor()
+
+# 编辑器模式（嵌在地图编辑器里编辑 placed 单位）：隐藏「开始游戏 / 存单位进地图」两个战斗宿主专属钮，
+# 只保留「四维/属性/特性/技能/装备/阵营/名字 + 保存为预设」。宿主(MapEditor)负责把编辑结果序列化回 map_units。
+func set_editor_mode(on: bool) -> void:
+	editor_mode = on
+	if _start_btn: _start_btn.visible = not on
+	if _save_map_btn: _save_map_btn.visible = not on
+	if _hint:
+		_hint.text = "编辑这个已放置的单位；改动即时写回关卡" if on else "在底部栏点单位来编辑；拖到地图布置"
 
 # 战斗阶段：整个编辑器隐藏（编辑停用）
 func set_battle_mode(on: bool) -> void:
@@ -389,6 +401,4 @@ func _mklabel(t: String) -> Label:
 func _label_for(key: String) -> String:
 	if FOUR_CN.has(key):
 		return str(FOUR_CN[key])
-	if host != null and host.STAT_LABELS.has(key):
-		return str(host.STAT_LABELS[key])
-	return key
+	return StatMeta.label(key)

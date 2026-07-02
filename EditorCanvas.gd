@@ -8,8 +8,8 @@ extends "res://HexCanvas.gd"
 ##   区域层：左＝把格加入当前区域 / 右＝从当前区域移除（均支持拖动）
 ## 中键平移 / 滚轮缩放 / 悬停 复用父类几何与状态。
 
+const TextureCache := preload("res://TextureCache.gd")   # 图标加载 + 缓存单一入口
 var _secondary_down := false   # 右键是否按住（区域层用来拖动擦除）
-var _icon_cache := {}          # 单位 token 图标缓存（路径 → 纹理）
 
 func _draw() -> void:
 	super()   # 先画地形 + 悬停高亮（父类已 draw_set_transform 视图变换，且保留到本函数）
@@ -44,23 +44,9 @@ func _draw_units() -> void:
 			var s := r * 1.6
 			draw_texture_rect(tex, Rect2(c - Vector2(s, s) * 0.5, Vector2(s, s)), false, Color(1, 1, 1, 1.0 if on_unit else 0.6))
 
-# 按路径取纹理并缓存：优先已导入资源，否则直读原图（与 SandboxCanvas 同策略；将来可抽公共件）
+# 按路径取纹理并缓存（统一走 TextureCache，跨实例共享缓存）
 func _get_icon(path: String):
-	if path == "":
-		return null
-	if _icon_cache.has(path):
-		return _icon_cache[path]
-	var tex = null
-	if ResourceLoader.exists(path):
-		var t = load(path)
-		if t is Texture2D:
-			tex = t
-	if tex == null and FileAccess.file_exists(path):
-		var img := Image.new()
-		if img.load(path) == OK:
-			tex = ImageTexture.create_from_image(img)
-	_icon_cache[path] = tex
-	return tex
+	return TextureCache.get_tex(path)
 
 # 区域层：每个区域一片半透明色块。当前层＝区域时正常显示、当前区域更亮 + 描边；
 # 当前层＝地形时整体压淡（让你画地形时仍看得见区域、但不抢眼）。

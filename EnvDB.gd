@@ -1,0 +1,88 @@
+extends RefCounted
+## 环境注册表（天气 + 日夜）：读 res://data/environment.json，做「环境真值」单一来源（代码侧）。
+## 用法：const EnvDB := preload("res://EnvDB.gd")，再 EnvDB.weather(id) / EnvDB.weather_sight(id) / EnvDB.all_weathers()。
+## （仿 TerrainDB/ItemDB：preload + 静态变量 = 全局单例，不用 class_name 免编辑器扫描；headless 也能用。）
+## 数据/代码分离：具体天气/日夜及其 sight 修正是「数据」(environment.json)；这里只做加载 + O(1) 查表。
+## 见 docs/感知系统.md「环境：日夜 + 天气」🔒。近期环境只影响视野(sight)，将来影响别的 = 数据加字段 + 消费端多读。
+
+const ENV_PATH := "res://data/environment.json"
+
+static var _weathers := []          # 有序天气定义（编辑器天气下拉按此顺序）
+static var _times := []             # 有序日夜定义
+static var _weather_by_id := {}     # id -> 天气 entry
+static var _time_by_id := {}        # id -> 日夜 entry
+static var _loaded := false
+
+static func _ensure() -> void:
+	if _loaded:
+		return
+	_loaded = true
+	_weathers = []
+	_times = []
+	_weather_by_id = {}
+	_time_by_id = {}
+	if FileAccess.file_exists(ENV_PATH):
+		var f = FileAccess.open(ENV_PATH, FileAccess.READ)
+		var data = JSON.parse_string(f.get_as_text())
+		f.close()
+		if typeof(data) == TYPE_DICTIONARY:
+			for e in data.get("weathers", []):
+				if typeof(e) == TYPE_DICTIONARY and e.has("id"):
+					_weathers.append(e)
+					_weather_by_id[str(e["id"])] = e
+			for e in data.get("times", []):
+				if typeof(e) == TYPE_DICTIONARY and e.has("id"):
+					_times.append(e)
+					_time_by_id[str(e["id"])] = e
+	if _weathers.is_empty():   # 兜底：至少有个晴
+		var clear := {"id": "clear", "label": "晴", "sight": 0, "desc": "晴"}
+		_weathers = [clear]
+		_weather_by_id = {"clear": clear}
+	if _times.is_empty():
+		var day := {"id": "day", "label": "昼", "sight": 0, "desc": "昼"}
+		_times = [day]
+		_time_by_id = {"day": day}
+
+# —— 天气 ——
+static func all_weathers() -> Array:
+	_ensure()
+	return _weathers
+
+static func weather(id: String):
+	_ensure()
+	return _weather_by_id.get(id)
+
+static func weather_label(id: String) -> String:
+	var e = weather(id)
+	return str(e.get("label", id)) if e != null else id
+
+static func weather_sight(id: String) -> int:
+	var e = weather(id)
+	return int(e.get("sight", 0)) if e != null else 0
+
+static func weather_desc(id: String) -> String:
+	var e = weather(id)
+	return str(e.get("desc", "")) if e != null else ""
+
+# —— 日夜 ——
+static func all_times() -> Array:
+	_ensure()
+	return _times
+
+static func time(id: String):
+	_ensure()
+	return _time_by_id.get(id)
+
+static func time_label(id: String) -> String:
+	var e = time(id)
+	return str(e.get("label", id)) if e != null else id
+
+# 日夜的视野【最终乘子】：在天气/装备/技能等所有加减之后再乘（夜=0.5 减半）。默认 1.0。
+static func time_sight_mult(id: String) -> float:
+	var e = time(id)
+	return float(e.get("sight_mult", 1.0)) if e != null else 1.0
+
+# 日夜的全屏变暗滤镜色（含 alpha 的 hex，空＝不变暗）
+static func time_tint(id: String) -> String:
+	var e = time(id)
+	return str(e.get("tint", "")) if e != null else ""

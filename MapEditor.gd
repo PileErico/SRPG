@@ -9,6 +9,9 @@ const HexCanvas := preload("res://HexCanvas.gd")
 const EditorCanvas := preload("res://EditorCanvas.gd")
 const TerrainDB := preload("res://TerrainDB.gd")
 const MapIO := preload("res://MapIO.gd")   # 地图读 / 写单一入口（与 Sandbox 共用）
+const UnitFactory := preload("res://UnitFactory.gd")   # 造单位/序列化单一入口（与 Sandbox 共用）
+const DeployPanel := preload("res://DeployPanel.gd")   # 复用单位编辑器（editor_mode 编 placed 单位）
+const EnvDB := preload("res://EnvDB.gd")   # 环境注册表（天气/日夜，环境面板下拉数据源）
 
 const MAX_W := 50
 const MAX_H := 50
@@ -46,16 +49,18 @@ const SIZE_PRESETS := [
 var width := 15
 var height := 15
 var tiles := []            # tiles[row][col] = {"terrain":..., "variant":...}
-var map_units := []        # 预置单位（地图 units 字段）原样透传：编辑器（α 期）不编辑、仅加载保留+存盘写回
-var map_triggers := []     # 触发器（地图 triggers 字段）原样透传：编辑器 UI 待做、先加载保留+存盘写回
+var map_units := []        # 预置单位（地图 units 字段）：单位层可编辑（选原型+阵营落子/删）；存盘写回、含撤销
+var map_triggers := []     # 触发器（地图 triggers 字段）：触发器层可编辑（列表+when 表单+do 动作）；存盘写回、含撤销
+var map_terrain_overrides := {}   # 图级地形覆盖 { "terrain/variant": {move} }：地形数据「本图」范围写的，只改这张图；存盘写回、含撤销
+var map_environment := {}   # 环境 { time, weather_table:[{weather,weight,min_rounds,max_rounds}] }：环境面板写的；存盘写回、含撤销
 var brush_index := 0
 var embedded := false      # 嵌入 Game 统一宿主时为 true：隐藏自己的「主菜单」按钮（由 Game 顶栏统一提供）
 
-# —— 图层（地形底层 + 叠加层）。当前先两层：terrain / region，结构留好第三层位 ——
+# —— 图层（地形底层 + 叠加层）。四层齐：terrain / region / unit / trigger ——
 # 区域层：给一片格子命名（"前厅"/"守军房"），喂战斗侧 AI 的 ai_region 仇恨触发。
 # 内存形：regions[i] = {id, label, color, kind, cells:{Vector2i:true}}；存盘转 cells:[[x,y],…]（见 _regions_to_json）。
 # kind=区域类型：aggro=AI 仇恨/触发区（敌人 ai_region 引用）；deploy=玩家部署区（战斗只许玩家放区内）。缺省 aggro。
-var current_layer := "terrain"      # "terrain" | "region"
+var current_layer := "terrain"      # "terrain" | "region" | "unit" | "trigger"
 var regions := []
 var _active_region_idx := -1
 # 区域配色循环池（新建区域时按序取）
@@ -70,12 +75,18 @@ const FACTION_COLORS := {
 	"player": Color(0.30, 0.55, 0.95), "ally": Color(0.30, 0.55, 0.95),
 	"enemy": Color(0.90, 0.30, 0.30), "neutral": Color(0.90, 0.80, 0.30),
 }
-const UNIT_PROTOS_PATH := "res://data/unit_prototypes.json"
 var _unit_panel: Control   # 单位工具区（当前层=单位时显示）
 var _unit_list: ItemList   # 单位原型选择列表
 var _unit_proto = null     # 当前要落子的原型（null=未选）
 var _unit_faction := "enemy"   # 落子阵营（关卡敌人居多，默认敌方）
 var _unit_protos := []     # 内置原型缓存（data/unit_prototypes.json）
+# —— placed 单位深度编辑（复用 DeployPanel，editor_mode）——
+var _unit_edit_win: PanelContainer   # 右侧浮动编辑面板（编辑某个已放置单位时显示）
+var _unit_edit_panel                 # DeployPanel 实例（host=本编辑器）
+var _editing_unit = null             # 当前编辑的活 Unit（改完序列化回 map_units）
+var _editing_index := -1             # 被编辑单位在 map_units 的下标
+var _unit_edit_snap_pushed := false  # 本次编辑会话是否已压过撤销快照（整段编辑 = 一步撤销）
+var _unit_stroke_action := ""        # 单位层一次拖动的动作锁（""未定 / "edit" 编辑 / "place" 落子）
 
 # —— 触发器层：authoring 关卡事件（when 条件 → do 动作），存进地图 triggers 字段 ——
 const TRIG_FACTIONS := [["player", "玩家"], ["any", "任意"]]
@@ -110,11 +121,19 @@ var _terr_pass_checks := {}             # tag → CheckBox
 var _terr_tagcost_checks := {}          # tag_cost：tag → 启用 CheckBox
 var _terr_tagcost_spins := {}           # tag_cost：tag → 成本 SpinBox
 var _terr_data_loading := false
+# 地形数据编辑范围：global=改全局 terrains.json（所有图）/ map=只覆盖本图（map_terrain_overrides）
+var _terr_scope := "global"
+var _terr_scope_opt: OptionButton
+var _terr_ov_label: Label
+var _terr_save_btn: Button              # 「保存到 terrains.json」（global 范围）
+var _terr_clear_btn: Button            # 「清除本图覆盖」（map 范围）
 var _terrain_panel: Control            # 地形笔刷区（当前层=地形时显示）
 var _region_panel: Control             # 区域工具区（当前层=区域时显示）
 var _region_list: ItemList             # 区域列表
 var _region_color_btn: ColorPickerButton
 var _region_kind_opt: OptionButton     # 区域类型下拉（触发区/部署区）
+var _env_time_opt: OptionButton        # 环境·日夜下拉（昼/夜…）
+var _env_weather_box: VBoxContainer    # 环境·天气表行容器（每行 = 天气/权重/最短·最长回合 + 删）
 var _region_rename_dlg: ConfirmationDialog
 var _region_rename_edit: LineEdit
 var _save_dlg: FileDialog
@@ -325,7 +344,9 @@ func _build_ui() -> void:
 	brush_buttons[0].button_pressed = true  # 默认选第一支画笔
 	_refresh_history()
 	_refresh_region_list()
+	_refresh_env_panel()
 	_update_file_label()
+	_build_unit_edit_win()
 
 func _build_brush_sidebar() -> Control:
 	var sidebar := VBoxContainer.new()
@@ -375,6 +396,8 @@ func _layer_button(label: String, layer_id: String, group: ButtonGroup) -> Butto
 
 func _set_layer(id: String) -> void:
 	current_layer = id
+	if id != "unit":
+		_close_unit_edit()   # 离开单位层，关掉深编面板
 	if _terrain_panel: _terrain_panel.visible = (id == "terrain")
 	if _region_panel: _region_panel.visible = (id == "region")
 	if _unit_panel: _unit_panel.visible = (id == "unit")
@@ -413,9 +436,22 @@ func _build_terrain_brushes() -> Control:
 		b.toggled.connect(_on_brush_toggled.bind(i))
 		list.add_child(b)
 		brush_buttons.append(b)
-	# —— 地形数据（编辑选中笔刷的战斗属性，写回 terrains.json，全局共用）——
+	# —— 地形数据（编辑选中笔刷的战斗属性）——
+	# 范围：全局＝写回 terrains.json（影响所有图）；本图＝只覆盖这张图（存进地图 terrain_overrides）
 	box.add_child(HSeparator.new())
 	box.add_child(_make_label("地形数据（选中笔刷）"))
+	var srow := HBoxContainer.new()
+	srow.add_child(_make_label("范围"))
+	_terr_scope_opt = OptionButton.new()
+	_terr_scope_opt.add_item("全局 (terrains.json)", 0)
+	_terr_scope_opt.add_item("本图 (仅此图)", 1)
+	_terr_scope_opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_terr_scope_opt.item_selected.connect(_on_terr_scope_changed)
+	srow.add_child(_terr_scope_opt)
+	box.add_child(srow)
+	_terr_ov_label = _make_label("")
+	_terr_ov_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(_terr_ov_label)
 	var crow := HBoxContainer.new()
 	crow.add_child(_make_label("移动成本"))
 	_terr_cost_spin = SpinBox.new()
@@ -466,11 +502,17 @@ func _build_terrain_brushes() -> Control:
 		_terr_tagcost_checks[str(pair[0])] = cb
 		_terr_tagcost_spins[str(pair[0])] = sp
 		box.add_child(row)
-	var save_b := Button.new()
-	save_b.text = "保存到 terrains.json"
-	save_b.tooltip_text = "把改过的地形战斗属性写回 terrains.json（影响所有地图；编辑器与战斗共用同一份）"
-	save_b.pressed.connect(_on_save_terrain_data)
-	box.add_child(save_b)
+	_terr_save_btn = Button.new()
+	_terr_save_btn.text = "保存到 terrains.json"
+	_terr_save_btn.tooltip_text = "把改过的地形战斗属性写回 terrains.json（影响所有地图；编辑器与战斗共用同一份）"
+	_terr_save_btn.pressed.connect(_on_save_terrain_data)
+	box.add_child(_terr_save_btn)
+	_terr_clear_btn = Button.new()
+	_terr_clear_btn.text = "清除本图覆盖"
+	_terr_clear_btn.tooltip_text = "移除本图对该地形的覆盖，回到全局值（本图覆盖随地图 Ctrl+S 存盘）"
+	_terr_clear_btn.pressed.connect(_on_terr_clear_override)
+	_terr_clear_btn.visible = false
+	box.add_child(_terr_clear_btn)
 	return box
 
 # 选中笔刷时刷新「地形数据」编辑区
@@ -478,7 +520,14 @@ func _refresh_terrain_data() -> void:
 	if _terr_cost_spin == null or brush_index < 0 or brush_index >= PALETTE.size():
 		return
 	_terr_data_loading = true
-	var mv = PALETTE[brush_index].get("move", {})
+	# 显示值：本图范围优先本图覆盖、无覆盖则显全局作基线；全局范围显全局
+	var mv
+	if _terr_scope == "map":
+		mv = _map_move_override(false)
+		if mv.is_empty():
+			mv = PALETTE[brush_index].get("move", {})
+	else:
+		mv = PALETTE[brush_index].get("move", {})
 	if typeof(mv) != TYPE_DICTIONARY:
 		mv = {}
 	_terr_cost_spin.value = int(mv.get("cost", 1))
@@ -503,19 +552,81 @@ func _refresh_terrain_data() -> void:
 		if has_tc:
 			_terr_tagcost_spins[tag].value = int(tc[tag])
 	_terr_data_loading = false
+	if _terr_save_btn: _terr_save_btn.visible = (_terr_scope == "global")
+	if _terr_clear_btn: _terr_clear_btn.visible = (_terr_scope == "map")
+	_refresh_terr_ov_label()
 
-# 取选中笔刷的 move 块（live 引用，没有则建）
+# 取选中笔刷要编辑的 move 块（live 引用，没有则建）：
+# 全局范围＝改 PALETTE（写回 terrains.json）；本图范围＝改 map_terrain_overrides[terrain/variant].move
 func _terr_move() -> Dictionary:
+	if _terr_scope == "map":
+		return _map_move_override(true)
 	var e = PALETTE[brush_index]
 	if typeof(e.get("move")) != TYPE_DICTIONARY:
 		e["move"] = {}
 	return e["move"]
 
+# 当前笔刷的覆盖 key = "terrain/variant"
+func _map_move_key() -> String:
+	var e = PALETTE[brush_index]
+	return "%s/%s" % [str(e.get("terrain", "")), str(e.get("variant", ""))]
+
+# 取本图对当前笔刷的 move 覆盖；ensure=true 时若无则以「当前全局 move 深拷贝」为起点创建（整块覆盖，避免丢 passable/tag_cost）
+func _map_move_override(ensure: bool) -> Dictionary:
+	var key := _map_move_key()
+	if not map_terrain_overrides.has(key):
+		if not ensure:
+			return {}
+		var gmv = PALETTE[brush_index].get("move", {})
+		map_terrain_overrides[key] = {"move": (gmv.duplicate(true) if typeof(gmv) == TYPE_DICTIONARY else {})}
+	var ov = map_terrain_overrides[key]
+	if typeof(ov.get("move")) != TYPE_DICTIONARY:
+		ov["move"] = {}
+	return ov["move"]
+
+func _refresh_terr_ov_label() -> void:
+	if _terr_ov_label == null:
+		return
+	if _terr_scope != "map":
+		_terr_ov_label.text = "改动写回 terrains.json（影响所有地图）"
+		_terr_ov_label.add_theme_color_override("font_color", Color(0.7, 0.74, 0.82))
+	elif _map_move_override(false).is_empty():
+		_terr_ov_label.text = "本图未覆盖此地形——改任一项即创建本图覆盖（随地图存盘）"
+		_terr_ov_label.add_theme_color_override("font_color", Color(0.7, 0.74, 0.82))
+	else:
+		_terr_ov_label.text = "● 本图已覆盖此地形（只改这张图；下方可清除）"
+		_terr_ov_label.add_theme_color_override("font_color", Color(0.55, 0.85, 0.55))
+
+# 范围切换：全局 / 本图
+func _on_terr_scope_changed(idx: int) -> void:
+	_terr_scope = "map" if idx == 1 else "global"
+	_refresh_terrain_data()
+	set_status("地形数据范围：%s" % ("本图（仅此图）" if _terr_scope == "map" else "全局（terrains.json）"))
+
+# 本图范围下每次改动 → 标脏（随地图 Ctrl+S 存盘）+ 刷新覆盖状态标
+func _terr_edit_touched() -> void:
+	if _terr_scope == "map":
+		_dirty = true
+		_update_file_label()
+		_refresh_terr_ov_label()
+
+# 清除当前笔刷的本图覆盖（回到全局值）
+func _on_terr_clear_override() -> void:
+	var key := _map_move_key()
+	if map_terrain_overrides.has(key):
+		map_terrain_overrides.erase(key)
+		_dirty = true
+		_update_file_label()
+		set_status("已清除「%s」的本图覆盖（回到全局）" % str(PALETTE[brush_index].label))
+	_refresh_terrain_data()
+	if canvas: canvas.queue_redraw()
+
 func _on_terr_cost_changed(v: float) -> void:
 	if _terr_data_loading or brush_index < 0 or brush_index >= PALETTE.size():
 		return
 	_terr_move()["cost"] = int(v)
-	set_status("「%s」移动成本=%d（点「保存到 terrains.json」写回）" % [str(PALETTE[brush_index].label), int(v)])
+	set_status("「%s」移动成本=%d" % [str(PALETTE[brush_index].label), int(v)])
+	_terr_edit_touched()
 
 func _on_terr_pass_changed(idx: int) -> void:
 	if _terr_data_loading or brush_index < 0 or brush_index >= PALETTE.size():
@@ -541,6 +652,7 @@ func _on_terr_pass_changed(idx: int) -> void:
 			_terr_pass_checks[str(pair[0])].button_pressed = (typeof(arr) == TYPE_ARRAY and arr.has(str(pair[0])))
 		_terr_data_loading = false
 		set_status("「%s」通行=限定tag：勾选可进的移动型（取消＝禁止该类）" % str(PALETTE[brush_index].label))
+	_terr_edit_touched()
 
 # 限定tag 勾选变化 → 从勾选项重建 passable_by 数组
 func _on_terr_pass_tag_toggled() -> void:
@@ -551,7 +663,8 @@ func _on_terr_pass_tag_toggled() -> void:
 		if _terr_pass_checks[str(pair[0])].button_pressed:
 			arr.append(str(pair[0]))
 	_terr_move()["passable_by"] = arr
-	set_status("「%s」通行=限定[%s]（点保存写回）" % [str(PALETTE[brush_index].label), ", ".join(arr)])
+	set_status("「%s」通行=限定[%s]" % [str(PALETTE[brush_index].label), ", ".join(arr)])
+	_terr_edit_touched()
 
 # tag_cost 勾选 / 成本变化 → 从勾选的 tag 重建 move.tag_cost（空则移除该键）
 func _on_terr_tagcost_changed() -> void:
@@ -567,7 +680,8 @@ func _on_terr_tagcost_changed() -> void:
 		mv.erase("tag_cost")
 	else:
 		mv["tag_cost"] = tc
-	set_status("「%s」tag 成本已改（点保存写回）" % str(PALETTE[brush_index].label))
+	set_status("「%s」tag 成本已改" % str(PALETTE[brush_index].label))
+	_terr_edit_touched()
 
 func _on_save_terrain_data() -> void:
 	if TerrainDB.save():
@@ -650,24 +764,12 @@ func _build_unit_tools() -> Control:
 	return v
 
 func _refresh_unit_protos() -> void:
-	_unit_protos = _load_unit_protos()
+	_unit_protos = UnitFactory.all_prototypes()   # 与 Sandbox 共用同一原型读取
 	if _unit_list == null:
 		return
 	_unit_list.clear()
 	for p in _unit_protos:
 		_unit_list.add_item("%s（%s）" % [str(p.get("name", "单位")), _faction_cn(str(p.get("default_faction", "enemy")))])
-
-func _load_unit_protos() -> Array:
-	var out := []
-	if FileAccess.file_exists(UNIT_PROTOS_PATH):
-		var f := FileAccess.open(UNIT_PROTOS_PATH, FileAccess.READ)
-		var d = JSON.parse_string(f.get_as_text())
-		f.close()
-		if typeof(d) == TYPE_ARRAY:
-			for e in d:
-				if typeof(e) == TYPE_DICTIONARY:
-					out.append(e)
-	return out
 
 func _on_unit_proto_selected(idx: int) -> void:
 	if idx >= 0 and idx < _unit_protos.size():
@@ -700,12 +802,134 @@ func _place_unit(col: int, row: int) -> void:
 
 # 单位层：删除 (col,row) 上的单位
 func _remove_unit(col: int, row: int) -> void:
+	var removed := false
 	for i in range(map_units.size() - 1, -1, -1):
 		var e = map_units[i]
 		if typeof(e) == TYPE_DICTIONARY and int(e.get("col", -1)) == col and int(e.get("row", -1)) == row:
 			map_units.remove_at(i)
 			_stroke_dirty = true
+			removed = true
+	if removed and _editing_unit != null:
+		_close_unit_edit()   # 删单位会移动下标 → 关掉深编面板，避免序列化写错条目
 	if canvas: canvas.queue_redraw()
+
+# ============ placed 单位深度编辑（点已放单位 → 复用 DeployPanel 改四维/装备/技能/特性/AI）============
+# 右侧浮动面板（DeployPanel，editor_mode）。改动即时经宿主回调序列化回 map_units[i].proto。
+
+func _build_unit_edit_win() -> void:
+	_unit_edit_win = PanelContainer.new()
+	_unit_edit_win.visible = false
+	_unit_edit_win.anchor_left = 1.0
+	_unit_edit_win.anchor_right = 1.0
+	_unit_edit_win.anchor_top = 0.0
+	_unit_edit_win.anchor_bottom = 1.0
+	_unit_edit_win.offset_left = -340
+	_unit_edit_win.offset_right = -8
+	_unit_edit_win.offset_top = 48
+	_unit_edit_win.offset_bottom = -8
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.11, 0.12, 0.15, 0.98)
+	sb.set_border_width_all(1)
+	sb.border_color = Color(0.42, 0.52, 0.66)
+	sb.set_corner_radius_all(4)
+	sb.content_margin_left = 6
+	sb.content_margin_right = 6
+	sb.content_margin_top = 6
+	sb.content_margin_bottom = 6
+	_unit_edit_win.add_theme_stylebox_override("panel", sb)
+	var v := VBoxContainer.new()
+	var head := HBoxContainer.new()
+	var t := Label.new()
+	t.text = "编辑放置的单位"
+	t.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	t.add_theme_color_override("font_color", Color(0.85, 0.9, 1.0))
+	head.add_child(t)
+	var close_b := Button.new()
+	close_b.text = "✕"
+	close_b.pressed.connect(_close_unit_edit)
+	head.add_child(close_b)
+	v.add_child(head)
+	v.add_child(HSeparator.new())
+	_unit_edit_panel = DeployPanel.new()
+	_unit_edit_panel.host = self
+	_unit_edit_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	v.add_child(_unit_edit_panel)
+	_unit_edit_win.add_child(v)
+	add_child(_unit_edit_win)   # 加在 root 之后 → 浮在画布上层
+	_unit_edit_panel.set_editor_mode(true)   # 隐藏「开始游戏/存单位进地图」等战斗宿主专属钮
+
+# 打开某个 map_units[idx] 的深度编辑：从 proto 造活 Unit 交给 DeployPanel
+func _edit_placed_unit(idx: int) -> void:
+	if idx < 0 or idx >= map_units.size():
+		return
+	var e = map_units[idx]
+	var proto = e.get("proto", {})
+	if typeof(proto) != TYPE_DICTIONARY:
+		proto = {}
+	_editing_index = idx
+	_editing_unit = UnitFactory.make_unit(proto, str(e.get("faction", "enemy")), int(e.get("col", 0)), int(e.get("row", 0)))
+	_unit_edit_snap_pushed = false
+	if _unit_edit_win: _unit_edit_win.visible = true
+	if _unit_edit_panel: _unit_edit_panel.select_unit(_editing_unit)
+	set_status("编辑单位：%s（改动即时写回关卡；右上 ✕ 关闭）" % _editing_unit.unit_name)
+
+func _close_unit_edit() -> void:
+	if _unit_edit_win: _unit_edit_win.visible = false
+	if _unit_edit_panel: _unit_edit_panel.select_unit(null)
+	_editing_unit = null
+	_editing_index = -1
+	_unit_edit_snap_pushed = false
+
+# 找 (col,row) 上的单位在 map_units 的下标（无则 -1；后放的在上，取最后一个）
+func _unit_index_at(col: int, row: int) -> int:
+	for i in range(map_units.size() - 1, -1, -1):
+		var e = map_units[i]
+		if typeof(e) == TYPE_DICTIONARY and int(e.get("col", -1)) == col and int(e.get("row", -1)) == row:
+			return i
+	return -1
+
+# 把当前编辑的活 Unit 序列化回 map_units[_editing_index]（proto + faction 都更新）
+func _serialize_editing_unit() -> void:
+	if _editing_unit == null or _editing_index < 0 or _editing_index >= map_units.size():
+		return
+	var e = map_units[_editing_index]
+	e["proto"] = UnitFactory.unit_to_proto(_editing_unit)
+	e["faction"] = _editing_unit.faction   # 阵营在面板里可能改过
+	_dirty = true
+	_update_file_label()
+
+# 本次编辑会话首次改动前压一次撤销快照（整段编辑 = 一步撤销）
+func _unit_edit_before_change() -> void:
+	if not _unit_edit_snap_pushed:
+		_push_undo(_snapshot(), "编辑单位")
+		_unit_edit_snap_pushed = true
+
+# —— DeployPanel 的宿主回调（editor_mode 下需要的最小契约）——
+# 改四维/属性/特性/装备 → 重算派生 + 序列化回 map_units
+func _commit_unit(u) -> void:
+	if u == null:
+		return
+	_unit_edit_before_change()
+	u.recompute_derived()
+	u.init_vitals()
+	_serialize_editing_unit()
+	if canvas: canvas.queue_redraw()
+
+# 改名字/阵营 → DeployPanel 调此（战斗宿主里刷底部栏；编辑器里=序列化回关卡 + 重绘 token）
+func _refresh_roster_bar() -> void:
+	if _editing_unit == null:
+		return
+	_unit_edit_before_change()
+	_serialize_editing_unit()
+	if canvas: canvas.queue_redraw()
+
+# DeployPanel 改阵营时会调（战斗宿主里高亮被查看单位）；编辑器里无需，空实现
+func set_viewed_unit(_u) -> void:
+	pass
+
+# DeployPanel「保存为预设」→ 走 UnitFactory 写 user://unit_presets.json
+func save_unit_preset(u, preset_name: String) -> void:
+	UnitFactory.save_preset(u, preset_name)
 
 # ============ 触发器层（authoring 关卡事件：when 条件 → do 动作）============
 
@@ -954,7 +1178,7 @@ func _build_action_row(a: Dictionary, idx: int) -> Control:
 			le.text_changed.connect(func(t: String): _set_action_field(a, "group", t))
 			box.add_child(le)
 		"spawn_unit":
-			var protos := _load_unit_protos()
+			var protos := UnitFactory.all_prototypes()
 			var po := OptionButton.new()
 			for i in protos.size():
 				po.add_item(str(protos[i].get("name", "")))
@@ -1025,6 +1249,11 @@ func _build_side_panel() -> Control:
 
 	side.add_child(HSeparator.new())
 
+	# —— 环境（日夜 + 天气表；地图级 authoring，见 docs/感知系统.md 🔒）——
+	side.add_child(_build_env_section())
+
+	side.add_child(HSeparator.new())
+
 	# —— 当前文件 ——
 	_file_label = _make_label("文件：(未保存)")
 	_file_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -1039,6 +1268,145 @@ func _build_side_panel() -> Control:
 	_history_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	side.add_child(_history_list)
 	return side
+
+# ------------------------------------------------------------------ 环境（日夜 + 天气表）
+
+# 环境面板：日夜下拉 + 天气表（增删行）。写进 map_environment，随图存盘、含撤销。
+func _build_env_section() -> Control:
+	var v := VBoxContainer.new()
+	v.add_child(_make_label("环境（天气·日夜）"))
+	var trow := HBoxContainer.new()
+	trow.add_child(_make_label("日夜"))
+	_env_time_opt = OptionButton.new()
+	_env_time_opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	for t in EnvDB.all_times():
+		_env_time_opt.add_item("%s (%s)" % [str(t.get("label", "")), str(t.get("id", ""))])
+	_env_time_opt.item_selected.connect(_on_env_time_selected)
+	trow.add_child(_env_time_opt)
+	v.add_child(trow)
+	v.add_child(_make_label("天气表（随机氛围；空=晴）"))
+	_env_weather_box = VBoxContainer.new()
+	v.add_child(_env_weather_box)
+	var add_b := Button.new()
+	add_b.text = "＋ 加天气"
+	add_b.pressed.connect(_on_env_add_weather)
+	v.add_child(add_b)
+	return v
+
+# 当前 weather_table（保证返回 Array，且是 map_environment 里那个引用）
+func _env_weather_table() -> Array:
+	var t = map_environment.get("weather_table", [])
+	return t if typeof(t) == TYPE_ARRAY else []
+
+# 刷新整个环境面板（载入 / 撤销 / 新图后调）：同步日夜下拉 + 重建天气行
+func _refresh_env_panel() -> void:
+	if _env_time_opt == null:
+		return
+	var cur_time := str(map_environment.get("time", "day")) if typeof(map_environment) == TYPE_DICTIONARY else "day"
+	var times := EnvDB.all_times()
+	for i in times.size():
+		if str(times[i].get("id", "")) == cur_time:
+			_env_time_opt.select(i)
+			break
+	_refresh_env_weather_rows()
+
+# 重建天气表行控件（每行：天气下拉 / 权重 / 最短·最长回合 / 删）
+func _refresh_env_weather_rows() -> void:
+	if _env_weather_box == null:
+		return
+	for c in _env_weather_box.get_children():
+		c.queue_free()
+	var table := _env_weather_table()
+	var weathers := EnvDB.all_weathers()
+	for i in table.size():
+		var row: Dictionary = table[i] if typeof(table[i]) == TYPE_DICTIONARY else {}
+		var hb := HBoxContainer.new()
+		var wopt := OptionButton.new()
+		wopt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var cur_w := str(row.get("weather", "clear"))
+		for j in weathers.size():
+			wopt.add_item(str(weathers[j].get("label", "")))
+			wopt.set_item_metadata(j, str(weathers[j].get("id", "")))
+			if str(weathers[j].get("id", "")) == cur_w:
+				wopt.select(j)
+		wopt.item_selected.connect(_on_env_weather_id.bind(i, wopt))
+		hb.add_child(wopt)
+		hb.add_child(_env_spin(int(row.get("weight", 1)), 1, 100, "权", _on_env_weather_num.bind(i, "weight")))
+		hb.add_child(_env_spin(int(row.get("min_rounds", 1)), 1, 99, "短", _on_env_weather_num.bind(i, "min_rounds")))
+		hb.add_child(_env_spin(int(row.get("max_rounds", 1)), 1, 99, "长", _on_env_weather_num.bind(i, "max_rounds")))
+		var del := Button.new()
+		del.text = "✕"
+		del.pressed.connect(_on_env_del_weather.bind(i))
+		hb.add_child(del)
+		_env_weather_box.add_child(hb)
+
+func _env_spin(val: int, lo: int, hi: int, prefix: String, cb: Callable) -> SpinBox:
+	var sp := SpinBox.new()
+	sp.min_value = lo
+	sp.max_value = hi
+	sp.value = val
+	sp.prefix = prefix
+	sp.custom_minimum_size = Vector2(58, 0)
+	sp.value_changed.connect(cb)
+	return sp
+
+# 确保 map_environment 可写 + 有 weather_table
+func _env_ensure() -> void:
+	if typeof(map_environment) != TYPE_DICTIONARY:
+		map_environment = {}
+	if typeof(map_environment.get("weather_table")) != TYPE_ARRAY:
+		map_environment["weather_table"] = []
+
+func _on_env_time_selected(idx: int) -> void:
+	var times := EnvDB.all_times()
+	if idx < 0 or idx >= times.size():
+		return
+	var id := str(times[idx].get("id", "day"))
+	if str(map_environment.get("time", "day")) == id:
+		return
+	_push_undo(_snapshot(), "环境·日夜")
+	_env_ensure()
+	map_environment["time"] = id
+	_dirty = true
+	_update_file_label()
+
+func _on_env_add_weather() -> void:
+	_push_undo(_snapshot(), "加天气")
+	_env_ensure()
+	map_environment["weather_table"].append({"weather": "rain", "weight": 1, "min_rounds": 2, "max_rounds": 4})
+	_dirty = true
+	_refresh_env_weather_rows()
+	_update_file_label()
+
+func _on_env_del_weather(i: int) -> void:
+	var table := _env_weather_table()
+	if i < 0 or i >= table.size():
+		return
+	_push_undo(_snapshot(), "删天气")
+	table.remove_at(i)
+	_dirty = true
+	_refresh_env_weather_rows()
+	_update_file_label()
+
+func _on_env_weather_id(sel: int, i: int, opt: OptionButton) -> void:
+	var table := _env_weather_table()
+	if i < 0 or i >= table.size() or typeof(table[i]) != TYPE_DICTIONARY:
+		return
+	_push_undo(_snapshot(), "改天气")
+	table[i]["weather"] = str(opt.get_item_metadata(sel))
+	_dirty = true
+	_update_file_label()
+
+func _on_env_weather_num(val: float, i: int, key: String) -> void:
+	var table := _env_weather_table()
+	if i < 0 or i >= table.size() or typeof(table[i]) != TYPE_DICTIONARY:
+		return
+	if int(table[i].get(key, -999999)) == int(val):
+		return
+	_push_undo(_snapshot(), "天气·" + key)
+	table[i][key] = int(val)
+	_dirty = true
+	_update_file_label()
 
 # ------------------------------------------------------------------ 地图库
 
@@ -1278,9 +1646,21 @@ func primary_paint(col: int, row: int) -> void:
 	if current_layer == "region":
 		_region_paint(col, row, true)
 	elif current_layer == "unit":
-		_place_unit(col, row)
+		_unit_paint(col, row)
 	else:
 		paint_cell(col, row)
+
+# 单位层左键：一次拖动在第一格决定并锁定动作——点到已有单位=编辑它；点空格=落子（拖动续落）
+func _unit_paint(col: int, row: int) -> void:
+	if _unit_stroke_action == "":
+		var idx := _unit_index_at(col, row)
+		_unit_stroke_action = "edit" if idx >= 0 else "place"
+		if _unit_stroke_action == "edit":
+			_edit_placed_unit(idx)
+			return
+	if _unit_stroke_action == "edit":
+		return
+	_place_unit(col, row)
 
 # 画布右键 → 按当前层：地形=取色 / 区域=从当前区域移除格 / 单位=删除该格单位
 func secondary_paint(col: int, row: int) -> void:
@@ -1453,6 +1833,7 @@ func _regions_at(col: int, row: int) -> String:
 # ------------------------------------------------------------------ 数据
 
 func new_map(w: int, h: int) -> void:
+	_close_unit_edit()   # 换图前关掉深编面板（下标失效）
 	var nw := clampi(w, 1, MAX_W)
 	var nh := clampi(h, 1, MAX_H)
 	if not tiles.is_empty():
@@ -1466,6 +1847,10 @@ func new_map(w: int, h: int) -> void:
 			line.append({"terrain": DEFAULT_TERRAIN, "variant": DEFAULT_VARIANT})
 		tiles.append(line)
 	regions = []                 # 新图：清空区域层
+	map_units = []               # 新图：清空预置单位层
+	map_triggers = []            # 新图：清空触发器层
+	map_terrain_overrides = {}   # 新图：清空图级地形覆盖
+	map_environment = {}         # 新图：清空环境
 	_active_region_idx = -1
 	current_path = ""
 	_dirty = false
@@ -1474,6 +1859,7 @@ func new_map(w: int, h: int) -> void:
 	if canvas: canvas.request_fit()
 	_refresh_canvas()
 	_refresh_region_list()
+	_refresh_env_panel()
 	_update_file_label()
 	_refresh_map_highlight()
 	set_status("新建地图 %d×%d" % [width, height])
@@ -1531,7 +1917,7 @@ func _update_file_label() -> void:
 # ------------------------------------------------------------------ 撤销 / 重做
 
 func _snapshot() -> Dictionary:
-	return {"width": width, "height": height, "tiles": _copy_tiles(tiles), "regions": _copy_regions(regions), "map_units": _copy_map_units(map_units), "map_triggers": _copy_map_triggers(map_triggers)}
+	return {"width": width, "height": height, "tiles": _copy_tiles(tiles), "regions": _copy_regions(regions), "map_units": _copy_map_units(map_units), "map_triggers": _copy_map_triggers(map_triggers), "map_terrain_overrides": map_terrain_overrides.duplicate(true), "map_environment": map_environment.duplicate(true)}
 
 # 深拷贝单位层（含 proto 嵌套字典）——撤销快照要把单位层一起拷，否则落子/删单位无法撤销
 func _copy_map_units(src: Array) -> Array:
@@ -1576,18 +1962,23 @@ func _push_undo(snap: Dictionary, label: String) -> void:
 	_refresh_history()
 
 func _apply_snapshot(snap: Dictionary) -> void:
+	_close_unit_edit()   # map_units 整体替换 → 下标失效，先关掉深编面板
 	width = snap.width
 	height = snap.height
 	tiles = snap.tiles
 	regions = snap.get("regions", [])
 	map_units = snap.get("map_units", [])
 	map_triggers = snap.get("map_triggers", map_triggers)
+	map_terrain_overrides = snap.get("map_terrain_overrides", {})
+	map_environment = snap.get("map_environment", {})
 	_active_region_idx = clampi(_active_region_idx, -1, regions.size() - 1)
 	_active_trigger_idx = clampi(_active_trigger_idx, -1, map_triggers.size() - 1)
 	if width_spin: width_spin.value = width
 	if height_spin: height_spin.value = height
 	_refresh_canvas()
 	_refresh_region_list()
+	_refresh_env_panel()      # 撤销/重做后同步环境面板
+	_refresh_terrain_data()   # 覆盖变了 → 刷新地形数据编辑区（若在本图范围）
 	if _trigger_panel != null and _trigger_panel.visible:
 		_refresh_trigger_list()
 		_load_trigger_form()
@@ -1596,6 +1987,7 @@ func begin_stroke() -> void:
 	_stroke_snapshot = _snapshot()
 	_stroke_dirty = false
 	_stroke_count = 0
+	_unit_stroke_action = ""   # 单位层：新一次拖动重置动作锁（第一格再定 编辑/落子）
 
 func end_stroke() -> void:
 	if _stroke_dirty and _stroke_snapshot != null:
@@ -1654,7 +2046,7 @@ func _refresh_history() -> void:
 # ------------------------------------------------------------------ 存档 / 读档
 
 func to_json_dict() -> Dictionary:
-	return MapIO.to_dict(width, height, tiles, _regions_to_json(), map_units, map_triggers)
+	return MapIO.to_dict(width, height, tiles, _regions_to_json(), map_units, map_triggers, map_terrain_overrides, map_environment)
 
 # 区域 → JSON：cells 集合转 [[x,y],…]（确定性排序，利于 diff）
 func _regions_to_json() -> Array:
@@ -1689,7 +2081,7 @@ func _regions_from_json(raw, mw: int, mh: int) -> Array:
 	return out
 
 func save_to_file(path: String) -> void:
-	if not MapIO.write_map(path, width, height, tiles, _regions_to_json(), map_units, map_triggers):
+	if not MapIO.write_map(path, width, height, tiles, _regions_to_json(), map_units, map_triggers, map_terrain_overrides, map_environment):
 		set_status("保存失败：无法写入文件")
 		return
 	current_path = path
@@ -1699,6 +2091,7 @@ func save_to_file(path: String) -> void:
 	set_status("已保存：" + path)
 
 func load_from_file(path: String) -> void:
+	_close_unit_edit()   # 换图前关掉深编面板（下标失效）
 	var res := MapIO.read_file(path)
 	if not res.get("ok", false):
 		if not FileAccess.file_exists(path):
@@ -1717,8 +2110,10 @@ func load_from_file(path: String) -> void:
 	height = nh
 	tiles = new_tiles
 	regions = new_regions
-	map_units = res["units"]   # 预置单位原样保留（α 期编辑器不编辑，仅在存盘时写回，不丢）
-	map_triggers = res["triggers"]   # 触发器原样保留（编辑器 UI 待做，先不丢）
+	map_units = res["units"]   # 预置单位（单位层可编辑）
+	map_triggers = res["triggers"]   # 触发器（触发器层可编辑）
+	map_terrain_overrides = res.get("terrain_overrides", {})   # 图级地形覆盖（地形数据「本图」范围）
+	map_environment = res.get("environment", {})   # 环境（日夜/天气）
 	_active_region_idx = -1 if regions.is_empty() else 0
 	current_path = path
 	_dirty = false
@@ -1727,6 +2122,7 @@ func load_from_file(path: String) -> void:
 	if canvas: canvas.request_fit()
 	_refresh_canvas()
 	_refresh_region_list()
+	_refresh_env_panel()      # 载入后同步环境面板
 	_update_file_label()
 	_refresh_map_highlight()
 	set_status("已加载：%s (%d×%d)" % [path, width, height])

@@ -4,8 +4,18 @@ extends Control
 ## 充当 HexCanvas 需要的“editor”宿主：提供 width/height/tiles + 地形查表 + hover_text。
 
 const Unit := preload("res://Unit.gd")
+const UnitFactory := preload("res://UnitFactory.gd")   # 造单位/序列化单一入口（与编辑器共用）
+const CombatResolver := preload("res://CombatResolver.gd")   # 伤害分量化 + 减伤链（纯数学）
+const HexGrid := preload("res://HexGrid.gd")               # 纯六边形几何前置（cube 互转/距离/邻居/连线/环）
 const SkillDB := preload("res://SkillDB.gd")
+const ItemDB := preload("res://ItemDB.gd")                  # 悬停单位卡取武器图标/名
+const TextureCache := preload("res://TextureCache.gd")      # 立绘/图标加载 + 缓存单一入口
+
+# element → 抗性中文标签（战斗记录用）
+const ELEM_RES_CN := {"physical": "物抗", "fire": "火抗", "ice": "冰抗", "thunder": "雷抗", "holy": "神圣抗"}
 const TerrainDB := preload("res://TerrainDB.gd")
+const EnvDB := preload("res://EnvDB.gd")   # 环境注册表（天气/日夜 → sight 修正）
+const WeatherVFX := preload("res://WeatherVFX.gd")   # 天气视觉叠层（屏幕空间氛围）
 const SandboxCanvas := preload("res://SandboxCanvas.gd")
 const UnitStatusPanel := preload("res://UnitStatusPanel.gd")
 const TurnOrderBar := preload("res://TurnOrderBar.gd")
@@ -16,19 +26,13 @@ const MapIO := preload("res://MapIO.gd")   # 地图读 / 写单一入口（与 M
 # 战斗地图：默认与地图编辑器共享同一张图（编辑器改 → 这里读到）。
 # 实际打开哪张：优先 SandboxConfig.map_path（选地图界面传入），空则用此默认；缺失/损坏回退全草原。
 const MAP_PATH := "res://maps/sandbox.json"
-const PLAYER_PORTRAIT := "res://icons/Characters/Plyer_Special_Belooz.png"  # 玩家立绘（角色状态页大图）
-const PLAYER_ICON := "res://icons/Unit_Icons/Player_Special_Belooz.png"          # 玩家棋子图标（token）
-const ENEMY_PORTRAIT := "res://icons/Characters/Empire_Infantry.png"        # 帝国步兵 立绘
-const ENEMY_ICON := "res://icons/Unit_Icons/Empire_Infantry.png"                 # 帝国步兵 棋子图标（修正：Unit_Icons 复数）
-const ENEMY2_PORTRAIT := "res://icons/Characters/Empire_Light_Infantry.png" # 帝国轻步兵 立绘（empire 开头 = 敌人）
-const ENEMY2_ICON := "res://icons/Unit_Icons/Empire_Light_Infantry.png"          # 帝国轻步兵 棋子图标
-const ALLY_PORTRAIT := "res://icons/Characters/Plyer_Special_Veiken.png"    # 友方维肯 立绘
-const ALLY_ICON := "res://icons/Unit_Icons/Player_Special_Veiken.png"            # 友方维肯 棋子图标
-const ALLY_SPAWN := Vector2i(6, 7)     # 友方出生点（挨着玩家）
 const DEFAULT_TERRAIN := "plain"
 const DEFAULT_VARIANT := "grassland"
 const AI_THINK_DELAY := 0.5            # 敌方 AI 回合开始的思考停顿
 const AI_ACT_GAP := 1.0                # 每个动作之间的停顿（移动→停 1 秒→攻击），便于观看
+# 语义色（判定/胜负）：成功绿 / 失败红——胜负横幅、col_html、_oc 共用，避免同一对色多处字面量
+const OK_GREEN := "#6FCF6F"
+const BAD_RED := "#E07A5A"
 
 var width := 15
 var height := 15
@@ -41,9 +45,25 @@ var aggro_regions := {}
 var _map_regions := []     # 地图文件 regions 原始数据：[{id,label,color,cells:[[x,y]…],kind?}]（schema v2，可空）
 var _map_units := []       # 地图文件 units 原始数据：[{proto,col,row,faction}]（schema v3，可空）→ _spawn_map_units 落子
 var _map_triggers := []    # 地图文件 triggers 原始数据：[{id,label,when,do}]（schema v3，可空）→ 运行时评估
+var _map_terrain_overrides := {}   # 图级地形覆盖 { "terrain/variant": {move?,effects?} }：只改本图、不动全局 terrains.json
 var _all_region_cells := {}   # 所有区域的格集合 {region_id: {Vector2i:true}}（不分 kind，供触发器引用）
 var _fired_triggers := {}  # 已触发过的 trigger id（when.once 用）；每场战斗开始清空
 var _deploy_cells := {}    # 部署区格集合 {Vector2i:true}：kind=="deploy" 的区域并集（玩家单位只能放这里）
+
+# —— 感知 / 战争迷雾（玩家侧；见 docs/感知系统.md 🔒）——
+# 三态＝黑(未探索)/灰(探索过·当前无观测)/常态(当前视野内)。数据模型：seen 决定黑vs非黑、visible 决定灰vs常态。
+var _vis_visible := {}    # 当前可见格 {Vector2i:true}＝我方/友方全体单位视野格并集（每次移动/开战重算）
+var _vis_seen := {}       # 曾看到过的格 {Vector2i:true}（只增不减）
+var omniscient := false   # 调试全知：默认 false＝迷雾生效（真实体验 🔒）；按 V 切换
+
+# —— 环境：日夜(静态) + 天气(动态)（Phase 2；见 docs/感知系统.md 🔒。近期只影响 sight）——
+var _map_environment := {}   # 地图 environment 字段 {time, weather_table:[{weather,weight,min_rounds,max_rounds}]}
+var _cur_time := "day"       # 当前日夜 id（战中不变）
+var _cur_weather := "clear"  # 当前天气 id
+var _weather_left := 0       # 当前天气剩余回合（<=0 ＝ 不自动变：表空 / 强制常驻）
+var _time_sight_mult := 1.0  # 日夜的视野【最终乘子】：在所有加减之后再乘（夜=0.5 减半）；见 _effective_sight
+var _weather_vfx             # 天气视觉叠层（WeatherVFX，挂在 canvas 下；随 _cur_weather 播放）
+var _night_overlay: ColorRect  # 夜晚整体变暗滤镜（挂 canvas 下、在天气 VFX 之下）
 
 # —— 简陋回合框架（round/turn 双层，出手按速度；详见 docs/单位系统设计.md）——
 var round_num := 1
@@ -113,23 +133,11 @@ var _battle_ui: VBoxContainer   # 战斗期才显示的右栏（回合状态 + �
 
 # 可用单位 roster（底部栏全部已准备单位）。其中「已布置」的也在 units 里（= 上场参战的子集）。
 # roster 单位的配置（四维/装备/技能…）可存成「单位预设」，与场上位置无关。
+# 原型/预设的读写与「proto ↔ Unit」往返统一在 UnitFactory（含路径常量）。
 var roster := []
-const UNIT_PRESETS_PATH := "user://unit_presets.json"   # 单位预设（用户自存的配置，跨次启动保留）
-const UNIT_PROTOS_PATH := "res://data/unit_prototypes.json"
 
-# 平顶六边形 odd-q 邻居偏移（奇数列向下错半格，分奇偶两套）
-const NB_EVEN := [Vector2i(1, 0), Vector2i(1, -1), Vector2i(0, -1), Vector2i(-1, -1), Vector2i(-1, 0), Vector2i(0, 1)]
-const NB_ODD := [Vector2i(1, 1), Vector2i(1, 0), Vector2i(0, -1), Vector2i(-1, 0), Vector2i(-1, 1), Vector2i(0, 1)]
-# 侧栏属性键 → 中文标签
-const STAT_LABELS := {
-	"HP": "生命", "HP_max": "生命上限", "armor": "护甲", "armor_max": "护甲上限",
-	"AP_max": "AP上限", "move": "移动力", "speed": "速度",
-	"atk": "攻击", "mag": "理术", "atk_eff": "攻击效能", "def_eff": "防御效能",
-	"acc": "命中", "eva": "闪避", "crit_rate": "暴击率", "crit_dmg": "暴击威力",
-	"block_rate": "格挡率", "block_power": "格挡性能",
-	"res_phys": "物理抗性", "res_status": "异常抗性",
-	"res_fire": "火焰抗性", "res_thunder": "雷电抗性", "res_ice": "冰冻抗性", "res_holy": "神圣抗性",
-}
+# 六边形邻居偏移表已迁 HexGrid（odd-q，single source）；本文件几何一律走 HexGrid.*。
+# stat 键→中文 统一走 StatMeta.label（单一数据源、全量键），不再在此维护副本（已删除未使用的 STAT_LABELS）。
 # tag → 中文标签（通行性/效果文字用）
 const TAG_LABELS := {"flying": "飞行", "spectral": "灵体", "ground": "地面"}
 
@@ -167,14 +175,6 @@ func _setup_regions() -> void:
 		elif id != "":
 			aggro_regions[id] = cells   # 仇恨/触发区按 id 存（敌人 ai_region 引用）
 
-func _rect_cells(x0: int, y0: int, x1: int, y1: int) -> Dictionary:
-	var d := {}
-	for x in range(x0, x1 + 1):
-		for y in range(y0, y1 + 1):
-			if _cell_in_bounds(x, y):
-				d[Vector2i(x, y)] = true
-	return d
-
 # —— 地形：经 TerrainDB 复用 terrains.json（与编辑器同一数据源、O(1) 查表）——
 func _load_terrains() -> void:
 	PALETTE = TerrainDB.palette()
@@ -184,6 +184,8 @@ func _load_map() -> void:
 	_map_regions = []   # 默认无区域（旧 v1 图 / 加载失败）
 	_map_units = []     # 默认无预置单位（旧图 / 加载失败）
 	_map_triggers = []  # 默认无触发器
+	_map_terrain_overrides = {}   # 默认无图级地形覆盖
+	_map_environment = {}   # 默认无环境设定（＝昼·晴）
 	# 优先用「选地图」界面传入的路径（SandboxConfig.map_path）；空则用默认战斗图
 	var path: String = SandboxConfig.map_path if SandboxConfig.map_path != "" else MAP_PATH
 	var res := MapIO.read_file(path)   # 统一读 / 钳制（与 MapEditor 共用 MapIO）
@@ -194,6 +196,8 @@ func _load_map() -> void:
 		_map_regions = res["regions"]   # schema v2：命名区域（向后兼容，旧图无此键=空）
 		_map_units = res["units"]       # schema v3：预置单位（向后兼容，旧图无此键=空）
 		_map_triggers = res["triggers"] # schema v3：触发器（向后兼容，旧图无此键=空）
+		_map_terrain_overrides = res.get("terrain_overrides", {})   # 图级地形覆盖（向后兼容，旧图无此键=空）
+		_map_environment = res.get("environment", {})   # 环境（日夜/天气；向后兼容，旧图无此键=空）
 		return
 	if FileAccess.file_exists(path):
 		push_warning("战斗地图 %s 格式无效，回退全草原" % path)
@@ -223,13 +227,15 @@ func load_from_memory(map_dict: Dictionary) -> void:
 	_map_regions = res["regions"]
 	_map_units = res["units"]
 	_map_triggers = res["triggers"]
+	_map_terrain_overrides = res.get("terrain_overrides", {})
+	_map_environment = res.get("environment", {})
 	_setup_regions()
 	# 场上清空、roster 收回待命（保留玩家自带军，跨试玩不丢）
 	units = []
 	for u in roster:
 		u.col = -1
 		u.row = -1
-		u.effects = []
+		_clear_effects_and_buffs(u)
 		u.init_vitals()
 	_spawn_map_units()   # 按新地图落预置单位（关卡的敌 / 我）
 	turn_order = []
@@ -239,71 +245,6 @@ func load_from_memory(map_dict: Dictionary) -> void:
 		canvas.request_fit()
 		canvas.queue_redraw()
 	_enter_deploy()
-
-# 敌方阵容（遭遇战）：两个不同帝国单位（empire 开头 = 敌人）。
-# ai_threat=威胁感知(进它移动+攻击范围就扑)；ai_region=区域守卫(玩家进指定房间才醒)；ai_group=同组连锁。
-const ENEMY_ROSTER := [
-	# 两个都用威胁感知：进它的「移动+攻击」范围(6+1=7)就扑上来
-	{"name": "帝国步兵", "cell": Vector2i(10, 7), "speed": 5, "portrait": ENEMY_PORTRAIT, "icon": ENEMY_ICON,
-		"ai_threat": true},
-	{"name": "帝国轻步兵", "cell": Vector2i(11, 8), "speed": 7, "portrait": ENEMY2_PORTRAIT, "icon": ENEMY2_ICON,
-		"ai_threat": true},
-]
-
-func _spawn_units() -> void:
-	var p = Unit.new("比路兹", "player", 7, 7)   # 比路兹 = 我方
-	p.portrait = PLAYER_PORTRAIT
-	p.icon = PLAYER_ICON
-	p.tags.append("char_belooz")            # 比路兹专属标记（拥有独特立绘 → 专属技能页）
-	p.tags.append("harpy")                  # 种族：鸟人
-	_set_four(p, 3, 5, 3, 4)                # 比路兹基础四维（力量/灵巧/智力/体力）
-	p.exp = 35                              # 占位经验（演示紫色经验槽，可改）
-	p.set_trait("innate_martial")           # 专属特性：天性武者（+5 力量/灵巧/体力、无法装“外来”武器）
-	p.equip("claw_wing")                    # 主手：翼爪（撕裂）——天生武器，地面用，不可卸/缴
-	p.equip("claw_foot")                    # 副手：足爪（抓取）——天生武器，空中用，不可卸/缴
-	p.level = 5                             # 【占位/演示】等级 5：可学/可升「战场救治」到 II（门槛 2/5/9）
-	p.learn_skill("battlefield_heal")       # 【占位/演示】预学战场救治 I：技能页显金「I」、战斗里「技能」可用
-	var a = Unit.new("维肯", "player", ALLY_SPAWN.x, ALLY_SPAWN.y)   # 维肯 = 我方
-	a.portrait = ALLY_PORTRAIT
-	a.icon = ALLY_ICON
-	a.tags.append("char_veiken")            # 维肯专属标记（龙之灾祸 requires 它）
-	a.tags.append("human")                  # 种族：人类
-	_set_four(a, 8, 6, 4, 8)                # 维肯：力量8/敏捷6/智力4/体力8
-	a.set_trait("dragonslayer")             # 专属特性：屠龙者（+5%攻防效能；对怪物/野兽三倍）
-	a.equip("spear_dragon_calamity")        # 开局装上专属双手长矛
-	units = [p, a]
-	for d in ENEMY_ROSTER:
-		units.append(_make_enemy(d))
-	# 出生点越界保护：地图被编辑得比出生坐标小时，把单位钳进界内，避免越界崩溃
-	for u in units:
-		var c := Vector2i(clampi(u.col, 0, width - 1), clampi(u.row, 0, height - 1))
-		if c.x != u.col or c.y != u.row:
-			push_warning("单位 %s 出生点(%d,%d)越界，已钳至(%d,%d)" % [u.unit_name, u.col, u.row, c.x, c.y])
-			u.col = c.x
-			u.row = c.y
-	# 统一收尾：四维/特性/装备都就位后，重算派生第一层属性并注满生命
-	for u in units:
-		u.recompute_derived()
-		u.init_vitals()
-
-# 设四维主属性（力量/灵巧/智力/体力）——占位用，正式数据日后从角色表读
-func _set_four(u, strv: int, dex: int, intl: int, sta: int) -> void:
-	u.stats["STR"] = strv
-	u.stats["DEX"] = dex
-	u.stats["INT"] = intl
-	u.stats["STA"] = sta
-
-# 按花名册条目造一个敌方单位（含 AI 警觉配置）
-func _make_enemy(def: Dictionary):
-	var e = Unit.new(str(def["name"]), "enemy", def["cell"].x, def["cell"].y)
-	e.portrait = str(def["portrait"])
-	e.icon = str(def["icon"])
-	e.tags.append(str(def.get("race", "human")))   # 种族 tag（帝国军=human；怪物/野兽日后在花名册指定）
-	e.stats["speed"] = int(def["speed"])
-	e.ai_threat = bool(def.get("ai_threat", true))
-	e.ai_region = str(def.get("ai_region", ""))
-	e.ai_group = str(def.get("ai_group", ""))
-	return e
 
 # 落子地图预置单位（_map_units → units）：关卡设计者在编辑器/部署里摆好、存进地图的敌 / 中立 / 固定单位。
 # 每条 = {proto, col, row, faction}；直接进 units（不过部署区限制——这是关卡数据，非玩家临时布置）。
@@ -380,6 +321,13 @@ func _do_trigger_action(a: Dictionary, trig_label: String) -> void:
 			for g in units:
 				if not _is_friendly(g) and (grp == "" or g.ai_group == grp) and not g.ai_aggroed:
 					_ai_set_aggro(g)
+		"set_weather":
+			# 定点变天：设为指定天气；duration>0 ＝ 持续该回合数后回天气表随机，<=0/缺 ＝ 常驻不变
+			_cur_weather = str(a.get("weather", "clear"))
+			_weather_left = maxi(0, int(a.get("duration", 0)))
+			_apply_env_modifiers()
+			var dur_txt := ("%d 回合" % _weather_left) if _weather_left > 0 else "持续"
+			_log_line("⚑ 天气转为 [b]%s[/b]（%s）" % [EnvDB.weather_label(_cur_weather), dur_txt])
 		"spawn_unit":
 			var proto := _find_proto(str(a.get("proto_id", "")))
 			if proto.is_empty():
@@ -410,6 +358,11 @@ func _find_proto(pid: String) -> Dictionary:
 func _enter_deploy() -> void:
 	phase = "deploy"
 	battle_over = false
+	_cur_weather = "clear"   # 回布置：清天气 + 日夜（叠层停），下次开战再按地图摇/读
+	_weather_left = 0
+	_cur_time = "day"
+	_time_sight_mult = 1.0
+	_update_env_overlays()   # 停天气 VFX + 隐藏夜晚变暗
 	_clear_selection()
 	if _deploy_panel != null:
 		_deploy_panel.visible = true
@@ -445,48 +398,10 @@ func begin_game() -> void:
 	_start_battle()
 
 # 通用造单位工厂：按原型 proto（unit_prototypes.json 一条或 {}）+ 指定阵营，落在 (col,row)。
-# 合并了 _spawn_units 造具名角色 与 _make_enemy 的套路，供调试侧栏拖放调用。
+# 单一造单位入口——名字/立绘/图标/tag/四维/特性/装备/技能/AI 字段全从 proto 组装，供预置落子、
+# 布置栏拖放、试玩重建共用。（阶段规划：抽成独立 UnitFactory 供编辑器单位深编 / 角色编辑器复用。）
 func make_unit(proto: Dictionary, fac: String, col: int, row: int):
-	var u = Unit.new(str(proto.get("name", "新兵")), fac, col, row)
-	u.portrait = str(proto.get("portrait", ""))
-	u.icon = str(proto.get("icon", ""))
-	for t in proto.get("tags", []):
-		if not u.tags.has(str(t)):
-			u.tags.append(str(t))
-	var four = proto.get("four", {})
-	if typeof(four) == TYPE_DICTIONARY and not four.is_empty():
-		_set_four(u, int(four.get("STR", 5)), int(four.get("DEX", 5)), int(four.get("INT", 5)), int(four.get("STA", 5)))
-	if proto.get("speed", null) != null:
-		u.stats["speed"] = int(proto["speed"])
-	u.level = int(proto.get("level", 1))
-	u.exp = int(proto.get("exp", 0))
-	var tr := str(proto.get("trait", ""))
-	if tr != "":
-		u.set_trait(tr)
-	for it in proto.get("equip", []):
-		u.equip(str(it))
-	# 属性覆盖（预设里手动调过的非派生属性：move/speed/AP_max/armor_max/各抗/效能…）
-	var ov = proto.get("stats", {})
-	if typeof(ov) == TYPE_DICTIONARY:
-		for k in ov:
-			u.stats[k] = ov[k]
-	# 技能：列表（各学到 1 级）或字典 {id:level}（学到该等级）
-	var sk_src = proto.get("skills", [])
-	if typeof(sk_src) == TYPE_DICTIONARY:
-		for sid in sk_src:
-			for _n in range(maxi(1, int(sk_src[sid]))):
-				if u.learn_skill(str(sid)) == 0:
-					break
-	else:
-		for sk in sk_src:
-			u.learn_skill(str(sk))
-	# 敌方 AI 字段（玩家/友方忽略）
-	u.ai_threat = bool(proto.get("ai_threat", true))
-	u.ai_region = str(proto.get("ai_region", ""))
-	u.ai_group = str(proto.get("ai_group", ""))
-	u.recompute_derived()
-	u.init_vitals()
-	return u
+	return UnitFactory.make_unit(proto, fac, col, row)
 
 # 编辑单位后收尾：重算四维派生 + 注满生命/护甲（编辑器改四维/特性/装备后调）
 func _commit_unit(u) -> void:
@@ -603,78 +518,18 @@ func spawn_default_roster() -> void:
 
 # 把一个单位序列化成 proto 字典（可被 make_unit 复原）
 func _unit_to_proto(u) -> Dictionary:
-	var keep_tags := []
-	for t in u.tags:
-		if t in ["player", "ally", "enemy", "neutral", "flying"]:
-			continue   # 阵营立场单独存、flying 是运行时态
-		keep_tags.append(t)
-	var equip_ids := []
-	for slot in u.equipment:
-		var id = u.equipment[slot]
-		if not equip_ids.has(id):
-			equip_ids.append(id)
-	var skill_lv := {}
-	for sid in u.skills:
-		skill_lv[sid] = u.skill_level(sid)
-	var stat_ov := {}
-	for k in ["move", "speed", "AP_max", "armor_max", "atk_eff", "def_eff", "res_phys", "res_fire", "res_thunder", "res_ice", "res_holy"]:
-		stat_ov[k] = u.stats.get(k, 0)
-	return {
-		"name": u.unit_name,
-		"default_faction": u.faction,
-		"portrait": u.portrait,
-		"icon": u.icon,
-		"tags": keep_tags,
-		"four": {"STR": u.stats.get("STR", 5), "DEX": u.stats.get("DEX", 5), "INT": u.stats.get("INT", 5), "STA": u.stats.get("STA", 5)},
-		"level": u.level,
-		"exp": u.exp,
-		"trait": u.trait_id,
-		"equip": equip_ids,
-		"skills": skill_lv,
-		"stats": stat_ov,
-		"_preset": true,
-	}
+	return UnitFactory.unit_to_proto(u)
 
 # 保存单位为预设（名 preset_name），写进 user://unit_presets.json（同名覆盖）
 func save_unit_preset(u, preset_name: String) -> void:
-	if u == null or preset_name.strip_edges() == "":
-		return
-	var proto := _unit_to_proto(u)
-	proto["name"] = preset_name
-	var arr := load_unit_presets()
-	var replaced := false
-	for i in arr.size():
-		if str(arr[i].get("name", "")) == preset_name:
-			arr[i] = proto
-			replaced = true
-			break
-	if not replaced:
-		arr.append(proto)
-	var f := FileAccess.open(UNIT_PRESETS_PATH, FileAccess.WRITE)
-	if f != null:
-		f.store_string(JSON.stringify(arr, "  "))
-		f.close()
+	UnitFactory.save_preset(u, preset_name)
 
 func load_unit_presets() -> Array:
-	if not FileAccess.file_exists(UNIT_PRESETS_PATH):
-		return []
-	var f := FileAccess.open(UNIT_PRESETS_PATH, FileAccess.READ)
-	var d = JSON.parse_string(f.get_as_text())
-	f.close()
-	return d if typeof(d) == TYPE_ARRAY else []
+	return UnitFactory.load_presets()
 
 # 读 unit_prototypes.json 的内置原型
 func _all_prototypes() -> Array:
-	var out := []
-	if FileAccess.file_exists(UNIT_PROTOS_PATH):
-		var f := FileAccess.open(UNIT_PROTOS_PATH, FileAccess.READ)
-		var d = JSON.parse_string(f.get_as_text())
-		f.close()
-		if typeof(d) == TYPE_ARRAY:
-			for e in d:
-				if typeof(e) == TYPE_DICTIONARY:
-					out.append(e)
-	return out
+	return UnitFactory.all_prototypes()
 
 # 「＋」菜单数据：内置原型（含开头「空白单位」）+ 用户预设
 func roster_sources() -> Dictionary:
@@ -699,6 +554,18 @@ func _build_ui() -> void:
 	canvas.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	canvas.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	main.add_child(canvas)
+	# 环境叠层（都挂 canvas 下 → 覆盖战场视口、不盖侧栏、点击穿透）：
+	# ① 夜晚变暗滤镜（先加＝在下层，压暗地形/单位/迷雾）
+	_night_overlay = ColorRect.new()
+	_night_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_night_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_night_overlay.visible = false
+	canvas.add_child(_night_overlay)
+	# ② 天气 VFX（后加＝在上层，雨雪雾画在变暗之上）
+	_weather_vfx = WeatherVFX.new()
+	canvas.add_child(_weather_vfx)
+	# ③ 调试快捷键提示（战场右下角，最上层、点击穿透）
+	_build_shortcut_hint()
 
 	var side := VBoxContainer.new()
 	side.custom_minimum_size = Vector2(320, 0)
@@ -799,6 +666,11 @@ func _refresh_info() -> void:
 	if u == null:
 		u = units[0]
 	_add_info("回合", str(round_num))
+	if _cur_time != "day" or _cur_weather != "clear":   # 非「昼·晴」才显示环境（影响视野）
+		var env_txt := "%s·%s" % [EnvDB.time_label(_cur_time), EnvDB.weather_label(_cur_weather)]
+		if _weather_left > 0:
+			env_txt += "（余%d）" % _weather_left
+		_add_info("环境", env_txt)
 	_add_info("行动", "%s [%s]" % [u.unit_name, u.faction])
 	_add_info("AP", "%d / %d" % [u.ap, int(u.stats.get("AP_max", 0))])
 	_add_info("移动点", str(u.move_points))
@@ -807,6 +679,26 @@ func _add_info(k: String, v: String) -> void:
 	var l := Label.new()
 	l.text = "%s：%s" % [k, v]
 	_turn_panel.add_child(l)
+
+# 战场右下角：调试快捷键提示（半透明深底 + 浅字，点击穿透、最上层）
+func _build_shortcut_hint() -> void:
+	if canvas == null:
+		return
+	var panel := PanelContainer.new()
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0, 0, 0, 0.45)
+	sb.set_corner_radius_all(4)
+	sb.set_content_margin_all(6)
+	panel.add_theme_stylebox_override("panel", sb)
+	var lbl := Label.new()
+	lbl.text = "[调试]  V 迷雾开关   N 昼/夜   C 切天气"
+	lbl.add_theme_color_override("font_color", Color(0.85, 0.88, 0.95))
+	lbl.add_theme_font_size_override("font_size", 12)
+	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_child(lbl)
+	canvas.add_child(panel)
+	panel.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT, Control.PRESET_MODE_MINSIZE, 8)
 
 # ============ 供 HexCanvas / SandboxCanvas 调用的“editor”接口 ============
 
@@ -820,6 +712,17 @@ func faction_color(f: String) -> Color:
 # 按 tile 的 terrain/variant 查地形定义（经 TerrainDB O(1) 查表，找不到返回 null）
 func _terrain_entry(tile):
 	return TerrainDB.entry_for(tile)
+
+# 该 tile 的有效 move 块：优先本图 terrain_overrides（整块覆盖），否则全局 terrains.json。
+# 图级覆盖 = 编辑器「地形数据·本图」写的，只影响这张图（通行/成本），不动全局。
+func _effective_move(tile) -> Dictionary:
+	if not _map_terrain_overrides.is_empty():
+		var key := "%s/%s" % [str(tile.get("terrain", "")), str(tile.get("variant", ""))]
+		var ov = _map_terrain_overrides.get(key)
+		if typeof(ov) == TYPE_DICTIONARY and typeof(ov.get("move")) == TYPE_DICTIONARY:
+			return ov["move"]
+	var e = _terrain_entry(tile)
+	return e.get("move", {}) if e != null else {}
 
 func color_for_tile(tile) -> Color:
 	var e = _terrain_entry(tile)
@@ -839,11 +742,11 @@ func unit_at(col: int, row: int):
 			return u
 	return null
 
-# 通行性文字：可通行 / 不可通行 / 仅<tag1/tag2>（读 move.passable_by）
-func _passability_text(entry) -> String:
-	if entry == null:
+# 通行性文字：可通行 / 不可通行 / 仅<tag1/tag2>（读有效 move.passable_by，含图级覆盖）
+func _passability_text(mv) -> String:
+	if typeof(mv) != TYPE_DICTIONARY:
 		return "未知"
-	var pb = entry.get("move", {}).get("passable_by", "all")
+	var pb = mv.get("passable_by", "all")
 	if typeof(pb) == TYPE_ARRAY:
 		if pb.is_empty():
 			return "不可通行"
@@ -878,13 +781,181 @@ func hover_text(col: int, row: int) -> String:
 		return ""
 	var entry = _terrain_entry(tiles[row][col])
 	var label = entry.get("label", "未知") if entry != null else "未知"
-	var s := "(%d, %d)  %s" % [col, row, label]
-	s += "\n通行性：%s" % _passability_text(entry)
+	# 地形段（单位信息已移到 hover_extra 的单位卡里，不再走文字行）
+	var s := "地形：%s（%d, %d）" % [label, col, row]
+	s += "\n可通行性：%s" % _passability_text(_effective_move(tiles[row][col]))
 	s += "\n特殊效果：%s" % _effects_text(entry)
-	var u = unit_at(col, row)
-	if u != null:
-		s += "\n单位：%s [%s]" % [u.unit_name, u.faction]
 	return s
+
+# 左下信息栏的扩展段：悬停格若有可见单位 → 返回一张单位速览卡；否则 null（栏只剩地形段）。
+func hover_extra(col: int, row: int):
+	if not _cell_in_bounds(col, row):
+		return null
+	var u = unit_at(col, row)
+	if u == null or _unit_hidden_by_fog(u):
+		return null   # 迷雾里看不见的敌人不给卡
+	return _build_unit_hover_card(u)
+
+# 单位速览卡：左 头像 / 右竖排 名字 · 血量条 · 护甲条(有甲才画) · 图标行(主手武器 + 主动技能)。
+func _build_unit_hover_card(u) -> Control:
+	var root := HBoxContainer.new()
+	root.add_theme_constant_override("separation", 8)
+	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var tex = TextureCache.get_tex(str(u.portrait))
+	if tex != null:
+		var av := TextureRect.new()
+		av.texture = tex
+		av.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		av.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		av.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		av.custom_minimum_size = Vector2(52, 52)
+		av.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		root.add_child(av)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 3)
+	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(col)
+	# 名字（阵营色）+ 等级
+	var namerow := HBoxContainer.new()
+	namerow.add_theme_constant_override("separation", 6)
+	namerow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var nm := Label.new()
+	nm.text = str(u.unit_name)
+	nm.add_theme_color_override("font_color", faction_color(u.faction))
+	nm.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	namerow.add_child(nm)
+	var lv := Label.new()
+	lv.text = "Lv%d" % int(u.level)
+	lv.add_theme_color_override("font_color", Color(0.80, 0.80, 0.86))
+	lv.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	lv.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	namerow.add_child(lv)
+	col.add_child(namerow)
+	# 护甲条（在血条上面，有甲才画）+ 血条
+	var amax := int(u.effective_stat("armor_max"))
+	if amax > 0:
+		col.add_child(_hover_stat_bar("护甲", int(u.stats.get("armor", 0)), amax, FLOAT_ARMOR_COLOR))
+	col.add_child(_hover_stat_bar("生命", int(u.stats.get("HP", 0)), int(u.effective_stat("HP_max")), FLOAT_HP_COLOR))
+	# 武器 + 技能（各一行「图标 + 名字」）
+	var skills := _hover_skill_section(u)
+	if skills != null:
+		col.add_child(skills)
+	return root
+
+# 卡内一条状态条：底黑 + 按 cur/max 充填 color，上叠「标签 cur/max」白字（描边可读）。
+func _hover_stat_bar(label: String, cur: int, maxv: int, color: Color) -> Control:
+	var bar := ProgressBar.new()
+	bar.custom_minimum_size = Vector2(150, 16)
+	bar.min_value = 0
+	bar.max_value = maxf(1.0, float(maxv))
+	bar.value = clampf(float(cur), 0.0, bar.max_value)
+	bar.show_percentage = false
+	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var bg := StyleBoxFlat.new()
+	bg.bg_color = Color(0, 0, 0, 0.5)
+	bg.set_corner_radius_all(2)
+	bar.add_theme_stylebox_override("background", bg)
+	var fill := StyleBoxFlat.new()
+	fill.bg_color = color
+	fill.set_corner_radius_all(2)
+	bar.add_theme_stylebox_override("fill", fill)
+	var lbl := Label.new()
+	lbl.text = "%s %d/%d" % [label, cur, maxv]
+	lbl.set_anchors_preset(Control.PRESET_FULL_RECT)
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lbl.add_theme_font_size_override("font_size", 12)
+	lbl.add_theme_color_override("font_color", Color.WHITE)
+	lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	lbl.add_theme_constant_override("outline_size", 3)
+	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bar.add_child(lbl)
+	return bar
+
+# 武器段：主手武器（图标+名）+ 其技能，再 副手武器（图标+名）+ 其技能。
+# 每把武器的技能第一个 = attack(基础攻击 = 广义普攻)，其余 = 武器附加技能（见 _weapon_skills）。
+func _hover_skill_section(u) -> Control:
+	if not ("equipment" in u):
+		return null
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 3)
+	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var main_id := str(u.equipment.get("main_hand", ""))
+	_add_weapon_rows(v, main_id)
+	var off_id := str(u.equipment.get("off_hand", ""))
+	if off_id != "" and off_id != main_id:   # 双手武器占两槽、同一件 → 不重复列
+		_add_weapon_rows(v, off_id)
+	return v if v.get_child_count() > 0 else null
+
+# 把一件武器（图标+名，白）及其技能（图标+名，金；第一个=基础攻击）逐行加进 parent。
+func _add_weapon_rows(parent: VBoxContainer, item_id: String) -> void:
+	if item_id == "":
+		return
+	var item = ItemDB.get_item(item_id)
+	if item == null:
+		return
+	var wrow = _hover_named_icon(str(item.get("icon", "")), str(item.get("name", "")), Color(0.90, 0.90, 0.95))
+	if wrow != null:
+		parent.add_child(wrow)
+	for sk in _weapon_skills(item):
+		var srow = _hover_named_icon(str(sk.get("icon", "")), str(sk.get("name", "")), Color(0.95, 0.82, 0.5))
+		if srow != null:
+			parent.add_child(srow)
+
+# 一件武器的技能列表：第一个 = attack(基础攻击/广义普攻)；其余 = 未来 `skills` 数组里的附加技能。
+func _weapon_skills(item) -> Array:
+	var out := []
+	var atk = item.get("attack", null)
+	if typeof(atk) == TYPE_DICTIONARY:
+		out.append(atk)
+	var extra = item.get("skills", null)
+	if typeof(extra) == TYPE_ARRAY:
+		for s in extra:
+			if typeof(s) == TYPE_DICTIONARY:
+				out.append(s)
+	return out
+
+# 一行「小图标 + 名字」：图标可缺（只剩名字）；图标名都空 → null。
+func _hover_named_icon(icon_path: String, name: String, name_color: Color) -> Control:
+	if name == "" and icon_path == "":
+		return null
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 5)
+	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var ic = _hover_icon(icon_path)
+	if ic != null:
+		h.add_child(ic)
+	var l := Label.new()
+	l.text = name
+	l.add_theme_font_size_override("font_size", 12)
+	l.add_theme_color_override("font_color", name_color)
+	l.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	h.add_child(l)
+	return h
+
+# 卡内一个小图标：带淡边框方框 + 纹理（缺纹理 → null）。
+func _hover_icon(path: String) -> Control:
+	var tex = TextureCache.get_tex(path)
+	if tex == null:
+		return null
+	var p := PanelContainer.new()
+	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(1, 1, 1, 0.05)
+	sb.border_color = Color(1, 1, 1, 0.25)
+	sb.set_border_width_all(1)
+	sb.set_corner_radius_all(2)
+	p.add_theme_stylebox_override("panel", sb)
+	var ic := TextureRect.new()
+	ic.texture = tex
+	ic.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	ic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	ic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	ic.custom_minimum_size = Vector2(22, 22)
+	ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	p.add_child(ic)
+	return p
 
 # 画布输入接口（sandbox 不绘制地形/取色，留空兜底）
 func begin_stroke() -> void: pass
@@ -950,6 +1021,8 @@ func _start_battle() -> void:
 		u.reset_skill_charges()    # 技能冷却清零、本战次数按智力重置
 	_rebuild_turn_order()
 	active_index = 0
+	_setup_environment()  # 建立日夜 + 开场天气（挂 sight 环境修正）
+	_recompute_vision()   # 开战即算一次玩家视野（迷雾初态）
 	_begin_active_turn()
 
 func _rebuild_turn_order() -> void:
@@ -1049,18 +1122,18 @@ func _run_enemy_ai(unit) -> void:
 		end_turn()
 
 # 评估并更新 unit 的仇恨状态；返回是否已激活（已激活才会行动）。
-# passive：敌人进入「攻击距离」才警觉；alert：敌人进入「警戒半径」就警觉（含攻击距离）。
-# 连锁：ai_group 非空时，同组任一已激活 → 本体也激活。
+# ① 视野感知(ai_threat)：敌人进本单位 sight 且有 LOS 就警觉；② 区域触发；③ 连锁同组。见 docs/感知系统.md。
 func _ai_update_aggro(unit) -> bool:
 	if unit.ai_aggroed:
 		return true
 	var trig := false
 	var here := Vector2i(unit.col, unit.row)
-	# ① 威胁感知：敌人进入「移动一批 + 攻击距离」的威胁范围
+	# ① 视野感知：敌人进入本单位视野(sight)且视线(LOS)不被地形挡（六边形战棋：只有地形挡、单位不挡）
 	if unit.ai_threat:
-		var sense: int = unit.effective_stat("move") + int(unit.basic_attack().get("range", 1))
+		var sight: int = _effective_sight(unit)   # 含天气加减 + 日夜最终乘子
 		for h in units:
-			if _is_hostile(unit, h) and _hex_dist(here, Vector2i(h.col, h.row)) <= sense:
+			var hp := Vector2i(h.col, h.row)
+			if _is_hostile(unit, h) and _hex_dist(here, hp) <= sight and _has_los(here, hp):
 				trig = true
 				break
 	# ② 区域触发：敌人踏进该单位挂的区域（关卡设计者指定）
@@ -1198,6 +1271,7 @@ func _handle_deaths() -> void:
 			round_num += 1
 			_rebuild_turn_order()
 			zoc_triggered = {}
+			_tick_weather()   # 新 round：天气计时 −1，到期重摇
 		_check_battle_over()
 		if not battle_over:
 			call_deferred("_begin_active_turn")   # 延后开始下一单位的 turn（避免在借机结算中重入）
@@ -1207,6 +1281,7 @@ func _handle_deaths() -> void:
 		_check_battle_over()
 	_refresh_info()
 	_refresh_turn_bar()   # 单位变动（阵亡）→ 更新行动顺序槽
+	_recompute_vision()   # 单位阵亡 → 重算视野（友方阵亡收缩视野）
 	if canvas != null:
 		canvas.queue_redraw()
 
@@ -1229,7 +1304,7 @@ func _check_battle_over() -> void:
 func _end_battle(win: bool) -> void:
 	battle_over = true
 	_clear_selection()
-	var col := "#6FCF6F" if win else "#E07A5A"
+	var col := OK_GREEN if win else BAD_RED
 	var msg := "胜利！" if win else "失败…"
 	_log_line("[b][color=%s]══ %s ══[/color][/b]" % [col, msg])
 	_show_banner(msg, win)
@@ -1255,7 +1330,7 @@ func _show_banner(msg: String, win: bool) -> void:
 	_banner.position = (vp - _banner.size) * 0.5
 
 func col_html(win: bool) -> String:
-	return "#6FCF6F" if win else "#E07A5A"
+	return OK_GREEN if win else BAD_RED
 
 # 退出战斗 / 重开：回到布置阶段（战斗期点「退出战斗」按钮，或胜负后按 R）
 func exit_battle() -> void:
@@ -1275,7 +1350,7 @@ func exit_battle() -> void:
 	for u in roster:
 		u.col = -1
 		u.row = -1
-		u.effects = []
+		_clear_effects_and_buffs(u)
 		u.init_vitals()   # 回满生命/护甲（清掉战斗里的损耗）
 	_spawn_map_units()   # 重新落地图预置单位（关卡的敌 / 我），R 重开后不消失
 	turn_order = []
@@ -1296,6 +1371,33 @@ func _input(event: InputEvent) -> void:
 		show_enemy_preview = not show_enemy_preview
 		_update_overlays()
 		get_viewport().set_input_as_handled()
+	elif event.keycode == KEY_V:
+		# 调试：切换全知（关迷雾）；默认迷雾生效
+		omniscient = not omniscient
+		_update_overlays()   # 悬停预览受迷雾影响，跟着刷新
+		if canvas != null:
+			canvas.queue_redraw()
+		get_viewport().set_input_as_handled()
+	elif event.keycode == KEY_C and phase == "battle":
+		# 调试：循环切换天气（看 VFX / 视野变化）；锁为常驻直到再切
+		var ws := EnvDB.all_weathers()
+		if not ws.is_empty():
+			var ids := []
+			for w in ws:
+				ids.append(str(w.get("id", "")))
+			_cur_weather = ids[(ids.find(_cur_weather) + 1) % ids.size()]
+			_weather_left = 0
+			_apply_env_modifiers()
+			_refresh_info()
+			_log_line("☁ [调试]天气 → [b]%s[/b]" % EnvDB.weather_label(_cur_weather))
+		get_viewport().set_input_as_handled()
+	elif event.keycode == KEY_N and phase == "battle":
+		# 调试：切换昼/夜（看整体变暗滤镜 + 视野最终减半）
+		_cur_time = "day" if _cur_time == "night" else "night"
+		_apply_env_modifiers()
+		_refresh_info()
+		_log_line("☾ [调试]日夜 → [b]%s[/b]" % EnvDB.time_label(_cur_time))
+		get_viewport().set_input_as_handled()
 
 func end_turn() -> void:
 	if battle_over:
@@ -1312,6 +1414,7 @@ func end_turn() -> void:
 		round_num += 1
 		_rebuild_turn_order()
 		zoc_triggered = {}   # 新 round：借机去重清空
+		_tick_weather()      # 新 round：天气计时 −1，到期重摇
 	_begin_active_turn()
 
 # 单位自己 turn 末：结算个人 DoT（按最大生命百分比直接掉 HP，无视护甲）+ 时长递减（按 round）+ 到期移除。
@@ -1335,7 +1438,9 @@ func _tick_turn_end_effects(u) -> bool:
 			var dur := int(e.get("duration", 0)) - 1
 			if dur > 0:
 				e["duration"] = dur
-				keep.append(e)   # 否则到期移除（本回合已结算伤害）
+				keep.append(e)
+			else:
+				_remove_mods_by_source(u, str(e.get("source", "buff:" + str(e.get("name", "")))))   # 到期：连带摘掉其挂的修正
 	u.effects = keep
 	return dmg_done
 
@@ -1555,20 +1660,11 @@ func _is_friendly(u) -> bool:
 
 # 平顶 odd-q：从 c 沿方向 d（0–5）走一格
 func _neighbor_in_dir(c: Vector2i, d: int) -> Vector2i:
-	var tbl = NB_ODD if (c.x & 1) == 1 else NB_EVEN
-	return Vector2i(c.x + tbl[d].x, c.y + tbl[d].y)
+	return HexGrid.neighbor_in_dir(c, d)
 
 # 从 from 沿某方向直线走 length 格；返回“包含 target 的那条方向线”的格序列（找不到=[]）
 func _line_cells(from: Vector2i, target: Vector2i, length: int) -> Array:
-	for d in 6:
-		var cells := []
-		var cur := from
-		for _i in length:
-			cur = _neighbor_in_dir(cur, d)
-			cells.append(cur)
-		if target in cells:
-			return cells
-	return []
+	return HexGrid.spoke_through(from, target, length)
 
 # ============ 移动力 / 寻路 ============
 
@@ -1576,11 +1672,7 @@ func _cell_in_bounds(col: int, row: int) -> bool:
 	return col >= 0 and col < width and row >= 0 and row < height
 
 func _neighbors(col: int, row: int) -> Array:
-	var out := []
-	var tbl = NB_ODD if (col & 1) == 1 else NB_EVEN
-	for d in tbl:
-		out.append(Vector2i(col + d.x, row + d.y))
-	return out
+	return HexGrid.neighbors(Vector2i(col, row))
 
 # 单位进入该地块的移动消耗（tag 驱动）：-1 = 不可进入。
 # passable_by 决定能否进（"all"/"none"/[tag…]，按单位 tag 判定）；
@@ -1588,10 +1680,7 @@ func _neighbors(col: int, row: int) -> Array:
 func _move_cost_at(col: int, row: int, unit) -> int:
 	if not _cell_in_bounds(col, row):
 		return -1
-	var entry = _terrain_entry(tiles[row][col])
-	if entry == null:
-		return 1
-	var mv = entry.get("move", {})
+	var mv = _effective_move(tiles[row][col])   # 图级覆盖 ?? 全局
 	var utags = unit.tags if unit != null else []
 	# 通行性门槛
 	var pb = mv.get("passable_by", "all")
@@ -1788,7 +1877,7 @@ func _update_overlays() -> void:
 		range_overlays.append(ov)
 		if show_enemy_preview:
 			var foe = _ai_nearest_hostile(selected_unit)   # 距离最近的敌方单位
-			if foe != null:
+			if foe != null and not _unit_hidden_by_fog(foe):   # 迷雾里的敌人不预览
 				var r := _compute_ranges(foe)
 				range_overlays.append(_overlay(foe, r["reach"], r["attack"]))
 	elif hover_range_unit != null and not _animating:
@@ -1811,6 +1900,8 @@ func _is_active_unit(u) -> bool:
 # 鼠标移到地图某格：若格上有单位则预览其移动/攻击范围（敌我皆可），离开则清除
 func update_unit_hover(cell: Vector2i) -> void:
 	var u = unit_at(cell.x, cell.y) if _cell_in_bounds(cell.x, cell.y) else null
+	if u != null and _unit_hidden_by_fog(u):
+		u = null   # 迷雾里的敌人不可被悬停预览（看不到就不知其范围）
 	if u == hover_range_unit:
 		return
 	hover_range_unit = u
@@ -1819,16 +1910,7 @@ func update_unit_hover(cell: Vector2i) -> void:
 
 # 把一组格按六边形几何外扩 radius 圈（仅几何、不管通行性）；返回含原格的集合
 func _cells_within(cells: Dictionary, radius: int) -> Dictionary:
-	var out := cells.duplicate()
-	for _r in radius:
-		var added := {}
-		for c in out:
-			for nb in _neighbors(c.x, c.y):
-				if _cell_in_bounds(nb.x, nb.y) and not out.has(nb):
-					added[nb] = true
-		for k in added:
-			out[k] = true
-	return out
+	return HexGrid.ring_within(cells, radius, func(v: Vector2i) -> bool: return _cell_in_bounds(v.x, v.y))
 
 # 进入移动模式：算范围、清路径线
 func _enter_move_mode() -> void:
@@ -1863,7 +1945,7 @@ func _enter_attack_mode() -> void:
 					attack_cells[cur] = true
 	else:
 		for c in _cells_within({start: true}, rng):
-			if c != start:
+			if c != start and _has_los(start, c):   # 视线被地形挡住的格不可攻击
 				attack_cells[c] = true
 	_update_overlays()
 
@@ -1905,13 +1987,18 @@ func _attack_targets(attacker, cell: Vector2i, skill) -> Array:
 				out.append(u)
 	else:
 		var t = unit_at(cell.x, cell.y)
-		if t != null and _is_hostile(attacker, t):
+		# 只能打「看得到的」：目标在当前视野内(非迷雾) + 攻方到目标有视线
+		if t != null and _is_hostile(attacker, t) \
+			and _can_see_cell(cell) and _has_los(Vector2i(attacker.col, attacker.row), cell):
 			out.append(t)
 	return out
 
-# 命中率（%）= clamp(命中 − 闪避, 5, 95)，读 effective_stat
+# 命中率（%）= clamp( (命中 − 闪避) × Π命中效能, 5, 95 )，读 effective_stat。
+# Π命中效能 = 攻方命中效能(增益向) × 守方闪避效能(减免向)——无效能修正时 =1.0（与旧行为一致）。
 func _hit_chance(attacker, target) -> int:
-	return clampi(attacker.effective_stat("acc") - target.effective_stat("eva"), 5, 95)
+	var base: int = attacker.effective_stat("acc") - target.effective_stat("eva")
+	var eff: float = attacker.eff_mult("hit_eff") * target.eff_reduce("eva_eff")
+	return clampi(int(round(float(base) * eff)), 5, 95)
 
 # 一次攻击（可多目标）：抬头「攻方 使用 技能 → 目标…」，再逐目标跑判定序
 func _resolve_attack(attacker, skill, targets: Array) -> void:
@@ -1937,12 +2024,13 @@ func _resolve_one(attacker, target, skill, show_target := false) -> Dictionary:
 	# 命中
 	var acc := int(attacker.effective_stat("acc"))
 	var eva := int(target.effective_stat("eva"))
-	var hc := clampi(acc - eva, 5, 95)
+	var hc := _hit_chance(attacker, target)   # 命中公式单一来源（见 _hit_chance）
 	var roll := int(randf() * 100.0)
 	var hit := roll < hc
 	lines.append("命中%d-闪避%d=%d%%（骰%d）" % [acc, eva, hc, roll])
 	lines.append("→ %s" % _oc(hit, "已命中", "未命中"))
 	if not hit:
+		_spawn_hit_feedback(target, false, false, false, 0, 0)   # 飘字：未命中/闪避（看目标阵营）
 		_push_log(lines)
 		return {"hit": false, "blocked": false}
 	# 暴击（属性吃 1 位小数：crit_rate 等可为 X.5）
@@ -1953,7 +2041,7 @@ func _resolve_one(attacker, target, skill, show_target := false) -> Dictionary:
 	# 伤害 = 攻击 × 系数 [× 暴击] [× 效能≠100%]
 	var coeff := float(skill.get("coeff", 1.0))
 	var cmult := (float(attacker.effective_stat_f("crit_dmg")) / 100.0) if crit else 1.0
-	var aeff := float(attacker.effective_stat_f("atk_eff")) / 100.0
+	var aeff: float = attacker.eff_mult("atk_eff")   # 攻击效能桶：面板 atk_eff/100 × Π效能修正（无修正=atk_eff/100，同旧）
 	var atk := float(attacker.effective_stat_f("atk"))
 	var out := atk * coeff * cmult * aeff
 	var formula := "攻击%s×系数%s" % [_numf(atk), _numf(coeff)]
@@ -1972,22 +2060,44 @@ func _resolve_one(attacker, target, skill, show_target := false) -> Dictionary:
 	var blocked := randf() * 100.0 < br
 	lines.append("格挡率%s%%" % _numf(br))
 	lines.append("→ %s" % _oc(blocked, "格挡", "未格挡"))
-	# 减伤：有什么写什么，没有写「无」
+	# 全域减伤 G = max(0, 1−格挡性能/100) × 防御效能因子（下限 clamp🔒）
 	var bp := float(target.effective_stat_f("block_power")) if blocked else 0.0
-	var rp := float(target.effective_stat_f("res_phys"))
-	var reductions := []
-	if bp > 0:
-		reductions.append("格挡性能%s%%" % _numf(bp))
-	if rp > 0:
-		reductions.append("物抗%s%%" % _numf(rp))
-	var pen := float(skill.get("armor_pen", 0.0))
+	# 防御效能 def_eff：base 100=中性、越高越减伤。def_factor = max(0, 2 − def_eff/100)（100→×1.0 / 120→×0.8 / ≥200→×0免疫；下限0安全）
+	var deff: float = float(target.effective_stat_f("def_eff"))
+	var def_factor := maxf(0.0, 2.0 - deff / 100.0)
+	var g := maxf(0.0, 1.0 - bp / 100.0) * def_factor
+	# 分量：普攻单分量(先进甲)；穿甲 armor_pen 拆 人/甲 两分量。element 默认物理。
+	var elem := str(skill.get("element", "physical"))
+	var pen := clampf(float(skill.get("armor_pen", 0.0)), 0.0, 1.0)
+	var components := []
 	if pen > 0.0:
-		reductions.append("穿甲%s%%" % _numf(pen * 100.0))   # 标注：该攻击有穿甲
+		components.append({"lane": "human", "element": elem, "ratio": pen})
+		components.append({"lane": "armor_first", "element": elem, "ratio": 1.0 - pen})
+	else:
+		components.append({"lane": "armor_first", "element": elem, "ratio": 1.0})
+	# 减伤日志：有什么写什么（格挡性能 / 减伤效能≠1 / 对应元素人抗 / 甲抗(有甲时) / 穿甲）
+	var reductions := []
+	if bp > 0.0: reductions.append("格挡性能%s%%" % _numf(bp))
+	if def_factor != 1.0: reductions.append("防御效能×%s" % _numf(def_factor))
+	var rp := float(target.effective_stat_f("res_" + CombatResolver.res_suffix(elem)))
+	if rp != 0.0: reductions.append("%s%s%%" % [str(ELEM_RES_CN.get(elem, "抗")), _numf(rp)])
+	var ar := float(target.effective_stat_f("armor_res_" + CombatResolver.res_suffix(elem)))
+	if ar != 0.0 and int(target.stats.get("armor", 0)) > 0: reductions.append("甲抗%s%%" % _numf(ar))
+	if pen > 0.0: reductions.append("穿甲%s%%" % _numf(pen * 100.0))
 	lines.append("减伤：%s" % ("、".join(reductions) if reductions.size() > 0 else "无"))
-	# 落血（穿甲：pen 比例无视护甲直接进 HP）
-	var dmg := int(round(out * (1.0 - bp / 100.0) * (1.0 - rp / 100.0)))
-	_apply_damage(target, dmg, pen)
-	lines.append("%s 剩余血量：%d（-%d）" % [_cname(target), int(target.stats.get("HP", 0)), dmg])
+	# 结算落血（分量减伤链在 CombatResolver：逐分量 甲抗/人抗/固减 + 破甲溢出保留元素）
+	var dres := CombatResolver.resolve(target, out, g, components)
+	var hp_loss := int(round(float(dres["hp_loss"])))
+	var armor_loss := int(round(float(dres["armor_loss"])))
+	if armor_loss > 0:
+		target.stats["armor"] = maxi(0, int(target.stats.get("armor", 0)) - armor_loss)
+	if hp_loss > 0:
+		target.stats["HP"] = int(target.stats.get("HP", 0)) - hp_loss
+	var tail := "%s 剩余血量：%d（-%d）" % [_cname(target), int(target.stats.get("HP", 0)), hp_loss]
+	if armor_loss > 0:
+		tail += "，护甲 -%d" % armor_loss
+	lines.append(tail)
+	_spawn_hit_feedback(target, true, crit, blocked, armor_loss, hp_loss)   # 飘字：格挡 + 护甲/生命伤（暴击加粗）
 	# 施加异常（如撕裂的流血）：基础概率 × (1 − 异常抵抗)，命中即挂效果
 	_try_inflict(attacker, target, skill, lines)
 	_push_log(lines)
@@ -2019,51 +2129,85 @@ func _try_inflict(attacker, target, skill, lines: Array) -> void:
 	if applied:
 		_add_effect(target, inf)
 
-# 给单位挂一个效果（同名则刷新时长、不叠层）。
+# 给单位挂一个效果（同名则刷新时长/数值、不叠层）。
+# **buff↔modifier 桥 🔒**：若 inf 带 mods（[{stat,op,value}]），同时往 target.modifiers 挂（source="buff:名"）——
+# 让"改属性的异常"（冰减速改 speed、雷麻痹改 acc/eva…）真正走修正管线（去重取高、效能等一视同仁）。
 func _add_effect(target, inf: Dictionary) -> void:
+	var nm := str(inf.get("name", ""))
+	var source := "buff:" + nm
+	_remove_mods_by_source(target, source)   # 刷新：先摘旧的同名修正，按最新重挂
+	var refreshed := false
 	for e in target.effects:
-		if str(e.get("name", "")) == str(inf.get("name", "")):
+		if str(e.get("name", "")) == nm:
 			e["duration"] = int(inf.get("duration", e.get("duration", 0)))
-			return
-	target.effects.append({
-		"name": str(inf.get("name", "")),
-		"kind": str(inf.get("kind", "debuff")),
-		"permanent": false,
-		"duration": int(inf.get("duration", 1)),
-		"dot_pct_max_hp": float(inf.get("dot_pct_max_hp", 0)),
-		"tags": inf.get("tags", []),   # 效果 tag（如 bleeding）：供「按 tag 驱散/清除」用
-	})
+			e["dot_pct_max_hp"] = float(inf.get("dot_pct_max_hp", e.get("dot_pct_max_hp", 0)))
+			refreshed = true
+			break
+	if not refreshed:
+		target.effects.append({
+			"name": nm,
+			"kind": str(inf.get("kind", "debuff")),
+			"permanent": false,
+			"duration": int(inf.get("duration", 1)),
+			"dot_pct_max_hp": float(inf.get("dot_pct_max_hp", 0)),
+			"tags": inf.get("tags", []),   # 效果 tag（如 bleeding）：供「按 tag 驱散/清除」用
+			"source": source,              # 与其挂的修正共用，便于到期/清除时按 source 摘
+		})
+	var touched_four := false
+	for m in inf.get("mods", []):
+		if typeof(m) != TYPE_DICTIONARY:
+			continue
+		var st := str(m.get("stat", ""))
+		target.modifiers.append({"stat": st, "op": str(m.get("op", "flat")), "value": float(m.get("value", 0)), "source": source, "nature": str(inf.get("kind", "debuff"))})
+		if st in ["STR", "DEX", "INT", "STA"]:
+			touched_four = true
+	if touched_four:
+		target.recompute_derived()   # 改了四维 → 重算派生（让减速等传导到派生属性）
 
-# 移除单位身上所有带某 tag 的效果（如治疗清「bleeding」流血类）；返回移除条数。
+# 按 source 摘掉单位的修正（buff 到期/被清除时）。若摘掉的含四维修正 → 重算派生。
+func _remove_mods_by_source(u, source: String) -> void:
+	if u == null or typeof(u.modifiers) != TYPE_ARRAY:
+		return
+	var had_four := false
+	var kept := []
+	for m in u.modifiers:
+		if str(m.get("source", "")) == source:
+			if str(m.get("stat", "")) in ["STR", "DEX", "INT", "STA"]:
+				had_four = true
+			continue
+		kept.append(m)
+	u.modifiers = kept
+	if had_four:
+		u.recompute_derived()
+
+# 清空单位的效果 + 所有 buff 来源的临时修正（重开/退战/换图用）；装备/特性等常驻修正保留。
+func _clear_effects_and_buffs(u) -> void:
+	u.effects = []
+	if typeof(u.modifiers) == TYPE_ARRAY:
+		u.modifiers = u.modifiers.filter(func(m): return not str(m.get("source", "")).begins_with("buff:"))
+	u.recompute_derived()
+
+# 移除单位身上所有带某 tag 的效果（如治疗清「bleeding」流血类）+ 连带摘掉它们挂的修正；返回移除条数。
 func _cleanse_effects_with_tag(u, tag: String) -> int:
 	if u == null or not ("effects" in u) or typeof(u.effects) != TYPE_ARRAY:
 		return 0
-	var before: int = u.effects.size()
-	u.effects = u.effects.filter(func(e): return not (e.get("tags", []) as Array).has(tag))
-	return before - u.effects.size()
-
-# 伤害落地：先扣护甲、溢出到 HP（甲抗/人抗分项见设计文档，测试期省略）
-func _apply_damage(target, dmg: int, pen := 0.0) -> void:
-	if dmg <= 0:
-		return
-	var pen_dmg := int(round(float(dmg) * clampf(pen, 0.0, 1.0)))   # 穿甲部分：无视护甲、直接进 HP
-	var armor_dmg := dmg - pen_dmg                                   # 其余：先扣甲、溢出进 HP
-	var armor := int(target.stats.get("armor", 0))
-	var to_hp := pen_dmg
-	if armor_dmg <= armor:
-		target.stats["armor"] = armor - armor_dmg
-	else:
-		target.stats["armor"] = 0
-		to_hp += armor_dmg - armor
-	if to_hp > 0:
-		target.stats["HP"] = int(target.stats.get("HP", 0)) - to_hp
+	var kept := []
+	var removed := 0
+	for e in u.effects:
+		if (e.get("tags", []) as Array).has(tag):
+			_remove_mods_by_source(u, str(e.get("source", "buff:" + str(e.get("name", "")))))
+			removed += 1
+		else:
+			kept.append(e)
+	u.effects = kept
+	return removed
 
 # —— 战斗记录 BBCode 小工具 ——
 func _hl(x) -> String:                       # 高亮加粗数字（金）
 	return "[b][color=#FFD24A]%s[/color][/b]" % str(x)
 
 func _oc(cond: bool, yes: String, no: String) -> String:  # 判定结果（绿/红）
-	var col := "#6FCF6F" if cond else "#E07A5A"
+	var col := OK_GREEN if cond else BAD_RED
 	return "[b][color=%s]%s[/color][/b]" % [col, (yes if cond else no)]
 
 # 单位名按阵营上色（我方/友方蓝、敌方红、中立黄）
@@ -2151,6 +2295,7 @@ func _commit_move(col: int, row: int) -> void:
 	u.row = row
 	_clear_selection()
 	_refresh_info()
+	_recompute_vision()   # 单位落位 → 重算玩家视野（友方移动揭开/关闭迷雾）
 	_animate_path(u, path)   # 沿路径平移（非瞬移）；玩家不 await（即发即忘）
 	if _is_friendly(u):
 		_check_enter_triggers(u)   # 玩家踏入新格 → 评估 enter_region 触发器
@@ -2230,6 +2375,65 @@ func _clear_flash(targets: Array) -> void:
 	if canvas != null:
 		canvas.queue_redraw()
 
+# —— 战斗飘字（浮动文字反馈）——
+# 颜色对齐 token 状态条：生命=血条绿 / 护甲=护甲条银（见 SandboxCanvas._draw_hp_bar/_draw_armor_bar）。
+const FLOAT_HP_COLOR := Color(0.30, 0.80, 0.30)     # 生命伤（同血条绿）
+const FLOAT_ARMOR_COLOR := Color(0.82, 0.83, 0.86)  # 护甲伤（同护甲条银）
+const FLOAT_MISS_COLOR := Color(0.88, 0.88, 0.92)   # 未命中 / 闪避（灰白）
+const FLOAT_BLOCK_COLOR := Color(0.72, 0.85, 1.0)   # 格挡（浅蓝）
+
+# 在目标 token 上方生成一串飘字。玩家视角措辞🔒：目标是敌方→「未命中」；目标是我方→「闪避」。
+# 命中：先「格挡」（若格挡），再 护甲伤(银)、生命伤(绿)；暴击 → 该数字加粗放大。全程上浮淡出。
+func _spawn_hit_feedback(target, hit: bool, crit: bool, blocked: bool, armor_loss: int, hp_loss: int) -> void:
+	if canvas == null or target == null:
+		return
+	var entries := []   # [text, color, bold]
+	if not hit:
+		var friendly: bool = str(target.faction) in ["player", "ally"]
+		entries.append(["闪避" if friendly else "未命中", FLOAT_MISS_COLOR, false])
+	else:
+		if blocked:
+			entries.append(["格挡", FLOAT_BLOCK_COLOR, false])
+		if armor_loss > 0:
+			entries.append(["-%d" % armor_loss, FLOAT_ARMOR_COLOR, crit])
+		if hp_loss > 0:
+			entries.append(["-%d" % hp_loss, FLOAT_HP_COLOR, crit])
+		if entries.is_empty():   # 命中但全免（0 伤、未格挡）→ 至少给个「0」反馈
+			entries.append(["0", FLOAT_MISS_COLOR, false])
+	# token 上方基准点：格心（世界坐标）经视图变换 → 画布屏幕坐标
+	var base: Vector2 = canvas.hex_center(int(target.col), int(target.row)) * canvas.view_zoom + canvas.view_offset
+	base += Vector2(0, -30)
+	for i in entries.size():
+		var e = entries[i]
+		_float_text(base + Vector2(0, 20.0 * i), str(e[0]), e[1], bool(e[2]))
+
+# 单条飘字：加为画布子节点（渲染在地块/token 之上），上浮 + 淡出后自毁。暴击 → 加粗放大。
+func _float_text(pos: Vector2, text: String, color: Color, bold: bool) -> void:
+	var lbl := Label.new()
+	lbl.text = text
+	lbl.custom_minimum_size = Vector2(140, 0)
+	lbl.size = Vector2(140, 0)
+	lbl.position = pos - Vector2(70, 0)   # 140 宽居中对齐 → 视觉中心落在 pos.x
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	lbl.z_index = 200
+	lbl.add_theme_font_size_override("font_size", 26 if bold else 18)
+	lbl.add_theme_color_override("font_color", color)
+	lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))   # 深描边：战场上可读
+	lbl.add_theme_constant_override("outline_size", 7 if bold else 5)
+	if bold:   # 暴击：合成加粗（FontVariation.embolden，兼容任意底层字体）
+		var basef := get_theme_font("font", "Label")
+		if basef != null:
+			var fv := FontVariation.new()
+			fv.base_font = basef
+			fv.variation_embolden = 0.7
+			lbl.add_theme_font_override("font", fv)
+	canvas.add_child(lbl)
+	var tw := create_tween()
+	tw.tween_property(lbl, "position:y", lbl.position.y - 36.0, 0.9).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.parallel().tween_property(lbl, "modulate:a", 0.0, 0.9).set_delay(0.35)
+	tw.tween_callback(lbl.queue_free)
+
 func _play_sfx() -> void:
 	if _sfx != null and _sfx.stream != null:
 		_sfx.play()
@@ -2256,13 +2460,153 @@ func _path_via(came: Dictionary, cell: Vector2i) -> Array:
 	path.reverse()
 	return path
 
-# ============ 六边形距离（odd-q offset → cube）============
-func _to_cube(c: Vector2i) -> Vector3i:
-	var x := c.x
-	var z := c.y - (c.x - (c.x & 1)) / 2
-	return Vector3i(x, -x - z, z)
-
+# ============ 六边形距离 / 连线（纯几何一律委托 HexGrid，见 HexGrid.gd）============
 func _hex_dist(a: Vector2i, b: Vector2i) -> int:
-	var ca := _to_cube(a)
-	var cb := _to_cube(b)
-	return int((abs(ca.x - cb.x) + abs(ca.y - cb.y) + abs(ca.z - cb.z)) / 2)
+	return HexGrid.distance(a, b)
+
+# 两格间的连线采样（cube 插值，含端点）：LOS/寻路用。地形阻挡判定见 _has_los。
+func _hex_line(a: Vector2i, b: Vector2i) -> Array:
+	return HexGrid.line(a, b)
+
+# 该格地形是否阻挡视线（读地形 blocks_sight tag；越界＝挡）
+func _tile_blocks_sight(col: int, row: int) -> bool:
+	if not _cell_in_bounds(col, row):
+		return true
+	var e = _terrain_entry(tiles[row][col])
+	return e != null and ("blocks_sight" in e.get("tags", []))
+
+# a 能否看到 b：连线上「中间格」任一 blocks_sight 即挡。终点 b 自身的 blocks_sight 不挡（看得到森林边缘的人）。
+func _has_los(a: Vector2i, b: Vector2i) -> bool:
+	if a == b:
+		return true
+	var line := _hex_line(a, b)
+	for i in range(1, line.size() - 1):   # 掐头去尾：只查中间格
+		var c: Vector2i = line[i]
+		if _tile_blocks_sight(c.x, c.y):
+			return false
+	return true
+
+# 单个单位的可见格：以己为心、半径 sight（六边形距离）、逐格被 LOS 裁剪。
+func _unit_visible_cells(u) -> Dictionary:
+	var out := {}
+	var here := Vector2i(u.col, u.row)
+	out[here] = true
+	var sight: int = _effective_sight(u)   # 含天气加减 + 日夜最终乘子（夜×0.5）
+	if sight <= 0:
+		return out
+	for cell in _cells_within({here: true}, sight):
+		if _has_los(here, cell):
+			out[cell] = true
+	return out
+
+# 重算玩家侧团队视野（我方/友方全体单位可见格并集）→ 更新 visible，并入 seen。位置/单位集变化后调用。
+func _recompute_vision() -> void:
+	_vis_visible = {}
+	for u in units:
+		if _is_friendly(u):
+			for cell in _unit_visible_cells(u):
+				_vis_visible[cell] = true
+	for cell in _vis_visible:
+		_vis_seen[cell] = true
+	if canvas != null:
+		canvas.queue_redraw()
+
+# 某格对玩家的迷雾态：0=黑(未探索) / 1=灰(探索过·无观测) / 2=常态(可见)。全知或非战斗阶段一律常态。
+func cell_fog(cell: Vector2i) -> int:
+	if omniscient or phase != "battle":
+		return 2
+	if _vis_visible.has(cell):
+		return 2
+	if _vis_seen.has(cell):
+		return 1
+	return 0
+
+# 玩家当前能否「看到」某格（用于 targeting：只能打可见格上的目标）
+func _can_see_cell(cell: Vector2i) -> bool:
+	return omniscient or phase != "battle" or _vis_visible.has(cell)
+
+# 该单位是否被迷雾藏起（不该渲染）：战斗中、非全知、敌对且其所在格不在当前视野内。我方/友方永远可见。
+func _unit_hidden_by_fog(u) -> bool:
+	if omniscient or phase != "battle":
+		return false
+	if _is_friendly(u):
+		return false
+	return not _vis_visible.has(Vector2i(u.col, u.row))
+
+# ============ 环境：日夜 + 天气（Phase 2；见 docs/感知系统.md 🔒）============
+# 开战建立环境：读地图 environment 的日夜（战中不变）+ 从 weather_table 摇开场天气，挂 sight 修正。
+func _setup_environment() -> void:
+	_cur_time = str(_map_environment.get("time", "day"))
+	_roll_weather_from_table(_map_environment.get("weather_table", []), true)
+	_apply_env_modifiers()
+
+# 从 weather_table 按 weight 摇一个天气 + 在 [min,max] 摇持续回合。表空/无效 → 晴、不自动变(_weather_left=0)。
+func _roll_weather_from_table(table, announce: bool) -> void:
+	if typeof(table) != TYPE_ARRAY or table.is_empty():
+		_cur_weather = "clear"
+		_weather_left = 0
+		return
+	var total := 0.0
+	for row in table:
+		if typeof(row) == TYPE_DICTIONARY:
+			total += maxf(0.0, float(row.get("weight", 1)))
+	if total <= 0.0:
+		_cur_weather = "clear"
+		_weather_left = 0
+		return
+	var pick := randf() * total
+	var chosen: Dictionary = table[0]
+	for row in table:
+		if typeof(row) != TYPE_DICTIONARY:
+			continue
+		pick -= maxf(0.0, float(row.get("weight", 1)))
+		if pick <= 0.0:
+			chosen = row
+			break
+	_cur_weather = str(chosen.get("weather", "clear"))
+	var lo := int(chosen.get("min_rounds", 1))
+	var hi := int(chosen.get("max_rounds", lo))
+	_weather_left = maxi(1, randi_range(mini(lo, hi), maxi(lo, hi)))
+	if announce:
+		_log_line("☁ 天气：[b]%s[/b]（%d 回合）" % [EnvDB.weather_label(_cur_weather), _weather_left])
+
+# 进入新 round：当前天气剩余回合 −1，到期则从表摇下一个（表空→晴）。_weather_left<=0 ＝ 常驻不变（强制/无表）。
+func _tick_weather() -> void:
+	if _weather_left <= 0:
+		return
+	_weather_left -= 1
+	if _weather_left <= 0:
+		_roll_weather_from_table(_map_environment.get("weather_table", []), true)
+		_apply_env_modifiers()   # 天气变 → 重挂 sight 修正 + 重算视野
+
+# 应用环境到视野：天气＝flat 加减（挂修正管线 source=env:weather）；日夜＝【最终乘子】_time_sight_mult（不走 flat，见 _effective_sight）。
+# 先清旧天气修正再挂新的；再刷新叠层（夜变暗 + 天气 VFX）+ 重算视野。
+func _apply_env_modifiers() -> void:
+	var w_mod := EnvDB.weather_sight(_cur_weather)
+	for u in units:
+		u.remove_modifiers_by_source("env:time")     # 清理旧版可能留下的日夜 flat（现日夜=乘子、不再挂 flat）
+		u.remove_modifiers_by_source("env:weather")
+		if w_mod != 0:
+			u.modifiers.append({"stat": "sight", "op": "flat", "value": w_mod,
+				"source": "env:weather", "source_label": "环境·" + EnvDB.weather_label(_cur_weather)})
+	_time_sight_mult = EnvDB.time_sight_mult(_cur_time)   # 日夜＝所有加减之后的最终乘子（夜×0.5）
+	_update_env_overlays()
+	if phase == "battle":
+		_recompute_vision()
+
+# 刷新环境视觉叠层：夜晚全屏变暗滤镜（读日夜 tint）+ 天气 VFX（读 _cur_weather）。
+func _update_env_overlays() -> void:
+	if _night_overlay != null:
+		var tint := EnvDB.time_tint(_cur_time)
+		if tint != "":
+			_night_overlay.color = Color.html(tint)
+			_night_overlay.visible = true
+		else:
+			_night_overlay.visible = false
+	if _weather_vfx != null:
+		_weather_vfx.set_weather(_cur_weather)
+
+# 单位当前【实际】视野半径 ＝ round( 面板 sight〔含天气/装备/技能等所有加减〕 × 日夜最终乘子 )，下限 0。
+# 日夜（夜×0.5）是最后一步乘算，符合「其余都是加减、夜晚最终减半」的口径。
+func _effective_sight(u) -> int:
+	return maxi(0, int(round(u.effective_stat("sight") * _time_sight_mult)))

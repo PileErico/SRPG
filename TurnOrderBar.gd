@@ -35,7 +35,7 @@ var _slots := {}             # key(String) -> 条目节点
 var _last_seq := []          # 上次 refresh 的序列
 var _content_w := 0.0        # 全部条目总宽
 var _prev_active_key := ""   # 上次的当前行动条目 key（用于「下落」退场判定）
-var _tex_cache := {}         # 头像纹理缓存
+const TextureCache := preload("res://TextureCache.gd")   # 头像加载 + 缓存单一入口
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -358,23 +358,9 @@ func _on_slot_hover(u, entered: bool) -> void:
 
 # ============ 工具 ============
 
-# 路径取纹理并缓存（优先已导入资源，否则直读原图，免依赖编辑器导入）
+# 路径取纹理并缓存（统一走 TextureCache，跨实例共享缓存）
 func _load_tex(path: String):
-	if path == "":
-		return null
-	if _tex_cache.has(path):
-		return _tex_cache[path]
-	var tex = null
-	if ResourceLoader.exists(path):
-		var t = load(path)
-		if t is Texture2D:
-			tex = t
-	if tex == null:
-		var img := Image.new()
-		if img.load(path) == OK:
-			tex = ImageTexture.create_from_image(img)
-	_tex_cache[path] = tex
-	return tex
+	return TextureCache.get_tex(path)
 
 # 阿拉伯数字 → 中文数字（0–99，超出回退阿拉伯）
 func _cn_num(n: int) -> String:

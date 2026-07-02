@@ -5,6 +5,7 @@ extends Control
 ## 坐标系：flat-top（平顶），odd-q 偏移（奇数列向下错半格）。
 ## 视图变换由 view_offset(平移) + view_zoom(缩放) 表达，绘制时统一套用。
 
+const HexGrid := preload("res://HexGrid.gd")   # 纯六边形几何前置（取整器 single source）
 const HEX_SIZE := 24.0
 const MIN_ZOOM := 0.2
 const MAX_ZOOM := 4.0
@@ -22,7 +23,9 @@ var panning := false
 var view_offset := Vector2(20, 20)
 var view_zoom := 1.0
 var hover_cell := Vector2i(-1, -1)
-var info_label: Label
+var info_label: Label             # 地形信息文字（底段，永远显示当前格）
+var _info_panel: PanelContainer   # 左下可扩展信息栏（含底 + 内边距）
+var _info_extra: VBoxContainer    # 扩展段（宿主经 hover_extra 填，如单位卡）；无则空
 var _need_fit := false   # 新建/加载后置位：待布局尺寸就绪时在 _draw 里自动适配窗口
 
 func _ready() -> void:
@@ -30,20 +33,34 @@ func _ready() -> void:
 	mouse_exited.connect(_on_mouse_exit)
 	_make_info_label()
 
+# 左下「光标位置信息」栏：可扩展——底段永远是地形文字；宿主可经 hover_extra 在其上叠一段（如单位卡）。
 func _make_info_label() -> void:
-	info_label = Label.new()
-	info_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	info_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
-	info_label.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	info_label.offset_left = 8
-	info_label.offset_bottom = -8
+	_info_panel = PanelContainer.new()
+	_info_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_info_panel.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
+	_info_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN   # 内容变多向上生长（底边固定）
+	_info_panel.offset_left = 8
+	_info_panel.offset_bottom = -8
 	var box := StyleBoxFlat.new()
 	box.bg_color = Color(0, 0, 0, 0.55)
 	box.set_content_margin_all(6)
-	info_label.add_theme_stylebox_override("normal", box)
+	_info_panel.add_theme_stylebox_override("panel", box)
+	_info_panel.visible = false
+	add_child(_info_panel)
+
+	var vb := VBoxContainer.new()
+	vb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vb.add_theme_constant_override("separation", 6)
+	_info_panel.add_child(vb)
+
+	_info_extra = VBoxContainer.new()   # 扩展段（上），默认空；宿主填单位卡时才有内容
+	_info_extra.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vb.add_child(_info_extra)
+
+	info_label = Label.new()            # 地形文字（下），永远显示
+	info_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	info_label.add_theme_color_override("font_color", Color.WHITE)
-	info_label.visible = false
-	add_child(info_label)
+	vb.add_child(info_label)
 
 func reset_view() -> void:
 	view_offset = Vector2(20, 20)
@@ -104,28 +121,17 @@ func hex_corners(center: Vector2) -> PackedVector2Array:
 	return pts
 
 func axial_round(qf: float, rf: float) -> Vector2i:
-	var sf := -qf - rf
-	var q := roundi(qf)
-	var r := roundi(rf)
-	var s := roundi(sf)
-	var qd := absf(q - qf)
-	var rd := absf(r - rf)
-	var sd := absf(s - sf)
-	if qd > rd and qd > sd:
-		q = -r - s
-	elif rd > sd:
-		r = -q - s
-	return Vector2i(q, r)
+	# axial(q,r,s) 映射到 cube(x,y,z) 后复用唯一取整器；分支/取整与旧实现逐位一致（对拍验证）。
+	var c := HexGrid.cube_round(qf, rf, -qf - rf)
+	return Vector2i(c.x, c.y)
 
 func pixel_to_offset(world: Vector2) -> Vector2i:
 	var px := world.x - HEX_SIZE
 	var py := world.y - hex_h * 0.5
 	var qf := (2.0 / 3.0 * px) / HEX_SIZE
 	var rf := (-1.0 / 3.0 * px + sqrt(3.0) / 3.0 * py) / HEX_SIZE
-	var ax := axial_round(qf, rf)
-	var col := ax.x
-	var row := ax.y + ((ax.x - (ax.x & 1)) / 2)
-	return Vector2i(col, row)
+	# axial(q,r) → odd-q offset 复用 HexGrid（消最后一处开写的 (col-(col&1))/2）
+	return HexGrid.axial_to_offset(axial_round(qf, rf))
 
 func _world_from_screen(p: Vector2) -> Vector2:
 	return (p - view_offset) / view_zoom
@@ -333,14 +339,24 @@ func _update_hover(screen_pos: Vector2) -> void:
 		queue_redraw()
 
 func _update_info_label() -> void:
-	if info_label == null:
+	if _info_panel == null:
 		return
+	# 每次换格：先清扩展段（立即移出树，不残留一帧）
+	for c in _info_extra.get_children():
+		_info_extra.remove_child(c)
+		c.queue_free()
 	if hover_cell.x < 0:
-		info_label.visible = false
+		_info_panel.visible = false
 		info_label.text = ""
-	else:
-		info_label.text = editor.hover_text(hover_cell.x, hover_cell.y)
-		info_label.visible = true
+		return
+	info_label.text = editor.hover_text(hover_cell.x, hover_cell.y)
+	_info_panel.visible = true
+	# 宿主可选钩子：给该格提供一个扩展控件（有单位→单位卡，否则 null）。编辑器无此方法 = 只显示地形。
+	if editor != null and editor.has_method("hover_extra"):
+		var extra = editor.hover_extra(hover_cell.x, hover_cell.y)
+		if extra != null:
+			_info_extra.add_child(extra)
+			_info_extra.add_child(HSeparator.new())   # 单位段与地形段之间的分隔
 
 func _on_mouse_exit() -> void:
 	if hover_cell.x >= 0:
