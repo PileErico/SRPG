@@ -32,7 +32,7 @@
 **关键判断：campaign 存档 ≠ 战中 suspend 存档，两层分开、前者先行。**
 
 - **A 层 · campaign 存档（M1 就做）**：战斗外世界的全部状态——WorldState 整体 `to_dict/from_dict` → `user://saves/`。单位在此层只需「**定义+养成+跨战续存**」：proto（已有 UnitFactory 往返）⊕ 当前 HP、重伤状态、装备实例 uid 引用。**不含**战斗内运行态（AP/位置/buff/迷雾），故**完全不依赖 BattleState**。
-- **B 层 · battle suspend（后置）**：战中挂起，才需要完整 BattleState（解耦规划 Phase 1+，硬前置见该文档 §3）。meta 层一切功能不等它。
+- **B 层 · battle suspend（后置，🔒 语义已定）**：**「临时存档」**——只为退出游戏后随时继续、非 SL 读档（读取即失效/覆盖式）；**可裁剪**（用户明确：麻烦就不提供）。才需要完整 BattleState（解耦规划 Phase 1+，硬前置见该文档 §3）。meta 层一切功能不等它。
 - **uid 体系（写第一行存档前必须定 🔒）**：`unit_uid` + `item_uid` 一起定。扫描确认 Unit 无 id 字段（Unit.gd:13-41），turn_order/回写全靠对象引用。建议：**存档域自增 int + WorldState 持有 next_uid 计数器**（简单、可读、无碰撞；uuid 无必要）。同一套 uid 将来直接喂 BattleState，一次投资两层受益。
 - **存档兼容套路沿用地图 v3 范式**：`save_version` + 读端 `.get(key,default)` 兜底。
 
@@ -43,7 +43,7 @@
 | **WorldState** | campaign 数据聚合根：clock/roster/物品实例/声望/事件状态/flag + to_dict/from_dict | 纯 RefCounted；SandboxConfig 静态模式是跨场景通道先例（SandboxConfig.gd:4），WorldState 照此挂静态引用 |
 | **SaveIO** | 存读档单一入口（仿 MapIO）：槽位管理/版本兜底/原子写 | UnitFactory 的 user:// JSON 落盘手法已验证可用 |
 | **ItemInstances** | 物品实例库：`uid → {tpl_id, affixes[], durability, condition, enhance_count}` + **合成视图 `view(uid)` = 模板 ⊕ 词条 ⊕ 状态**（喂 tooltip/攻击/资格判定） | ItemDB 降为纯模板源。⚠️ 三个雷（扫描确认）：① `ItemDB.get_item` 返回共享引用（ItemDB.gd:32-38），合成视图必须 duplicate；② `Unit.equipment` 现存 id 字符串、双手靠**字符串相等**找连带槽（Unit.gd:248-264）——改存 uid 后按 uid 配对；③ 修正 source 现为 `equip:<槽>`（Unit.gd:243），同 source 同 (stat,op) 会**去重取高**（Unit.gd:112-132）吃掉多词条——source 改 `equip:<uid>`、词条各带序号 |
-| **WorldClock** | 战斗外时间：推进规则/日夜映射/**调度表**（恢复·事件冷却·据点刷新都注册到它） | 战外时间概念现为零（全仓 grep 确认）；日夜复用 EnvDB times（有序数组、加时段免改消费端）；战斗侧注入点＝`_setup_environment`（Sandbox.gd:2537，time 现从地图静态读，需定优先级：地图指定 > 时钟推导）；退战复位 day/clear 硬编码（Sandbox.gd:360-364）改回读时钟 |
+| **WorldClock** | 战斗外时间 🔒＝**单调小时计数器**：推进规则/小时→日夜映射/**调度表**（恢复·事件冷却·据点刷新按「每小时」节拍结算，职务加成＝改每小时速率） | 战外时间概念现为零（全仓 grep 确认）；日夜复用 EnvDB times（有序数组、加时段免改消费端）；战斗侧注入点＝`_setup_environment`（Sandbox.gd:2537，time 现从地图静态读，需定优先级：地图指定 > 时钟推导）；**战斗不耗世界时间 🔒**（战场日夜冻结、仅天气变——与现状一致）；退战复位 day/clear 硬编码（Sandbox.gd:360-364）改回读时钟 |
 | **EventEngine** | 统一 when/do 事件引擎：战斗触发器与大地图事件共用一套评估/执行，宿主能力（日志/造单位/变天/开对话）经**注入接口** | 现状契约：when 仅 `enter_region`+once+by_faction+region；do 四动作内联在 Sandbox（Sandbox.gd:314-343，耦合 _log/units/turn_order/canvas）。⚠️ 编辑器动作表与运行时已分叉（set_weather 只有运行时）——动作**元数据注册表**单一源化，编辑器表单据此生成。fired/冷却状态分两层：战斗局部（每战清零，现状）vs 世界持久（进 WorldState） |
 | **Checks** | 属性检定原语 `check(attr, dc)`（1d20+属性 vs 难度） | 全仓无检定函数、4 处判定各写 `randf()*100<X`（Sandbox.gd:2027/2037/2059/2123）——死门首用，大地图/营地事件复用；顺势可把 4 处内联掷骰收敛（可选） |
 | **DialogueUI** | 通用对话模块（立绘+文本+选项），数据外置 json | 独立性强可并行；战场内触发＝EventEngine 加 `do: dialogue` 动作即接上（唯一接口成本，需求 §1.8 已识别） |
@@ -69,13 +69,13 @@
 - **M7 · 地点**；**M8 · 对话**（独立可与 M3+ 并行）；**M9 · 派系声望**（数据层进 WorldState 很早就能放，遭遇消费依赖 M4）。
 - **BattleState 完整版（战中 suspend）**：继续按解耦规划后置；M5 的 BattleIO 与 M1 的 uid 都是它的前置投资，做到那天成本已摊薄。
 
-## 6. 待拍板的架构决策（写第一行代码前）
+## 6. 架构决策（🔒 已拍板 2026-07-02）
 
-1. **uid 生成规则 🔒候选**：存档域自增 int（WorldState.next_uid）——建议，够用且可读；反对 uuid（无跨档合并需求）。
-2. **时间粒度**：小时制（0-23，日夜由区间映射）vs 抽象刻（如 1 天=4 刻：晨/昼/暮/夜）。影响所有恢复/冷却/事件间隔的数值表达。**建议抽象刻起步**（数值好调、EnvDB times 直接对应），需要更细再细分——加粒度比减粒度容易。
-3. **存档槽**：单槽自动 + 手动多槽？铁人模式（需求 §1.11 已提）＝强制单槽覆盖，从 SaveIO 第一版就留 flag。
-4. **战斗内时间是否消耗世界时间**（N round = X 刻？）：扫描发现 round 推进脉冲在两处重复（Sandbox.gd:1410-1416 / 1266-1273），若要挂钩先收敛成一个函数（顺手债）。
-5. **sandbox 模式与 WorldState 的关系确认**：沙盒＝自由测试场继续**不挂** campaign（临时实例、退出即弃），战役入口才建/载 WorldState——与「编辑器≠沙盒」同款边界。
+1. **uid 生成规则 🔒**：存档域自增 int（`WorldState.next_uid`），unit/item 共用一个计数器（建议采纳，未见异议；uuid 无必要）。
+2. **时间粒度 🔒（用户定）**：**按小时计数**——WorldClock ＝ 单调递增的小时计数器（本质是计数，非钟表模拟）。所有战外结算以「每小时」为节拍：伤口恢复＝每小时结算 X 点；营地职务（医生等）＝**改变每小时速率**而非一次性触发。日夜＝小时区间 → EnvDB time id 映射。
+3. **存档 🔒（用户定）**：campaign 正常存档（槽位细节 M1 实做时定，铁人 flag 从 SaveIO 第一版留）；**战中存档＝「临时存档（suspend）」语义**——只为「退出游戏后随时继续」，**不是 SL 读档**（读取即失效/覆盖式，防 save-scum）；且**明确可裁剪**（用户：麻烦的话直接不提供）→ 依赖 BattleState、继续后置，与解耦规划对齐，meta 层不等它。
+4. **战斗不消耗世界时间 🔒（用户定）**：战场日夜**冻结**——夜里进战斗全程是夜、退出后世界仍是夜；战中只有天气变（与现状代码一致：`_cur_time` 战中不变、天气机每 round tick）。含义：① 无需 round→世界时钟挂钩（round 推进两处重复的收敛降级为纯可选债）；② 退战环境复位（Sandbox.gd:360-364 硬编码 day/clear）改为**回读 WorldClock 当前 time**。
+5. **sandbox 边界 🔒**：沙盒＝自由测试场**不挂** WorldState（临时实例、退出即弃），战役入口才建/载档（建议采纳，未见异议）——与「编辑器≠沙盒」同款边界。
 
 ## 7. 扫描顺手发现的既有 bug/债（做对应模块时一并还）
 
