@@ -61,7 +61,7 @@
 
 - **✅ M0 · 文档同步**（2026-07-02）：§4 四项 + 扫描发现的第 3 处陈旧（实现现状 412/414、路线图 91）全部改写。
 - **✅ M1 · 根基（需求 §3.0，2026-07-02 完成）**：uid 体系 🔒 → WorldState 骨架 + SaveIO + campaign 存档 v1（roster 续存 HP + 时钟 + flag/声望/ironman）→ **物品实例化**（ItemInstances + Unit.equipment 改 uid + 合成视图 + **三个雷全部排掉**；`equip(模板id)` 保留为造新实例的兼容入口→原型/预设/沙盒零改动）。headless：`test_worldstate` + `test_iteminstances`（含 campaign 带词条全链往返）全 PASS。**剩**：词条生成 roll/铁匠 UI（内容层）、耐久消耗钩子（M2/M5）、重伤位字段（M5 定细则时加，schema 兼容免改档）。
-- **M2 · WorldClock（§3.1）**：时钟本体 + 调度表；恢复/冷却数值用占位（重伤细则待 §2.3）。
+- **✅ M2 · WorldClock（§3.1，2026-07-02 完成）**：`WorldClock.gd`（`advance(ws,hours)` 逐小时调度、显式收档不碰 current + 计数换算）+ 调度表首项＝恢复结算（占位速率，重伤细则待 §2.3；HP≤0 不回待 M5）+ 日夜映射数据外置（environment.json times 加 `from_hour` + `EnvDB.time_for_hour`，消费端零改动）+ Sandbox 两注入点接线（`_setup_environment` 优先级＝地图显式>战役时钟>昼；`_enter_deploy` 退战回读时钟——§6.4 的硬编码复位已清）。headless `test_worldclock` 全 PASS。推进入口（大地图移动/扎营）＝M4。
 - **M3 · EventEngine（§3.3）**：动作元数据注册表（先治编辑器/运行时分叉）→ 抽引擎、战斗侧四动作迁入 → when 扩 `timer/enter_tile` + 冷却/全局间隔 + fired 状态分层。
 - **M4 · Overworld（§3.4）**：map_type + 新场景 + 移动/扎营 + enter_tile 事件 + 日夜随时钟。
 - **M5 · 死门+重伤+BattleIO（§3.5）**：Checks 原语 → 死门插入 → BattleResult 契约 + 战后回写 roster（经验结算也挂这，需求 §1.9「经验未实现」在此闭环）。⚠️ M1 审查记下的两笔账在此清：① **双所有权**——同一 Unit 可同时在 Sandbox.roster 与 WorldState.roster，沙盒 `exit_battle` 的 `init_vitals` 回满会抹 campaign 战损，战役战斗接入时必须定「谁拥有单位、何时回写」（BattleIO 正是这个契约）；② campaign 读档路径技能 uses 按无装备 INT 初始化（战斗开局 `reset_skill_charges` 会重算，仅战前面板显示可能偏差）。

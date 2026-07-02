@@ -23,6 +23,8 @@ const TurnOrderBar := preload("res://TurnOrderBar.gd")
 const DeployPanel := preload("res://DeployPanel.gd")
 const RosterBar := preload("res://RosterBar.gd")
 const SandboxConfig := preload("res://SandboxConfig.gd")
+const WorldState := preload("res://WorldState.gd")   # 战役档静态引用（沙盒不建档 🔒；有档＝战役战斗，时钟供日夜）
+const WorldClock := preload("res://WorldClock.gd")   # 世界时钟：小时→日夜映射（战斗不耗世界时间 🔒，战中日夜冻结）
 const MapIO := preload("res://MapIO.gd")   # 地图读 / 写单一入口（与 MapEditor 共用）
 # 战斗地图：默认与地图编辑器共享同一张图（编辑器改 → 这里读到）。
 # 实际打开哪张：优先 SandboxConfig.map_path（选地图界面传入），空则用此默认；缺失/损坏回退全草原。
@@ -364,10 +366,10 @@ func _find_proto(pid: String) -> Dictionary:
 func _enter_deploy() -> void:
 	phase = "deploy"
 	battle_over = false
-	_cur_weather = "clear"   # 回布置：清天气 + 日夜（叠层停），下次开战再按地图摇/读
+	_cur_weather = "clear"   # 回布置：清天气（叠层停），下次开战再按地图摇/读
 	_weather_left = 0
-	_cur_time = "day"
-	_time_sight_mult = 1.0
+	_cur_time = _world_time()   # 日夜回读世界时钟（夜进夜出 🔒，退战不再硬编码回昼；沙盒无档＝昼）
+	_time_sight_mult = EnvDB.time_sight_mult(_cur_time)
 	_update_env_overlays()   # 停天气 VFX + 隐藏夜晚变暗
 	_clear_selection()
 	if _deploy_panel != null:
@@ -2538,11 +2540,16 @@ func _unit_hidden_by_fog(u) -> bool:
 	return not _vis_visible.has(Vector2i(u.col, u.row))
 
 # ============ 环境：日夜 + 天气（Phase 2；见 docs/感知系统.md 🔒）============
-# 开战建立环境：读地图 environment 的日夜（战中不变）+ 从 weather_table 摇开场天气，挂 sight 修正。
+# 开战建立环境：日夜优先级＝地图显式指定 > 战役时钟推导 > 默认昼（战中不变 🔒）；再从 weather_table 摇开场天气。
+# （编辑器只在用户改过日夜时才写 time 键，故 has("time")＝地图显式指定。）
 func _setup_environment() -> void:
-	_cur_time = str(_map_environment.get("time", "day"))
+	_cur_time = str(_map_environment["time"]) if _map_environment.has("time") else _world_time()
 	_roll_weather_from_table(_map_environment.get("weather_table", []), true)
 	_apply_env_modifiers()
+
+# 世界时钟推导的当前日夜；无战役档（沙盒模式 🔒）＝恒昼，与旧行为一致。
+func _world_time() -> String:
+	return WorldClock.time_of_day(WorldState.current.clock_hours) if WorldState.current != null else "day"
 
 # 从 weather_table 按 weight 摇一个天气 + 在 [min,max] 摇持续回合。表空/无效 → 晴、不自动变(_weather_left=0)。
 func _roll_weather_from_table(table, announce: bool) -> void:

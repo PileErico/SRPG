@@ -77,6 +77,30 @@ static func time_label(id: String) -> String:
 	var e = time(id)
 	return str(e.get("label", id)) if e != null else id
 
+# 当日小时(0~23) → 日夜 id：取 from_hour<=h 的最大者；h 在最早时段之前＝环回前一日最后时段（如 0~5 点＝夜）。
+# 无 from_hour 的时段不参与映射（只能被地图显式指定，如特殊剧本时段）；全无 from_hour → 第一个时段兜底。
+static func time_for_hour(h: int) -> String:
+	_ensure()
+	var best_id := ""
+	var best_from := -1
+	var wrap_id := ""    # from_hour 最大者＝跨午夜环回的归属时段
+	var wrap_from := -1
+	for e in _times:
+		if not e.has("from_hour"):
+			continue
+		var fh := int(e["from_hour"])
+		if fh <= h and fh > best_from:
+			best_from = fh
+			best_id = str(e["id"])
+		if fh > wrap_from:
+			wrap_from = fh
+			wrap_id = str(e["id"])
+	if best_id != "":
+		return best_id
+	if wrap_id != "":
+		return wrap_id
+	return str(_times[0].get("id", "day"))
+
 # 日夜的视野【最终乘子】：在天气/装备/技能等所有加减之后再乘（夜=0.5 减半）。默认 1.0。
 static func time_sight_mult(id: String) -> float:
 	var e = time(id)

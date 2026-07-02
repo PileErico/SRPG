@@ -1,5 +1,5 @@
 {
-  "_note": "环境单一数据源（天气 + 日夜）。天气：sight(视野加减,负=减,flat) + vfx(weather/individual_frames 文件夹名,48帧循环) + tint(叠层染色) + vfx_fps。日夜：sight_mult(视野【最终乘子】,在天气/装备/技能等所有加减之后再乘,夜=0.5减半) + tint(全屏变暗滤镜色,含alpha)。近期环境只影响视野(见 docs/感知系统.md Phase 2)。VFX 素材＝Alenia Studios〔CC BY 4.0，署名见 CREDITS.md〕。EnvDB 读本文件。",
+  "_note": "环境单一数据源（天气 + 日夜）。天气：sight(视野加减,负=减,flat) + vfx(weather/individual_frames 文件夹名,48帧循环) + tint(叠层染色) + vfx_fps。日夜：from_hour(时段起始的当日小时,WorldClock 小时→日夜映射用;最早时段之前环回前一日最后时段,如 0~5 点=夜;无此键的时段不参与映射、只能被地图显式指定) + sight_mult(视野【最终乘子】,在天气/装备/技能等所有加减之后再乘,夜=0.5减半) + tint(全屏变暗滤镜色,含alpha)。近期环境只影响视野(见 docs/感知系统.md Phase 2)。VFX 素材＝Alenia Studios〔CC BY 4.0，署名见 CREDITS.md〕。EnvDB 读本文件。",
   "format_version": 1,
   "weathers": [
     {"id": "clear", "label": "晴", "sight": 0, "desc": "天气晴朗，视野正常"},
@@ -10,7 +10,7 @@
     {"id": "storm", "label": "雷暴", "sight": -2, "desc": "雷暴闪电，视野受阻", "vfx": "clima_tormenta_electrica", "vfx_fps": 16}
   ],
   "times": [
-    {"id": "day", "label": "昼", "sight_mult": 1.0, "desc": "白昼，视野正常"},
-    {"id": "night", "label": "夜", "sight_mult": 0.5, "tint": "#0A16386E", "desc": "夜幕低垂，能见度减半（最终乘算，在所有加减之后）"}
+    {"id": "day", "label": "昼", "from_hour": 6, "sight_mult": 1.0, "desc": "白昼，视野正常"},
+    {"id": "night", "label": "夜", "from_hour": 18, "sight_mult": 0.5, "tint": "#0A16386E", "desc": "夜幕低垂，能见度减半（最终乘算，在所有加减之后）"}
   ]
 }
