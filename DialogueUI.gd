@@ -10,6 +10,7 @@ signal finished
 
 const DialogueDB := preload("res://DialogueDB.gd")
 const TextureCache := preload("res://TextureCache.gd")
+const FactionDB := preload("res://FactionDB.gd")   # 声望唯一写口（钳制/默认值在它那）
 
 var _dlg = null    # 当前对话定义（null=未播放/已结束）
 var _node = null   # 当前节点
@@ -98,7 +99,7 @@ func _apply_choice_effects(c: Dictionary) -> void:
 	var rp = c.get("rep", {})
 	if typeof(rp) == TYPE_DICTIONARY:
 		for f in rp:
-			_ws.reputation[str(f)] = int(_ws.reputation.get(str(f), 0)) + int(rp[f])
+			FactionDB.add_rep(_ws, str(f), int(rp[f]))   # 唯一写口：默认值兜底+[-100,100] 钳制
 
 func _finish() -> void:
 	_node = null

@@ -30,6 +30,7 @@ const Checks := preload("res://Checks.gd")           # d20 检定原语（死门
 const BattleIO := preload("res://BattleIO.gd")       # 战斗进出契约：战役模式快照进/结果出（M5）
 const SaveIO := preload("res://SaveIO.gd")           # 战役战斗结算后自动存档
 const DialogueUI := preload("res://DialogueUI.gd")   # 通用对话模块：战场内触发（do: dialogue，M8）
+const FactionDB := preload("res://FactionDB.gd")     # 派系/声望：战场内触发器改声望（do: add_rep，M9；纯沙盒无档=跳过）
 const MapIO := preload("res://MapIO.gd")   # 地图读 / 写单一入口（与 MapEditor 共用）
 # 战斗地图：默认与地图编辑器共享同一张图（编辑器改 → 这里读到）。
 # 实际打开哪张：优先 SandboxConfig.map_path（选地图界面传入），空则用此默认；缺失/损坏回退全草原。
@@ -347,6 +348,22 @@ func event_spawn_unit(proto_id: String, faction: String, col: int, row: int) -> 
 		_recompute_vision()   # 新单位立刻纳入迷雾计算（旧债：曾延迟一拍到下次移动）
 	if canvas != null:
 		canvas.queue_redraw()
+
+# 改声望 / 设 flag（do: add_rep / set_flag，M9）：战役战斗里生效（写 campaign 档）；纯沙盒无档＝提示跳过
+func event_add_rep(faction_id: String, delta: int) -> void:
+	var ws = WorldState.current
+	if ws == null:
+		_log_line("⚑ （沙盒无战役档，声望变化跳过）")
+		return
+	FactionDB.add_rep(ws, faction_id, delta)
+	_log_line("⚑ 🚩 %s 声望 %+d → %d" % [FactionDB.label(faction_id), delta, FactionDB.rep_of(ws, faction_id)])
+
+func event_set_flag(key: String, value) -> void:
+	var ws = WorldState.current
+	if ws == null:
+		_log_line("⚑ （沙盒无战役档，flag 设置跳过）")
+		return
+	ws.flags[key] = value
 
 # 开对话（do: dialogue，M8 战场内触发）：模态覆盖战斗 UI；ws 有档＝选项效果落战役、纯沙盒＝效果跳过
 func event_dialogue(dialogue_id: String) -> void:

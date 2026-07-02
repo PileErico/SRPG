@@ -11,7 +11,8 @@ extends RefCounted
 ## once 缺省值按事件类型：enter_region/enter_tile＝true（现状契约），timer＝false（周期语义）。
 ## 宿主原语约定（实现即支持该动作）：event_log(text) / event_activate_aggro(group)
 ##   / event_set_weather(weather, duration) / event_spawn_unit(proto_id, faction, col, row)
-##   / event_start_battle(map_path) / event_dialogue(dialogue_id)。
+##   / event_start_battle(map_path) / event_dialogue(dialogue_id)
+##   / event_add_rep(faction_id, delta) / event_set_flag(key, value)。
 
 const GLOBAL_EVENT_GAP_HOURS := 24   # 全局事件间隔（BB 式防世界事件刷屏）：占位值，将来挪难度/设定层
 
@@ -40,6 +41,14 @@ const ACTIONS := [
 	]},
 	{"id": "dialogue", "label": "开对话", "fields": [
 		{"key": "dialogue_id", "label": "对话id（data/dialogues.json）", "type": "text", "default": ""},
+	]},
+	{"id": "add_rep", "label": "改声望", "fields": [
+		{"key": "faction_id", "label": "派系id（data/factions.json）", "type": "text", "default": ""},
+		{"key": "delta", "label": "增减", "type": "int", "default": 0, "min": -100, "max": 100},
+	]},
+	{"id": "set_flag", "label": "设世界flag", "fields": [
+		{"key": "key", "label": "flag 键", "type": "text", "default": ""},
+		{"key": "value", "label": "值（true/false/文本）", "type": "text", "default": "true"},
 	]},
 ]
 
@@ -94,6 +103,19 @@ static func execute_action(a: Dictionary, host, fallback_text := "") -> void:
 			if did == "":
 				return
 			_host_call(host, "event_dialogue", [did])
+		"add_rep":
+			var fid := str(a.get("faction_id", ""))
+			if fid == "":
+				return
+			_host_call(host, "event_add_rep", [fid, int(a.get("delta", 0))])
+		"set_flag":
+			var key := str(a.get("key", ""))
+			if key == "":
+				return
+			# "true"/"false" 转 bool（flag 主流形态）；其余按原文本存——单一解析处，宿主只管存
+			var raw := str(a.get("value", "true"))
+			var val = true if raw == "true" else (false if raw == "false" else raw)
+			_host_call(host, "event_set_flag", [key, val])
 		var unknown:
 			push_warning("EventEngine：未知动作「%s」跳过" % unknown)
 

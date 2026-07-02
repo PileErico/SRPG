@@ -21,6 +21,7 @@ const SandboxConfig := preload("res://SandboxConfig.gd")
 const JobDB := preload("res://JobDB.gd")   # 营地职务注册表（M6 框架）
 const DialogueUI := preload("res://DialogueUI.gd")   # 通用对话模块（M8）
 const LocationDB := preload("res://LocationDB.gd")   # 地点类型/服务注册表（M7）
+const FactionDB := preload("res://FactionDB.gd")     # 派系/声望注册表（M9）
 
 const MAP_PATH := "res://maps/overworld/world.json"
 const HOURS_PER_COST := 2    # 占位：1 点地形通行成本 ＝ 2 小时行程（数值层后调）
@@ -250,11 +251,31 @@ func _travel(path: Array) -> void:
 	if _loc_by_cell.has(dest):
 		_open_location_panel(_loc_by_cell[dest])
 
-# 一格落位后的事件评估：enter_tile（含概率/冷却/全局间隔）+ timer（时钟刚被推进）
+# 一格落位后的事件评估：地图触发器 enter_tile + 敌对派系遭伏（M9 伪触发器）+ timer（时钟刚被推进）
 func _check_cell_events(cell: Vector2i) -> void:
 	var ws = WorldState.current
 	EventEngine.check_enter_tile(_map_triggers, cell, "player", ws.event_fired, self, ws)
+	EventEngine.check_enter_tile(_hostile_ambush_triggers(), cell, "player", ws.event_fired, self, ws)
 	EventEngine.check_timer(_map_triggers, ws, self)
+
+# 敌对派系遭伏（M9）：把当前敌对的派系转成 enter_tile 伪触发器喂 EventEngine——
+# 复用同一套 chance/冷却闸门（tid 稳定＝"faction_ambush_<id>"，冷却随档持久）；参数全在 factions.json。
+func _hostile_ambush_triggers() -> Array:
+	var out := []
+	var ws = WorldState.current
+	for f in FactionDB.all_factions():
+		var fid := str(f["id"])
+		if not FactionDB.hostile(ws, fid):
+			continue
+		var amb = f.get("ambush", {})
+		if typeof(amb) != TYPE_DICTIONARY or amb.is_empty():
+			continue
+		out.append({"id": "faction_ambush_%s" % fid, "label": "%s遭伏" % FactionDB.label(fid),
+			"when": {"event": "enter_tile", "once": false,
+				"chance": float(amb.get("chance", 10)), "cooldown_hours": int(amb.get("cooldown_hours", 24))},
+			"do": [{"action": "show_message", "text": str(amb.get("text", "遭到伏击！"))},
+				{"action": "start_battle", "map": str(amb.get("battle_map", "res://maps/sandbox.json"))}]})
+	return out
 
 # 扎营：原地休整推进时钟（恢复结算走 WorldClock 调度表；临时据点/职务＝M6）
 func _on_camp() -> void:
@@ -273,6 +294,22 @@ func _on_camp() -> void:
 
 func event_log(text: String) -> void:
 	_log_line("⚑ %s" % text)
+
+# 改声望（do: add_rep，M9）：写口在 FactionDB（默认值兜底+钳制）
+func event_add_rep(faction_id: String, delta: int) -> void:
+	var ws = WorldState.current
+	if ws == null:
+		return
+	FactionDB.add_rep(ws, faction_id, delta)
+	_log_line("🚩 %s 声望 %+d → %d%s" % [FactionDB.label(faction_id), delta,
+		FactionDB.rep_of(ws, faction_id), "（敌对！）" if FactionDB.hostile(ws, faction_id) else ""])
+
+# 设世界 flag（do: set_flag，M9）：任务/事件状态的通用兜底存储
+func event_set_flag(key: String, value) -> void:
+	var ws = WorldState.current
+	if ws == null:
+		return
+	ws.flags[key] = value
 
 # 开对话（do: dialogue）：模态覆盖大地图；行进中触发＝_travel 暂停等 finished（M8）
 func event_dialogue(dialogue_id: String) -> void:
@@ -460,6 +497,10 @@ func _build_ui() -> void:
 	jobs_b.text = "🏕 职务"
 	jobs_b.pressed.connect(_open_jobs_panel)
 	top.add_child(jobs_b)
+	var rep_b := Button.new()
+	rep_b.text = "🚩 声望"
+	rep_b.pressed.connect(_open_rep_panel)
+	top.add_child(rep_b)
 	var menu_b := Button.new()
 	menu_b.text = "返回菜单"
 	menu_b.pressed.connect(_on_back_to_menu)
@@ -562,6 +603,44 @@ func _assign_job(jid: String, uid: int) -> void:
 	_log_line("🏕 %s ← %s" % [JobDB.job_label(jid), (holder.unit_name if holder != null else "空缺")])
 	_autosave()
 	_open_jobs_panel()   # 重建面板（兼任撤职后其它行下拉同步）
+
+# ============ 派系声望（M9）：数值存 ws.reputation、读写口在 FactionDB；敌对＝大地图遭伏 ============
+
+var _rep_popup: PopupPanel
+
+# 声望面板：每派系一行（名称·派系色 + 数值 + 敌对标记）。改动入口＝对话选项/事件动作，面板只读。
+func _open_rep_panel() -> void:
+	if _rep_popup != null:
+		_rep_popup.queue_free()
+	_rep_popup = PopupPanel.new()
+	add_child(_rep_popup)
+	var v := VBoxContainer.new()
+	v.custom_minimum_size = Vector2(300, 0)
+	v.add_theme_constant_override("separation", 6)
+	_rep_popup.add_child(v)
+	var title := Label.new()
+	title.text = "派系声望（低于阈值＝敌对，大地图会遭袭击）"
+	v.add_child(title)
+	var ws = WorldState.current
+	for f in FactionDB.all_factions():
+		var fid := str(f["id"])
+		var row := HBoxContainer.new()
+		var name_l := Label.new()
+		name_l.text = FactionDB.label(fid)
+		name_l.add_theme_color_override("font_color", FactionDB.color(fid))
+		name_l.custom_minimum_size = Vector2(110, 0)
+		row.add_child(name_l)
+		var val_l := Label.new()
+		val_l.text = str(FactionDB.rep_of(ws, fid))
+		val_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(val_l)
+		if FactionDB.hostile(ws, fid):
+			var host_l := Label.new()
+			host_l.text = "⚔ 敌对"
+			host_l.add_theme_color_override("font_color", Color(0.9, 0.45, 0.4))
+			row.add_child(host_l)
+		v.add_child(row)
+	_rep_popup.popup_centered()
 
 # 返回菜单：先自动存档（current 由 StartMenu._ready 统一清——「继续」从磁盘重读，保留只会泄漏进沙盒）
 func _on_back_to_menu() -> void:
