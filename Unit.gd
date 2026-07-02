@@ -33,6 +33,7 @@ var faction: String:
 			tags.append(value)
 
 # —— 身份 / 养成（非战斗数值，显示在角色状态页左区）——
+var uid := 0                 # 存档域唯一 id 🔒（WorldState.mint_uid 分配，unit/item 共用计数器；0=未分配＝临时对象，如沙盒测试单位）
 var level := 1               # 等级
 var exp := 0                 # 当前经验
 var exp_max := 100           # 升级所需经验

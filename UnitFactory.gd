@@ -27,6 +27,7 @@ static func make_unit(proto: Dictionary, fac: String, col: int, row: int):
 		u.stats["speed"] = int(proto["speed"])
 	u.level = int(proto.get("level", 1))
 	u.exp = int(proto.get("exp", 0))
+	u.exp_max = int(proto.get("exp_max", u.exp_max))
 	var tr := str(proto.get("trait", ""))
 	if tr != "":
 		u.set_trait(tr)
@@ -89,12 +90,35 @@ static func unit_to_proto(u) -> Dictionary:
 		"four": {"STR": u.stats.get("STR", 5), "DEX": u.stats.get("DEX", 5), "INT": u.stats.get("INT", 5), "STA": u.stats.get("STA", 5)},
 		"level": u.level,
 		"exp": u.exp,
+		"exp_max": u.exp_max,
 		"trait": u.trait_id,
 		"equip": equip_ids,
 		"skills": skill_lv,
 		"stats": stat_ov,
 		"_preset": true,
 	}
+
+# ============ campaign 层（战役续存，供 WorldState 调用）============
+# campaign 条目 = proto（定义/养成）⊕ 跨战运行态（uid / 当前 HP / 当前护甲）。
+# 战斗内瞬态（AP/位置/buff/冷却）不入——那是战中临时存档（BattleState）的事。
+static func unit_to_campaign(u) -> Dictionary:
+	return {
+		"uid": u.uid,
+		"proto": unit_to_proto(u),
+		"hp": int(u.stats.get("HP", 0)),
+		"armor": int(u.stats.get("armor", 0)),
+	}
+
+# 读档复原：make_unit 会 init_vitals 注满 —— 之后再覆写 HP/armor（绕开注满，战损跨存档保留）。
+static func unit_from_campaign(entry: Dictionary):
+	var proto = entry.get("proto", {})
+	if typeof(proto) != TYPE_DICTIONARY:
+		proto = {}
+	var u = make_unit(proto, str(proto.get("default_faction", "player")), -1, -1)   # col/row=-1＝待命（非战斗中）
+	u.uid = int(entry.get("uid", 0))
+	u.stats["HP"] = clampi(int(entry.get("hp", u.stats.get("HP", 0))), 0, int(u.effective_stat("HP_max")))
+	u.stats["armor"] = clampi(int(entry.get("armor", u.stats.get("armor", 0))), 0, int(u.effective_stat("armor_max")))
+	return u
 
 # 读 unit_prototypes.json 的内置原型列表
 static func all_prototypes() -> Array:
