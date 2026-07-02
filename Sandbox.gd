@@ -8,8 +8,7 @@ const UnitFactory := preload("res://UnitFactory.gd")   # 造单位/序列化单�
 const CombatResolver := preload("res://CombatResolver.gd")   # 伤害分量化 + 减伤链（纯数学）
 const HexGrid := preload("res://HexGrid.gd")               # 纯六边形几何前置（cube 互转/距离/邻居/连线/环）
 const SkillDB := preload("res://SkillDB.gd")
-const ItemDB := preload("res://ItemDB.gd")                  # 物品模板注册表
-const ItemInstances := preload("res://ItemInstances.gd")    # 物品实例库（悬停单位卡经合成视图取武器）
+const ItemInstances := preload("res://ItemInstances.gd")    # 物品实例门面（悬停单位卡经合成视图取武器）
 const TextureCache := preload("res://TextureCache.gd")      # 立绘/图标加载 + 缓存单一入口
 
 # element → 抗性中文标签（战斗记录用）

@@ -1,20 +1,21 @@
 extends RefCounted
-## Campaign 层聚合根（战斗外世界状态 single source）：时钟 / roster / 声望 / 世界 flag。
+## Campaign 层聚合根（战斗外世界状态 single source）：时钟 / roster / 物品实例库 / 声望 / 世界 flag。
 ## 纯数据、不认识任何场景节点——场景（Overworld/营地/战斗入口）是它的消费者。
 ## 落盘经 SaveIO（user://saves/）；序列化套路同地图 v3：save_version + 读端 .get 兜底。
 ## 生命周期：`WorldState.current`＝当前战役（静态引用，跨 change_scene 存活，仿 SandboxConfig 范式）；
-##          null＝无战役——沙盒/编辑器模式不建档、不落盘 🔒。
+##          null＝无战役——沙盒/编辑器模式不建档、不落盘 🔒。**物品实例库归属本实例**（item_instances 成员），
+##          ItemInstances 门面按 current 路由——换档=换 current，无全局副作用（读档预览安全）。
 ## uid 铁律 🔒：unit / item 实例共用**一个**存档域自增计数器（mint_uid）；0＝未分配（临时对象）。
 ## 时间铁律 🔒：clock_hours＝单调小时计数器（战斗不消耗世界时间；仅大地图移动/扎营推进）。
 ## 用法：const WorldState := preload("res://WorldState.gd") → WorldState.current / WorldState.mint_uid()。
 
 const UnitFactory := preload("res://UnitFactory.gd")
-const ItemInstances := preload("res://ItemInstances.gd")   # 物品实例整库随档序列化（roster 只存 uid 引用）
+const ItemInstances := preload("res://ItemInstances.gd")
 
 const SAVE_VERSION := 1
 
 static var current = null           # 当前战役（WorldState 实例）或 null
-static var _transient_next_uid := 1 # 无战役时的临时计数（沙盒等；不落盘、载档即被替换）
+static var _transient_next_uid := 1 # 无战役时的临时计数（沙盒等；与档内 uid 域天然隔离——库也各是一个）
 
 var save_version := SAVE_VERSION
 var next_uid := 1        # 存档域自增 uid 计数器（unit/item 共用）
@@ -23,8 +24,9 @@ var ironman := false     # 铁人模式 flag（强制单槽覆盖；SaveIO 第�
 var flags := {}          # 世界 flag {key: value}——任务/事件状态起步先用它兜底
 var reputation := {}     # 派系声望 {faction_id: int}
 var roster := []         # 花名册：活 Unit 对象列表（存档时经 unit_to_campaign 快照、读档重建）
+var item_instances := {} # 本档物品实例库 {uid(int): inst}——ItemInstances 门面在 current==self 时路由到这
 
-# 分配一个存档域唯一 uid。有战役走档内计数器；无战役给临时 uid（不持久、无碰撞风险——载档会整体替换）。
+# 分配一个存档域唯一 uid。有战役走档内计数器；无战役给临时 uid（临时库独立，不与任何档相交）。
 static func mint_uid() -> int:
 	if current != null:
 		var id: int = current.next_uid
@@ -34,13 +36,14 @@ static func mint_uid() -> int:
 	_transient_next_uid += 1
 	return tid
 
-# 单位入册：未分配 uid 的补发，再进 roster（重复入册忽略）。
+# 单位入册：uid 为 0 / 与册内撞号则补发；装备实例若来自临时库（沙盒造的）则收编迁移进本档库。
 func add_to_roster(u) -> void:
 	if u == null or roster.has(u):
 		return
-	if u.uid == 0:
+	if u.uid == 0 or roster_by_uid(u.uid) != null:
 		u.uid = next_uid
 		next_uid += 1
+	_adopt_equipment(u)
 	roster.append(u)
 
 func roster_by_uid(uid: int):
@@ -49,12 +52,39 @@ func roster_by_uid(uid: int):
 			return u
 	return null
 
+# 收编：单位装备引用的实例若不在本档库（来自沙盒 transient 域），迁移进来并重铸 uid（修正 source 同步重写）。
+func _adopt_equipment(u) -> void:
+	var missing := {}
+	for s in u.equipment:
+		var iuid: int = int(u.equipment[s])
+		if iuid > 0 and not item_instances.has(iuid):
+			missing[iuid] = true
+	for old_uid in missing:
+		var inst = ItemInstances.take_transient(old_uid)
+		if inst == null:
+			push_warning("WorldState 收编：单位「%s」的装备实例 %d 无处可寻，装备引用保留但档内无实体（读档后将丢失）" % [u.unit_name, old_uid])
+			continue
+		var new_uid := next_uid
+		next_uid += 1
+		inst["uid"] = new_uid
+		item_instances[new_uid] = inst
+		u.remap_equip_uid(old_uid, new_uid)
+
 # ============ 序列化（SaveIO 调用） ============
 
+# 导出＝**roster 可达的实例才落盘**（GC：换装顶掉的孤儿/战斗临时单位造的实例不进档，防存档单调膨胀）。
+# 将来加背包/仓库容器时，把它们的引用并进 reachable 即可。
 func to_dict() -> Dictionary:
 	var roster_json := []
+	var reachable := {}
 	for u in roster:
 		roster_json.append(UnitFactory.unit_to_campaign(u))
+		for s in u.equipment:
+			reachable[int(u.equipment[s])] = true
+	var items_json := []
+	for iuid in item_instances:
+		if reachable.has(int(iuid)):
+			items_json.append((item_instances[iuid] as Dictionary).duplicate(true))
 	return {
 		"save_version": save_version,
 		"next_uid": next_uid,
@@ -62,10 +92,12 @@ func to_dict() -> Dictionary:
 		"ironman": ironman,
 		"flags": flags.duplicate(true),
 		"reputation": reputation.duplicate(true),
-		"item_instances": ItemInstances.to_json(),
+		"item_instances": items_json,
 		"roster": roster_json,
 	}
 
+# 只构建、不激活：库装进 ws 自己的成员（不碰全局/当前档）。roster 重建期间临时把 current 指向 ws
+# ——单位重挂装备/旧档回退造新件的 mint 与实例路由都落在本档域（结束即还原，不违反「不自动写 current」契约）。
 static func from_dict(d: Dictionary):
 	var ws = new()
 	ws.save_version = int(d.get("save_version", SAVE_VERSION))
@@ -76,8 +108,20 @@ static func from_dict(d: Dictionary):
 	ws.flags = fl if typeof(fl) == TYPE_DICTIONARY else {}
 	var rep = d.get("reputation", {})
 	ws.reputation = rep if typeof(rep) == TYPE_DICTIONARY else {}
-	ItemInstances.load_json(d.get("item_instances", []))   # 必须先于 roster：单位重挂装备要在库里找到实例
-	for e in d.get("roster", []):
-		if typeof(e) == TYPE_DICTIONARY:
-			ws.roster.append(UnitFactory.unit_from_campaign(e))
+	ws.item_instances = ItemInstances.parse_json(d.get("item_instances", []))
+	var prev = current
+	current = ws
+	var ro = d.get("roster", [])
+	if typeof(ro) == TYPE_ARRAY:
+		for e in ro:
+			if typeof(e) == TYPE_DICTIONARY:
+				ws.roster.append(UnitFactory.unit_from_campaign(e))
+	current = prev
+	# 计数器自愈：兜住 next_uid 缺失/被手改小于存量 uid 的档（否则 mint 撞号会被 create 跳号、但 unit uid 仍可能重复）
+	var mx: int = ws.next_uid
+	for iuid in ws.item_instances:
+		mx = maxi(mx, int(iuid) + 1)
+	for u in ws.roster:
+		mx = maxi(mx, int(u.uid) + 1)
+	ws.next_uid = mx
 	return ws

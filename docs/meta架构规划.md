@@ -64,7 +64,7 @@
 - **M2 · WorldClock（§3.1）**：时钟本体 + 调度表；恢复/冷却数值用占位（重伤细则待 §2.3）。
 - **M3 · EventEngine（§3.3）**：动作元数据注册表（先治编辑器/运行时分叉）→ 抽引擎、战斗侧四动作迁入 → when 扩 `timer/enter_tile` + 冷却/全局间隔 + fired 状态分层。
 - **M4 · Overworld（§3.4）**：map_type + 新场景 + 移动/扎营 + enter_tile 事件 + 日夜随时钟。
-- **M5 · 死门+重伤+BattleIO（§3.5）**：Checks 原语 → 死门插入 → BattleResult 契约 + 战后回写 roster（经验结算也挂这，需求 §1.9「经验未实现」在此闭环）。
+- **M5 · 死门+重伤+BattleIO（§3.5）**：Checks 原语 → 死门插入 → BattleResult 契约 + 战后回写 roster（经验结算也挂这，需求 §1.9「经验未实现」在此闭环）。⚠️ M1 审查记下的两笔账在此清：① **双所有权**——同一 Unit 可同时在 Sandbox.roster 与 WorldState.roster，沙盒 `exit_battle` 的 `init_vitals` 回满会抹 campaign 战损，战役战斗接入时必须定「谁拥有单位、何时回写」（BattleIO 正是这个契约）；② campaign 读档路径技能 uses 按无装备 INT 初始化（战斗开局 `reset_skill_charges` 会重算，仅战前面板显示可能偏差）。
 - **M6 · 营地职务/人员轮替（§3.6）**：职务槽 + 加成载体（待定 §2.2，先框架）。
 - **M7 · 地点**；**M8 · 对话**（独立可与 M3+ 并行）；**M9 · 派系声望**（数据层进 WorldState 很早就能放，遭遇消费依赖 M4）。
 - **BattleState 完整版（战中 suspend）**：继续按解耦规划后置；M5 的 BattleIO 与 M1 的 uid 都是它的前置投资，做到那天成本已摊薄。

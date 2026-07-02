@@ -5,8 +5,7 @@ extends RefCounted
 ## 属性口径见 docs/单位系统设计.md「第一层属性」：默认值可为 0（面板 + 修正）。
 
 const STANCE_TAGS := ["player", "ally", "enemy", "neutral"]   # 阵营立场 tag
-const ItemDB := preload("res://ItemDB.gd")                   # 物品模板注册表（模板查表）
-const ItemInstances := preload("res://ItemInstances.gd")     # 物品实例库（每件装备独立实例；消费合成视图）
+const ItemInstances := preload("res://ItemInstances.gd")     # 物品实例门面（每件装备独立实例；消费合成视图）
 const TraitDB := preload("res://TraitDB.gd")                 # 特性注册表（特性查表）
 const SkillDB := preload("res://SkillDB.gd")                 # 技能注册表（技能查表）
 const EquipSlots := preload("res://EquipSlots.gd")          # 槽位 / 槽位资格（tag 驱动装备资格）
@@ -230,18 +229,18 @@ func set_trait(id: String) -> void:
 # 装备（模板 id 便捷入口）：从模板**造新实例**再装——原型/预设/沙盒路径零改动。
 # 装失败回收孤儿实例。成功 true。
 func equip(item_id: String) -> bool:
-	var uid := ItemInstances.create(item_id)
-	if uid == 0:
+	var iuid := ItemInstances.create(item_id)
+	if iuid == 0:
 		return false
-	if equip_instance(uid):
+	if equip_instance(iuid):
 		return true
-	ItemInstances.destroy(uid)
+	ItemInstances.destroy(iuid)
 	return false
 
-# 装备一件**已存在的实例**（按 uid）；双手武器占 main_hand+off_hand（同一 uid）。
-# campaign 读档重挂 / 将来背包·铁匠都走这条。
-func equip_instance(uid: int) -> bool:
-	var item = ItemInstances.view(uid)
+# 装备一件**已存在的实例**（按实例 iuid）；双手武器占 main_hand+off_hand（同一 iuid）。
+# campaign 读档重挂 / 将来背包·铁匠都走这条。目标槽被天生武器占用＝装备失败（innate 永不被顶）。
+func equip_instance(iuid: int) -> bool:
+	var item = ItemInstances.view(iuid)
 	if item == null or not can_equip(item):
 		return false
 	var primary := str(item.get("slot", ""))
@@ -252,28 +251,47 @@ func equip_instance(uid: int) -> bool:
 	var slots := ["main_hand", "off_hand"] if item.get("two_handed", false) else [primary]
 	for s in slots:
 		if equipment.has(s):
+			var occ = ItemInstances.view(int(equipment[s]))
+			if occ != null and occ.get("innate", false):
+				return false   # innate 占槽不可顶（unequip 对 innate 早退，硬写会泄漏其烘焙修正）
+	for s in slots:
+		if equipment.has(s):
 			unequip(s)
 	for s in slots:
-		equipment[s] = uid
-	_apply_item_mods(item, uid)
+		equipment[s] = iuid
+	_apply_item_mods(item, iuid)
+	recompute_derived()   # 装备/词条可改四维 → 派生属性即时传导（与 set_trait 对齐）
 	return true
 
-# 卸下某槽的物品（双手武器从任一槽卸都连带清两槽 + 去掉它的修正，按 uid 配对）。
+# 卸下某槽的物品（双手武器从任一槽卸都连带清两槽 + 去掉它的修正，按实例 iuid 配对）。
 # 天生武器（innate）永不卸下/缴械——直接忽略。卸下不销毁实例（将来进背包）。
 func unequip(slot: String) -> void:
 	if not equipment.has(slot):
 		return
-	var uid: int = int(equipment[slot])
-	var item = ItemInstances.view(uid)
+	var iuid: int = int(equipment[slot])
+	var item = ItemInstances.view(iuid)
 	if item != null and item.get("innate", false):
 		return
-	remove_modifiers_by_source_prefix("equip:%d:" % uid)
+	remove_modifiers_by_source_prefix("equip:%d:" % iuid)
 	var to_clear := []
 	for s in equipment:
-		if int(equipment[s]) == uid:
+		if int(equipment[s]) == iuid:
 			to_clear.append(s)
 	for s in to_clear:
 		equipment.erase(s)
+	recompute_derived()   # 对称：卸下也即时传导四维派生
+
+# 收编迁移用（WorldState._adopt_equipment）：装备实例换 uid——equipment 槽值 + 修正 source 前缀同步重写。
+func remap_equip_uid(old_uid: int, new_uid: int) -> void:
+	for s in equipment:
+		if int(equipment[s]) == old_uid:
+			equipment[s] = new_uid
+	var oldp := "equip:%d:" % old_uid
+	var newp := "equip:%d:" % new_uid
+	for m in modifiers:
+		var src := str(m.get("source", ""))
+		if src.begins_with(oldp):
+			m["source"] = newp + src.substr(oldp.length())
 
 # 无武器时的基础攻击（徒手）；装了武器则用其 attack skill（兑现“换武器=换攻击”）。
 const UNARMED_ATTACK := {
@@ -310,14 +328,14 @@ func basic_attack() -> Dictionary:
 			return item["attack"]
 	return UNARMED_ATTACK
 
-# 挂装备修正：每条 mod 唯一 source（"equip:<uid>:<序号>"）——同件装备的模板 mod 与词条 mod
+# 挂装备修正：每条 mod 唯一 source（"equip:<实例iuid>:<序号>"）——同件装备的模板 mod 与词条 mod
 # 即使同 stat 同 op 也各自生效（effective_stat 的「同 source 去重取高」只该压重复 buff，不该吃词条）。
-func _apply_item_mods(item: Dictionary, uid: int) -> void:
+func _apply_item_mods(item: Dictionary, iuid: int) -> void:
 	var label := str(item.get("name", ""))
 	var idx := 0
 	for m in item.get("mods", []):
 		var mod: Dictionary = m.duplicate()
-		mod["source"] = "equip:%d:%d" % [uid, idx]
+		mod["source"] = "equip:%d:%d" % [iuid, idx]
 		mod["source_label"] = label   # 人类可读来源名（tooltip 用）
 		modifiers.append(mod)
 		idx += 1

@@ -9,7 +9,6 @@ extends Control
 ## 打开：open(unit)；关闭：ESC / 点卡片外的遮罩（不设关闭按钮）。
 
 const DiagonalFrame := preload("res://DiagonalFrame.gd")
-const ItemDB := preload("res://ItemDB.gd")
 const ItemInstances := preload("res://ItemInstances.gd")   # 装备槽经合成视图取物品（equipment 存实例 uid）
 const ItemSlot := preload("res://ItemSlot.gd")
 const TraitDB := preload("res://TraitDB.gd")

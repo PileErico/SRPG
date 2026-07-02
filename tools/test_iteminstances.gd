@@ -94,7 +94,8 @@ func _initialize() -> void:
 	var eq: Array = proto.get("equip", [])
 	ck(eq.has("long_sword") and eq.has("breast_plate") and eq.size() == 2, "proto.equip=模板 id 各一条")
 
-	# 9) campaign 带词条全链往返（存 → 清库模拟重启 → 读 → 实例/词条/装配保真）
+	# 9) campaign 带词条全链往返（存 → 换会话 → 读 → 激活 → 实例/词条/装配保真）+ 存档 GC
+	ItemInstances.clear()   # 清临时域：档内与临时是两个独立 uid 域、数值可重合，先清避免同号干扰断言
 	var ws = WorldState.new()
 	WorldState.current = ws
 	var u6 = UnitFactory.make_unit({"name": "队长", "four": {"STR": 8, "DEX": 6, "INT": 4, "STA": 7}}, "player", -1, -1)
@@ -102,15 +103,19 @@ func _initialize() -> void:
 	var sword := ItemInstances.create("long_sword")
 	ItemInstances.add_affix(sword, {"name": "锋利", "mods": [{"stat": "atk", "op": "flat", "value": 3}]})
 	ck(u6.equip_instance(sword), "队长装词条剑")
+	var orphan := ItemInstances.create("wood_kite_shield")   # 无人穿的孤儿——存档 GC 应丢弃
+	ck(orphan > 0, "孤儿实例已造")
 	var atk_before: float = u6.effective_stat_f("atk")
 	u6.stats["HP"] = 5   # 带伤
 	ck(SaveIO.save_campaign(ws, SLOT), "存档")
-	# 模拟重启：清空运行态
+	# 模拟重启：脱离战役（库归属 ws，current 置空即切走，无需清库）
 	WorldState.current = null
-	ItemInstances.clear()
 	var ld = SaveIO.load_campaign(SLOT)
 	ck(ld != null and ld.roster.size() == 1, "读档 roster")
+	# 无副作用：读档只构建、不激活——当前（无战役）域看不到档内实例
+	ck(ItemInstances.view(sword) == null, "未激活前档内实例不可见（from_dict 无全局副作用）")
 	if ld != null and ld.roster.size() == 1:
+		WorldState.current = ld   # 激活＝换 current，库随之切换
 		var r = ld.roster_by_uid(u6.uid)
 		ck(r != null, "按 uid 找回队长")
 		if r != null:
@@ -118,9 +123,51 @@ func _initialize() -> void:
 			ck((ItemInstances.view(sword)["affixes"] as Array).size() == 1, "词条随档还原")
 			ck(absf(r.effective_stat_f("atk") - atk_before) < 0.001, "含词条的有效攻击一致（要 %.1f 实得 %.1f）" % [atk_before, r.effective_stat_f("atk")])
 			ck(int(r.stats["HP"]) == 5, "战损 HP 保留")
+		ck(not ItemInstances.exists(orphan), "孤儿实例被存档 GC 丢弃（档只存 roster 可达）")
 	SaveIO.delete_slot(SLOT)
 	WorldState.current = null
-	ItemInstances.clear()
+
+	# 10) innate 占槽守卫：天生武器不可被顶（否则其烘焙修正泄漏）
+	var u7 = _fresh_unit("狼人")
+	u7.tags.append("char_desmond")
+	ck(u7.equip("Desmond_Claw"), "装天生爪")
+	var claw_uid := int(u7.equipment.get("main_hand", 0))
+	var atk_claw: float = u7.effective_stat_f("atk")
+	ck(not u7.equip("long_sword"), "长剑顶天生爪被拒")
+	ck(int(u7.equipment.get("main_hand", 0)) == claw_uid, "爪仍在原槽")
+	ck(absf(u7.effective_stat_f("atk") - atk_claw) < 0.001, "修正无泄漏/无重复")
+
+	# 11) 收编迁移：沙盒（无战役）装备的单位入册 → 实例迁进档内库、修正 source 重写、数值不变
+	WorldState.current = null
+	var u8 = _fresh_unit("新兵")
+	ck(u8.equip("long_sword"), "沙盒域装剑")
+	var t_uid := int(u8.equipment["main_hand"])
+	var atk_t: float = u8.effective_stat_f("atk")
+	var ws2 = WorldState.new()
+	WorldState.current = ws2
+	ws2.add_to_roster(u8)
+	var new_iuid := int(u8.equipment["main_hand"])
+	ck(ws2.item_instances.has(new_iuid), "实例已迁入档内库")
+	ck(ItemInstances.view(new_iuid) != null and str(ItemInstances.view(new_iuid)["tpl_id"]) == "long_sword", "迁移后视图可解析")
+	ck(absf(u8.effective_stat_f("atk") - atk_t) < 0.001, "迁移后修正数值不变（source 重写成功）")
+	WorldState.current = null
+	ck(not ItemInstances.exists(t_uid), "临时库原实例已被取走")
+	WorldState.current = null
+
+	# 12) 读档健壮性：roster:null 不炸；计数器自愈（next_uid 被改小于存量 uid 的档）
+	var bad = WorldState.from_dict({"roster": null})
+	ck(bad != null and bad.roster.is_empty(), "roster:null 安全返回空册")
+	var heal = WorldState.from_dict({"next_uid": 1,
+		"item_instances": [{"uid": 5, "tpl_id": "long_sword"}],
+		"roster": [{"uid": 3, "proto": {"name": "残卷"}, "hp": 1, "armor": 0, "equip_uids": {}}]})
+	ck(heal.next_uid == 6, "计数器自愈到 max(uid)+1（实得 %d）" % heal.next_uid)
+
+	# 13) slot 名净化：路径穿越被拒
+	ck(not SaveIO.save_campaign(WorldState.new(), "../evil"), "save ../ 被拒")
+	ck(SaveIO.load_campaign("..\\x") == null, "load ..\\ 被拒")
+	ck(not SaveIO.delete_slot("a/b"), "delete 带分隔符被拒")
+
+	WorldState.current = null
 
 	if _fail == 0:
 		print("=== 全 PASS ===")

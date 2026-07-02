@@ -1,66 +1,92 @@
 extends RefCounted
-## 物品实例库（single source）：每件装备一个独立实例——词条/耐久/状态修正/强化次数的载体。
-## `ItemDB` 降为**纯模板源**；战斗/UI 一律消费**合成视图 `view(uid)`**＝模板 ⊕ 实例（词条并进 mods）。
+## 物品实例的**静态门面**：每件装备一个独立实例——词条/耐久/状态修正/强化次数的载体。
+## `ItemDB` 是**纯模板源**；战斗/UI 一律消费**合成视图 `view(iuid)`**＝模板深拷 ⊕ 词条并入 mods。
 ## 实例形：{uid:int, tpl_id:String, affixes:[{name, mods:[{stat,op,value}], nature?}], durability:int(-1=未启用),
 ##          condition:String(""=无状态修正), enhance_count:int}
-## uid 走 WorldState.mint_uid（unit/item 共用存档域计数器 🔒；惰性 load 断 preload 环）。
-## 生命周期：静态库（战斗层不必认识 campaign）；campaign 存读档由 WorldState 序列化/整库替换；
-##          沙盒模式的临时实例同库存放、不落盘（新建/读档 load_json 会先 clear）。
+##
+## 存储归属 🔒（2026-07-02 审查后定）：**实例库数据归属 WorldState 实例**（`current.item_instances` 成员字典），
+## 本门面按 `WorldState.current` 路由——current==null（沙盒等无战役模式）时路由到独立的 `_transient` 临时库
+## （不落盘、与任何档的 uid 域天然隔离）。读档/新建战役＝换 current，库随之切换，无全局副作用。
+## uid 走 WorldState.mint_uid（unit/item 共用存档域计数器 🔒；惰性 load 断 preload 环——
+## ⚠️ 导出预设须「导出全部资源」，否则字符串 load 不被依赖扫描追踪，见 docs/架构.md）。
+##
+## 模板热改语义 🔒：view() 实时读当前模板（编辑器改模板→tooltip 立即变），但已装单位的修正是**装备时烘焙**的
+## ——运行期不重挂、**读档/重新装备时按新模板生效**；删模板前应确认无实例引用（否则该实例 view 为 null）。
 ## 用法：const ItemInstances := preload("res://ItemInstances.gd") → create/view/add_affix…
 
 const ItemDB := preload("res://ItemDB.gd")
 
-static var _instances := {}   # uid(int) -> instance dict
+static var _transient := {}   # current==null 域的临时实例库（uid->inst；不落盘）
 static var _ws_script = null  # WorldState 惰性引用（避免 ItemInstances→WorldState→UnitFactory→Unit→ItemInstances 的 preload 环）
 
-static func _mint_uid() -> int:
+static func _ws():
 	if _ws_script == null:
 		_ws_script = load("res://WorldState.gd")
-	return _ws_script.mint_uid()
+		if _ws_script == null:
+			push_error("ItemInstances: 载入 WorldState.gd 失败（导出包未含该资源？导出预设须 export all resources）")
+	return _ws_script
 
-# 从模板造一个新实例，返回 uid（模板不存在返回 0）。
+# 当前生效的实例库：有战役→该档的成员库；无战役→临时库。
+static func _store() -> Dictionary:
+	var ws = _ws().current
+	return ws.item_instances if ws != null else _transient
+
+# 从模板造一个新实例，返回 uid（模板不存在返回 0）。撞号防御：mint 单调，跳号直到空位
+# （正常不会撞；兜手编档/计数器被改小的污染场景，宁跳号不静默覆盖）。
 static func create(tpl_id: String) -> int:
 	if ItemDB.get_item(tpl_id) == null:
 		return 0
-	var uid := _mint_uid()
-	_instances[uid] = {
-		"uid": uid, "tpl_id": tpl_id,
+	var store := _store()
+	var iuid: int = _ws().mint_uid()
+	while store.has(iuid):
+		iuid = _ws().mint_uid()
+	store[iuid] = {
+		"uid": iuid, "tpl_id": tpl_id,
 		"affixes": [], "durability": -1, "condition": "", "enhance_count": 0,
 	}
-	return uid
+	return iuid
 
-static func get_instance(uid: int):
-	return _instances.get(uid)
+static func get_instance(iuid: int):
+	return _store().get(iuid)
 
-static func exists(uid: int) -> bool:
-	return _instances.has(uid)
+static func exists(iuid: int) -> bool:
+	return _store().has(iuid)
 
-static func tpl_id(uid: int) -> String:
-	var inst = _instances.get(uid)
+static func tpl_id(iuid: int) -> String:
+	var inst = _store().get(iuid)
 	return str(inst.get("tpl_id", "")) if inst != null else ""
 
 # 销毁实例（装备失败回收 / 将来词条转移消耗供体）。
-static func destroy(uid: int) -> void:
-	_instances.erase(uid)
+# ⚠️ 调用方须保证无单位在穿它——否则该单位残留烘焙修正 + equipment 悬空引用。
+static func destroy(iuid: int) -> void:
+	_store().erase(iuid)
 
 # 给实例加一条词条（词条＝修正对象组：{name, mods:[{stat,op,value}], nature?}）。生成 roll/铁匠 UI 后续接。
-static func add_affix(uid: int, affix: Dictionary) -> void:
-	var inst = _instances.get(uid)
+static func add_affix(iuid: int, affix: Dictionary) -> void:
+	var inst = _store().get(iuid)
 	if inst != null and typeof(affix) == TYPE_DICTIONARY:
 		inst["affixes"].append(affix.duplicate(true))
+
+# 从临时库取走一个实例（收编迁移用：WorldState.add_to_roster 把沙盒装备迁进档内库）。无则 null。
+static func take_transient(iuid: int):
+	if _transient.has(iuid):
+		var inst = _transient[iuid]
+		_transient.erase(iuid)
+		return inst
+	return null
 
 # ============ 合成视图（战斗/UI 的唯一消费口） ============
 # 模板深拷（ItemDB.get_item 返回共享引用——深拷防污染全局模板）⊕ 实例字段；
 # mods = 模板 mods + 各词条 mods（顺序保留；修正 source 粒度由 Unit._apply_item_mods 按条编号）。
-static func view(uid: int):
-	var inst = _instances.get(uid)
+static func view(iuid: int):
+	var inst = _store().get(iuid)
 	if inst == null:
 		return null
 	var tpl = ItemDB.get_item(str(inst.get("tpl_id", "")))
 	if tpl == null:
 		return null
 	var v: Dictionary = tpl.duplicate(true)
-	v["uid"] = uid
+	v["uid"] = iuid
 	v["tpl_id"] = inst["tpl_id"]
 	var mods: Array = v.get("mods", [])
 	if typeof(mods) != TYPE_ARRAY:
@@ -80,33 +106,29 @@ static func view(uid: int):
 	v["enhance_count"] = int(inst.get("enhance_count", 0))
 	return v
 
-# ============ 序列化（WorldState 调用）============
+# ============ 序列化助手（WorldState 调用；纯函数、不碰任何库）============
 
-static func to_json() -> Array:
-	var out := []
-	for uid in _instances:
-		out.append((_instances[uid] as Dictionary).duplicate(true))
-	return out
-
-# 整库替换（读档/新战役）；JSON 数字回来是 float，逐字段转 int。
-static func load_json(arr) -> void:
-	_instances.clear()
+# JSON 数组 → 实例字典（uid->inst；JSON 数字回来是 float，逐字段转 int）。
+static func parse_json(arr) -> Dictionary:
+	var out := {}
 	if typeof(arr) != TYPE_ARRAY:
-		return
+		return out
 	for e in arr:
 		if typeof(e) != TYPE_DICTIONARY:
 			continue
-		var uid := int(e.get("uid", 0))
-		if uid <= 0:
+		var iuid := int(e.get("uid", 0))
+		if iuid <= 0:
 			continue
-		_instances[uid] = {
-			"uid": uid,
+		out[iuid] = {
+			"uid": iuid,
 			"tpl_id": str(e.get("tpl_id", "")),
 			"affixes": (e.get("affixes", []) as Array).duplicate(true) if typeof(e.get("affixes", [])) == TYPE_ARRAY else [],
 			"durability": int(e.get("durability", -1)),
 			"condition": str(e.get("condition", "")),
 			"enhance_count": int(e.get("enhance_count", 0)),
 		}
+	return out
 
+# 清空**当前生效**的库（测试/退出临时模式用）。
 static func clear() -> void:
-	_instances.clear()
+	_store().clear()

@@ -139,7 +139,11 @@ static func unit_from_campaign(entry: Dictionary):
 			var iuid := int(entry["equip_uids"][slot])
 			if iuid > 0 and not done.has(iuid):
 				done.append(iuid)
-				u.equip_instance(iuid)
+				if not u.equip_instance(iuid):
+					# 实例缺失/模板被删/资格不再满足：响亮警告 + 按模板补新件兜底（能查到模板时），拒绝无声空手
+					var tpl := ItemInstances.tpl_id(iuid)
+					var salvaged := tpl != "" and u.equip(tpl)
+					push_warning("读档重挂装备失败：unit=%s slot=%s iuid=%d tpl=%s%s" % [u.unit_name, str(slot), iuid, tpl if tpl != "" else "?", "，已按模板补新件（词条丢失）" if salvaged else "，该件丢失"])
 	u.uid = int(entry.get("uid", 0))
 	u.stats["HP"] = clampi(int(entry.get("hp", u.stats.get("HP", 0))), 0, int(u.effective_stat("HP_max")))
 	u.stats["armor"] = clampi(int(entry.get("armor", u.stats.get("armor", 0))), 0, int(u.effective_stat("armor_max")))
