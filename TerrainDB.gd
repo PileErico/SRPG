@@ -119,6 +119,7 @@ static func save() -> bool:
 	return true
 
 # 丢弃内存表、下次查询重新从磁盘读（terrains.json 被外部改过时用）
-static func reload() -> void:
+# ⚠️ 不能叫 reload：外部 TerrainDB.reload() 会命中原生 Script.reload()（重编译+静态全重置），见 ItemDB 同注。
+static func reload_data() -> void:
 	_loaded = false
 	_ensure()

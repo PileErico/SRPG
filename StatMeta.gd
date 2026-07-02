@@ -42,3 +42,9 @@ const EDITOR_STATS := ["move", "speed", "sight", "AP_max", "armor_max",
 # 中文标签（缺则回退键本身）
 static func label(key: String) -> String:
 	return str(LABELS.get(key, key))
+
+# 该 stat 是否百分比语义（显示加 %）——抗性/甲抗/效能/率类即便 op=flat 也按 % 读
+# （原 UnitStatusPanel._is_pct_stat 迁来；顺手补 armor_res_*——键约定「甲抗均为百分比」🔒 而旧版漏了）
+static func is_pct(key: String) -> bool:
+	return key.begins_with("res_") or key.begins_with("armor_res_") \
+		or key.ends_with("_eff") or key.ends_with("_rate") or key in ["block_power", "crit_dmg"]

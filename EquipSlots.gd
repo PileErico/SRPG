@@ -7,32 +7,12 @@ extends RefCounted
 ##  · main_hand/off_hand 等 **不作物品 tag**；位置类效果(强化副手)按【槽位占用】判，不靠物品 tag。
 ## 用法：const EquipSlots := preload("res://EquipSlots.gd")。纯静态、无状态。
 
-const SLOTS := ["main_hand", "off_hand", "head", "body", "accessory_1", "accessory_2"]
 const SLOT_CN := {
 	"main_hand": "主手", "off_hand": "副手", "head": "头部", "body": "身体",
 	"accessory_1": "饰品1", "accessory_2": "饰品2",
 }
-# 类别（kind，物品编辑器按类别给槽下拉）→ 该类可选的具体槽/部位。
-const SLOTS_BY_KIND := {
-	"weapon": ["main_hand", "off_hand"],
-	"armor": ["head", "body"],
-	"accessory": ["accessory_1", "accessory_2"],
-}
-# 编辑器自动管理、不进自由标签的 tag（含旧失误的 main_hand/off_hand）。
-const MANAGED_TAGS := ["one_handed", "two_handed", "head", "body", "accessory", "main_hand", "off_hand"]
-
-# 物品内在 tag（编辑器按 类别/双手/天生 派生）。武器→持握；防具→部位(head/body)；饰品→accessory。
-static func intrinsic_tag(kind: String, slot: String, two_handed: bool, innate: bool) -> String:
-	match kind:
-		"weapon":
-			if innate:
-				return ""
-			return "two_handed" if two_handed else "one_handed"
-		"armor":
-			return slot     # "head" / "body"
-		"accessory":
-			return "accessory"
-	return ""
+# （曾有 SLOTS/SLOTS_BY_KIND/MANAGED_TAGS/intrinsic_tag——全仓零调用的死码，2026-07-02 清除：
+#  编辑器的管理集/内在 tag 派生实际长在 ItemEditor〔MANAGED_CATS 走 TagDB 类别、更全〕，两份只留活的那份。）
 
 # 装备资格相关的内在 tag。
 const ELIGIBILITY_TAGS := ["one_handed", "two_handed", "shield", "head", "body", "accessory"]

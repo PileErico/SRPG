@@ -10,7 +10,9 @@ const TextureCache := preload("res://TextureCache.gd")
 const EquipSlots := preload("res://EquipSlots.gd")
 const ItemDB := preload("res://ItemDB.gd")
 
-const KIND_CN := {"weapon": "武器", "armor": "防具", "accessory": "饰品"}
+# 修正行语义色（与 Sandbox.OK_GREEN/BAD_RED、UnitStatusPanel.STAT_GREEN/RED 同 hex——语义色全局统一待 D8 拍板）
+const MOD_GREEN := Color("#6FCF6F")
+const MOD_RED := Color("#E07A5A")
 
 # 物品富 tooltip 面板：纯黑底 + 稀有度边框；名称(稀有度色)/种类·部位/标签/需求/mods/攻击 skill。
 static func render(item: Dictionary) -> Control:
@@ -43,9 +45,8 @@ static func render(item: Dictionary) -> Control:
 		name_l.add_theme_color_override("font_color", rc)
 	headv.add_child(name_l)
 	var slot := str(item.get("slot", ""))
-	var kind := str(ItemDB.kind_of(item))
 	var sub := Label.new()
-	sub.text = "%s · %s" % [str(KIND_CN.get(kind, kind)), str(EquipSlots.SLOT_CN.get(slot, slot))]
+	sub.text = "%s · %s" % [ItemDB.kind_cn(ItemDB.kind_of(item)), str(EquipSlots.SLOT_CN.get(slot, slot))]
 	sub.add_theme_font_size_override("font_size", 12)
 	sub.add_theme_color_override("font_color", Color(0.66, 0.7, 0.78))
 	headv.add_child(sub)
@@ -69,7 +70,7 @@ static func render(item: Dictionary) -> Control:
 	# mods
 	for m in item.get("mods", []):
 		if typeof(m) == TYPE_DICTIONARY:
-			v.add_child(_mod_line(m))
+			v.add_child(mod_line(m))
 
 	# 攻击 skill
 	var atk = item.get("attack", null)
@@ -122,8 +123,8 @@ static func render(item: Dictionary) -> Control:
 			v.add_child(note)
 	return panel
 
-# —— 共用小件（tag_chip 公开，供技能/特性 tooltip 等复用）——
-static func tag_chip(text: String) -> Control:
+# —— 共用小件（公开：物品/技能/特性 tooltip 与角色状态页复用同一份，字号按场合传）——
+static func tag_chip(text: String, font_px := 12) -> Control:
 	var p := PanelContainer.new()
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = Color(1, 1, 1, 0.14)
@@ -135,7 +136,8 @@ static func tag_chip(text: String) -> Control:
 	p.add_theme_stylebox_override("panel", sb)
 	var l := Label.new()
 	l.text = text
-	l.add_theme_font_size_override("font_size", 12)
+	l.add_theme_font_size_override("font_size", font_px)
+	l.add_theme_color_override("font_color", Color(0.86, 0.86, 0.9))
 	p.add_child(l)
 	return p
 
@@ -150,14 +152,16 @@ static func _tags(parent: Node, tags) -> void:
 		flow.add_child(tag_chip(TagDB.cn(str(t))))
 	parent.add_child(flow)
 
-static func _mod_line(m: Dictionary) -> Label:
+# 一条修正数值行（绿=加/红=减；抗性/效能/率类即便 flat 也带 % —— StatMeta.is_pct 语义）
+static func mod_line(m: Dictionary, font_px := 13) -> Label:
 	var l := Label.new()
+	var key := str(m.get("stat", ""))
 	var val := float(m.get("value", 0))
-	var sfx := "%" if str(m.get("op", "flat")) == "pct" else ""
-	var sign := "+" if val >= 0.0 else ""
-	l.text = "%s %s%s%s" % [StatMeta.label(str(m.get("stat", ""))), sign, _num(val), sfx]
-	l.add_theme_font_size_override("font_size", 13)
-	l.add_theme_color_override("font_color", Color(0.45, 0.85, 0.5) if val >= 0.0 else Color(0.92, 0.5, 0.5))
+	var sfx := "%" if (str(m.get("op", "flat")) == "pct" or StatMeta.is_pct(key)) else ""
+	var sgn := "+" if val >= 0.0 else ""
+	l.text = "%s %s%s%s" % [StatMeta.label(key), sgn, _num(val), sfx]
+	l.add_theme_font_size_override("font_size", font_px)
+	l.add_theme_color_override("font_color", MOD_GREEN if val >= 0.0 else MOD_RED)
 	return l
 
 static func _kv(k: String, val: String) -> Label:

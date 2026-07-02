@@ -517,7 +517,7 @@ func _build_skill_tooltip(def, u) -> Control:
 	flow.add_theme_constant_override("h_separation", 4)
 	flow.add_theme_constant_override("v_separation", 4)
 	for c in chips:
-		flow.add_child(_tag_chip(str(c)))
+		flow.add_child(ItemTooltip.tag_chip(str(c), 13))
 	v.add_child(flow)
 
 	v.add_child(_tip_line("距离", "%d" % int(def.get("range", 1))))
@@ -786,7 +786,7 @@ func _build_trait_tooltip(t) -> Control:
 	v.add_child(name_l)
 	# 具体属性加成行
 	for m in t.get("mods", []):
-		v.add_child(_mod_line(m))
+		v.add_child(ItemTooltip.mod_line(m, 15))
 	# 性质描述（含限制说明）
 	var desc := str(t.get("desc", ""))
 	if desc != "":
@@ -915,7 +915,7 @@ func _build_equip_summary_tooltip(u) -> Control:
 		v.add_child(none)
 	else:
 		for m in agg:
-			v.add_child(_mod_line(m))
+			v.add_child(ItemTooltip.mod_line(m, 15))
 	return panel
 
 # 单个装备槽：正方形空格（已装备则放物品图标）+ 下方名称（居中）
@@ -1189,44 +1189,12 @@ func _rarity_color(item):
 			return c
 	return null
 
-func _is_pct_stat(key: String) -> bool:
-	return key.begins_with("res_") or key.ends_with("_eff") or key.ends_with("_rate") or key in ["block_power", "crit_dmg"]
-
 # 物品富 tooltip → 通用组件 ItemTooltip.render（与物品编辑器共用一份渲染）
 func _build_item_tooltip(item) -> Control:
 	return ItemTooltip.render(item)
 
-# 单个标签 chip：浅灰圆角方底 + 中文
-func _tag_chip(text: String) -> Control:
-	var p := PanelContainer.new()
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(1, 1, 1, 0.14)
-	sb.set_corner_radius_all(3)
-	sb.content_margin_left = 6
-	sb.content_margin_right = 6
-	sb.content_margin_top = 1
-	sb.content_margin_bottom = 1
-	p.add_theme_stylebox_override("panel", sb)
-	var l := Label.new()
-	l.text = text
-	l.add_theme_font_size_override("font_size", 13)
-	l.add_theme_color_override("font_color", Color(0.86, 0.86, 0.9))
-	p.add_child(l)
-	return p
-
-# tooltip 里的一条修正数值（绿=加/红=减）
-func _mod_line(m) -> Label:
-	var key := str(m.get("stat", ""))
-	var cn = StatMeta.label(key)
-	var vnum := float(m.get("value", 0))
-	var vstr := str(int(vnum)) if vnum == float(int(vnum)) else str(vnum)
-	var sgn := "+" if vnum >= 0.0 else ""
-	var sfx := "%" if (str(m.get("op", "flat")) == "pct" or _is_pct_stat(key)) else ""
-	var l := Label.new()
-	l.text = "%s %s%s%s" % [cn, sgn, vstr, sfx]
-	l.add_theme_font_size_override("font_size", 15)
-	l.add_theme_color_override("font_color", STAT_GREEN if vnum >= 0.0 else STAT_RED)
-	return l
+# tag_chip / mod_line / _is_pct_stat：D6 双活小件已合并进 ItemTooltip（tag_chip/mod_line，字号按场合传）
+# 与 StatMeta.is_pct（百分比语义属 stat 元数据）——本类调用点直用共享件。
 
 # tooltip 里的一条「键：值」
 func _tip_line(k: String, val: String) -> Label:
