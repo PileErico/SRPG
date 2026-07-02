@@ -272,7 +272,7 @@ func save_units_to_map() -> bool:
 		proto["ai_group"] = u.ai_group
 		units_json.append({"proto": proto, "col": u.col, "row": u.row, "faction": u.faction})
 	var path: String = SandboxConfig.map_path if SandboxConfig.map_path != "" else MAP_PATH
-	if MapIO.write_map(path, width, height, tiles, _map_regions, units_json, _map_triggers):
+	if MapIO.write_map(path, width, height, tiles, _map_regions, units_json, _map_triggers, _map_terrain_overrides, _map_environment):
 		_map_units = units_json   # 同步内存：R 重开 / exit_battle 从这里重建
 		return true
 	return false
@@ -286,13 +286,14 @@ func _check_enter_triggers(u) -> void:
 	if _map_triggers.is_empty():
 		return
 	var cell := Vector2i(u.col, u.row)
-	for trig in _map_triggers:
+	for i in _map_triggers.size():
+		var trig = _map_triggers[i]
 		if typeof(trig) != TYPE_DICTIONARY:
 			continue
 		var when = trig.get("when", {})
 		if typeof(when) != TYPE_DICTIONARY or str(when.get("event", "")) != "enter_region":
 			continue
-		var tid := str(trig.get("id", ""))
+		var tid := _trigger_key(trig, i)
 		if bool(when.get("once", true)) and _fired_triggers.has(tid):
 			continue
 		var by := str(when.get("by_faction", "player"))   # 缺省＝仅玩家踏入触发
@@ -300,10 +301,16 @@ func _check_enter_triggers(u) -> void:
 			continue
 		var cells: Dictionary = _all_region_cells.get(str(when.get("region", "")), {})
 		if cells.has(cell):
-			_fire_trigger(trig)
+			_fire_trigger(trig, tid)
 
-func _fire_trigger(trig: Dictionary) -> void:
+# 触发器去重 key：有 id 用 id；无 id 用数组下标兜底（否则 once 对无 id 触发器失效、会重复触发）
+func _trigger_key(trig: Dictionary, index: int) -> String:
 	var tid := str(trig.get("id", ""))
+	return tid if tid != "" else "#%d" % index
+
+func _fire_trigger(trig: Dictionary, tid: String = "") -> void:
+	if tid == "":
+		tid = str(trig.get("id", ""))
 	if tid != "":
 		_fired_triggers[tid] = true
 	var label := str(trig.get("label", tid))
@@ -701,12 +708,10 @@ func _build_shortcut_hint() -> void:
 
 # ============ 供 HexCanvas / SandboxCanvas 调用的“editor”接口 ============
 
+# 阵营色单一源＝tags.json faction 条目 color（TagDB.color）；未知阵营回退玩家蓝
 func faction_color(f: String) -> Color:
-	match f:
-		"enemy": return Color("#D5453A")    # 红
-		"neutral": return Color("#D5B53A")  # 黄
-		"ally": return Color("#3A7BD5")     # 蓝（友方，与我方同蓝基底）
-		_: return Color("#3A7BD5")          # 蓝（玩家）
+	var hex := TagDB.color(f)
+	return Color(hex) if hex != "" else Color("#3A7BD5")
 
 # 按 tile 的 terrain/variant 查地形定义（经 TerrainDB O(1) 查表，找不到返回 null）
 func _terrain_entry(tile):

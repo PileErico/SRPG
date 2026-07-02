@@ -1,8 +1,8 @@
 [
-  {"id": "player", "cn": "我方", "cat": "faction", "status": "in_use"},
-  {"id": "ally", "cn": "友方", "cat": "faction", "status": "in_use"},
-  {"id": "enemy", "cn": "敌方", "cat": "faction", "status": "in_use"},
-  {"id": "neutral", "cn": "中立", "cat": "faction", "status": "in_use"},
+  {"id": "player", "cn": "我方", "cat": "faction", "status": "in_use", "color": "#3A7BD5"},
+  {"id": "ally", "cn": "友方", "cat": "faction", "status": "in_use", "color": "#3A7BD5"},
+  {"id": "enemy", "cn": "敌方", "cat": "faction", "status": "in_use", "color": "#D5453A"},
+  {"id": "neutral", "cn": "中立", "cat": "faction", "status": "in_use", "color": "#D5B53A"},
 
   {"id": "ground", "cn": "地面", "cat": "movement", "status": "in_use", "desc": "默认兵种；按地块基础成本，不可进深水"},
   {"id": "flying", "cn": "飞行", "cat": "movement", "status": "in_use", "desc": "地块成本恒1、可进深水、森林掩蔽不享受"},

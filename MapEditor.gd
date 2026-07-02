@@ -71,11 +71,7 @@ const REGION_KINDS := [["aggro", "触发区"], ["deploy", "部署区"]]
 
 # —— 单位层：在编辑器里摆「这一关的单位」（authoring 关卡内容，存进地图 units 字段）——
 # 与沙盒「自由测试」不同：这里摆的是关卡固定内容（敌人/预置友军/中立），随地图持久化。
-const UNIT_FACTIONS := ["enemy", "player", "ally", "neutral"]   # 顺序=下拉顺序；中文走 TagDB.cn
-const FACTION_COLORS := {
-	"player": Color(0.30, 0.55, 0.95), "ally": Color(0.30, 0.55, 0.95),
-	"enemy": Color(0.90, 0.30, 0.30), "neutral": Color(0.90, 0.80, 0.30),
-}
+const UNIT_FACTIONS := ["enemy", "player", "ally", "neutral"]   # 顺序=下拉顺序；中文走 TagDB.cn、颜色走 TagDB.color
 var _unit_panel: Control   # 单位工具区（当前层=单位时显示）
 var _unit_list: ItemList   # 单位原型选择列表
 var _unit_proto = null     # 当前要落子的原型（null=未选）
@@ -780,8 +776,10 @@ func _on_unit_proto_selected(idx: int) -> void:
 
 
 # 单位层棋子色（供 EditorCanvas 画 token；与战斗一致：我方/友方蓝、敌方红、中立黄）
+# 阵营色单一源＝tags.json faction 条目 color（TagDB.color，与战斗侧同一份）；未知回退灰
 func faction_color(fac: String) -> Color:
-	return FACTION_COLORS.get(fac, Color(0.8, 0.8, 0.8))
+	var hex := TagDB.color(fac)
+	return Color(hex) if hex != "" else Color(0.8, 0.8, 0.8)
 
 # 单位层：在 (col,row) 落子当前选中的原型（替换该格已有单位）。走 stroke → 一次撤销。
 func _place_unit(col: int, row: int) -> void:
