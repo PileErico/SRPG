@@ -115,6 +115,10 @@ func select_unit(u) -> void:
 	_sel = u
 	_rebuild_editor()
 
+# 当前选中单位（供宿主读，替代跨对象 .get("_sel") 反射）
+func selected_unit():
+	return _sel
+
 # 宿主侧消息（如部署区限制提示）显示到底部消息行
 func notify(t: String) -> void:
 	if _msg != null:

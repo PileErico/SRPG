@@ -487,7 +487,7 @@ func remove_roster_unit(u) -> void:
 		canvas.queue_redraw()
 
 func _sel_is(u) -> bool:
-	return _deploy_panel != null and _deploy_panel.get("_sel") == u
+	return _deploy_panel != null and _deploy_panel.selected_unit() == u
 
 func _refresh_roster_bar() -> void:
 	if _roster_bar != null:

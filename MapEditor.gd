@@ -1941,13 +1941,20 @@ func _copy_tiles(src: Array) -> Array:
 	return out
 
 # 深拷贝区域（含 cells 集合）——撤销快照必须把区域层一起拷，否则画区域无法撤销
+# 区域四标量键(id/label/color/kind)统一构造——加字段只改这里；cells 形态各异由调用方补。
+# id/label 文本默认按来源不同(内部空串 / 外部 JSON 回退"region"/"区域")作参数传入。
+func _region_scalars(r, def_id: String, def_label: String) -> Dictionary:
+	return {"id": str(r.get("id", def_id)), "label": str(r.get("label", def_label)), "color": str(r.get("color", "#FFFFFF")), "kind": str(r.get("kind", "aggro"))}
+
 func _copy_regions(src: Array) -> Array:
 	var out := []
 	for r in src:
 		var cells := {}
 		for k in r["cells"]:
 			cells[k] = true
-		out.append({"id": str(r.get("id", "")), "label": str(r.get("label", "")), "color": str(r.get("color", "#FFFFFF")), "kind": str(r.get("kind", "aggro")), "cells": cells})
+		var m := _region_scalars(r, "", "")
+		m["cells"] = cells
+		out.append(m)
 	return out
 
 func _push_undo(snap: Dictionary, label: String) -> void:
@@ -2053,7 +2060,9 @@ func _regions_to_json() -> Array:
 		var cells := []
 		for k in keys:
 			cells.append([k.x, k.y])
-		out.append({"id": str(r.get("id", "")), "label": str(r.get("label", "")), "color": str(r.get("color", "#FFFFFF")), "kind": str(r.get("kind", "aggro")), "cells": cells})
+		var m := _region_scalars(r, "", "")
+		m["cells"] = cells
+		out.append(m)
 	return out
 
 # JSON → 区域（过滤越界格；非数组/坏项跳过）
@@ -2073,7 +2082,9 @@ func _regions_from_json(raw, mw: int, mh: int) -> Array:
 					var y := int(pair[1])
 					if x >= 0 and x < mw and y >= 0 and y < mh:
 						cells[Vector2i(x, y)] = true
-		out.append({"id": str(r.get("id", "region")), "label": str(r.get("label", "区域")), "color": str(r.get("color", "#FFFFFF")), "kind": str(r.get("kind", "aggro")), "cells": cells})
+		var m := _region_scalars(r, "region", "区域")
+		m["cells"] = cells
+		out.append(m)
 	return out
 
 func save_to_file(path: String) -> void:
