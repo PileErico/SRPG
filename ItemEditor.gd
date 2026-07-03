@@ -25,6 +25,15 @@ const OPS := [["flat", "固定"], ["pct", "百分比%"]]
 const MANAGED_CATS := ["rarity", "wtype", "wcat_melee", "wcat_ranged", "wcat_catalyst",
 	"wcat_shield", "handedness", "gear_type", "armor_weight", "weapon_attr"]
 
+# 自定义 tag 下拉的类别过滤（据「物品前面已填选项」排除无意义项，见 _tag_offered 各 mode）：
+const NON_ITEM_CATS := ["faction", "movement", "terrain", "unit_status"]   # 描述单位/世界，永不属于物品 → 全排除
+const REQUIRE_CATS := ["char", "race"]                                     # 「装备需求」只给"谁能装"＝身份类
+const ATTACK_CATS := ["target", "damage", "skill_type", "effect"]          # 「攻击标签」只给攻击/技能行为类
+const CATEGORY_CN := {   # 下拉分隔标题的类别中文（缺省回退原 id）
+	"char": "角色", "race": "种族", "target": "目标", "damage": "物理伤害型",
+	"skill_type": "技能类型", "effect": "效果",
+}
+
 const STAT_GROUPS := [
 	["四维", [["STR", "力量", true], ["DEX", "灵巧", true], ["INT", "智力", true], ["STA", "体力", true]]],
 	["进攻", [["atk", "攻击", true], ["acc", "命中", true], ["crit_rate", "暴击率", true],
@@ -36,7 +45,13 @@ const STAT_GROUPS := [
 	["甲抗（减护甲承伤·防具专属·%）", [["armor_res_phys", "物理甲抗", true], ["armor_res_fire", "火焰甲抗", true],
 		["armor_res_thunder", "雷电甲抗", true], ["armor_res_ice", "冰冻甲抗", true], ["armor_res_holy", "神圣甲抗", true]]],
 	["固定减伤（承伤最后减固定值·非%）", [["dr_flat_armor", "甲固减", true], ["dr_flat_human", "人固减", true]]],
-	["行动", [["move", "移动力", true], ["speed", "速度", true], ["AP_max", "AP上限", true]]],
+	["行动", [["move", "移动力", true], ["speed", "速度", true], ["sight", "视野", true], ["AP_max", "AP上限", true]]],
+]
+
+# 视觉状态（非数值 mod）：不进面板/数值管线，经 Unit.has_vision_state 影响视野计算。目前两种。
+const VISION_STATES := [
+	["nightvision", "黑夜视觉（无视夜间视野减半）"],
+	["blind", "无视力（视野 ×0）"],
 ]
 
 # —— 状态 ——
@@ -92,6 +107,9 @@ var _w_atk_coeff: SpinBox
 var _w_atk_range: SpinBox
 var _w_atk_ap: SpinBox
 var _w_atk_dmgkind: OptionButton
+var _w_has_bas: CheckBox         # 是否含基础攻击技能 BAS（关＝武器不提供基础攻击，如盾）
+var _bas_box: VBoxContainer      # BAS 字段容器（随 _w_has_bas 显隐）
+var _building: bool = false      # _build_form 进行中（抑制「选盾自动关 BAS」等用户动作专属逻辑）
 
 
 func _ready() -> void:
@@ -521,6 +539,7 @@ func _clear_form() -> void:
 
 func _build_form() -> void:
 	_clear_form()
+	_building = true   # 建表单期间抑制用户动作专属逻辑（选盾自动关 BAS）
 
 	# 1. 基础
 	_form.add_child(EditorUI.section_title("基础"))
@@ -543,10 +562,10 @@ func _build_form() -> void:
 	_requires = []
 	for r in _current.get("requires", []):
 		_requires.append(str(r))
-	_build_free_tag_ui("装备需求 requires", _requires)
+	_build_free_tag_ui(_form, "requires", "装备需求 requires", _requires)
 	# 其他标签（自由）
 	_free_tags = _collect_free_from(_current.get("tags", []))
-	_build_free_tag_ui("其他标签", _free_tags)
+	_build_free_tag_ui(_form, "other", "其他标签", _free_tags)
 
 	# 3. 修正 mods
 	_form.add_child(EditorUI.section_title("修正 mods（每条加在装备者属性上）"))
@@ -555,7 +574,7 @@ func _build_form() -> void:
 	_form.add_child(_mods_box)
 	for m in _current.get("mods", []):
 		if typeof(m) == TYPE_DICTIONARY:
-			_add_mod_row(str(m.get("stat", "atk")), str(m.get("op", "flat")), float(m.get("value", 0)))
+			_add_mod_row(str(m.get("stat", "atk")), str(m.get("op", "flat")), m.get("value", 0))
 	var addmod := Button.new()
 	addmod.text = "＋ 添加修正"
 	addmod.pressed.connect(func():
@@ -569,6 +588,7 @@ func _build_form() -> void:
 
 	if _current_kind == "weapon":
 		_on_wtype_changed()   # 级联 + 显隐初始化
+	_building = false
 	_refresh_preview()
 	_dirty = false   # 建表单过程的控件信号会把 _dirty 打真——载入完成＝干净基线
 
@@ -617,6 +637,9 @@ func _on_wtype_changed() -> void:
 		_handed_row.visible = wtype != "shield" and not innate
 	if _innate_slot_row != null and is_instance_valid(_innate_slot_row):
 		_innate_slot_row.visible = innate
+	# 盾不提供基础攻击：用户切到盾时自动关 BAS（仍可手动开回；载入初始化 _building 时不强改）
+	if not _building and wtype == "shield" and _w_has_bas != null and is_instance_valid(_w_has_bas) and _w_has_bas.button_pressed:
+		_w_has_bas.button_pressed = false
 	_refresh_preview()
 
 
@@ -626,27 +649,46 @@ func _build_bas_section() -> void:
 	if typeof(atk) != TYPE_DICTIONARY:
 		atk = {}
 	_form.add_child(EditorUI.section_title("基础攻击技能 BAS（装备武器 = 设定该单位的基础攻击）"))
-	_w_atk_name = _add_line(_form, "攻击名", str(atk.get("name", "")))
-	_w_atk_icon = _add_line(_form, "攻击 icon", str(atk.get("icon", "")))
-	_w_atk_coeff = _add_spin(_form, "伤害系数 coeff", float(atk.get("coeff", 1.0)), 0.0, 10.0, 0.05)
-	_w_atk_range = _add_spin(_form, "射程 range", float(atk.get("range", 1)), 0, 20, 1)
-	_w_atk_ap = _add_spin(_form, "AP 消耗 ap_cost", float(atk.get("ap_cost", 1)), 0, 9, 1)
+	# 开关：是否含 BAS。关闭＝武器不提供基础攻击（保存移除 attack 字段）；盾等纯防具武器用。
+	_w_has_bas = _add_check(_form, "含基础攻击技能 BAS（盾牌等不提供基础攻击的武器请关闭）", _has_bas_initial())
+	_w_has_bas.toggled.connect(func(_v): _on_has_bas_changed())
+	# BAS 字段容器（随开关显隐）
+	_bas_box = VBoxContainer.new()
+	_bas_box.add_theme_constant_override("separation", 8)
+	_form.add_child(_bas_box)
+	_w_atk_name = _add_line(_bas_box, "攻击名", str(atk.get("name", "")))
+	_w_atk_icon = _add_line(_bas_box, "攻击 icon", str(atk.get("icon", "")))
+	_w_atk_coeff = _add_spin(_bas_box, "伤害系数 coeff", float(atk.get("coeff", 1.0)), 0.0, 10.0, 0.05)
+	_w_atk_range = _add_spin(_bas_box, "射程 range", float(atk.get("range", 1)), 0, 20, 1)
+	_w_atk_ap = _add_spin(_bas_box, "AP 消耗 ap_cost", float(atk.get("ap_cost", 1)), 0, 9, 1)
 	_w_atk_dmgkind = OptionButton.new()
 	for dk in DAMAGE_KINDS:
 		_w_atk_dmgkind.add_item(dk)
 		_w_atk_dmgkind.set_item_metadata(_w_atk_dmgkind.item_count - 1, dk)
 	_select_meta(_w_atk_dmgkind, str(atk.get("damage_kind", "physical")))
 	_w_atk_dmgkind.item_selected.connect(func(_i): _refresh_preview())
-	_form.add_child(EditorUI.field_row("伤害类型 damage_kind", _w_atk_dmgkind))
+	_bas_box.add_child(EditorUI.field_row("伤害类型 damage_kind", _w_atk_dmgkind))
 	_atk_tags = []
 	for t in atk.get("tags", []):
 		_atk_tags.append(str(t))
-	_build_free_tag_ui("攻击标签", _atk_tags)
+	_build_free_tag_ui(_bas_box, "attack", "攻击标签", _atk_tags)
 	var note := Label.new()
 	note.text = "（aoe / bonus / inflict / armor_pen 等高级字段本版不编辑，保存时原样保留）"
 	note.add_theme_color_override("font_color", Color(0.6, 0.62, 0.68))
 	note.add_theme_font_size_override("font_size", 12)
-	_form.add_child(note)
+	_bas_box.add_child(note)
+	_bas_box.visible = _w_has_bas.button_pressed
+
+
+# 载入时 BAS 开关初值＝物品当前是否有非空 attack（盾/无 BAS 的旧数据＝关）
+func _has_bas_initial() -> bool:
+	var a = _current.get("attack", null)
+	return typeof(a) == TYPE_DICTIONARY and not a.is_empty()
+
+func _on_has_bas_changed() -> void:
+	if _bas_box != null and is_instance_valid(_bas_box):
+		_bas_box.visible = _w_has_bas.button_pressed
+	_refresh_preview()
 
 
 # —— 通用：分类下拉（建并加进表单，返回 OptionButton）——
@@ -672,22 +714,25 @@ func _fill_cat_dropdown(ob: OptionButton, cat: String, exclude: Array, with_none
 
 
 # —— 通用：自由标签 UI（下拉选中即加 + 手动输入需确认）——
-func _build_free_tag_ui(label: String, arr: Array) -> void:
+func _build_free_tag_ui(parent: VBoxContainer, mode: String, label: String, arr: Array) -> void:
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 3)
 	var adder := HBoxContainer.new()
 	adder.add_theme_constant_override("separation", 6)
 	var pick := OptionButton.new()
 	pick.custom_minimum_size = Vector2(170, 0)
-	_fill_all_tags(pick)
-	pick.item_selected.connect(func(idx):
-		var tg = pick.get_item_metadata(idx)
-		if tg != null and str(tg) != "" and not arr.has(str(tg)):
-			arr.append(str(tg))
-			_rebuild_free_box(box, arr)
-			_refresh_preview()
-		pick.select(0))
-	adder.add_child(pick)
+	_fill_all_tags(pick, mode)
+	if pick.item_count > 1:   # 有合规预设才显示下拉；否则只留手动输入（该分区当前无预设可选）
+		pick.item_selected.connect(func(idx):
+			var tg = pick.get_item_metadata(idx)
+			if tg != null and str(tg) != "" and not arr.has(str(tg)):
+				arr.append(str(tg))
+				_rebuild_free_box(box, arr)
+				_refresh_preview()
+			pick.select(0))
+		adder.add_child(pick)
+	else:
+		pick.queue_free()
 	var manual := LineEdit.new()
 	manual.placeholder_text = "手动 tag"
 	manual.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -702,8 +747,8 @@ func _build_free_tag_ui(label: String, arr: Array) -> void:
 			_refresh_preview()
 		manual.clear())
 	adder.add_child(addb)
-	_form.add_child(EditorUI.field_row(label, adder))
-	_form.add_child(box)
+	parent.add_child(EditorUI.field_row(label, adder))
+	parent.add_child(box)
 	_rebuild_free_box(box, arr)
 
 
@@ -737,21 +782,39 @@ func _rebuild_free_box(box: VBoxContainer, arr: Array) -> void:
 
 
 # 下拉填全部 tag（首项占位 + 按类别分隔），供「其他标签 / 攻击标签」挑
-func _fill_all_tags(ob: OptionButton) -> void:
+func _fill_all_tags(ob: OptionButton, mode: String) -> void:
 	ob.add_item("（下拉添加…）")
 	ob.set_item_metadata(ob.item_count - 1, "")
 	var cats := {}
 	var all := TagDB.all()
 	for id in all:
+		if not _tag_offered(str(id), all[id], mode):
+			continue
 		var c := str(all[id].get("cat", "其他"))
 		if not cats.has(c):
 			cats[c] = []
 		cats[c].append(id)
 	for c in cats:
-		ob.add_separator(c)
+		ob.add_separator(str(CATEGORY_CN.get(c, c)))
 		for id in cats[c]:
 			ob.add_item("%s（%s）" % [TagDB.cn(id), id])
 			ob.set_item_metadata(ob.item_count - 1, id)
+
+
+# 某 tag 是否该出现在指定 mode 的自定义下拉里（据类别 + 是否已被上方专门控件管）。
+func _tag_offered(id: String, entry: Dictionary, mode: String) -> bool:
+	var cat := str(entry.get("cat", ""))
+	if NON_ITEM_CATS.has(cat):
+		return false   # 阵营/移动型/地形/单位状态：与物品无关
+	if _managed_tag_set.has(id):
+		return false   # 稀有度/类型/种类/握持/部位/甲重/天生：上方专门控件已设，不重复
+	match mode:
+		"requires":
+			return REQUIRE_CATS.has(cat)   # 谁能装：角色/种族身份
+		"attack":
+			return ATTACK_CATS.has(cat)    # 攻击/技能行为
+		_:
+			return not (REQUIRE_CATS.has(cat) or ATTACK_CATS.has(cat))   # 其他：排除有专属分区的类别，留未来/未知
 
 
 # 从物品 tags 取「其他标签」（排除所有自动管理的）
@@ -809,15 +872,15 @@ func _on_icon_picked(path: String) -> void:
 
 
 # —— mods 动态行 ——
-func _add_mod_row(stat: String, op: String, value: float) -> void:
+func _add_mod_row(stat: String, op: String, value) -> void:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 6)
 	var st := OptionButton.new()
 	st.custom_minimum_size = Vector2(180, 0)
 	_fill_stat_options(st)
 	_select_meta(st, stat)
-	st.item_selected.connect(func(_i): _refresh_preview())
 	row.add_child(st)
+	# 数值型：op（固定/%）+ value（视觉状态时隐藏）
 	var opb := OptionButton.new()
 	opb.custom_minimum_size = Vector2(110, 0)
 	for o in OPS:
@@ -830,13 +893,26 @@ func _add_mod_row(stat: String, op: String, value: float) -> void:
 	val.min_value = -9999
 	val.max_value = 9999
 	val.step = 0.5
-	val.value = value
+	val.value = (float(value) if typeof(value) != TYPE_STRING else 0.0)
 	val.custom_minimum_size = Vector2(110, 0)
 	val.value_changed.connect(func(_v): _refresh_preview())
 	row.add_child(val)
+	# 视觉状态型：状态下拉（与 op+value 互斥显示；不是数值，不填百分比/固定）
+	var stt := OptionButton.new()
+	stt.custom_minimum_size = Vector2(226, 0)
+	for vs in VISION_STATES:
+		stt.add_item(vs[1])
+		stt.set_item_metadata(stt.item_count - 1, vs[0])
+	if typeof(value) == TYPE_STRING:
+		_select_meta(stt, str(value))
+	stt.item_selected.connect(func(_i): _refresh_preview())
+	row.add_child(stt)
 	var rm := Button.new()
 	rm.text = "✕"
-	var entry := {"stat": st, "op": opb, "value": val, "row": row}
+	var entry := {"stat": st, "op": opb, "value": val, "state": stt, "row": row}
+	st.item_selected.connect(func(_i):
+		_update_mod_row_mode(entry)
+		_refresh_preview())
 	rm.pressed.connect(func():
 		_mod_rows.erase(entry)
 		row.queue_free()
@@ -844,6 +920,14 @@ func _add_mod_row(stat: String, op: String, value: float) -> void:
 	row.add_child(rm)
 	_mods_box.add_child(row)
 	_mod_rows.append(entry)
+	_update_mod_row_mode(entry)
+
+# 据 stat 选择切换 mod 行形态：视觉状态＝显状态下拉、隐 op+value；数值＝反之。
+func _update_mod_row_mode(entry: Dictionary) -> void:
+	var is_vs := str(entry["stat"].get_selected_metadata()) == "vision_state"
+	entry["op"].visible = not is_vs
+	entry["value"].visible = not is_vs
+	entry["state"].visible = is_vs
 
 
 func _fill_stat_options(ob: OptionButton) -> void:
@@ -855,6 +939,9 @@ func _fill_stat_options(ob: OptionButton) -> void:
 				label += " ⚠未参战"
 			ob.add_item(label)
 			ob.set_item_metadata(ob.item_count - 1, s[0])
+	ob.add_separator("视觉（角色面板不显示）")
+	ob.add_item("视觉状态（夜视/无视力…）")
+	ob.set_item_metadata(ob.item_count - 1, "vision_state")
 
 
 # —— 保存 / 删除 ——
@@ -979,18 +1066,21 @@ func _collect() -> Dictionary:
 				slot = str(_w_innate_slot.get_selected_metadata())
 			else:
 				slot = "main_hand"
-			# attack
-			var atk: Dictionary = out.get("attack", {})
-			if typeof(atk) != TYPE_DICTIONARY:
-				atk = {}
-			atk["name"] = _w_atk_name.text.strip_edges()
-			atk["icon"] = _w_atk_icon.text.strip_edges()
-			atk["coeff"] = _num(_w_atk_coeff.value)
-			atk["range"] = int(_w_atk_range.value)
-			atk["ap_cost"] = int(_w_atk_ap.value)
-			atk["damage_kind"] = _w_atk_dmgkind.get_selected_metadata()
-			atk["tags"] = _atk_tags.duplicate()
-			out["attack"] = atk
+			# attack（BAS）——开关关闭＝武器不提供基础攻击（如盾），移除 attack 字段；下游 basic_attack() 自会跳过
+			if _w_has_bas != null and is_instance_valid(_w_has_bas) and _w_has_bas.button_pressed:
+				var atk: Dictionary = out.get("attack", {})
+				if typeof(atk) != TYPE_DICTIONARY:
+					atk = {}
+				atk["name"] = _w_atk_name.text.strip_edges()
+				atk["icon"] = _w_atk_icon.text.strip_edges()
+				atk["coeff"] = _num(_w_atk_coeff.value)
+				atk["range"] = int(_w_atk_range.value)
+				atk["ap_cost"] = int(_w_atk_ap.value)
+				atk["damage_kind"] = _w_atk_dmgkind.get_selected_metadata()
+				atk["tags"] = _atk_tags.duplicate()
+				out["attack"] = atk
+			else:
+				out.erase("attack")
 		"armor":
 			var g: String = str(_w_gear.get_selected_metadata())
 			if g != "":
@@ -1014,7 +1104,10 @@ func _collect() -> Dictionary:
 
 	var mods := []
 	for e in _mod_rows:
-		mods.append({"stat": e["stat"].get_selected_metadata(), "op": e["op"].get_selected_metadata(), "value": _num(e["value"].value)})
+		if str(e["stat"].get_selected_metadata()) == "vision_state":
+			mods.append({"stat": "vision_state", "op": "state", "value": str(e["state"].get_selected_metadata())})
+		else:
+			mods.append({"stat": e["stat"].get_selected_metadata(), "op": e["op"].get_selected_metadata(), "value": _num(e["value"].value)})
 	out["mods"] = mods
 	return out
 

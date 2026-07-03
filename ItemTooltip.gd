@@ -13,6 +13,7 @@ const ItemDB := preload("res://ItemDB.gd")
 # 修正行语义色（与 Sandbox.OK_GREEN/BAD_RED、UnitStatusPanel.STAT_GREEN/RED 同 hex——语义色全局统一待 D8 拍板）
 const MOD_GREEN := Color("#6FCF6F")
 const MOD_RED := Color("#E07A5A")
+const VISION_STATE_CN := {"nightvision": "黑夜视觉", "blind": "无视力"}   # vision_state mod 值→中文（物品自身 tooltip 显示；角色面板不显示）
 
 # 物品富 tooltip 面板：纯黑底 + 稀有度边框；名称(稀有度色)/种类·部位/标签/需求/mods/攻击 skill。
 static func render(item: Dictionary) -> Control:
@@ -155,12 +156,17 @@ static func _tags(parent: Node, tags) -> void:
 # 一条修正数值行（绿=加/红=减；抗性/效能/率类即便 flat 也带 % —— StatMeta.is_pct 语义）
 static func mod_line(m: Dictionary, font_px := 13) -> Label:
 	var l := Label.new()
+	l.add_theme_font_size_override("font_size", font_px)
 	var key := str(m.get("stat", ""))
+	if key == "vision_state":   # 非数值状态旗：直接显状态名（如「黑夜视觉」，蓝），不加前缀、不走 ±数值/百分比
+		var vv := str(m.get("value", ""))
+		l.text = str(VISION_STATE_CN.get(vv, vv))
+		l.add_theme_color_override("font_color", Color("#7FB0E0"))
+		return l
 	var val := float(m.get("value", 0))
 	var sfx := "%" if (str(m.get("op", "flat")) == "pct" or StatMeta.is_pct(key)) else ""
 	var sgn := "+" if val >= 0.0 else ""
 	l.text = "%s %s%s%s" % [StatMeta.label(key), sgn, _num(val), sfx]
-	l.add_theme_font_size_override("font_size", font_px)
 	l.add_theme_color_override("font_color", MOD_GREEN if val >= 0.0 else MOD_RED)
 	return l
 
