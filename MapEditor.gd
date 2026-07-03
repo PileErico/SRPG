@@ -17,6 +17,8 @@ const EventEngine := preload("res://EventEngine.gd")   # 动作元数据注册�
 const HexGrid := preload("res://HexGrid.gd")   # 纯六边形几何（边键归一/相邻判定/连线——线特征层用）
 const LocationDB := preload("res://LocationDB.gd")   # 地点类型注册表（地点层类型列表/校验数据源）
 const TerrainSwatch := preload("res://TerrainSwatch.gd")   # 地块缩略图控件（笔刷显示完整六边形；与地图格同一份渲染）
+const EditorTheme := preload("res://EditorTheme.gd")   # 编辑器统一深色主题（与物品编辑器共用）
+const EditorUI := preload("res://EditorUI.gd")   # 编辑器公共 UI 控件工厂（分节/折叠/菜单/面板/确认框，与物品编辑器共用）
 
 const MAX_W := 50
 const MAX_H := 50
@@ -171,8 +173,6 @@ var _save_dlg: FileDialog
 var _load_dlg: FileDialog
 var _history_list: ItemList
 var _file_label: Label
-var _confirm_dlg: ConfirmationDialog   # 未保存改动时的「确定丢弃？」确认框
-var _pending: Callable                 # 确认后要执行的动作（新建 / 加载 / 切换地图）
 
 # —— 地图库（文件夹 + 其中的地图列表）——
 var _map_dir := DEFAULT_MAP_DIR
@@ -183,7 +183,6 @@ var _dir_dlg: FileDialog               # 选文件夹对话框
 var _newmap_dlg: ConfirmationDialog    # 「新建地图」弹窗（输入文件名，存到文件夹）
 var _newmap_name: LineEdit             # 新建地图的文件名输入框
 var _newsize_dlg: ConfirmationDialog   # 「新建地图」弹窗（宽/高/预设，文件菜单调；内存新建不落盘）
-var _save_confirm_dlg: ConfirmationDialog   # 保存覆盖确认（防手快 Ctrl+S 覆盖到错文件）
 
 # 撤销/重做：以整图快照为单位，每项 {"snap":Dictionary, "label":String}
 var _undo_stack := []
@@ -215,14 +214,9 @@ func _load_terrains() -> void:
 
 func _build_ui() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
-	theme = _build_theme()   # 统一深色控件观感（一处改全局）
+	theme = EditorTheme.build()   # 统一深色控件观感（公共层 EditorTheme，一处改全局）
 
-	# 深色背景（铺满，垫在所有 UI 之下）——去掉引擎默认灰
-	var bgrect := ColorRect.new()
-	bgrect.set_anchors_preset(Control.PRESET_FULL_RECT)
-	bgrect.color = Color(0.09, 0.10, 0.12)
-	bgrect.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(bgrect)
+	add_child(EditorUI.background())   # 深色背景（铺满垫底，去引擎默认灰）——公共层
 
 	var root := VBoxContainer.new()
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -230,12 +224,12 @@ func _build_ui() -> void:
 
 	# ---- 顶部工具栏 ----
 	var bar := HBoxContainer.new()
-	var bar_wrap := _panelize(bar)   # 顶栏也给个深底，与画布分开
+	var bar_wrap := EditorUI.panelize(bar)   # 顶栏也给个深底，与画布分开
 	root.add_child(bar_wrap)
 
 	# 菜单栏（绘图软件式下拉，替代平铺按钮）：文件 / 编辑 / 视图。仅「类型」+ 状态常驻；返回主菜单＝右上角常驻（高频，不藏子菜单）。
 	# 文件菜单：新建地图…(0) / 保存(1) / 另存为…(2) / 加载…(3)
-	var file_menu := _make_menu("文件")
+	var file_menu := EditorUI.make_menu("文件")
 	var fp := file_menu.get_popup()
 	fp.add_item("新建地图…", 0)
 	fp.add_separator()
@@ -245,14 +239,14 @@ func _build_ui() -> void:
 	fp.id_pressed.connect(_on_file_menu)
 	bar.add_child(file_menu)
 
-	var edit_menu := _make_menu("编辑")
+	var edit_menu := EditorUI.make_menu("编辑")
 	var ep := edit_menu.get_popup()
 	ep.add_item("撤销  (Ctrl+Z)", 0)
 	ep.add_item("重做  (Ctrl+Y)", 1)
 	ep.id_pressed.connect(func(id: int): if id == 0: undo() else: redo())
 	bar.add_child(edit_menu)
 
-	var view_menu := _make_menu("视图")
+	var view_menu := EditorUI.make_menu("视图")
 	var vp := view_menu.get_popup()
 	vp.add_item("适配窗口", 0)
 	vp.id_pressed.connect(func(_id: int): _on_reset_view())
@@ -286,7 +280,7 @@ func _build_ui() -> void:
 	main.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	root.add_child(main)
 
-	main.add_child(_panelize(_build_brush_sidebar()))
+	main.add_child(EditorUI.panelize(_build_brush_sidebar()))
 
 	canvas = EditorCanvas.new()
 	canvas.editor = self
@@ -294,15 +288,15 @@ func _build_ui() -> void:
 	canvas.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	main.add_child(canvas)
 
-	main.add_child(_panelize(_build_side_panel()))
+	main.add_child(EditorUI.panelize(_build_side_panel()))
 
 	# ---- 文件对话框（建一次复用）----
-	_save_dlg = _make_file_dialog(FileDialog.FILE_MODE_SAVE_FILE)
+	_save_dlg = EditorUI.make_file_dialog(FileDialog.FILE_MODE_SAVE_FILE, FileDialog.ACCESS_FILESYSTEM, [["*.json", "地图 JSON"]], true)
 	_save_dlg.current_file = "map.json"
 	_save_dlg.file_selected.connect(save_to_file)
 	add_child(_save_dlg)
 
-	_load_dlg = _make_file_dialog(FileDialog.FILE_MODE_OPEN_FILE)
+	_load_dlg = EditorUI.make_file_dialog(FileDialog.FILE_MODE_OPEN_FILE, FileDialog.ACCESS_FILESYSTEM, [["*.json", "地图 JSON"]], true)
 	_load_dlg.file_selected.connect(load_from_file)
 	add_child(_load_dlg)
 
@@ -314,17 +308,7 @@ func _build_ui() -> void:
 	_dir_dlg.dir_selected.connect(_set_map_dir)
 	add_child(_dir_dlg)
 
-	# 未保存改动确认框（新建/加载/切换前若 _dirty 则先问一次）
-	_confirm_dlg = ConfirmationDialog.new()
-	_confirm_dlg.title = "未保存的改动"
-	_confirm_dlg.dialog_text = "当前地图有未保存的改动，确定要丢弃吗？"
-	_confirm_dlg.ok_button_text = "丢弃"
-	_confirm_dlg.get_cancel_button().text = "取消"
-	_confirm_dlg.confirmed.connect(func():
-		if _pending.is_valid():
-			_pending.call())
-	_confirm_dlg.canceled.connect(_refresh_map_highlight)  # 取消切换则恢复列表选中
-	add_child(_confirm_dlg)
+	# 未保存改动确认 → 公共层 EditorUI.confirm_discard（见 _confirm_discard）；不再持久化对话框节点
 
 	# 新建地图弹窗（输入文件名，尺寸取 width_spin/height_spin＝新尺寸弹窗里的值）
 	_newmap_dlg = ConfirmationDialog.new()
@@ -374,15 +358,7 @@ func _build_ui() -> void:
 	_newsize_dlg.confirmed.connect(_on_new_pressed)
 	add_child(_newsize_dlg)
 
-	# 保存覆盖确认（防手快 Ctrl+S / 点保存 覆盖到错文件）——弹窗显示目标路径
-	_save_confirm_dlg = ConfirmationDialog.new()
-	_save_confirm_dlg.title = "确认保存"
-	_save_confirm_dlg.ok_button_text = "覆盖保存"
-	_save_confirm_dlg.get_cancel_button().text = "取消"
-	_save_confirm_dlg.confirmed.connect(func():
-		if current_path != "":
-			save_to_file(current_path))
-	add_child(_save_confirm_dlg)
+	# 保存覆盖确认 → 公共层 EditorUI.confirm（见 _save_shortcut）；不再持久化对话框节点
 
 	# 区域改名弹窗
 	_region_rename_dlg = ConfirmationDialog.new()
@@ -411,7 +387,7 @@ func _build_brush_sidebar() -> Control:
 	sidebar.custom_minimum_size = Vector2(180, 0)
 
 	# —— 图层切换（互斥）：地形/线/区域/单位/触发/地点——线与地点仅大地图显示（_apply_map_type 门禁）
-	sidebar.add_child(_section_title("图层"))
+	sidebar.add_child(EditorUI.section_title("图层"))
 	var layer_grid := GridContainer.new()
 	layer_grid.columns = 3
 	var lg := ButtonGroup.new()
@@ -479,7 +455,7 @@ func _set_layer(id: String) -> void:
 	if id == "location":
 		_refresh_loc_list()
 		_load_loc_form()
-	if canvas: canvas.queue_redraw()
+	if canvas: canvas.refresh_static()
 	match id:
 		"line":
 			set_status("线特征层：河=沿格间边画（左画右擦）/ 路=沿格拖 / 桥=点已有河边")
@@ -501,7 +477,7 @@ func _set_layer(id: String) -> void:
 func _build_terrain_brushes() -> Control:
 	var box := VBoxContainer.new()
 	box.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	box.add_child(_section_title("地形笔刷"))
+	box.add_child(EditorUI.section_title("地形笔刷"))
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -518,7 +494,7 @@ func _build_terrain_brushes() -> Control:
 		brush_buttons.append(b)
 	# 地形数据（编辑选中笔刷战斗属性）＝进阶段，默认折叠给笔刷让出空间；
 	# 向上展开（expand_up）：header 钉在侧栏最底不动，展开时内容向上顶开笔刷区——开合位置一致，符合人体工学。
-	box.add_child(_make_foldable("地形数据（选中笔刷）", _build_terrain_data(), true, true))
+	box.add_child(EditorUI.make_foldable("地形数据（选中笔刷）", _build_terrain_data(), true, true))
 	return box
 
 # 地形数据编辑区（移动成本/通行/tag 成本 + 全局·本图范围）——被 _build_terrain_brushes 包进折叠区
@@ -704,7 +680,7 @@ func _on_terr_clear_override() -> void:
 		_update_file_label()
 		set_status("已清除「%s」的本图覆盖（回到全局）" % str(PALETTE[brush_index].label))
 	_refresh_terrain_data()
-	if canvas: canvas.queue_redraw()
+	if canvas: canvas.refresh_static()
 
 func _on_terr_cost_changed(v: float) -> void:
 	if _terr_data_loading or brush_index < 0 or brush_index >= PALETTE.size():
@@ -828,7 +804,7 @@ func _visible_brush_indices() -> Array:
 func _build_line_tools() -> Control:
 	var v := VBoxContainer.new()
 	v.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	v.add_child(_section_title("线特征（左键画 / 右键擦）"))
+	v.add_child(EditorUI.section_title("线特征（左键画 / 右键擦）"))
 	var mrow := HBoxContainer.new()
 	mrow.add_child(_make_label("工具"))
 	var mopt := OptionButton.new()
@@ -865,7 +841,7 @@ func _on_clear_lines() -> void:
 	_dirty = true
 	_update_file_label()
 	set_status("已清空本图全部河/路/桥")
-	if canvas: canvas.queue_redraw()
+	if canvas: canvas.refresh_static()
 
 # 画布线层输入入口：对边 (a,b) 施加当前工具（add=左键画 / 右键擦）。走 stroke → 一段拖动一次撤销。
 func line_paint_edge(a: Vector2i, b: Vector2i, add: bool) -> void:
@@ -946,7 +922,7 @@ func _line_touched() -> void:
 	_stroke_dirty = true
 	_stroke_count += 1
 	_dirty = true
-	if canvas: canvas.queue_redraw()
+	if canvas: canvas.refresh_static()
 
 # —— 格对工具（JSON 形 [[x,y],[x,y]]；无向，键归一走 HexGrid.edge_key）——
 
@@ -1001,7 +977,7 @@ func line_features() -> Dictionary:
 func _build_location_tools() -> Control:
 	var v := VBoxContainer.new()
 	v.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	v.add_child(_section_title("地点（左键放置/选中，右键删）"))
+	v.add_child(EditorUI.section_title("地点（左键放置/选中，右键删）"))
 	v.add_child(_make_label("放置类型"))
 	_loc_type_list = ItemList.new()
 	_loc_type_list.custom_minimum_size = Vector2(0, 92)
@@ -1112,7 +1088,7 @@ func _loc_paint(col: int, row: int) -> void:
 	_refresh_loc_list()
 	_load_loc_form()
 	set_status("已放置：%s @(%d,%d)" % [str(loc["label"]), col, row])
-	if canvas: canvas.queue_redraw()
+	if canvas: canvas.refresh_static()
 
 func _loc_remove(col: int, row: int) -> void:
 	var idx := _loc_index_at(col, row)
@@ -1130,7 +1106,7 @@ func _loc_remove(col: int, row: int) -> void:
 	_refresh_loc_list()
 	_load_loc_form()
 	set_status("已删除地点：%s" % nm)
-	if canvas: canvas.queue_redraw()
+	if canvas: canvas.refresh_static()
 
 func _refresh_loc_list() -> void:
 	if _loc_list == null:
@@ -1214,7 +1190,7 @@ func _on_loc_type_changed(idx: int) -> void:
 	_dirty = true
 	_update_file_label()
 	_refresh_loc_list()
-	if canvas: canvas.queue_redraw()
+	if canvas: canvas.refresh_static()
 
 # 画布地点层数据（EditorCanvas 画旗帜用；颜色走 LocationDB 类型色）
 func locations_for_draw() -> Array:
@@ -1231,7 +1207,7 @@ func locations_for_draw() -> Array:
 func _build_region_tools() -> Control:
 	var v := VBoxContainer.new()
 	v.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	v.add_child(_section_title("区域（左键画 / 右键擦）"))
+	v.add_child(EditorUI.section_title("区域（左键画 / 右键擦）"))
 	_region_list = ItemList.new()
 	_region_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_region_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1281,7 +1257,7 @@ func _build_region_tools() -> Control:
 func _build_unit_tools() -> Control:
 	var v := VBoxContainer.new()
 	v.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	v.add_child(_section_title("单位（左键落子 / 右键删）"))
+	v.add_child(EditorUI.section_title("单位（左键落子 / 右键删）"))
 	var frow := HBoxContainer.new()
 	frow.add_child(_make_label("阵营"))
 	var fopt := OptionButton.new()
@@ -1333,7 +1309,7 @@ func _place_unit(col: int, row: int) -> void:
 			map_units.remove_at(i)
 	map_units.append({"proto": (_unit_proto as Dictionary).duplicate(true), "col": col, "row": row, "faction": _unit_faction})
 	_stroke_dirty = true
-	if canvas: canvas.queue_redraw()
+	if canvas: canvas.refresh_static()
 
 # 单位层：删除 (col,row) 上的单位
 func _remove_unit(col: int, row: int) -> void:
@@ -1346,7 +1322,7 @@ func _remove_unit(col: int, row: int) -> void:
 			removed = true
 	if removed and _editing_unit != null:
 		_close_unit_edit()   # 删单位会移动下标 → 关掉深编面板，避免序列化写错条目
-	if canvas: canvas.queue_redraw()
+	if canvas: canvas.refresh_static()
 
 # ============ placed 单位深度编辑（点已放单位 → 复用 DeployPanel 改四维/装备/技能/特性/AI）============
 # 右侧浮动面板（DeployPanel，editor_mode）。改动即时经宿主回调序列化回 map_units[i].proto。
@@ -1448,7 +1424,7 @@ func _commit_unit(u) -> void:
 	u.recompute_derived()
 	u.init_vitals()
 	_serialize_editing_unit()
-	if canvas: canvas.queue_redraw()
+	if canvas: canvas.refresh_static()
 
 # 改名字/阵营 → DeployPanel 调此（战斗宿主里刷底部栏；编辑器里=序列化回关卡 + 重绘 token）
 func _refresh_roster_bar() -> void:
@@ -1456,7 +1432,7 @@ func _refresh_roster_bar() -> void:
 		return
 	_unit_edit_before_change()
 	_serialize_editing_unit()
-	if canvas: canvas.queue_redraw()
+	if canvas: canvas.refresh_static()
 
 # DeployPanel 改阵营时会调（战斗宿主里高亮被查看单位）；编辑器里无需，空实现
 func set_viewed_unit(_u) -> void:
@@ -1471,7 +1447,7 @@ func save_unit_preset(u, preset_name: String) -> void:
 func _build_trigger_tools() -> Control:
 	var v := VBoxContainer.new()
 	v.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	v.add_child(_section_title("触发器"))
+	v.add_child(EditorUI.section_title("触发器"))
 	_trigger_list = ItemList.new()
 	_trigger_list.custom_minimum_size = Vector2(0, 84)
 	_trigger_list.item_selected.connect(_on_trigger_selected)
@@ -1746,11 +1722,11 @@ func _build_side_panel() -> Control:
 	side.custom_minimum_size = Vector2(240, 0)
 
 	# —— 最近操作（撤销栈）＝右上角折叠（默认收起，需要时展开看）——
-	side.add_child(_make_foldable("最近操作（顶＝下一个撤销）", _build_history_panel(), true))
+	side.add_child(EditorUI.make_foldable("最近操作（顶＝下一个撤销）", _build_history_panel(), true))
 	side.add_child(HSeparator.new())
 
 	# —— 地图库（文件夹 + 其中地图列表）＝主内容，撑满中段 ——
-	side.add_child(_section_title("地图库"))
+	side.add_child(EditorUI.section_title("地图库"))
 	_dir_label = _make_label("")
 	_dir_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_dir_label.add_theme_color_override("font_color", Color(0.75, 0.78, 0.85))
@@ -1785,7 +1761,7 @@ func _build_side_panel() -> Control:
 	side.add_child(_file_label)
 
 	# —— 环境（日夜 + 天气表；地图级 authoring）＝右下角折叠·向上展开，与左栏底部「地形数据」对称 ——
-	side.add_child(_make_foldable("环境（天气·日夜）", _build_env_section(), true, true))
+	side.add_child(EditorUI.make_foldable("环境（天气·日夜）", _build_env_section(), true, true))
 	return side
 
 # 撤销历史面板（收进右上折叠区）：一个固定高度的列表
@@ -2053,110 +2029,7 @@ func _make_label(t: String) -> Label:
 	l.text = t
 	return l
 
-# —— UI chrome 助手（统一分节标题 / 折叠区 / 面板底）——
-
-# 分节标题：一条淡蓝底色条 + 亮字，给侧栏各段清晰的视觉分隔
-func _section_title(text: String) -> Control:
-	var p := PanelContainer.new()
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.22, 0.36, 0.55, 0.5)
-	sb.set_corner_radius_all(3)
-	sb.content_margin_left = 7
-	sb.content_margin_right = 6
-	sb.content_margin_top = 3
-	sb.content_margin_bottom = 3
-	p.add_theme_stylebox_override("panel", sb)
-	var l := Label.new()
-	l.text = text
-	l.add_theme_color_override("font_color", Color(0.92, 0.95, 1.0))
-	p.add_child(l)
-	return p
-
-# 折叠区：点标题栏收起/展开 content。进阶/占空间的段默认收起，给主内容让位。
-# expand_up=true：底部停靠段——content 在 header 之上（向上展开），header 钉死在底部原地不随开合上下跳（人体工学）。
-func _make_foldable(title: String, content: Control, collapsed: bool, expand_up: bool = false) -> VBoxContainer:
-	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 2)
-	var hdr := Button.new()
-	hdr.toggle_mode = true
-	hdr.button_pressed = not collapsed
-	hdr.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	hdr.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	hdr.focus_mode = Control.FOCUS_NONE
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.18, 0.22, 0.28)
-	sb.set_corner_radius_all(3)
-	sb.set_content_margin_all(4)
-	hdr.add_theme_stylebox_override("normal", sb)
-	hdr.add_theme_stylebox_override("hover", sb)
-	hdr.add_theme_stylebox_override("pressed", sb)
-	hdr.add_theme_color_override("font_color", Color(0.86, 0.9, 0.96))
-	# 箭头：普通段 ▸收起/▾展开；向上展开段 ▴收起(点了向上开)/▾展开(点了向下收)
-	var _upd := func(open: bool):
-		var a := ("▾ " if open else "▴ ") if expand_up else ("▾ " if open else "▸ ")
-		hdr.text = a + title
-	_upd.call(not collapsed)
-	content.visible = not collapsed
-	hdr.toggled.connect(func(pressed: bool):
-		content.visible = pressed
-		_upd.call(pressed))
-	if expand_up:
-		box.add_child(content)   # content 在上、header 在下 → 展开时内容向上长，header 留在底部
-		box.add_child(hdr)
-	else:
-		box.add_child(hdr)
-		box.add_child(content)
-	return box
-
-# 统一深色主题（挂在编辑器根 Control，全部子控件继承；per-instance override 仍优先——如笔刷缩略图）
-func _build_theme() -> Theme:
-	var th := Theme.new()
-	var text := Color(0.86, 0.89, 0.94)
-	var b_norm := _sb(Color(0.20, 0.22, 0.27), Color(0.30, 0.33, 0.40))
-	var b_hover := _sb(Color(0.25, 0.28, 0.34), Color(0.40, 0.44, 0.52))
-	var b_press := _sb(Color(0.24, 0.36, 0.52), Color(0.46, 0.62, 0.85))
-	var b_flat := _sb(Color(0, 0, 0, 0), Color(0, 0, 0, 0))
-	for t in ["Button", "OptionButton", "MenuButton"]:
-		th.set_stylebox("normal", t, b_norm)
-		th.set_stylebox("hover", t, b_hover)
-		th.set_stylebox("pressed", t, b_press)
-		th.set_stylebox("focus", t, b_flat)
-		th.set_stylebox("disabled", t, b_norm)
-		th.set_color("font_color", t, text)
-		th.set_color("font_hover_color", t, Color.WHITE)
-		th.set_color("font_pressed_color", t, Color.WHITE)
-		th.set_color("font_focus_color", t, text)
-		th.set_color("font_disabled_color", t, Color(0.5, 0.52, 0.57))
-	th.set_color("font_color", "Label", text)
-	th.set_color("font_color", "CheckBox", text)
-	th.set_color("font_pressed_color", "CheckBox", Color.WHITE)
-	th.set_color("font_hover_color", "CheckBox", Color.WHITE)
-	th.set_stylebox("normal", "LineEdit", _sb(Color(0.15, 0.16, 0.20), Color(0.30, 0.33, 0.40)))
-	th.set_stylebox("focus", "LineEdit", _sb(Color(0.17, 0.19, 0.24), Color(0.42, 0.56, 0.80)))
-	th.set_color("font_color", "LineEdit", text)
-	th.set_color("font_placeholder_color", "LineEdit", Color(0.55, 0.58, 0.64))
-	th.set_stylebox("panel", "ItemList", _sb(Color(0.14, 0.15, 0.19), Color(0.26, 0.29, 0.35)))
-	th.set_color("font_color", "ItemList", text)
-	th.set_color("font_selected_color", "ItemList", Color.WHITE)
-	return th
-
-func _sb(bg: Color, border: Color) -> StyleBoxFlat:
-	var s := StyleBoxFlat.new()
-	s.bg_color = bg
-	if border.a > 0.0:
-		s.border_color = border
-		s.set_border_width_all(1)
-	s.set_corner_radius_all(3)
-	s.set_content_margin_all(4)
-	return s
-
-# 顶栏下拉菜单按钮（文件/编辑/视图）——弹出项由调用方 get_popup().add_item 填
-func _make_menu(title: String) -> MenuButton:
-	var mb := MenuButton.new()
-	mb.text = title
-	mb.focus_mode = Control.FOCUS_NONE
-	mb.get_popup().add_theme_constant_override("v_separation", 3)
-	return mb
+# —— UI chrome 已抽到公共层：分节/折叠/菜单/面板/主题/文件对话框见 EditorUI.gd + EditorTheme.gd ——
 
 # 文件菜单分派：新建地图…/保存/另存为…/加载…/返回主菜单
 func _on_file_menu(id: int) -> void:
@@ -2165,16 +2038,6 @@ func _on_file_menu(id: int) -> void:
 		1: _save_shortcut()
 		2: _on_save_as_pressed()
 		3: _on_load_pressed()
-
-# 把一个侧栏 VBox 包进带深色底 + 内边距的面板（与画布视觉分开）
-func _panelize(inner: Control) -> PanelContainer:
-	var p := PanelContainer.new()
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.12, 0.13, 0.16)
-	sb.set_content_margin_all(7)
-	p.add_theme_stylebox_override("panel", sb)
-	p.add_child(inner)
-	return p
 
 # 笔刷按钮＝左侧地块缩略图（完整六边形，与地图格同一份 HexTileRender 渲染）+ 右侧地形名。
 # 底色改中性深底（地块颜色已由缩略图承载）；选中＝亮黄描边。
@@ -2218,13 +2081,6 @@ func _make_brush_button(entry: Dictionary, group: ButtonGroup) -> Button:
 	b.add_child(sw)
 	return b
 
-func _make_file_dialog(mode: int) -> FileDialog:
-	var dlg := FileDialog.new()
-	dlg.file_mode = mode
-	dlg.access = FileDialog.ACCESS_FILESYSTEM
-	dlg.use_native_dialog = true
-	dlg.add_filter("*.json", "地图 JSON")
-	return dlg
 
 # ------------------------------------------------------------------ 事件
 
@@ -2256,11 +2112,8 @@ func _unhandled_input(event: InputEvent) -> void:
 
 # 有未保存改动时先确认再执行 action（新建/加载共用）
 func _confirm_discard(action: Callable) -> void:
-	if not _dirty:
-		action.call()
-		return
-	_pending = action
-	_confirm_dlg.popup_centered()
+	EditorUI.confirm_discard(self, _dirty, action, _refresh_map_highlight,
+		"当前地图有未保存的改动，确定要丢弃吗？")
 
 func _on_new_pressed() -> void:
 	var w := int(width_spin.value)
@@ -2285,8 +2138,8 @@ func _save_shortcut() -> void:
 	if current_path == "":
 		_on_save_as_pressed()
 	else:
-		_save_confirm_dlg.dialog_text = "覆盖保存到：\n%s\n（此操作会覆盖该文件）" % current_path
-		_save_confirm_dlg.popup_centered()
+		EditorUI.confirm(self, "覆盖保存到：\n%s\n（此操作会覆盖该文件）" % current_path,
+			"覆盖保存", func(): save_to_file(current_path), Callable(), "确认保存")
 
 func _on_save_as_pressed() -> void:
 	if current_path != "":
@@ -2394,7 +2247,7 @@ func _region_paint(col: int, row: int, add: bool) -> void:
 	_stroke_count += 1
 	_dirty = true
 	if canvas:
-		canvas.queue_redraw()
+		canvas.refresh_static()
 
 func _on_region_selected(idx: int) -> void:
 	_active_region_idx = idx
@@ -2402,7 +2255,7 @@ func _on_region_selected(idx: int) -> void:
 		_region_color_btn.color = Color.html(str(regions[idx].get("color", "#FFFFFF")))
 	_sync_region_kind_opt()
 	if canvas:
-		canvas.queue_redraw()
+		canvas.refresh_static()
 
 # 把「类型」下拉同步到当前区域的 kind（select() 不触发 item_selected，无回环）
 func _sync_region_kind_opt() -> void:
@@ -2429,7 +2282,7 @@ func _on_region_kind_changed(idx: int) -> void:
 	_refresh_region_list()
 	_update_file_label()
 	if canvas:
-		canvas.queue_redraw()
+		canvas.refresh_static()
 
 func _on_add_region() -> void:
 	_push_undo(_snapshot(), "新建区域")
@@ -2445,7 +2298,7 @@ func _on_add_region() -> void:
 	_refresh_region_list()
 	_update_file_label()
 	if canvas:
-		canvas.queue_redraw()
+		canvas.refresh_static()
 
 func _on_rename_region() -> void:
 	var reg := active_region()
@@ -2477,7 +2330,7 @@ func _on_delete_region() -> void:
 	_refresh_region_list()
 	_update_file_label()
 	if canvas:
-		canvas.queue_redraw()
+		canvas.refresh_static()
 
 # 颜色实时改（ColorPicker 拖动会高频触发 → 不入撤销栈、避免刷屏；只标脏）
 func _on_region_color_changed(c: Color) -> void:
@@ -2487,7 +2340,7 @@ func _on_region_color_changed(c: Color) -> void:
 	reg["color"] = "#" + c.to_html(false)
 	_dirty = true
 	if canvas:
-		canvas.queue_redraw()
+		canvas.refresh_static()
 
 func _refresh_region_list() -> void:
 	if _region_list == null:
@@ -2582,7 +2435,7 @@ func paint_cell(col: int, row: int) -> void:
 	_stroke_count += 1
 	_dirty = true
 	if canvas:
-		canvas.queue_redraw()
+		canvas.refresh_static()
 
 # 画布查表（未知地形 -> 品红，便于发现数据异常）；统一走 TerrainDB 的 O(1) 查表
 func color_for_tile(tile) -> Color:
@@ -2644,7 +2497,7 @@ func _line_summary_at(col: int, row: int) -> String:
 
 func _refresh_canvas() -> void:
 	if canvas:
-		canvas.queue_redraw()
+		canvas.refresh_static()
 
 func set_status(s: String) -> void:
 	if status_label:

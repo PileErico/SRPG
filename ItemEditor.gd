@@ -10,6 +10,8 @@ const EquipSlots := preload("res://EquipSlots.gd")
 const TagDB := preload("res://TagDB.gd")
 const TextureCache := preload("res://TextureCache.gd")   # 图标加载 + 缓存单一入口
 const ItemTooltip := preload("res://ItemTooltip.gd")     # 物品富 tooltip 通用渲染组件（与角色状态页共用）
+const EditorTheme := preload("res://EditorTheme.gd")     # 编辑器统一深色主题（与地图编辑器共用）
+const EditorUI := preload("res://EditorUI.gd")           # 编辑器公共 UI 控件工厂（分节/字段行/确认框/文件对话框，与地图编辑器共用）
 
 const ICON_DIR := {
 	"weapon": "res://icons/Items/Weapons",
@@ -50,8 +52,11 @@ var _atk_tags: Array = []
 var _requires: Array = []   # 装备需求 tag（装备者须全部具备，如 char_desmond）
 
 # —— 控件 ——
-var _list: ItemList
-var _list_ids: Array = []
+var _list_scroll: ScrollContainer         # 分类清单滚动区
+var _list_root: VBoxContainer             # 三大分类折叠组的容器
+var _rows: Dictionary = {}                # id -> 物品行 Button（选中高亮 / 滚动定位）
+var _selected_id: String = ""            # 当前高亮的物品 id（"" = 无）
+var _cat_collapsed: Dictionary = {"weapon": false, "armor": false, "accessory": false}   # 各分类折叠态（跨刷新保留）
 var _search: LineEdit
 var _msg: Label
 var _form: VBoxContainer
@@ -91,6 +96,8 @@ var _w_atk_dmgkind: OptionButton
 
 func _ready() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
+	theme = EditorTheme.build()   # 统一深色主题（公共层，与地图编辑器共用）
+	add_child(EditorUI.background())   # 深色背景铺满垫底，去引擎默认灰
 	_rarities = TagDB.ids_in_cat("rarity")
 	if _rarities.is_empty():
 		_rarities = ["common", "uncommon", "rare", "epic", "legendary", "special"]
@@ -187,7 +194,7 @@ func _build_managed_set() -> void:
 
 func _build_left_pane() -> Control:
 	var box := VBoxContainer.new()
-	box.custom_minimum_size = Vector2(280, 0)
+	box.custom_minimum_size = Vector2(300, 0)
 	box.add_theme_constant_override("separation", 8)
 	var newbar := HBoxContainer.new()
 	newbar.add_theme_constant_override("separation", 6)
@@ -203,11 +210,15 @@ func _build_left_pane() -> Control:
 	_search.clear_button_enabled = true
 	_search.text_changed.connect(func(_t): _refresh_list())
 	box.add_child(_search)
-	_list = ItemList.new()
-	_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_list.item_selected.connect(_on_list_select)
-	box.add_child(_list)
+	_list_scroll = ScrollContainer.new()
+	_list_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_list_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_list_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_list_root = VBoxContainer.new()
+	_list_root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_list_root.add_theme_constant_override("separation", 4)
+	_list_scroll.add_child(_list_root)
+	box.add_child(_list_scroll)
 	_del_btn = Button.new()
 	_del_btn.text = "删除选中"
 	_del_btn.disabled = true
@@ -216,40 +227,199 @@ func _build_left_pane() -> Control:
 	return box
 
 
+# 分类清单：三大折叠组（武器/防具/饰品）+ 组内按 类型→种类→名字 排序 + 类型分隔标签。
 func _refresh_list() -> void:
-	_list.clear()
-	_list_ids.clear()
-	var q := (_search.text.strip_edges().to_lower() if _search != null else "")
-	var items := ItemDB.all()
-	var ids := items.keys()
-	ids.sort_custom(func(a, b):
-		var ka := ItemDB.kind_of(items[a])
-		var kb := ItemDB.kind_of(items[b])
-		if ka != kb:
-			return ka < kb
-		return str(items[a].get("name", a)) < str(items[b].get("name", b)))
-	for id in ids:
-		var it = items[id]
-		if q != "" and not (str(id).to_lower().contains(q) or str(it.get("name", "")).to_lower().contains(q)):
-			continue   # 搜索过滤：id / 名字 子串（不分大小写）
-		_list.add_item("[%s] %s  (%s)" % [ItemDB.kind_cn(ItemDB.kind_of(it)), str(it.get("name", id)), id])
-		_list.set_item_custom_fg_color(_list.item_count - 1, _rarity_color(_rarity_of(it)))
-		_list_ids.append(id)
-
-
-func _on_list_select(idx: int) -> void:
-	if idx < 0 or idx >= _list_ids.size():
+	if _list_root == null or not is_instance_valid(_list_root):
 		return
-	var id: String = _list_ids[idx]
-	# 未保存改动守卫：确认丢弃才切；留下则把列表选中拨回原物品
-	_confirm_discard(_load_item.bind(id), _reselect_current)
+	for c in _list_root.get_children():
+		c.queue_free()
+	_rows = {}
+	var q := (_search.text.strip_edges().to_lower() if _search != null else "")
+	var searching := q != ""
+	var items := ItemDB.all()
+	var by_kind := {"weapon": [], "armor": [], "accessory": []}
+	for id in items.keys():
+		var itf = items[id]
+		if searching and not (str(id).to_lower().contains(q) or str(itf.get("name", "")).to_lower().contains(q)):
+			continue   # 搜索过滤：id / 名字 子串（不分大小写）
+		var k := ItemDB.kind_of(itf)
+		if by_kind.has(k):
+			by_kind[k].append(id)
+	for kind in ["weapon", "armor", "accessory"]:
+		var ids: Array = by_kind[kind]
+		ids.sort_custom(func(a, b): return _sort_key(items[a], kind) < _sort_key(items[b], kind))
+		var section := VBoxContainer.new()
+		section.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		section.add_theme_constant_override("separation", 2)
+		var last_div := "￿"
+		for id in ids:
+			var it = items[id]
+			var dk := _type_divider_key(it, kind)
+			if dk != "" and dk != last_div:
+				section.add_child(_type_divider(dk))   # 类型变化处插分隔（仅标示排序，不可折叠）
+			last_div = dk
+			var row := _make_item_row(id, it)
+			section.add_child(row)
+			_rows[id] = row
+		if ids.is_empty():
+			var hint := Label.new()
+			hint.text = "（无匹配）" if searching else "（暂无，点上方 ＋%s 新建）" % ItemDB.kind_cn(kind)
+			hint.add_theme_color_override("font_color", Color(0.5, 0.54, 0.6))
+			hint.add_theme_font_size_override("font_size", 12)
+			section.add_child(hint)
+		var collapsed := false if searching else bool(_cat_collapsed.get(kind, false))
+		var fold := EditorUI.make_foldable("%s (%d)" % [ItemDB.kind_cn(kind), ids.size()], section, collapsed, false,
+			func(open): _cat_collapsed[kind] = not open)
+		_list_root.add_child(fold)
+	if _selected_id != "" and _rows.has(_selected_id):
+		_apply_row_selected(_rows[_selected_id], true)
 
-# 取消切换时把列表选中拨回当前编辑对象（新建未保存＝清选中）
-func _reselect_current() -> void:
-	if not _is_new and _loaded_id != "":
-		_select_list_by_id(_loaded_id)
+
+# 组内排序键：类型 rank → 种类 rank → 名字（拼字符串比较，避免 Array 比较不确定性）
+func _sort_key(item, kind: String) -> String:
+	var nm := str(item.get("name", "")).to_lower()
+	match kind:
+		"weapon":
+			var wt := _tag_in_cat(item.get("tags", []), "wtype")
+			var wc := _tag_in_cat(item.get("tags", []), "wcat_" + wt)
+			return "%02d|%02d|%s" % [_rank_in_cat(wt, "wtype"), _rank_in_cat(wc, "wcat_" + wt), nm]
+		"armor":
+			var g := _tag_in_cat(item.get("tags", []), "gear_type")
+			var w := _tag_in_cat(item.get("tags", []), "armor_weight")
+			return "%02d|%02d|%s" % [_rank_in_cat(g, "gear_type"), _rank_in_cat(w, "armor_weight"), nm]
+		_:
+			return "00|00|%s" % nm
+
+func _rank_in_cat(tag: String, cat: String) -> int:
+	if tag == "":
+		return 99
+	var idx := TagDB.ids_in_cat(cat).find(tag)
+	return idx if idx >= 0 else 98
+
+# 类型分隔 key（武器＝武器类型 / 防具＝部位；饰品不分组＝""）
+func _type_divider_key(item, kind: String) -> String:
+	match kind:
+		"weapon":
+			var wt := _tag_in_cat(item.get("tags", []), "wtype")
+			return TagDB.cn(wt) if wt != "" else "其他"
+		"armor":
+			var g := _tag_in_cat(item.get("tags", []), "gear_type")
+			return TagDB.cn(g) if g != "" else "其他"
+		_:
+			return ""
+
+func _type_divider(text: String) -> Control:
+	var l := Label.new()
+	l.text = "· " + text
+	l.add_theme_color_override("font_color", Color(0.5, 0.62, 0.72))
+	l.add_theme_font_size_override("font_size", 11)
+	return l
+
+# 物品行卡片：图标 + 名字（稀有度色）/ id（灰小字）两行；悬停微亮、选中金框。
+func _make_item_row(id: String, item) -> Button:
+	var b := Button.new()
+	b.custom_minimum_size = Vector2(0, 42)
+	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	b.clip_contents = true
+	b.tooltip_text = _row_tooltip(item)
+	b.pressed.connect(func(): _on_row_click(id))
+	var margin := MarginContainer.new()
+	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	margin.add_theme_constant_override("margin_left", 6)
+	margin.add_theme_constant_override("margin_right", 6)
+	var hb := HBoxContainer.new()
+	hb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hb.add_theme_constant_override("separation", 8)
+	var icon := TextureRect.new()
+	icon.custom_minimum_size = Vector2(32, 32)
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var tex = TextureCache.get_tex(str(item.get("icon", "")))
+	if tex != null:
+		icon.texture = tex
 	else:
-		_list.deselect_all()
+		icon.modulate = Color(1, 1, 1, 0.2)   # 无图标：占位淡显
+	hb.add_child(icon)
+	var vb := VBoxContainer.new()
+	vb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vb.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	vb.add_theme_constant_override("separation", 0)
+	var nm := Label.new()
+	nm.text = str(item.get("name", id))
+	nm.add_theme_color_override("font_color", _rarity_color(_rarity_of(item)))
+	nm.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	nm.clip_text = true
+	vb.add_child(nm)
+	var idl := Label.new()
+	idl.text = id
+	idl.add_theme_color_override("font_color", Color(0.55, 0.58, 0.64))
+	idl.add_theme_font_size_override("font_size", 10)
+	idl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	idl.clip_text = true
+	vb.add_child(idl)
+	hb.add_child(vb)
+	margin.add_child(hb)
+	b.add_child(margin)
+	_apply_row_selected(b, false)
+	return b
+
+func _row_tooltip(item) -> String:
+	var parts := []
+	var rar := _rarity_of(item)
+	if rar != "":
+		parts.append(TagDB.cn(rar))
+	var k := ItemDB.kind_of(item)
+	if k == "weapon":
+		var wt := _tag_in_cat(item.get("tags", []), "wtype")
+		if wt != "":
+			parts.append(TagDB.cn(wt))
+		var wc := _tag_in_cat(item.get("tags", []), "wcat_" + wt)
+		if wc != "":
+			parts.append(TagDB.cn(wc))
+	elif k == "armor":
+		var g := _tag_in_cat(item.get("tags", []), "gear_type")
+		if g != "":
+			parts.append(TagDB.cn(g))
+		var w := _tag_in_cat(item.get("tags", []), "armor_weight")
+		if w != "":
+			parts.append(TagDB.cn(w))
+	return "%s\n%s · slot=%s" % [str(item.get("name", "")), " · ".join(parts), str(item.get("slot", ""))]
+
+# 行选中/非选中样式（选中＝金框亮底；非选中＝中性深底 + 悬停微亮）。
+func _apply_row_selected(b: Button, selected: bool) -> void:
+	if b == null or not is_instance_valid(b):
+		return
+	if selected:
+		var sel := EditorTheme.sb(Color(0.26, 0.30, 0.36), Color(1.0, 0.82, 0.30))
+		sel.set_border_width_all(2)
+		for s in ["normal", "hover", "pressed", "focus"]:
+			b.add_theme_stylebox_override(s, sel)
+	else:
+		b.add_theme_stylebox_override("normal", EditorTheme.sb(Color(0.16, 0.17, 0.20), Color(0, 0, 0, 0)))
+		b.add_theme_stylebox_override("hover", EditorTheme.sb(Color(0.22, 0.24, 0.28), Color(0, 0, 0, 0)))
+		b.add_theme_stylebox_override("pressed", EditorTheme.sb(Color(0.24, 0.27, 0.32), Color(0, 0, 0, 0)))
+		b.add_theme_stylebox_override("focus", EditorTheme.sb(Color(0.16, 0.17, 0.20), Color(0, 0, 0, 0)))
+
+# 点击物品行：已在编辑它＝忽略；否则守卫后加载（取消丢弃＝旧高亮原地保留）。
+func _on_row_click(id: String) -> void:
+	if id == _selected_id:
+		return
+	_confirm_discard(_load_item.bind(id))
+
+# 移动选中高亮到某 id（""＝清空），并滚动到可见。
+func _select_row(id: String) -> void:
+	if _selected_id != id and _rows.has(_selected_id):
+		_apply_row_selected(_rows[_selected_id], false)
+	_selected_id = id
+	if id != "" and _rows.has(id):
+		_apply_row_selected(_rows[id], true)
+		if _list_scroll != null and is_instance_valid(_list_scroll):
+			_list_scroll.ensure_control_visible(_rows[id])
 
 
 func _new_item(kind: String) -> void:
@@ -260,7 +430,7 @@ func _do_new_item(kind: String) -> void:
 	_current_kind = kind
 	_is_new = true
 	_loaded_id = ""
-	_list.deselect_all()
+	_select_row("")
 	_build_form()
 	_save_btn.disabled = false
 	_dup_btn.disabled = true
@@ -281,6 +451,7 @@ func _load_item(id: String) -> void:
 	_dup_btn.disabled = false
 	_del_btn.disabled = false
 	_info("编辑「%s」" % str(_current.get("name", id)))
+	_select_row(id)
 
 
 # 另存副本：当前表单内容 → 新物品（id 自动唯一化），进「新建未保存」态
@@ -294,7 +465,7 @@ func _on_duplicate() -> void:
 	_current_kind = ItemDB.kind_of(item)
 	_is_new = true
 	_loaded_id = ""
-	_list.deselect_all()
+	_select_row("")
 	_build_form()
 	_dirty = true   # 副本＝未保存的新内容
 	_dup_btn.disabled = true
@@ -312,6 +483,7 @@ func _unique_copy_id(base: String) -> String:
 
 func _show_empty_form() -> void:
 	_clear_form()
+	_select_row("")
 	_w_id = null   # 表单已拆：预览/脏标记按「无表单」走（_clear_form 只 queue_free，引用得手动断）
 	var hint := Label.new()
 	hint.text = "← 选左侧物品编辑，或点＋新建一件"
@@ -351,13 +523,13 @@ func _build_form() -> void:
 	_clear_form()
 
 	# 1. 基础
-	_form.add_child(_section_label("基础"))
+	_form.add_child(EditorUI.section_title("基础"))
 	_w_id = _add_line(_form, "id（唯一主键）", str(_current.get("id", "")))
 	_w_name = _add_line(_form, "名字", str(_current.get("name", "")))
 	_build_icon_row()
 
 	# 2. 标签
-	_form.add_child(_section_label("标签"))
+	_form.add_child(EditorUI.section_title("标签"))
 	_w_rarity = _cat_dropdown_inline("稀有度", "rarity", false)
 	_select_meta(_w_rarity, _rarity_of(_current))
 	if _current_kind == "weapon":
@@ -377,7 +549,7 @@ func _build_form() -> void:
 	_build_free_tag_ui("其他标签", _free_tags)
 
 	# 3. 修正 mods
-	_form.add_child(_section_label("修正 mods（每条加在装备者属性上）"))
+	_form.add_child(EditorUI.section_title("修正 mods（每条加在装备者属性上）"))
 	_mods_box = VBoxContainer.new()
 	_mods_box.add_theme_constant_override("separation", 4)
 	_form.add_child(_mods_box)
@@ -409,7 +581,7 @@ func _build_weapon_tags() -> void:
 
 	_w_wcat = OptionButton.new()   # 内容由 _refill_wcat 级联填充
 	_w_wcat.item_selected.connect(func(_i): _refresh_preview())
-	_wcat_row = _field_row("武器种类", _w_wcat)
+	_wcat_row = EditorUI.field_row("武器种类", _w_wcat)
 	_form.add_child(_wcat_row)
 
 	_w_handed = _cat_dropdown_inline("握持方式", "handedness", false)
@@ -424,7 +596,7 @@ func _build_weapon_tags() -> void:
 		_w_innate_slot.set_item_metadata(_w_innate_slot.item_count - 1, s)
 	_select_meta(_w_innate_slot, str(_current.get("slot", "main_hand")))
 	_w_innate_slot.item_selected.connect(func(_i): _refresh_preview())
-	_innate_slot_row = _field_row("天生武器放在（主/副手）", _w_innate_slot)
+	_innate_slot_row = EditorUI.field_row("天生武器放在（主/副手）", _w_innate_slot)
 	_form.add_child(_innate_slot_row)
 
 
@@ -453,7 +625,7 @@ func _build_bas_section() -> void:
 	var atk = _current.get("attack", {})
 	if typeof(atk) != TYPE_DICTIONARY:
 		atk = {}
-	_form.add_child(_section_label("基础攻击技能 BAS（装备武器 = 设定该单位的基础攻击）"))
+	_form.add_child(EditorUI.section_title("基础攻击技能 BAS（装备武器 = 设定该单位的基础攻击）"))
 	_w_atk_name = _add_line(_form, "攻击名", str(atk.get("name", "")))
 	_w_atk_icon = _add_line(_form, "攻击 icon", str(atk.get("icon", "")))
 	_w_atk_coeff = _add_spin(_form, "伤害系数 coeff", float(atk.get("coeff", 1.0)), 0.0, 10.0, 0.05)
@@ -465,7 +637,7 @@ func _build_bas_section() -> void:
 		_w_atk_dmgkind.set_item_metadata(_w_atk_dmgkind.item_count - 1, dk)
 	_select_meta(_w_atk_dmgkind, str(atk.get("damage_kind", "physical")))
 	_w_atk_dmgkind.item_selected.connect(func(_i): _refresh_preview())
-	_form.add_child(_field_row("伤害类型 damage_kind", _w_atk_dmgkind))
+	_form.add_child(EditorUI.field_row("伤害类型 damage_kind", _w_atk_dmgkind))
 	_atk_tags = []
 	for t in atk.get("tags", []):
 		_atk_tags.append(str(t))
@@ -482,7 +654,7 @@ func _cat_dropdown_inline(label: String, cat: String, with_none: bool, exclude: 
 	var ob := OptionButton.new()
 	_fill_cat_dropdown(ob, cat, exclude, with_none)
 	ob.item_selected.connect(func(_i): _refresh_preview())
-	_form.add_child(_field_row(label, ob))
+	_form.add_child(EditorUI.field_row(label, ob))
 	return ob
 
 
@@ -530,7 +702,7 @@ func _build_free_tag_ui(label: String, arr: Array) -> void:
 			_refresh_preview()
 		manual.clear())
 	adder.add_child(addb)
-	_form.add_child(_field_row(label, adder))
+	_form.add_child(EditorUI.field_row(label, adder))
 	_form.add_child(box)
 	_rebuild_free_box(box, arr)
 
@@ -622,10 +794,8 @@ func _build_icon_row() -> void:
 
 func _open_icon_dialog() -> void:
 	if _file_dialog == null or not is_instance_valid(_file_dialog):
-		_file_dialog = FileDialog.new()
-		_file_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
-		_file_dialog.access = FileDialog.ACCESS_RESOURCES
-		_file_dialog.filters = PackedStringArray(["*.png ; PNG", "*.jpg, *.jpeg ; JPG", "*.webp ; WebP"])
+		_file_dialog = EditorUI.make_file_dialog(FileDialog.FILE_MODE_OPEN_FILE, FileDialog.ACCESS_RESOURCES,
+			[["*.png", "PNG"], ["*.jpg,*.jpeg", "JPG"], ["*.webp", "WebP"]], false)
 		_file_dialog.file_selected.connect(_on_icon_picked)
 		add_child(_file_dialog)
 	_file_dialog.current_dir = ICON_DIR.get(_current_kind, "res://icons/Items")
@@ -714,7 +884,7 @@ func _on_save() -> void:
 	_current = item
 	_dirty = false
 	_refresh_list()
-	_select_list_by_id(id)
+	_select_row(id)
 	_dup_btn.disabled = false
 	_del_btn.disabled = false
 
@@ -723,15 +893,8 @@ func _on_delete() -> void:
 	var id := str(_current.get("id", ""))
 	if id == "" or _is_new:
 		return
-	var dlg := ConfirmationDialog.new()
-	dlg.dialog_text = "确认删除「%s」(%s)？此操作直接写盘。" % [str(_current.get("name", id)), id]
-	dlg.ok_button_text = "删除"
-	add_child(dlg)
-	dlg.confirmed.connect(func():
-		_do_delete(id)
-		dlg.queue_free())
-	dlg.canceled.connect(func(): dlg.queue_free())
-	dlg.popup_centered()
+	EditorUI.confirm(self, "确认删除「%s」(%s)？此操作直接写盘。" % [str(_current.get("name", id)), id],
+		"删除", func(): _do_delete(id), Callable(), "确认删除")
 
 func _do_delete(id: String) -> void:
 	if not ItemDB.delete_item(id):
@@ -750,23 +913,9 @@ func _do_delete(id: String) -> void:
 
 # 未保存改动守卫：干净直接执行；脏则弹确认（丢弃→执行 on_ok / 留下→执行 on_cancel）
 func _confirm_discard(on_ok: Callable, on_cancel := Callable()) -> void:
-	if not _dirty:
-		on_ok.call()
-		return
-	var dlg := ConfirmationDialog.new()
-	dlg.dialog_text = "当前物品有未保存的修改，继续将丢弃。"
-	dlg.ok_button_text = "丢弃修改"
-	dlg.cancel_button_text = "留下"
-	add_child(dlg)
-	dlg.confirmed.connect(func():
-		_dirty = false
-		on_ok.call()
-		dlg.queue_free())
-	dlg.canceled.connect(func():
-		if on_cancel.is_valid():
-			on_cancel.call()
-		dlg.queue_free())
-	dlg.popup_centered()
+	# 干净直接执行；脏则弹确认（丢弃→on_ok / 留下→on_cancel）。on_ok 各路径都会重建表单/离场，dirty 自会归零。
+	EditorUI.confirm_discard(self, _dirty, on_ok, on_cancel,
+		"当前物品有未保存的修改，继续将丢弃。", "丢弃修改", "留下")
 
 # Ctrl+S 保存（表单激活时）
 func _input(event: InputEvent) -> void:
@@ -928,49 +1077,12 @@ func _select_meta(ob: OptionButton, key) -> void:
 			ob.select(i)
 			return
 
-func _select_list_by_id(id: String) -> void:
-	var idx := _list_ids.find(id)
-	if idx >= 0:
-		_list.select(idx)
-
-func _section_label(text: String) -> Label:
-	var l := Label.new()
-	l.text = "── " + text
-	l.add_theme_color_override("font_color", Color(0.55, 0.78, 0.95))
-	l.add_theme_font_size_override("font_size", 15)
-	return l
-
-func _field_row(label: String, control: Control) -> HBoxContainer:
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 8)
-	var l := Label.new()
-	l.text = label
-	l.custom_minimum_size = Vector2(200, 0)
-	row.add_child(l)
-	control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(control)
-	return row
-
+# 表单动态字段 → 公共层 EditorUI（信号统一走 _refresh_preview）
 func _add_line(parent: VBoxContainer, label: String, value: String) -> LineEdit:
-	var le := LineEdit.new()
-	le.text = value
-	le.text_changed.connect(func(_t): _refresh_preview())
-	parent.add_child(_field_row(label, le))
-	return le
+	return EditorUI.add_line(parent, label, value, _refresh_preview)
 
 func _add_check(parent: VBoxContainer, label: String, value: bool) -> CheckBox:
-	var cb := CheckBox.new()
-	cb.button_pressed = value
-	cb.toggled.connect(func(_v): _refresh_preview())
-	parent.add_child(_field_row(label, cb))
-	return cb
+	return EditorUI.add_check(parent, label, value, _refresh_preview)
 
 func _add_spin(parent: VBoxContainer, label: String, value: float, mn: float, mx: float, step: float) -> SpinBox:
-	var sb := SpinBox.new()
-	sb.min_value = mn
-	sb.max_value = mx
-	sb.step = step
-	sb.value = value
-	sb.value_changed.connect(func(_v): _refresh_preview())
-	parent.add_child(_field_row(label, sb))
-	return sb
+	return EditorUI.add_spin(parent, label, value, mn, mx, step, _refresh_preview)
