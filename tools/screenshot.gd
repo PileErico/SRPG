@@ -38,6 +38,10 @@ func _initialize() -> void:
 	var setup := str(args.get("setup", ""))
 	if setup != "" and inst.has_method(setup):
 		inst.call(setup)
+	# 可选 load 钩子：若场景有 load_from_file(path)（如地图编辑器），先载入指定地图再截
+	var load_path := str(args.get("load", ""))
+	if load_path != "" and inst.has_method("load_from_file"):
+		inst.call("load_from_file", load_path)
 	# 等待若干帧：确保容器布局稳定 + Control._draw 至少跑过一次
 	for i in frames:
 		await process_frame
