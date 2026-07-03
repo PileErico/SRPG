@@ -138,7 +138,7 @@ var height_spin: SpinBox
 var status_label: Label
 var canvas
 var brush_buttons := []
-var _map_type_opt: OptionButton   # 顶栏地图类型切换（战斗图/大地图）——决定笔刷 scope 过滤与 线/地点 层门禁
+var _map_type_btn: Button   # 顶栏地图类型切换按钮（点击 战斗图⇄大地图 来回切）——决定笔刷 scope 过滤与 线/地点 层门禁
 var _layer_btns := {}             # layer_id → 图层按钮（线/地点按 map_type 显隐）
 # —— 图层切换 + 区域工具（左侧栏）——
 # 地形数据编辑（选中笔刷的战斗属性 → 写回 terrains.json，全局共用）
@@ -183,6 +183,7 @@ var _dir_dlg: FileDialog               # 选文件夹对话框
 var _newmap_dlg: ConfirmationDialog    # 「新建地图」弹窗（输入文件名，存到文件夹）
 var _newmap_name: LineEdit             # 新建地图的文件名输入框
 var _newsize_dlg: ConfirmationDialog   # 「新建地图」弹窗（宽/高/预设，文件菜单调；内存新建不落盘）
+var _save_confirm_dlg: ConfirmationDialog   # 保存覆盖确认（防手快 Ctrl+S 覆盖到错文件）
 
 # 撤销/重做：以整图快照为单位，每项 {"snap":Dictionary, "label":String}
 var _undo_stack := []
@@ -262,14 +263,13 @@ func _build_ui() -> void:
 
 	bar.add_child(VSeparator.new())
 
-	# 地图类型（battle/overworld）常驻可见（是编辑模式开关，决定笔刷 scope + 线/地点层可用性）
+	# 地图类型（battle/overworld）＝一个按钮来回切（不用下拉）：显示当前类型，点击换到另一种。
 	bar.add_child(_make_label("类型"))
-	_map_type_opt = OptionButton.new()
-	_map_type_opt.add_item("战斗图", 0)
-	_map_type_opt.add_item("大地图", 1)
-	_map_type_opt.tooltip_text = "battle=战场关卡 / overworld=大地图。\n影响：地形笔刷按 scope 过滤；线特征（河/路/桥）与地点层仅大地图可编。"
-	_map_type_opt.item_selected.connect(_on_map_type_selected)
-	bar.add_child(_map_type_opt)
+	_map_type_btn = Button.new()
+	_map_type_btn.custom_minimum_size = Vector2(76, 0)
+	_map_type_btn.tooltip_text = "点击在 战斗图 ⇄ 大地图 间切换。\n影响：地形笔刷按 scope 过滤；线特征（河/路/桥）与地点层仅大地图可编。"
+	_map_type_btn.pressed.connect(_on_map_type_toggle)
+	bar.add_child(_map_type_btn)
 
 	bar.add_child(VSeparator.new())
 	status_label = Label.new()
@@ -369,6 +369,16 @@ func _build_ui() -> void:
 	_newsize_dlg.add_child(ns_box)
 	_newsize_dlg.confirmed.connect(_on_new_pressed)
 	add_child(_newsize_dlg)
+
+	# 保存覆盖确认（防手快 Ctrl+S / 点保存 覆盖到错文件）——弹窗显示目标路径
+	_save_confirm_dlg = ConfirmationDialog.new()
+	_save_confirm_dlg.title = "确认保存"
+	_save_confirm_dlg.ok_button_text = "覆盖保存"
+	_save_confirm_dlg.get_cancel_button().text = "取消"
+	_save_confirm_dlg.confirmed.connect(func():
+		if current_path != "":
+			save_to_file(current_path))
+	add_child(_save_confirm_dlg)
 
 	# 区域改名弹窗
 	_region_rename_dlg = ConfirmationDialog.new()
@@ -761,10 +771,9 @@ func _on_save_terrain_data() -> void:
 
 # ============ 地图类型（battle/overworld）切换 + 笔刷 scope 过滤 ============
 
-func _on_map_type_selected(idx: int) -> void:
-	var nt := "overworld" if idx == 1 else "battle"
-	if nt == map_type:
-		return
+# 类型按钮：在 战斗图 ⇄ 大地图 间来回切
+func _on_map_type_toggle() -> void:
+	var nt := "battle" if map_type == "overworld" else "overworld"
 	_push_undo(_snapshot(), "地图类型")
 	map_type = nt
 	_dirty = true
@@ -774,11 +783,11 @@ func _on_map_type_selected(idx: int) -> void:
 		"大地图" if nt == "overworld" else "战斗图",
 		"线特征/地点层已开放" if nt == "overworld" else "线特征/地点层已隐藏（数据保留）"])
 
-# map_type 落地（切换/载入/撤销后调）：同步顶栏下拉 + 笔刷 scope 过滤 + 线/地点层门禁。
+# map_type 落地（切换/载入/撤销后调）：同步顶栏类型按钮 + 笔刷 scope 过滤 + 线/地点层门禁。
 # 越 scope 的已画地形不动——scope 只管笔刷栏 authoring，渲染/通行照常（旧图零破坏）。
 func _apply_map_type() -> void:
-	if _map_type_opt != null:
-		_map_type_opt.select(1 if map_type == "overworld" else 0)
+	if _map_type_btn != null:
+		_map_type_btn.text = "大地图" if map_type == "overworld" else "战斗图"
 	_apply_brush_filter()
 	var on_ow := map_type == "overworld"
 	for lid in ["line", "location"]:
@@ -2254,11 +2263,12 @@ func _on_brush_toggled(pressed: bool, idx: int) -> void:
 		select_brush(idx)
 
 func _save_shortcut() -> void:
-	# 有文件就覆盖，没有就走“另存为”弹窗
+	# 没文件走“另存为”（文件选择器本身即确认）；有文件＝覆盖，先弹确认显示目标路径（防手快覆盖错文件）
 	if current_path == "":
 		_on_save_as_pressed()
 	else:
-		save_to_file(current_path)
+		_save_confirm_dlg.dialog_text = "覆盖保存到：\n%s\n（此操作会覆盖该文件）" % current_path
+		_save_confirm_dlg.popup_centered()
 
 func _on_save_as_pressed() -> void:
 	if current_path != "":
