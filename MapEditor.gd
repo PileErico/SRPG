@@ -213,6 +213,14 @@ func _load_terrains() -> void:
 
 func _build_ui() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
+	theme = _build_theme()   # 统一深色控件观感（一处改全局）
+
+	# 深色背景（铺满，垫在所有 UI 之下）——去掉引擎默认灰
+	var bgrect := ColorRect.new()
+	bgrect.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bgrect.color = Color(0.09, 0.10, 0.12)
+	bgrect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(bgrect)
 
 	var root := VBoxContainer.new()
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -220,7 +228,8 @@ func _build_ui() -> void:
 
 	# ---- 顶部工具栏 ----
 	var bar := HBoxContainer.new()
-	root.add_child(bar)
+	var bar_wrap := _panelize(bar)   # 顶栏也给个深底，与画布分开
+	root.add_child(bar_wrap)
 
 	if not embedded:   # 嵌入 Game 时由 Game 顶栏提供「主菜单」，这里不重复
 		var menu_btn := Button.new()
@@ -312,7 +321,7 @@ func _build_ui() -> void:
 	main.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	root.add_child(main)
 
-	main.add_child(_build_brush_sidebar())
+	main.add_child(_panelize(_build_brush_sidebar()))
 
 	canvas = EditorCanvas.new()
 	canvas.editor = self
@@ -320,7 +329,7 @@ func _build_ui() -> void:
 	canvas.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	main.add_child(canvas)
 
-	main.add_child(_build_side_panel())
+	main.add_child(_panelize(_build_side_panel()))
 
 	# ---- 文件对话框（建一次复用）----
 	_save_dlg = _make_file_dialog(FileDialog.FILE_MODE_SAVE_FILE)
@@ -395,7 +404,7 @@ func _build_brush_sidebar() -> Control:
 	sidebar.custom_minimum_size = Vector2(180, 0)
 
 	# —— 图层切换（互斥）：地形/线/区域/单位/触发/地点——线与地点仅大地图显示（_apply_map_type 门禁）
-	sidebar.add_child(_make_label("图层"))
+	sidebar.add_child(_section_title("图层"))
 	var layer_grid := GridContainer.new()
 	layer_grid.columns = 3
 	var lg := ButtonGroup.new()
@@ -485,7 +494,7 @@ func _set_layer(id: String) -> void:
 func _build_terrain_brushes() -> Control:
 	var box := VBoxContainer.new()
 	box.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	box.add_child(_make_label("地形笔刷"))
+	box.add_child(_section_title("地形笔刷"))
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -500,10 +509,14 @@ func _build_terrain_brushes() -> Control:
 		b.toggled.connect(_on_brush_toggled.bind(i))
 		list.add_child(b)
 		brush_buttons.append(b)
-	# —— 地形数据（编辑选中笔刷的战斗属性）——
+	# 地形数据（编辑选中笔刷战斗属性）＝进阶段，默认折叠给笔刷让出空间
+	box.add_child(_make_foldable("地形数据（选中笔刷）", _build_terrain_data(), true))
+	return box
+
+# 地形数据编辑区（移动成本/通行/tag 成本 + 全局·本图范围）——被 _build_terrain_brushes 包进折叠区
+func _build_terrain_data() -> Control:
+	var box := VBoxContainer.new()
 	# 范围：全局＝写回 terrains.json（影响所有图）；本图＝只覆盖这张图（存进地图 terrain_overrides）
-	box.add_child(HSeparator.new())
-	box.add_child(_make_label("地形数据（选中笔刷）"))
 	var srow := HBoxContainer.new()
 	srow.add_child(_make_label("范围"))
 	_terr_scope_opt = OptionButton.new()
@@ -808,7 +821,7 @@ func _visible_brush_indices() -> Array:
 func _build_line_tools() -> Control:
 	var v := VBoxContainer.new()
 	v.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	v.add_child(_make_label("线特征（左键画 / 右键擦）"))
+	v.add_child(_section_title("线特征（左键画 / 右键擦）"))
 	var mrow := HBoxContainer.new()
 	mrow.add_child(_make_label("工具"))
 	var mopt := OptionButton.new()
@@ -981,7 +994,7 @@ func line_features() -> Dictionary:
 func _build_location_tools() -> Control:
 	var v := VBoxContainer.new()
 	v.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	v.add_child(_make_label("地点（左键放置/选中，右键删）"))
+	v.add_child(_section_title("地点（左键放置/选中，右键删）"))
 	v.add_child(_make_label("放置类型"))
 	_loc_type_list = ItemList.new()
 	_loc_type_list.custom_minimum_size = Vector2(0, 92)
@@ -1211,7 +1224,7 @@ func locations_for_draw() -> Array:
 func _build_region_tools() -> Control:
 	var v := VBoxContainer.new()
 	v.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	v.add_child(_make_label("区域（左键画 / 右键擦）"))
+	v.add_child(_section_title("区域（左键画 / 右键擦）"))
 	_region_list = ItemList.new()
 	_region_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_region_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1261,7 +1274,7 @@ func _build_region_tools() -> Control:
 func _build_unit_tools() -> Control:
 	var v := VBoxContainer.new()
 	v.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	v.add_child(_make_label("单位（左键落子 / 右键删）"))
+	v.add_child(_section_title("单位（左键落子 / 右键删）"))
 	var frow := HBoxContainer.new()
 	frow.add_child(_make_label("阵营"))
 	var fopt := OptionButton.new()
@@ -1451,7 +1464,7 @@ func save_unit_preset(u, preset_name: String) -> void:
 func _build_trigger_tools() -> Control:
 	var v := VBoxContainer.new()
 	v.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	v.add_child(_make_label("触发器"))
+	v.add_child(_section_title("触发器"))
 	_trigger_list = ItemList.new()
 	_trigger_list.custom_minimum_size = Vector2(0, 84)
 	_trigger_list.item_selected.connect(_on_trigger_selected)
@@ -1725,7 +1738,7 @@ func _build_side_panel() -> Control:
 	side.custom_minimum_size = Vector2(240, 0)
 
 	# —— 地图库（文件夹 + 其中地图列表）——
-	side.add_child(_make_label("地图库"))
+	side.add_child(_section_title("地图库"))
 	_dir_label = _make_label("")
 	_dir_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_dir_label.add_theme_color_override("font_color", Color(0.75, 0.78, 0.85))
@@ -1754,22 +1767,16 @@ func _build_side_panel() -> Control:
 	new_map_btn.pressed.connect(_on_new_map_in_dir)
 	side.add_child(new_map_btn)
 
-	side.add_child(HSeparator.new())
-
-	# —— 环境（日夜 + 天气表；地图级 authoring，见 docs/感知系统.md 🔒）——
-	side.add_child(_build_env_section())
-
-	side.add_child(HSeparator.new())
+	# —— 环境（日夜 + 天气表；地图级 authoring）——默认折叠，进阶段
+	side.add_child(_make_foldable("环境（天气·日夜）", _build_env_section(), true))
 
 	# —— 当前文件 ——
 	_file_label = _make_label("文件：(未保存)")
 	_file_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	side.add_child(_file_label)
 
-	side.add_child(HSeparator.new())
-
 	# —— 最近操作（撤销栈）——
-	side.add_child(_make_label("最近操作（顶＝下一个撤销）"))
+	side.add_child(_section_title("最近操作（顶＝下一个撤销）"))
 	_history_list = ItemList.new()
 	_history_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_history_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1781,7 +1788,6 @@ func _build_side_panel() -> Control:
 # 环境面板：日夜下拉 + 天气表（增删行）。写进 map_environment，随图存盘、含撤销。
 func _build_env_section() -> Control:
 	var v := VBoxContainer.new()
-	v.add_child(_make_label("环境（天气·日夜）"))
 	var trow := HBoxContainer.new()
 	trow.add_child(_make_label("日夜"))
 	_env_time_opt = OptionButton.new()
@@ -2032,6 +2038,106 @@ func _make_label(t: String) -> Label:
 	var l := Label.new()
 	l.text = t
 	return l
+
+# —— UI chrome 助手（统一分节标题 / 折叠区 / 面板底）——
+
+# 分节标题：一条淡蓝底色条 + 亮字，给侧栏各段清晰的视觉分隔
+func _section_title(text: String) -> Control:
+	var p := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.22, 0.36, 0.55, 0.5)
+	sb.set_corner_radius_all(3)
+	sb.content_margin_left = 7
+	sb.content_margin_right = 6
+	sb.content_margin_top = 3
+	sb.content_margin_bottom = 3
+	p.add_theme_stylebox_override("panel", sb)
+	var l := Label.new()
+	l.text = text
+	l.add_theme_color_override("font_color", Color(0.92, 0.95, 1.0))
+	p.add_child(l)
+	return p
+
+# 折叠区：点标题栏（▾/▸）收起/展开 content。进阶/占空间的段默认收起，给主内容让位。
+func _make_foldable(title: String, content: Control, collapsed: bool) -> VBoxContainer:
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 2)
+	var hdr := Button.new()
+	hdr.toggle_mode = true
+	hdr.button_pressed = not collapsed
+	hdr.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	hdr.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hdr.focus_mode = Control.FOCUS_NONE
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.18, 0.22, 0.28)
+	sb.set_corner_radius_all(3)
+	sb.set_content_margin_all(4)
+	hdr.add_theme_stylebox_override("normal", sb)
+	hdr.add_theme_stylebox_override("hover", sb)
+	hdr.add_theme_stylebox_override("pressed", sb)
+	hdr.add_theme_color_override("font_color", Color(0.86, 0.9, 0.96))
+	var _upd := func(open: bool):
+		hdr.text = ("▾ " if open else "▸ ") + title
+	_upd.call(not collapsed)
+	content.visible = not collapsed
+	hdr.toggled.connect(func(pressed: bool):
+		content.visible = pressed
+		_upd.call(pressed))
+	box.add_child(hdr)
+	box.add_child(content)
+	return box
+
+# 统一深色主题（挂在编辑器根 Control，全部子控件继承；per-instance override 仍优先——如笔刷缩略图）
+func _build_theme() -> Theme:
+	var th := Theme.new()
+	var text := Color(0.86, 0.89, 0.94)
+	var b_norm := _sb(Color(0.20, 0.22, 0.27), Color(0.30, 0.33, 0.40))
+	var b_hover := _sb(Color(0.25, 0.28, 0.34), Color(0.40, 0.44, 0.52))
+	var b_press := _sb(Color(0.24, 0.36, 0.52), Color(0.46, 0.62, 0.85))
+	var b_flat := _sb(Color(0, 0, 0, 0), Color(0, 0, 0, 0))
+	for t in ["Button", "OptionButton", "MenuButton"]:
+		th.set_stylebox("normal", t, b_norm)
+		th.set_stylebox("hover", t, b_hover)
+		th.set_stylebox("pressed", t, b_press)
+		th.set_stylebox("focus", t, b_flat)
+		th.set_stylebox("disabled", t, b_norm)
+		th.set_color("font_color", t, text)
+		th.set_color("font_hover_color", t, Color.WHITE)
+		th.set_color("font_pressed_color", t, Color.WHITE)
+		th.set_color("font_focus_color", t, text)
+		th.set_color("font_disabled_color", t, Color(0.5, 0.52, 0.57))
+	th.set_color("font_color", "Label", text)
+	th.set_color("font_color", "CheckBox", text)
+	th.set_color("font_pressed_color", "CheckBox", Color.WHITE)
+	th.set_color("font_hover_color", "CheckBox", Color.WHITE)
+	th.set_stylebox("normal", "LineEdit", _sb(Color(0.15, 0.16, 0.20), Color(0.30, 0.33, 0.40)))
+	th.set_stylebox("focus", "LineEdit", _sb(Color(0.17, 0.19, 0.24), Color(0.42, 0.56, 0.80)))
+	th.set_color("font_color", "LineEdit", text)
+	th.set_color("font_placeholder_color", "LineEdit", Color(0.55, 0.58, 0.64))
+	th.set_stylebox("panel", "ItemList", _sb(Color(0.14, 0.15, 0.19), Color(0.26, 0.29, 0.35)))
+	th.set_color("font_color", "ItemList", text)
+	th.set_color("font_selected_color", "ItemList", Color.WHITE)
+	return th
+
+func _sb(bg: Color, border: Color) -> StyleBoxFlat:
+	var s := StyleBoxFlat.new()
+	s.bg_color = bg
+	if border.a > 0.0:
+		s.border_color = border
+		s.set_border_width_all(1)
+	s.set_corner_radius_all(3)
+	s.set_content_margin_all(4)
+	return s
+
+# 把一个侧栏 VBox 包进带深色底 + 内边距的面板（与画布视觉分开）
+func _panelize(inner: Control) -> PanelContainer:
+	var p := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.12, 0.13, 0.16)
+	sb.set_content_margin_all(7)
+	p.add_theme_stylebox_override("panel", sb)
+	p.add_child(inner)
+	return p
 
 # 笔刷按钮＝左侧地块缩略图（完整六边形，与地图格同一份 HexTileRender 渲染）+ 右侧地形名。
 # 底色改中性深底（地块颜色已由缩略图承载）；选中＝亮黄描边。
