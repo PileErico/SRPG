@@ -1,0 +1,19 @@
+{
+  "empire_infantry": {
+    "palettes": {
+      "body": "",
+      "cslot_2": "",
+      "helmet": ""
+    },
+    "parts": {
+      "body": "body_base_body_32x32",
+      "cslot_2": "cslot_2_new",
+      "helmet": "helmet_new"
+    },
+    "piece": {
+      "dx": 1,
+      "dy": 19,
+      "scale": 2
+    }
+  }
+}

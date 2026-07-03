@@ -1,4 +1,10 @@
 extends "res://HexCanvas.gd"
+
+const UnitPiece := preload("res://UnitPiece.gd")   # 单位棋子渲染（与战场同一出处；有工坊外观→精灵棋子）
+
+func _ready() -> void:
+	super()   # 保留 HexCanvas._ready
+	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST   # 像素精灵放大不糊（与 SandboxCanvas 一致）
 ## 编辑器画布：在 HexCanvas（地形底图 + 悬停高亮）之上叠加「图层编辑」。
 ## 仿 SandboxCanvas 的「底图 + 叠加层」模式；不改动 HexCanvas（它被 SandboxCanvas 共用），
 ## 编辑器专属的「区域层绘制 + 按当前层分派输入」都收在本文件里。
@@ -59,12 +65,22 @@ func _draw_units() -> void:
 			continue
 		var c := hex_center(col, row)
 		var r := HEX_SIZE * 0.62
-		var fill: Color = editor.faction_color(str(e.get("faction", "enemy")))
+		var fac: Color = editor.faction_color(str(e.get("faction", "enemy")))
+		var proto = e.get("proto", {})
+		var pid := str(proto.get("id", "")) if typeof(proto) == TYPE_DICTIONARY else ""
+		var icon := str(proto.get("icon", "")) if typeof(proto) == TYPE_DICTIONARY else ""
+		# 有工坊拼装外观 → 精灵棋子（与战场同一 UnitPiece + 同一 look 判定，非单位层压淡）
+		var look := UnitPiece.look_for(pid)
+		if not look.is_empty() and icon != "":
+			var opts := UnitPiece.piece_opts(look)
+			opts["tint"] = Color(1, 1, 1, 1.0 if on_unit else 0.6)
+			UnitPiece.draw_piece(self, c, r, TextureCache.get_tex(icon), fac, opts)
+			continue
+		# 无外观 → 圆底 token
+		var fill := fac
 		fill.a = 1.0 if on_unit else 0.5
 		draw_circle(c, r, fill)
 		draw_arc(c, r, 0.0, TAU, 28, Color(0, 0, 0, 0.7), 2.0)
-		var proto = e.get("proto", {})
-		var icon := str(proto.get("icon", "")) if typeof(proto) == TYPE_DICTIONARY else ""
 		var tex = TextureCache.get_tex(icon)
 		if tex != null:
 			var s := r * 1.6

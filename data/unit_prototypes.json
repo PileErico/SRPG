@@ -65,16 +65,45 @@
     "trait": "dragonslayer"
   },
   {
+    "_preset": true,
     "ai_threat": true,
     "default_faction": "enemy",
-    "icon": "res://icons/Unit_Icons/Empire_Infantry.png",
+    "equip": [],
+    "exp": 0,
+    "exp_max": 100,
+    "four": {
+      "DEX": 5,
+      "INT": 5,
+      "STA": 5,
+      "STR": 5
+    },
+    "icon": "res://icons/Characters/appearance_empire_infantry.png",
     "id": "empire_infantry",
+    "level": 1,
     "name": "帝国步兵",
     "portrait": "res://icons/Characters/Empire_Infantry.png",
-    "speed": 5,
+    "skills": {
+
+    },
+    "stats": {
+      "AP_max": 2,
+      "armor_max": 0,
+      "atk_eff": 100,
+      "def_eff": 100,
+      "move": 6,
+      "res_fire": 0,
+      "res_holy": 0,
+      "res_ice": 0,
+      "res_phys": 0,
+      "res_thunder": 0,
+      "sight": 5,
+      "speed": 5
+    },
     "tags": [
+      "ground",
       "human"
-    ]
+    ],
+    "trait": ""
   },
   {
     "ai_threat": true,

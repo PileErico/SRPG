@@ -3,6 +3,9 @@ extends "res://HexCanvas.gd"
 ## 在地形之上叠画单位 token。输入沿用父类（中键平移、滚轮缩放、悬停）；
 ## 左右键在 sandbox 宿主里是空操作（不绘制地形）。
 
+const UnitPiece := preload("res://UnitPiece.gd")          # 「单位即棋子」渲染（精灵+脚下阵营环+阴影）
+const AppearanceDB := preload("res://AppearanceDB.gd")    # 外观配方/棋子微调来源（get_look）
+
 var _fly_phase := 0.0   # 飞行漂浮相位（_process 累加，仅在场上有飞行单位时推进+重绘）
 
 func _ready() -> void:
@@ -246,6 +249,11 @@ const CAN_ACT_RING := Color(0.55, 0.95, 0.55, 0.95)  # 当前可行动：绿描�
 func _draw_unit(u) -> void:
 	# 动画期间该单位用滑动坐标，其余用格心
 	var ground: Vector2 = editor._anim_pos if (editor._animating and editor._anim_unit == u) else hex_center(u.col, u.row)
+	# 有完整外观(工坊拼装)的单位 → 精灵+脚下阵营环，取代圆底 token
+	var look = _sprite_look(u)
+	if look != null:
+		_draw_sprite_piece(u, ground, look)
+		return
 	var r := HEX_SIZE * 0.62
 	# 飞行：token 抬离地面 + 地面投影 + 轻微上下漂浮（每单位错相，不齐步）
 	# 抬升 > 棋子半径，否则浮起的圆会盖住自己的影子（投影固定贴地、不随漂浮上下动）
@@ -279,6 +287,32 @@ func _draw_unit(u) -> void:
 	# 头顶血条/护甲条已移除——单位血量/护甲改在左下「光标信息栏」悬停单位卡里看（见 Sandbox.hover_extra）。
 	# _draw_hp_bar/_draw_armor_bar 函数保留（将来若想「受伤才显示」再按需调用）。
 	_draw_ap_pips(u, c, r)
+
+# 有工坊拼装外观的单位 → 返回其 look（单一判定 UnitPiece.look_for），否则 null。
+func _sprite_look(u):
+	if u.icon == "":
+		return null
+	var look := UnitPiece.look_for(str(u.proto_id))
+	return look if not look.is_empty() else null
+
+# 「单位即棋子」：精灵立在地块 + 脚下阵营色椭圆环 + 阴影；沿用 acted/flash/死门/可动/查看/飞行 状态。
+func _draw_sprite_piece(u, ground: Vector2, look: Dictionary) -> void:
+	var r := HEX_SIZE * 0.62
+	var air_t: float = editor.fly_factor(u)
+	var lift := 0.0
+	if air_t > 0.001:
+		lift = HEX_SIZE * 0.72 * air_t + sin(_fly_phase + (u.col * 1.7 + u.row * 0.9)) * (HEX_SIZE * 0.07) * air_t
+	var opts := UnitPiece.piece_opts(look)   # scale/dx/dy 单一出处
+	opts.merge({
+		"acted": editor._has_acted(u),
+		"flashing": editor._flash_units.has(u),
+		"deaths": u.tags.has("deaths_door"),
+		"active": editor._is_active_unit(u),
+		"viewed": editor.viewed_unit == u,
+		"lift": lift,
+	})
+	UnitPiece.draw_piece(self, ground, r, TextureCache.get_tex(u.icon), editor.faction_color(u.faction), opts)
+	_draw_ap_pips(u, ground + Vector2(0, r * 0.55), r)
 
 # 飞行单位的地面投影：固定贴在原格（不随漂浮上下动），抬得越高→略小略淡（透视感，但有下限保证看得见）
 func _draw_ground_shadow(ground: Vector2, r: float, lift: float) -> void:

@@ -1,0 +1,187 @@
+{
+  "config": {
+    "size": 32
+  },
+  "palettes": [
+    {
+      "cn": "浅肤",
+      "id": "skin_pale",
+      "stops": [
+        "#20140f",
+        "#7a4a38",
+        "#e8b48c",
+        "#fff1e0"
+      ]
+    },
+    {
+      "cn": "麦肤",
+      "id": "skin_tan",
+      "stops": [
+        "#1a0e08",
+        "#5a3420",
+        "#b07040",
+        "#e8c090"
+      ]
+    },
+    {
+      "cn": "枯骨",
+      "id": "bone",
+      "stops": [
+        "#101014",
+        "#3a3a48",
+        "#8a8a9a",
+        "#e8e8f0"
+      ]
+    },
+    {
+      "cn": "绿鳞",
+      "id": "scale_green",
+      "stops": [
+        "#0e1a0a",
+        "#2c4a20",
+        "#5a8a3a",
+        "#a8d870"
+      ]
+    },
+    {
+      "cn": "棕发",
+      "id": "hair_brown",
+      "stops": [
+        "#1a0f08",
+        "#4a2c14",
+        "#8a5a30",
+        "#c89050"
+      ]
+    },
+    {
+      "cn": "黑发",
+      "id": "hair_black",
+      "stops": [
+        "#0a0a0e",
+        "#22242c",
+        "#44485a",
+        "#6a7088"
+      ]
+    },
+    {
+      "cn": "金发",
+      "id": "hair_blonde",
+      "stops": [
+        "#3a2a10",
+        "#8a6a20",
+        "#d8b040",
+        "#f8e090"
+      ]
+    },
+    {
+      "cn": "蓝衣",
+      "id": "cloth_blue",
+      "stops": [
+        "#10131a",
+        "#2b4a6a",
+        "#4a7db0",
+        "#9ec8ff"
+      ]
+    },
+    {
+      "cn": "红衣",
+      "id": "cloth_red",
+      "stops": [
+        "#180a0a",
+        "#5a1e1e",
+        "#a03838",
+        "#e08080"
+      ]
+    },
+    {
+      "cn": "绿衣",
+      "id": "cloth_green",
+      "stops": [
+        "#0e1610",
+        "#264028",
+        "#4a7a4a",
+        "#98c898"
+      ]
+    },
+    {
+      "cn": "钢",
+      "id": "steel",
+      "stops": [
+        "#0f0f14",
+        "#454550",
+        "#9aa0ac",
+        "#eef2ff"
+      ]
+    },
+    {
+      "cn": "金",
+      "id": "gold",
+      "stops": [
+        "#2a1c06",
+        "#7a5410",
+        "#c89828",
+        "#ffe088"
+      ]
+    }
+  ],
+  "parts": [
+    {
+      "cn": "base body_32x32",
+      "default_palette": "skin_pale",
+      "id": "body_base_body_32x32",
+      "path": "res://icons/Parts/body/base body_32x32.png",
+      "recolorable": true,
+      "slot": "body",
+      "tags": []
+    },
+    {
+      "cn": "helmet_new",
+      "default_palette": "steel",
+      "id": "helmet_new",
+      "path": "res://icons/Parts/helmet/helmet_new.png",
+      "recolorable": true,
+      "slot": "helmet",
+      "tags": []
+    },
+    {
+      "cn": "cslot_2_new",
+      "id": "cslot_2_new",
+      "path": "res://icons/Parts/cslot_2/cslot_2_new.png",
+      "recolorable": true,
+      "slot": "cslot_2",
+      "tags": []
+    }
+  ],
+  "slots": [
+    {
+      "cn": "身体",
+      "id": "body",
+      "z": 0
+    },
+    {
+      "cn": "头发",
+      "id": "hair",
+      "z": 20
+    },
+    {
+      "cn": "头盔",
+      "id": "helmet",
+      "z": 30
+    },
+    {
+      "cn": "武器",
+      "id": "weapon",
+      "z": 40
+    },
+    {
+      "cn": "盾",
+      "id": "cslot_1",
+      "z": 50
+    },
+    {
+      "cn": "外装",
+      "id": "cslot_2",
+      "z": 10
+    }
+  ]
+}

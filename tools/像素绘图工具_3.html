@@ -1,0 +1,938 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>像素绘图工具</title>
+<style>
+  :root{
+    --bg:#17171b; --panel:#1f1f25; --panel2:#26262d; --line:#34343d;
+    --txt:#d8d8dd; --dim:#85858f; --accent:#5fb3a8; --accent-d:#3d7d75;
+    --danger:#c2685f;
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  html,body{height:100%}
+  body{
+    background:var(--bg); color:var(--txt);
+    font-family:-apple-system,"Segoe UI",system-ui,sans-serif;
+    font-size:13px; overflow:hidden; user-select:none;
+    display:flex; flex-direction:column;
+  }
+  .mono{font-variant-numeric:tabular-nums; font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+
+  /* top bar */
+  #top{
+    display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+    padding:8px 12px; background:var(--panel); border-bottom:1px solid var(--line);
+    min-height:46px;
+  }
+  #top .group{display:flex; align-items:center; gap:6px}
+  #top .sep{width:1px; height:22px; background:var(--line)}
+  .ttl{font-weight:600; letter-spacing:.5px; color:var(--accent); margin-right:4px}
+  label.fld{display:flex; align-items:center; gap:4px; color:var(--dim)}
+  input[type=number],input[type=text]{
+    background:var(--panel2); border:1px solid var(--line); color:var(--txt);
+    border-radius:5px; padding:4px 6px; font-size:12px; width:52px; outline:none;
+  }
+  input[type=text].name{width:110px}
+  input:focus{border-color:var(--accent-d)}
+  button{
+    background:var(--panel2); border:1px solid var(--line); color:var(--txt);
+    border-radius:5px; padding:5px 9px; font-size:12px; cursor:pointer;
+    transition:background .12s,border-color .12s;
+  }
+  button:hover{background:#2f2f37; border-color:#454551}
+  button:active{background:#27272e}
+  button.primary{background:var(--accent-d); border-color:var(--accent-d); color:#eafffb}
+  button.primary:hover{background:#48908a}
+  select{background:var(--panel2); border:1px solid var(--line); color:var(--txt); border-radius:5px; padding:5px 6px; font-size:12px; outline:none}
+  .chk{display:flex; align-items:center; gap:5px; color:var(--dim); cursor:pointer}
+  .chk input{accent-color:var(--accent)}
+
+  /* main */
+  #main{flex:1; display:flex; min-height:0}
+
+  /* toolbar */
+  #tools{
+    width:62px; background:var(--panel); border-right:1px solid var(--line);
+    display:flex; flex-direction:column; gap:4px; padding:8px 7px; overflow:auto;
+  }
+  .tool{
+    background:var(--panel2); border:1px solid var(--line); color:var(--txt);
+    border-radius:6px; padding:7px 2px; font-size:11px; cursor:pointer; text-align:center;
+    line-height:1.25;
+  }
+  .tool .k{display:block; color:var(--dim); font-size:9px; margin-top:1px}
+  .tool:hover{background:#2f2f37}
+  .tool.active{background:var(--accent-d); border-color:var(--accent); color:#eafffb}
+  .tool.active .k{color:#bfeae4}
+  #tools .div{height:1px; background:var(--line); margin:4px 2px}
+
+  /* canvas area */
+  #stage{flex:1; position:relative; overflow:hidden; background:
+    repeating-conic-gradient(#1b1b20 0% 25%, #202027 0% 50%) 50%/22px 22px;}
+  #view{position:absolute; left:0; top:0; image-rendering:pixelated; cursor:crosshair}
+  #hud{
+    position:absolute; left:10px; bottom:10px; pointer-events:none;
+    background:rgba(15,15,18,.82); border:1px solid var(--line); border-radius:6px;
+    padding:5px 9px; font-size:11px; color:var(--dim);
+  }
+  #hud b{color:var(--txt); font-weight:600}
+  #zoomhint{
+    position:absolute; right:10px; bottom:10px; pointer-events:none;
+    background:rgba(15,15,18,.82); border:1px solid var(--line); border-radius:6px;
+    padding:5px 9px; font-size:11px; color:var(--dim);
+  }
+
+  /* sidebar */
+  #side{width:236px; background:var(--panel); border-left:1px solid var(--line);
+    display:flex; flex-direction:column; overflow:auto; padding:12px}
+  .sect{margin-bottom:16px}
+  .sect h3{font-size:11px; letter-spacing:1px; text-transform:uppercase; color:var(--dim);
+    margin-bottom:8px; font-weight:600}
+
+  #sv{width:100%; height:150px; border-radius:6px; cursor:crosshair; display:block; border:1px solid var(--line)}
+  #hue{width:100%; height:16px; border-radius:5px; cursor:pointer; display:block; margin-top:8px; border:1px solid var(--line)}
+  .swatchRow{display:flex; align-items:center; gap:10px; margin-top:10px}
+  #cur{width:42px; height:42px; border-radius:7px; border:1px solid var(--line);
+    background-image:repeating-conic-gradient(#444 0% 25%, #555 0% 50%); background-size:10px 10px}
+  #cur > i{display:block; width:100%; height:100%; border-radius:6px}
+  .rgbGrid{display:grid; grid-template-columns:auto 1fr; gap:5px 8px; flex:1; align-items:center}
+  .rgbGrid span{color:var(--dim); font-size:11px}
+  .rgbGrid input{width:100%}
+  .hexRow{display:flex; align-items:center; gap:6px; margin-top:9px}
+  .hexRow span{color:var(--dim)}
+  #hex{width:100%; text-transform:uppercase}
+
+  /* palette */
+  #palette{display:grid; grid-template-columns:repeat(8,1fr); gap:4px}
+  .pal{aspect-ratio:1; border-radius:4px; border:1px solid var(--line); cursor:pointer; position:relative;
+    background-image:repeating-conic-gradient(#444 0% 25%, #555 0% 50%); background-size:8px 8px}
+  .pal > i{position:absolute; inset:0; border-radius:3px}
+  .pal.sel{outline:2px solid var(--accent); outline-offset:1px}
+  .palBtns{display:flex; gap:6px; margin-top:9px; flex-wrap:wrap}
+  .palBtns button{flex:1; min-width:64px; padding:5px 4px; font-size:11px}
+  .tiny{font-size:10.5px; color:var(--dim); line-height:1.5; margin-top:8px}
+  kbd{background:var(--panel2); border:1px solid var(--line); border-radius:3px; padding:0 4px; font-size:10px; color:var(--txt)}
+  input[type=file]{display:none}
+
+  /* layer panel */
+  .layerCtl{display:flex; align-items:center; gap:7px; margin-bottom:7px}
+  .layerCtl .opTxt{color:var(--dim); font-size:11px; white-space:nowrap}
+  #blendSel{flex:1; width:100%}
+  #opSlider{flex:1; accent-color:var(--accent); min-width:0}
+  #opLabel{font-size:11px; color:var(--dim); width:38px; text-align:right}
+  #layerList{display:flex; flex-direction:column; gap:3px; max-height:200px; overflow:auto; margin:8px 0;
+    border:1px solid var(--line); border-radius:6px; padding:4px; background:var(--bg)}
+  .layerRow{display:flex; align-items:center; gap:7px; padding:4px 5px; border-radius:5px; cursor:pointer; border:1px solid transparent}
+  .layerRow:hover{background:var(--panel2)}
+  .layerRow.active{background:var(--panel2); border-color:var(--accent-d)}
+  .layerRow .eye{background:none; border:none; padding:0; width:18px; font-size:12px; cursor:pointer; color:var(--txt)}
+  .layerRow .eye.off{opacity:.4; color:var(--dim)}
+  .layerRow .lthumb{width:28px; height:28px; border:1px solid var(--line); border-radius:3px; flex:none;
+    image-rendering:pixelated; background:repeating-conic-gradient(#3a3a42 0% 25%, #2e2e35 0% 50%); background-size:8px 8px}
+  .layerRow .lname{flex:1; font-size:12px; color:var(--txt); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .layerBtns{display:flex; gap:4px; flex-wrap:wrap}
+  .layerBtns button{flex:1; min-width:30px; padding:5px 2px; font-size:13px}
+</style>
+</head>
+<body>
+
+<div id="top">
+  <span class="ttl">像素绘图</span>
+  <div class="group">
+    <label class="fld">W<input type="number" id="inW" value="32" min="1" max="128"></label>
+    <label class="fld">H<input type="number" id="inH" value="32" min="1" max="128"></label>
+    <select id="preset" title="尺寸预设">
+      <option value="">预设</option>
+      <option value="16">16×16</option>
+      <option value="24">24×24</option>
+      <option value="32">32×32</option>
+      <option value="48">48×48</option>
+      <option value="64">64×64</option>
+      <option value="128">128×128</option>
+    </select>
+    <button id="btnNew">新建</button>
+  </div>
+  <div class="sep"></div>
+  <div class="group">
+    <button id="btnUndo" title="Ctrl+Z">撤销</button>
+    <button id="btnRedo" title="Ctrl+Y">重做</button>
+    <button id="btnClear">清空</button>
+  </div>
+  <div class="sep"></div>
+  <label class="chk"><input type="checkbox" id="cGrid" checked>像素网格</label>
+  <label class="chk"><input type="checkbox" id="cMirror">水平镜像</label>
+  <div class="sep"></div>
+  <div class="group">
+    <button id="btnImport">导入 PNG</button>
+    <input type="file" id="impPng" accept="image/png,image/*">
+    <label class="fld">文件名<input type="text" id="fname" class="name" value="sprite"></label>
+    <select id="scale" title="导出倍数">
+      <option value="1">1×</option>
+      <option value="2">2×</option>
+      <option value="4">4×</option>
+      <option value="8">8×</option>
+    </select>
+    <button id="btnExport" class="primary">导出 PNG</button>
+  </div>
+</div>
+
+<div id="main">
+  <div id="tools">
+    <div class="tool active" data-tool="pencil">铅笔<span class="k">B</span></div>
+    <div class="tool" data-tool="eraser">橡皮<span class="k">E</span></div>
+    <div class="tool" data-tool="fill">填充<span class="k">G</span></div>
+    <div class="tool" data-tool="pick">吸管<span class="k">I</span></div>
+    <div class="div"></div>
+    <div class="tool" data-tool="line">直线<span class="k">L</span></div>
+    <div class="tool" data-tool="rect">矩形<span class="k">R</span></div>
+    <div class="tool" data-tool="rectf">实心<span class="k">F</span></div>
+    <div class="div"></div>
+    <div class="tool" data-tool="select">选取<span class="k">M</span></div>
+    <div class="tool" data-tool="wand">魔棒<span class="k">W</span></div>
+  </div>
+
+  <div id="stage">
+    <canvas id="view"></canvas>
+    <div id="hud"><b id="pos">–</b></div>
+    <div id="zoomhint"><span id="zlbl">1200%</span> · 滚轮缩放 · 中键/空格拖动</div>
+  </div>
+
+  <div id="side">
+    <div class="sect">
+      <h3>颜色</h3>
+      <canvas id="sv" width="210" height="150"></canvas>
+      <canvas id="hue" width="210" height="16"></canvas>
+      <div class="swatchRow">
+        <div id="cur"><i></i></div>
+        <div class="rgbGrid">
+          <span>R</span><input type="number" id="iR" min="0" max="255" class="mono">
+          <span>G</span><input type="number" id="iG" min="0" max="255" class="mono">
+          <span>B</span><input type="number" id="iB" min="0" max="255" class="mono">
+        </div>
+      </div>
+      <div class="hexRow"><span>#</span><input type="text" id="hex" class="mono" maxlength="6"></div>
+    </div>
+
+    <div class="sect">
+      <h3>调色盘</h3>
+      <div id="palette"></div>
+      <div class="palBtns">
+        <button id="btnAdd">+ 加入当前色</button>
+        <button id="btnDel">删除选中</button>
+      </div>
+      <div class="palBtns">
+        <button id="btnExpPal">导出盘</button>
+        <button id="btnImpPal">导入盘</button>
+        <input type="file" id="impPal" accept="application/json">
+      </div>
+      <div class="tiny">单击色块=选用，双击=替换为当前色。调色盘自动保存在本机（下载到本地打开时生效）。</div>
+    </div>
+
+    <div class="sect">
+      <h3>图层</h3>
+      <div class="layerCtl">
+        <select id="blendSel" title="混合模式"></select>
+      </div>
+      <div class="layerCtl">
+        <span class="opTxt">不透明</span>
+        <input type="range" id="opSlider" min="0" max="100" value="100">
+        <span id="opLabel" class="mono">100%</span>
+      </div>
+      <div id="layerList"></div>
+      <div class="layerBtns">
+        <button id="btnLayerAdd" title="新建图层">＋</button>
+        <button id="btnLayerDel" title="删除图层">🗑</button>
+        <button id="btnLayerDup" title="复制图层">⧉</button>
+        <button id="btnLayerUp" title="上移">▲</button>
+        <button id="btnLayerDown" title="下移">▼</button>
+        <button id="btnLayerMerge" title="向下合并">⤓</button>
+      </div>
+      <div class="tiny">单击切换当前层，双击层名可重命名。绘画/选取只作用于当前层。</div>
+    </div>
+
+    <div class="sect">
+      <h3>快捷键</h3>
+      <div class="tiny">
+        <kbd>B</kbd>铅笔 <kbd>E</kbd>橡皮 <kbd>G</kbd>填充 <kbd>I</kbd>吸管 <kbd>L</kbd>直线 <kbd>R</kbd>矩形<br>
+        <kbd>M</kbd>选取 <kbd>W</kbd>魔棒 · 选区内拖动=移动 · <kbd>Ctrl+C/V</kbd>复制粘贴 · <kbd>Ctrl+X</kbd>剪切<br>
+        <kbd>Del</kbd>删除选区 · <kbd>Ctrl+A</kbd>全选 · <kbd>Esc/Enter</kbd>取消/落定<br>
+        <kbd>右键</kbd>临时吸管 · <kbd>Ctrl+Z/Y</kbd>撤销重做 · <kbd>空格+拖</kbd>平移 · <kbd>0</kbd>复位视图
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+(function(){
+  // ---------- state ----------
+  let W=32,H=32, zoom=12, ox=0, oy=0;
+  const ZOOMS=[0.25,0.5,0.75,1,1.5,2,3,4,6,8,12,16,24,32,48];
+  function nearestZoomIndex(z){let bi=0,bd=Infinity;for(let i=0;i<ZOOMS.length;i++){const d=Math.abs(ZOOMS[i]-z);if(d<bd){bd=d;bi=i;}}return bi;}
+  let tool='pencil';
+  let fg={r:230,g:90,b:90}, hsv={h:0,s:0.6,v:0.9};
+  const undo=[], redo=[];
+  let palette=[];
+  let palSel=-1;
+
+  // ---------- layer system ----------
+  // Each layer: {canvas, ctx, name, visible, opacity(0..1), blend(globalCompositeOperation), id}
+  let layers=[];          // bottom -> top order (index 0 = bottom)
+  let activeIdx=0;
+  let layerSeq=1;
+  const BLENDS=[
+    ['source-over','正常'],['multiply','正片叠底'],['screen','滤色'],['overlay','叠加'],
+    ['darken','变暗'],['lighten','变亮'],['color-dodge','颜色减淡'],['color-burn','颜色加深'],
+    ['hard-light','强光'],['soft-light','柔光'],['difference','差值'],['exclusion','排除'],
+    ['hue','色相'],['saturation','饱和度'],['color','颜色'],['luminosity','明度']
+  ];
+  function newLayerObj(name){
+    const c=document.createElement('canvas'); c.width=W; c.height=H;
+    const x=c.getContext('2d',{willReadFrequently:true});
+    return {canvas:c,ctx:x,name:name||('图层 '+(layerSeq++)),visible:true,opacity:1,blend:'source-over',id:Date.now()+Math.random()};
+  }
+  // buf/bx are dynamic aliases to the ACTIVE layer, so all existing drawing code keeps working
+  let buf=null, bx=null;
+  function syncActive(){ const L=layers[activeIdx]; buf=L.canvas; bx=L.ctx; }
+  const view=document.getElementById('view');
+  const vx=view.getContext('2d');
+  const stage=document.getElementById('stage');
+
+  // composite all visible layers into a single canvas (for export / hasContent)
+  function flatten(){
+    const out=document.createElement('canvas'); out.width=W; out.height=H;
+    const o=out.getContext('2d');
+    for(const L of layers){
+      if(!L.visible||L.opacity<=0)continue;
+      o.globalAlpha=L.opacity; o.globalCompositeOperation=L.blend;
+      o.drawImage(L.canvas,0,0);
+    }
+    o.globalAlpha=1; o.globalCompositeOperation='source-over';
+    return out;
+  }
+
+  // ---------- color math ----------
+  function hsv2rgb(h,s,v){
+    let c=v*s, x=c*(1-Math.abs((h/60)%2-1)), m=v-c, r=0,g=0,b=0;
+    if(h<60){r=c;g=x;}else if(h<120){r=x;g=c;}else if(h<180){g=c;b=x;}
+    else if(h<240){g=x;b=c;}else if(h<300){r=x;b=c;}else{r=c;b=x;}
+    return {r:Math.round((r+m)*255),g:Math.round((g+m)*255),b:Math.round((b+m)*255)};
+  }
+  function rgb2hsv(r,g,b){
+    r/=255;g/=255;b/=255;
+    const mx=Math.max(r,g,b),mn=Math.min(r,g,b),d=mx-mn;
+    let h=0;
+    if(d){ if(mx===r)h=((g-b)/d)%6; else if(mx===g)h=(b-r)/d+2; else h=(r-g)/d+4; h*=60; if(h<0)h+=360; }
+    return {h, s:mx?d/mx:0, v:mx};
+  }
+  const hex2=n=>n.toString(16).padStart(2,'0');
+  const toHex=c=>(hex2(c.r)+hex2(c.g)+hex2(c.b)).toUpperCase();
+  function parseHex(s){s=s.replace(/[^0-9a-f]/gi,'');if(s.length===3)s=s.split('').map(c=>c+c).join('');if(s.length!==6)return null;return {r:parseInt(s.slice(0,2),16),g:parseInt(s.slice(2,4),16),b:parseInt(s.slice(4,6),16)};}
+
+  // ---------- color UI ----------
+  const sv=document.getElementById('sv'), svx=sv.getContext('2d');
+  const hue=document.getElementById('hue'), hux=hue.getContext('2d');
+  function drawHue(){
+    const g=hux.createLinearGradient(0,0,hue.width,0);
+    for(let i=0;i<=6;i++)g.addColorStop(i/6,`hsl(${i*60},100%,50%)`);
+    hux.fillStyle=g; hux.fillRect(0,0,hue.width,hue.height);
+    const x=hsv.h/360*hue.width;
+    hux.strokeStyle='#fff'; hux.lineWidth=2; hux.strokeRect(x-1.5,0,3,hue.height);
+    hux.strokeStyle='#000'; hux.lineWidth=1; hux.strokeRect(x-2.5,0,5,hue.height);
+  }
+  function drawSV(){
+    const base=hsv2rgb(hsv.h,1,1);
+    svx.fillStyle=`rgb(${base.r},${base.g},${base.b})`; svx.fillRect(0,0,sv.width,sv.height);
+    let gw=svx.createLinearGradient(0,0,sv.width,0); gw.addColorStop(0,'#fff');gw.addColorStop(1,'rgba(255,255,255,0)');
+    svx.fillStyle=gw; svx.fillRect(0,0,sv.width,sv.height);
+    let gb=svx.createLinearGradient(0,0,0,sv.height); gb.addColorStop(0,'rgba(0,0,0,0)');gb.addColorStop(1,'#000');
+    svx.fillStyle=gb; svx.fillRect(0,0,sv.width,sv.height);
+    const px=hsv.s*sv.width, py=(1-hsv.v)*sv.height;
+    svx.beginPath(); svx.arc(px,py,5,0,7); svx.strokeStyle='#fff'; svx.lineWidth=2; svx.stroke();
+    svx.beginPath(); svx.arc(px,py,6.5,0,7); svx.strokeStyle='rgba(0,0,0,.6)'; svx.lineWidth=1; svx.stroke();
+  }
+  function syncFromHSV(){ fg=hsv2rgb(hsv.h,hsv.s,hsv.v); refreshColorInputs(); drawSV(); drawHue(); }
+  function refreshColorInputs(){
+    document.querySelector('#cur > i').style.background=`rgb(${fg.r},${fg.g},${fg.b})`;
+    iR.value=fg.r; iG.value=fg.g; iB.value=fg.b; hex.value=toHex(fg);
+  }
+  function setFromRGB(){ hsv=rgb2hsv(fg.r,fg.g,fg.b); drawSV(); drawHue(); refreshColorInputs(); }
+
+  const iR=document.getElementById('iR'),iG=document.getElementById('iG'),iB=document.getElementById('iB'),hex=document.getElementById('hex');
+  [iR,iG,iB].forEach(el=>el.addEventListener('input',()=>{
+    fg={r:clampB(+iR.value),g:clampB(+iG.value),b:clampB(+iB.value)}; setFromRGB();
+  }));
+  hex.addEventListener('input',()=>{const c=parseHex(hex.value);if(c){fg=c;setFromRGB();}});
+  function clampB(n){n=n|0;return n<0?0:n>255?255:n;}
+
+  let svDrag=false, hueDrag=false;
+  function svPick(e){const r=sv.getBoundingClientRect();let x=(e.clientX-r.left)/r.width,y=(e.clientY-r.top)/r.height;
+    hsv.s=Math.min(1,Math.max(0,x)); hsv.v=Math.min(1,Math.max(0,1-y)); syncFromHSV();}
+  function huePick(e){const r=hue.getBoundingClientRect();let x=(e.clientX-r.left)/r.width;
+    hsv.h=Math.min(359.99,Math.max(0,x*360)); syncFromHSV();}
+  sv.addEventListener('mousedown',e=>{svDrag=true;svPick(e);});
+  hue.addEventListener('mousedown',e=>{hueDrag=true;huePick(e);});
+  window.addEventListener('mousemove',e=>{if(svDrag)svPick(e);if(hueDrag)huePick(e);});
+  window.addEventListener('mouseup',()=>{svDrag=hueDrag=false;});
+
+  // ---------- palette ----------
+  const palEl=document.getElementById('palette');
+  function renderPalette(){
+    palEl.innerHTML='';
+    palette.forEach((c,i)=>{
+      const d=document.createElement('div'); d.className='pal'+(i===palSel?' sel':'');
+      const inner=document.createElement('i'); inner.style.background=`rgb(${c.r},${c.g},${c.b})`;
+      d.appendChild(inner);
+      d.title=`#${toHex(c)}`;
+      d.addEventListener('click',()=>{fg={...c};palSel=i;setFromRGB();renderPalette();});
+      d.addEventListener('dblclick',()=>{palette[i]={...fg};savePalette();renderPalette();});
+      palEl.appendChild(d);
+    });
+  }
+  function savePalette(){try{localStorage.setItem('pixelPalette_v1',JSON.stringify(palette));}catch(e){}}
+  function loadPalette(){
+    try{const s=localStorage.getItem('pixelPalette_v1');if(s){palette=JSON.parse(s);return;}}catch(e){}
+    palette=[{r:0,g:0,b:0},{r:255,g:255,b:255},{r:230,g:90,b:90},{r:90,g:170,b:230},
+      {r:120,g:200,b:110},{r:240,g:200,b:90},{r:170,g:120,b:200},{r:120,g:90,b:70}];
+  }
+  document.getElementById('btnAdd').onclick=()=>{palette.push({...fg});savePalette();renderPalette();};
+  document.getElementById('btnDel').onclick=()=>{if(palSel>=0){palette.splice(palSel,1);palSel=-1;savePalette();renderPalette();}};
+  document.getElementById('btnExpPal').onclick=()=>{
+    const blob=new Blob([JSON.stringify(palette)],{type:'application/json'});
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='palette.json';a.click();
+  };
+  const impPal=document.getElementById('impPal');
+  document.getElementById('btnImpPal').onclick=()=>impPal.click();
+  impPal.onchange=()=>{const f=impPal.files[0];if(!f)return;const r=new FileReader();
+    r.onload=()=>{try{const arr=JSON.parse(r.result);if(Array.isArray(arr)){palette=arr.map(c=>({r:c.r|0,g:c.g|0,b:c.b|0}));savePalette();renderPalette();}}catch(e){alert('调色盘文件无法读取');}};
+    r.readAsText(f); impPal.value='';};
+
+  // ---------- canvas / view ----------
+  function fitView(){
+    view.width=stage.clientWidth; view.height=stage.clientHeight;
+    render();
+  }
+  function centerView(){
+    const fit=Math.min(stage.clientWidth/W,stage.clientHeight/H)*0.85;
+    zoom=ZOOMS[nearestZoomIndex(Math.max(0.25,Math.min(48,fit)))];
+    ox=Math.round((stage.clientWidth-W*zoom)/2);
+    oy=Math.round((stage.clientHeight-H*zoom)/2);
+  }
+  function render(){
+    vx.clearRect(0,0,view.width,view.height);
+    // transparency checker under sprite
+    vx.imageSmoothingEnabled=false;
+    const chk=12;
+    vx.save();
+    vx.beginPath(); vx.rect(ox,oy,W*zoom,H*zoom); vx.clip();
+    for(let y=0;y*chk<H*zoom;y++)for(let x=0;x*chk<W*zoom;x++){
+      vx.fillStyle=((x+y)&1)?'#3a3a42':'#2e2e35';
+      vx.fillRect(ox+x*chk,oy+y*chk,chk,chk);
+    }
+    vx.restore();
+    // sprite — composite all visible layers with their blend/opacity
+    vx.save();
+    vx.imageSmoothingEnabled=false;
+    for(const L of layers){
+      if(!L.visible||L.opacity<=0)continue;
+      vx.globalAlpha=L.opacity;
+      vx.globalCompositeOperation=L.blend;
+      vx.drawImage(L.canvas,ox,oy,W*zoom,H*zoom);
+    }
+    vx.globalAlpha=1; vx.globalCompositeOperation='source-over';
+    vx.restore();
+    // grid
+    if(document.getElementById('cGrid').checked && zoom>=6){
+      vx.strokeStyle='rgba(255,255,255,.10)'; vx.lineWidth=1;
+      vx.beginPath();
+      for(let x=0;x<=W;x++){vx.moveTo(ox+x*zoom+.5,oy);vx.lineTo(ox+x*zoom+.5,oy+H*zoom);}
+      for(let y=0;y<=H;y++){vx.moveTo(ox,oy+y*zoom+.5);vx.lineTo(ox+W*zoom,oy+y*zoom+.5);}
+      vx.stroke();
+    }
+    // border
+    vx.strokeStyle='#000'; vx.lineWidth=1; vx.strokeRect(ox-.5,oy-.5,W*zoom+1,H*zoom+1);
+    // preview overlay (line/rect dragging)
+    if(preview){ vx.save(); vx.globalAlpha=.85; vx.fillStyle=`rgb(${fg.r},${fg.g},${fg.b})`;
+      preview.forEach(p=>{if(p.x>=0&&p.y>=0&&p.x<W&&p.y<H)vx.fillRect(ox+p.x*zoom,oy+p.y*zoom,zoom,zoom);}); vx.restore(); }
+
+    // floating selection content (being moved / pasted)
+    if(floating){
+      vx.save(); vx.imageSmoothingEnabled=false;
+      floating.pixels.forEach(p=>{
+        if(p.a===0)return;
+        const x=p.x+floating.dx, y=p.y+floating.dy;
+        vx.globalAlpha=p.a/255;
+        vx.fillStyle=`rgb(${p.r},${p.g},${p.b})`;
+        vx.fillRect(ox+x*zoom,oy+y*zoom,zoom,zoom);
+      });
+      vx.restore();
+    }
+
+    // selection marching ants
+    const drawAnts=(keysOrRect)=>{
+      vx.save(); vx.lineWidth=1;
+      vx.setLineDash([4,3]); vx.lineDashOffset=-antsPhase;
+      vx.strokeStyle='#000';
+      const seg=[];
+      if(keysOrRect.rect){
+        const {x0,y0,x1,y1}=keysOrRect.rect;
+        const xa=Math.min(x0,x1),xb=Math.max(x0,x1),ya=Math.min(y0,y1),yb=Math.max(y0,y1);
+        vx.strokeStyle='#fff'; vx.strokeRect(ox+xa*zoom+.5,oy+ya*zoom+.5,(xb-xa+1)*zoom-1,(yb-ya+1)*zoom-1);
+        vx.strokeStyle='#000'; vx.lineDashOffset=-antsPhase+3; vx.strokeRect(ox+xa*zoom+.5,oy+ya*zoom+.5,(xb-xa+1)*zoom-1,(yb-ya+1)*zoom-1);
+      } else {
+        // outline of pixel-set selection: draw edges where neighbor not in set
+        const set=keysOrRect.set;
+        vx.beginPath();
+        set.forEach(k=>{const [x,y]=k.split(',').map(Number);
+          if(!set.has(selKey(x,y-1))){vx.moveTo(ox+x*zoom,oy+y*zoom+.5);vx.lineTo(ox+(x+1)*zoom,oy+y*zoom+.5);}
+          if(!set.has(selKey(x,y+1))){vx.moveTo(ox+x*zoom,oy+(y+1)*zoom+.5);vx.lineTo(ox+(x+1)*zoom,oy+(y+1)*zoom+.5);}
+          if(!set.has(selKey(x-1,y))){vx.moveTo(ox+x*zoom+.5,oy+y*zoom);vx.lineTo(ox+x*zoom+.5,oy+(y+1)*zoom);}
+          if(!set.has(selKey(x+1,y))){vx.moveTo(ox+(x+1)*zoom+.5,oy+y*zoom);vx.lineTo(ox+(x+1)*zoom+.5,oy+(y+1)*zoom);}
+        });
+        vx.strokeStyle='#fff'; vx.stroke();
+        vx.lineDashOffset=-antsPhase+3; vx.strokeStyle='#000'; vx.stroke();
+      }
+      vx.restore();
+    };
+    if(selRectPreview) drawAnts({rect:selRectPreview});
+    else if(selection&&selection.size) drawAnts({set:selection});
+
+    document.getElementById('zlbl').textContent=Math.round(zoom*100)+'%';
+  }
+
+  // pixel ops on buffer
+  function setPx(x,y,c){ if(x<0||y<0||x>=W||y>=H)return; bx.fillStyle=`rgb(${c.r},${c.g},${c.b})`; bx.fillRect(x,y,1,1); }
+  function clearPx(x,y){ if(x<0||y<0||x>=W||y>=H)return; bx.clearRect(x,y,1,1); }
+  function getPx(data,x,y){const i=(y*W+x)*4;return [data[i],data[i+1],data[i+2],data[i+3]];}
+
+  function mirroredX(x){return W-1-x;}
+  function paint(x,y){
+    if(tool==='eraser'){ clearPx(x,y); if(mirror())clearPx(mirroredX(x),y); }
+    else { setPx(x,y,fg); if(mirror())setPx(mirroredX(x),y,fg); }
+  }
+  const mirror=()=>document.getElementById('cMirror').checked;
+
+  // bresenham
+  function lineEach(x0,y0,x1,y1,cb){
+    let dx=Math.abs(x1-x0),dy=Math.abs(y1-y0),sx=x0<x1?1:-1,sy=y0<y1?1:-1,err=dx-dy;
+    while(true){cb(x0,y0);if(x0===x1&&y0===y1)break;const e2=2*err;if(e2>-dy){err-=dy;x0+=sx;}if(e2<dx){err+=dx;y0+=sy;}}
+  }
+  function rectPts(x0,y0,x1,y1,filled){
+    const pts=[],xa=Math.min(x0,x1),xb=Math.max(x0,x1),ya=Math.min(y0,y1),yb=Math.max(y0,y1);
+    for(let y=ya;y<=yb;y++)for(let x=xa;x<=xb;x++){ if(filled||x===xa||x===xb||y===ya||y===yb)pts.push({x,y}); }
+    return pts;
+  }
+  function floodFill(sx,sy){
+    const img=bx.getImageData(0,0,W,H), d=img.data;
+    const tgt=getPx(d,sx,sy);
+    const rep=[fg.r,fg.g,fg.b,255];
+    if(tgt[0]===rep[0]&&tgt[1]===rep[1]&&tgt[2]===rep[2]&&tgt[3]===rep[3])return;
+    const st=[[sx,sy]];
+    while(st.length){const [x,y]=st.pop();if(x<0||y<0||x>=W||y>=H)continue;
+      const c=getPx(d,x,y);
+      if(c[0]!==tgt[0]||c[1]!==tgt[1]||c[2]!==tgt[2]||c[3]!==tgt[3])continue;
+      const i=(y*W+x)*4; d[i]=rep[0];d[i+1]=rep[1];d[i+2]=rep[2];d[i+3]=rep[3];
+      st.push([x+1,y],[x-1,y],[x,y+1],[x,y-1]);
+    }
+    bx.putImageData(img,0,0);
+  }
+
+  // undo — snapshot the WHOLE layer stack (pixels + props + order + active index)
+  function snapshot(){
+    return {
+      active: activeIdx,
+      layers: layers.map(L=>({
+        img: L.ctx.getImageData(0,0,W,H),
+        name: L.name, visible: L.visible, opacity: L.opacity, blend: L.blend, id: L.id
+      }))
+    };
+  }
+  function restoreSnapshot(s){
+    layers = s.layers.map(ls=>{
+      const c=document.createElement('canvas'); c.width=W; c.height=H;
+      const x=c.getContext('2d',{willReadFrequently:true});
+      x.putImageData(ls.img,0,0);
+      return {canvas:c,ctx:x,name:ls.name,visible:ls.visible,opacity:ls.opacity,blend:ls.blend,id:ls.id};
+    });
+    activeIdx = Math.min(s.active, layers.length-1);
+    syncActive();
+  }
+  function pushUndo(){undo.push(snapshot());if(undo.length>40)undo.shift();redo.length=0;}
+  function doUndo(){if(!undo.length)return;redo.push(snapshot());restoreSnapshot(undo.pop());renderLayerPanel();render();}
+  function doRedo(){if(!redo.length)return;undo.push(snapshot());restoreSnapshot(redo.pop());renderLayerPanel();render();}
+
+  // ---------- mouse interaction ----------
+  let drawing=false,lastP=null,startP=null,preview=null,panning=false,panStart=null,spaceDown=false,rightPick=false;
+
+  // ---------- selection state ----------
+  let selection=null;        // Set of "x,y" keys, or null = no selection
+  let selRectPreview=null;   // {x0,y0,x1,y1} while dragging rect-select
+  let floating=null;         // {pixels:[{x,y,r,g,b,a}], dx,dy} a moving/pasted blob anchored by offset
+  let movingSel=false, moveStart=null, moveOrigin=null;
+  let clipboard=null;        // [{x,y,r,g,b,a}] copied pixels (normalized to min-corner)
+  let antsPhase=0;
+  function selKey(x,y){return x+','+y;}
+  function inSelection(x,y){return selection&&selection.has(selKey(x,y));}
+  function clearSelection(){selection=null; selRectPreview=null; render();}
+  function commitFloating(){ // stamp floating blob onto buffer
+    if(!floating)return;
+    floating.pixels.forEach(p=>{
+      const x=p.x+floating.dx, y=p.y+floating.dy;
+      if(x<0||y<0||x>=W||y>=H)return;
+      if(p.a===0){ /* skip fully transparent so paste doesn't punch holes */ }
+      else { bx.fillStyle=`rgba(${p.r},${p.g},${p.b},${(p.a/255).toFixed(3)})`; bx.clearRect(x,y,1,1); bx.fillStyle=`rgb(${p.r},${p.g},${p.b})`; bx.fillRect(x,y,1,1); }
+    });
+    // move selection to floating's new location
+    const ns=new Set();
+    floating.pixels.forEach(p=>{const x=p.x+floating.dx,y=p.y+floating.dy; if(x>=0&&y>=0&&x<W&&y<H)ns.add(selKey(x,y));});
+    selection=ns.size?ns:null;
+    floating=null;
+  }
+  function liftSelection(cut){ // turn current selection into a floating blob; cut=remove from buffer
+    if(!selection||!selection.size)return false;
+    const img=bx.getImageData(0,0,W,H), d=img.data;
+    const pixels=[];
+    selection.forEach(k=>{const [x,y]=k.split(',').map(Number); const i=(y*W+x)*4;
+      pixels.push({x,y,r:d[i],g:d[i+1],b:d[i+2],a:d[i+3]});});
+    if(cut){ selection.forEach(k=>{const [x,y]=k.split(',').map(Number); bx.clearRect(x,y,1,1);}); }
+    floating={pixels,dx:0,dy:0};
+    return true;
+  }
+
+  function pxAt(e){const r=view.getBoundingClientRect();
+    return {x:Math.floor((e.clientX-r.left-ox)/zoom), y:Math.floor((e.clientY-r.top-oy)/zoom)};}
+
+  function magicWand(sx,sy){
+    if(sx<0||sy<0||sx>=W||sy>=H)return;
+    const img=bx.getImageData(0,0,W,H), d=img.data;
+    const gp=(x,y)=>{const i=(y*W+x)*4;return [d[i],d[i+1],d[i+2],d[i+3]];};
+    const tgt=gp(sx,sy);
+    const sel=new Set(); const st=[[sx,sy]]; const seen=new Set();
+    while(st.length){const [x,y]=st.pop(); if(x<0||y<0||x>=W||y>=H)continue;
+      const k=selKey(x,y); if(seen.has(k))continue; seen.add(k);
+      const c=gp(x,y);
+      if(c[0]!==tgt[0]||c[1]!==tgt[1]||c[2]!==tgt[2]||c[3]!==tgt[3])continue; // exact color match
+      sel.add(k); st.push([x+1,y],[x-1,y],[x,y+1],[x,y-1]);
+    }
+    selection=sel.size?sel:null;
+  }
+  function selectRect(x0,y0,x1,y1){
+    const xa=Math.max(0,Math.min(x0,x1)),xb=Math.min(W-1,Math.max(x0,x1));
+    const ya=Math.max(0,Math.min(y0,y1)),yb=Math.min(H-1,Math.max(y0,y1));
+    const sel=new Set();
+    for(let y=ya;y<=yb;y++)for(let x=xa;x<=xb;x++)sel.add(selKey(x,y));
+    selection=sel.size?sel:null;
+  }
+
+
+  view.addEventListener('mousedown',e=>{
+    if(e.button===1||spaceDown){panning=true;panStart={x:e.clientX-ox,y:e.clientY-oy};e.preventDefault();return;}
+    const p=pxAt(e);
+    if(e.button===2){ // right = temp eyedropper
+      pickColorAt(p.x,p.y); rightPick=true; return;
+    }
+    if(tool==='pick'){ pickColorAt(p.x,p.y); return; }
+
+    // ---- selection tools ----
+    if(tool==='select'){
+      // if clicking inside existing selection -> start moving it
+      if(inSelection(p.x,p.y)){
+        pushUndo();
+        if(!floating) liftSelection(true);   // cut into floating
+        movingSel=true; moveStart=p; moveOrigin={dx:floating.dx,dy:floating.dy};
+        return;
+      }
+      // else start a new rectangle selection (commit any floating first)
+      if(floating){ pushUndo(); commitFloating(); }
+      drawing=true; startP=p; selRectPreview={x0:p.x,y0:p.y,x1:p.x,y1:p.y};
+      render(); return;
+    }
+    if(tool==='wand'){
+      if(floating){ pushUndo(); commitFloating(); }
+      magicWand(p.x,p.y); render(); return;
+    }
+    // a floating selection exists but user uses a drawing tool -> stamp it down first
+    if(floating){ pushUndo(); commitFloating(); }
+
+    if(p.x<0||p.y<0||p.x>=W||p.y>=H){ /* allow start outside for line/rect; ignore */ }
+    pushUndo();
+    if(tool==='fill'){ floodFill(p.x,p.y); render(); return; }
+    drawing=true; startP=p; lastP=p;
+    if(tool==='pencil'||tool==='eraser'){ paint(p.x,p.y); render(); }
+  });
+  window.addEventListener('mousemove',e=>{
+    if(panning){ox=Math.round(e.clientX-panStart.x);oy=Math.round(e.clientY-panStart.y);render();return;}
+    const p=pxAt(e);
+    document.getElementById('pos').textContent=(p.x>=0&&p.y>=0&&p.x<W&&p.y<H)?`${p.x}, ${p.y}`:'–';
+    if(rightPick){pickColorAt(p.x,p.y);return;}
+    // moving a floating selection
+    if(movingSel&&floating){ floating.dx=moveOrigin.dx+(p.x-moveStart.x); floating.dy=moveOrigin.dy+(p.y-moveStart.y); render(); return; }
+    // dragging rectangle selection
+    if(drawing&&tool==='select'&&selRectPreview){ selRectPreview.x1=p.x; selRectPreview.y1=p.y; render(); return; }
+    if(!drawing)return;
+    if(tool==='pencil'||tool==='eraser'){
+      lineEach(lastP.x,lastP.y,p.x,p.y,(x,y)=>paint(x,y)); lastP=p; render();
+    } else if(tool==='line'){ preview=[]; lineEach(startP.x,startP.y,p.x,p.y,(x,y)=>preview.push({x,y})); if(mirror())lineEach(mirroredX(startP.x),startP.y,mirroredX(p.x),p.y,(x,y)=>preview.push({x,y})); render();
+    } else if(tool==='rect'||tool==='rectf'){ preview=rectPts(startP.x,startP.y,p.x,p.y,tool==='rectf'); if(mirror())preview=preview.concat(rectPts(mirroredX(startP.x),startP.y,mirroredX(p.x),p.y,tool==='rectf')); render(); }
+  });
+  window.addEventListener('mouseup',e=>{
+    if(panning){panning=false;return;}
+    if(rightPick){rightPick=false;return;}
+    if(movingSel){ movingSel=false; return; }   // keep floating until next action commits it
+    if(drawing&&tool==='select'&&selRectPreview){
+      drawing=false;
+      selectRect(selRectPreview.x0,selRectPreview.y0,selRectPreview.x1,selRectPreview.y1);
+      selRectPreview=null; render(); return;
+    }
+    if(!drawing)return; drawing=false;
+    const p=pxAt(e);
+    if(tool==='line'){ lineEach(startP.x,startP.y,p.x,p.y,(x,y)=>setPx(x,y,fg)); if(mirror())lineEach(mirroredX(startP.x),startP.y,mirroredX(p.x),p.y,(x,y)=>setPx(x,y,fg)); }
+    else if(tool==='rect'||tool==='rectf'){ rectPts(startP.x,startP.y,p.x,p.y,tool==='rectf').forEach(q=>setPx(q.x,q.y,fg)); if(mirror())rectPts(mirroredX(startP.x),startP.y,mirroredX(p.x),p.y,tool==='rectf').forEach(q=>setPx(q.x,q.y,fg)); }
+    preview=null; render();
+  });
+  view.addEventListener('contextmenu',e=>e.preventDefault());
+
+  function pickColorAt(x,y){
+    if(x<0||y<0||x>=W||y>=H)return;
+    const d=bx.getImageData(x,y,1,1).data;
+    if(d[3]===0)return; // transparent, skip
+    fg={r:d[0],g:d[1],b:d[2]}; setFromRGB();
+  }
+
+  // wheel zoom (cursor-anchored) — step through fixed zoom levels to avoid float lock-up
+  stage.addEventListener('wheel',e=>{
+    e.preventDefault();
+    const r=view.getBoundingClientRect();
+    const cx=e.clientX-r.left, cy=e.clientY-r.top;
+    const wx=(cx-ox)/zoom, wy=(cy-oy)/zoom;
+    let i=nearestZoomIndex(zoom);
+    if(e.deltaY<0){ i=Math.min(ZOOMS.length-1,i+1); }   // zoom in
+    else { i=Math.max(0,i-1); }                          // zoom out
+    zoom=ZOOMS[i];
+    ox=Math.round(cx-wx*zoom); oy=Math.round(cy-wy*zoom);
+    render();
+  },{passive:false});
+
+  // ---------- tools / top buttons ----------
+  function setTool(t){
+    if(floating){ pushUndo(); commitFloating(); }   // stamp floating before switching tools
+    if(t!=='select'&&t!=='wand'){ selection=null; selRectPreview=null; }  // leaving selection tools clears selection
+    tool=t;
+    document.querySelectorAll('.tool').forEach(el=>el.classList.toggle('active',el.dataset.tool===t));
+    render();
+  }
+  document.querySelectorAll('.tool').forEach(el=>el.addEventListener('click',()=>setTool(el.dataset.tool)));
+
+  function newCanvas(w,h){
+    w=Math.min(128,Math.max(1,w|0)); h=Math.min(128,Math.max(1,h|0));
+    W=w;H=h;
+    layers=[]; layerSeq=1; activeIdx=0;
+    layers.push(newLayerObj('背景'));
+    syncActive();
+    undo.length=0; redo.length=0;
+    renderLayerPanel(); centerView(); render();
+  }
+  document.getElementById('btnNew').onclick=()=>{
+    const w=+document.getElementById('inW').value, h=+document.getElementById('inH').value;
+    if(undo.length||hasContent()){ if(!confirm('新建会清空当前画布与所有图层，继续？'))return; }
+    newCanvas(w,h);
+  };
+  document.getElementById('preset').onchange=e=>{const v=e.target.value;if(v){document.getElementById('inW').value=v;document.getElementById('inH').value=v;}e.target.value='';};
+  function hasContent(){ // any visible content across all layers
+    for(const L of layers){ const d=L.ctx.getImageData(0,0,W,H).data; for(let i=3;i<d.length;i+=4)if(d[i]!==0)return true; }
+    return false;
+  }
+
+  document.getElementById('btnUndo').onclick=doUndo;
+  document.getElementById('btnRedo').onclick=doRedo;
+  document.getElementById('btnClear').onclick=()=>{pushUndo();bx.clearRect(0,0,W,H);render();}; // clears active layer only
+  document.getElementById('cGrid').onchange=render;
+
+  document.getElementById('btnExport').onclick=()=>{
+    const s=+document.getElementById('scale').value;
+    const flat=flatten();
+    const out=document.createElement('canvas'); out.width=W*s; out.height=H*s;
+    const o=out.getContext('2d'); o.imageSmoothingEnabled=false; o.drawImage(flat,0,0,W*s,H*s);
+    out.toBlob(b=>{
+      const name=(document.getElementById('fname').value||'sprite').replace(/[\\/:*?"<>|]/g,'_').trim()||'sprite';
+      const a=document.createElement('a'); a.href=URL.createObjectURL(b);
+      a.download=`${name}_${W}x${H}${s>1?'@'+s+'x':''}.png`; a.click();
+    },'image/png');
+  };
+
+  // import PNG -> resize canvas to image size (1:1, preserve transparency)
+  const impPng=document.getElementById('impPng');
+  document.getElementById('btnImport').onclick=()=>impPng.click();
+  impPng.onchange=()=>{
+    const f=impPng.files[0]; if(!f)return;
+    const img=new Image();
+    img.onload=()=>{
+      URL.revokeObjectURL(img.src);
+      const iw=img.naturalWidth, ih=img.naturalHeight;
+      if(iw>128||ih>128){ alert(`图片为 ${iw}×${ih}，超过 128×128 上限，无法导入。`); impPng.value=''; return; }
+      if(iw<1||ih<1){ alert('无法读取该图片尺寸。'); impPng.value=''; return; }
+      const base=f.name.replace(/\.[^.]+$/,'').replace(/[\\/:*?"<>|]/g,'_').trim();
+      if(iw===W && ih===H){
+        // same size -> add as a NEW layer on top (great for reference layers)
+        pushUndo();
+        const L=newLayerObj(base||'导入'); L.ctx.imageSmoothingEnabled=false; L.ctx.drawImage(img,0,0);
+        layers.push(L); activeIdx=layers.length-1; syncActive();
+        renderLayerPanel(); render(); impPng.value='';
+      } else {
+        // different size -> must rebuild canvas (layers share one size)
+        if(hasContent() && !confirm(`图片为 ${iw}×${ih}，与当前画布尺寸不同，导入将重建画布并清空现有图层，继续？`)){ impPng.value=''; return; }
+        W=iw; H=ih; layers=[]; layerSeq=1; activeIdx=0;
+        const L=newLayerObj(base||'导入'); L.ctx.imageSmoothingEnabled=false; L.ctx.drawImage(img,0,0);
+        layers.push(L); syncActive();
+        undo.length=0; redo.length=0;
+        document.getElementById('inW').value=W; document.getElementById('inH').value=H;
+        if(base)document.getElementById('fname').value=base;
+        renderLayerPanel(); centerView(); render(); impPng.value='';
+      }
+    };
+    img.onerror=()=>{ alert('图片读取失败，请确认是有效的 PNG / 图片文件。'); impPng.value=''; };
+    img.src=URL.createObjectURL(f);
+  };
+
+  // selection clipboard ops
+  function copySelection(){
+    if(floating){ clipboard=floating.pixels.map(p=>({...p})); return; }
+    if(!selection||!selection.size)return;
+    const img=bx.getImageData(0,0,W,H), d=img.data;
+    const pts=[];
+    selection.forEach(k=>{const [x,y]=k.split(',').map(Number); const i=(y*W+x)*4;
+      pts.push({x,y,r:d[i],g:d[i+1],b:d[i+2],a:d[i+3]});});
+    // normalize to min corner
+    const minx=Math.min(...pts.map(p=>p.x)), miny=Math.min(...pts.map(p=>p.y));
+    clipboard=pts.map(p=>({x:p.x-minx,y:p.y-miny,r:p.r,g:p.g,b:p.b,a:p.a}));
+  }
+  function pasteClipboard(){
+    if(!clipboard||!clipboard.length)return;
+    if(floating){ pushUndo(); commitFloating(); }
+    pushUndo();
+    // switch to select tool FIRST (setTool commits floating), then create the floating paste
+    tool='select';
+    document.querySelectorAll('.tool').forEach(el=>el.classList.toggle('active',el.dataset.tool==='select'));
+    // paste roughly centered in current view
+    const cx=Math.floor((stage.clientWidth/2-ox)/zoom), cy=Math.floor((stage.clientHeight/2-oy)/zoom);
+    const maxx=Math.max(...clipboard.map(p=>p.x)), maxy=Math.max(...clipboard.map(p=>p.y));
+    const dx=Math.max(0,Math.min(W-1-maxx, cx-Math.floor(maxx/2)));
+    const dy=Math.max(0,Math.min(H-1-maxy, cy-Math.floor(maxy/2)));
+    floating={pixels:clipboard.map(p=>({...p})), dx, dy};
+    selection=new Set(clipboard.map(p=>selKey(p.x+dx,p.y+dy)));
+    render();
+  }
+  function deleteSelection(){
+    if(floating){ pushUndo(); floating=null; render(); return; } // discard floating
+    if(!selection||!selection.size)return;
+    pushUndo();
+    selection.forEach(k=>{const [x,y]=k.split(',').map(Number); bx.clearRect(x,y,1,1);});
+    render();
+  }
+  function selectAll(){ if(floating){pushUndo();commitFloating();} selectRect(0,0,W-1,H-1); render(); }
+
+  // keyboard
+  window.addEventListener('keydown',e=>{
+    if(e.target.tagName==='INPUT')return;
+    if(e.code==='Space'){spaceDown=true;view.style.cursor='grab';e.preventDefault();return;}
+    if(e.ctrlKey||e.metaKey){
+      if(e.key==='z'){e.preventDefault();doUndo();}
+      else if(e.key==='y'||(e.shiftKey&&e.key==='Z')){e.preventDefault();doRedo();}
+      else if(e.key==='c'){e.preventDefault();copySelection();}
+      else if(e.key==='v'){e.preventDefault();pasteClipboard();}
+      else if(e.key==='a'){e.preventDefault();setTool('select');selectAll();}
+      else if(e.key==='x'){e.preventDefault();copySelection();deleteSelection();}
+      return;
+    }
+    if(e.key==='Escape'){ if(floating){pushUndo();commitFloating();} clearSelection(); return; }
+    if(e.key==='Delete'||e.key==='Backspace'){ e.preventDefault(); deleteSelection(); return; }
+    if(e.key==='Enter'){ if(floating){pushUndo();commitFloating();render();} return; }
+    const m={b:'pencil',e:'eraser',g:'fill',i:'pick',l:'line',r:'rect',f:'rectf',m:'select',w:'wand'};
+    if(m[e.key]){setTool(m[e.key]);}
+    if(e.key==='0'){centerView();render();}
+  });
+  window.addEventListener('keyup',e=>{if(e.code==='Space'){spaceDown=false;view.style.cursor='crosshair';}});
+
+  // ---------- layer operations ----------
+  function addLayer(){ if(floating){pushUndo();commitFloating();} pushUndo();
+    const L=newLayerObj(); layers.splice(activeIdx+1,0,L); activeIdx++; syncActive(); renderLayerPanel(); render(); }
+  function deleteLayer(){ if(layers.length<=1){alert('至少保留一个图层。');return;} if(floating){pushUndo();commitFloating();} pushUndo();
+    layers.splice(activeIdx,1); if(activeIdx>=layers.length)activeIdx=layers.length-1; syncActive(); renderLayerPanel(); render(); }
+  function duplicateLayer(){ if(floating){pushUndo();commitFloating();} pushUndo();
+    const src=layers[activeIdx]; const L=newLayerObj(src.name+' 副本'); L.opacity=src.opacity; L.blend=src.blend; L.ctx.drawImage(src.canvas,0,0);
+    layers.splice(activeIdx+1,0,L); activeIdx++; syncActive(); renderLayerPanel(); render(); }
+  function moveLayer(dir){ // dir -1 down, +1 up
+    const ni=activeIdx+dir; if(ni<0||ni>=layers.length)return; if(floating){pushUndo();commitFloating();} pushUndo();
+    const t=layers[activeIdx]; layers[activeIdx]=layers[ni]; layers[ni]=t; activeIdx=ni; syncActive(); renderLayerPanel(); render(); }
+  function mergeDown(){ if(activeIdx<=0){alert('已是最底层，无法向下合并。');return;} if(floating){pushUndo();commitFloating();} pushUndo();
+    const top=layers[activeIdx], bot=layers[activeIdx-1];
+    bot.ctx.save(); bot.ctx.globalAlpha=top.opacity; bot.ctx.globalCompositeOperation=top.blend; bot.ctx.drawImage(top.canvas,0,0); bot.ctx.restore();
+    layers.splice(activeIdx,1); activeIdx--; syncActive(); renderLayerPanel(); render(); }
+  function selectLayer(i){ if(floating){pushUndo();commitFloating();} activeIdx=i; syncActive(); selection=null; renderLayerPanel(); render(); }
+  function renameLayer(i){ const n=prompt('图层名称：', layers[i].name); if(n!==null){ pushUndo(); layers[i].name=n||layers[i].name; renderLayerPanel(); } }
+
+  // ---------- layer panel UI ----------
+  function renderLayerPanel(){
+    const host=document.getElementById('layerList'); if(!host)return;
+    host.innerHTML='';
+    // top layer first in the list (visually matches canvas stacking)
+    for(let i=layers.length-1;i>=0;i--){
+      const L=layers[i];
+      const row=document.createElement('div'); row.className='layerRow'+(i===activeIdx?' active':'');
+      // visibility toggle
+      const eye=document.createElement('button'); eye.className='eye'+(L.visible?'':' off'); eye.textContent=L.visible?'👁':'—'; eye.title='显示/隐藏';
+      eye.onclick=(ev)=>{ev.stopPropagation(); pushUndo(); L.visible=!L.visible; renderLayerPanel(); render();};
+      // thumbnail
+      const th=document.createElement('canvas'); th.width=W; th.height=H; th.className='lthumb';
+      th.getContext('2d').drawImage(L.canvas,0,0);
+      // name
+      const nm=document.createElement('div'); nm.className='lname'; nm.textContent=L.name;
+      nm.ondblclick=(ev)=>{ev.stopPropagation(); renameLayer(i);};
+      row.appendChild(eye); row.appendChild(th); row.appendChild(nm);
+      row.onclick=()=>selectLayer(i);
+      host.appendChild(row);
+    }
+    // active layer's blend + opacity controls
+    const L=layers[activeIdx];
+    const bsel=document.getElementById('blendSel'), osl=document.getElementById('opSlider'), olbl=document.getElementById('opLabel');
+    if(bsel){ bsel.value=L.blend; }
+    if(osl){ osl.value=Math.round(L.opacity*100); }
+    if(olbl){ olbl.textContent=Math.round(L.opacity*100)+'%'; }
+  }
+
+  // ---------- init ----------
+  function init(){
+    layers=[]; layerSeq=1; activeIdx=0;
+    layers.push(newLayerObj('背景'));
+    syncActive();
+    loadPalette(); renderPalette();
+    hsv=rgb2hsv(fg.r,fg.g,fg.b); drawSV(); drawHue(); refreshColorInputs();
+    // wire layer panel buttons
+    document.getElementById('btnLayerAdd').onclick=addLayer;
+    document.getElementById('btnLayerDel').onclick=deleteLayer;
+    document.getElementById('btnLayerDup').onclick=duplicateLayer;
+    document.getElementById('btnLayerUp').onclick=()=>moveLayer(1);
+    document.getElementById('btnLayerDown').onclick=()=>moveLayer(-1);
+    document.getElementById('btnLayerMerge').onclick=mergeDown;
+    document.getElementById('blendSel').onchange=(e)=>{ pushUndo(); layers[activeIdx].blend=e.target.value; render(); };
+    document.getElementById('opSlider').oninput=(e)=>{ layers[activeIdx].opacity=(+e.target.value)/100; document.getElementById('opLabel').textContent=e.target.value+'%'; render(); };
+    document.getElementById('opSlider').onchange=()=>{ pushUndo(); }; // record once on release
+    // populate blend dropdown
+    const bsel=document.getElementById('blendSel');
+    BLENDS.forEach(([v,label])=>{ const o=document.createElement('option'); o.value=v; o.textContent=label; bsel.appendChild(o); });
+    renderLayerPanel();
+    fitView(); centerView(); render();
+  }
+  window.addEventListener('resize',fitView);
+  init();
+
+  // marching ants animation (only repaints when there is a selection / floating)
+  setInterval(()=>{
+    if((selection&&selection.size)||selRectPreview||floating){ antsPhase=(antsPhase+1)%7; render(); }
+  },90);
+})();
+</script>
+</body>
+</html>
