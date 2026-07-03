@@ -180,8 +180,9 @@ var _map_list: ItemList                # 侧栏：当前文件夹内的地图文
 var _map_paths := []                   # 与 _map_list 行一一对应的完整路径
 var _dir_label: Label                  # 显示当前文件夹
 var _dir_dlg: FileDialog               # 选文件夹对话框
-var _newmap_dlg: ConfirmationDialog    # 「新建地图」弹窗（输入文件名）
+var _newmap_dlg: ConfirmationDialog    # 「新建地图」弹窗（输入文件名，存到文件夹）
 var _newmap_name: LineEdit             # 新建地图的文件名输入框
+var _newsize_dlg: ConfirmationDialog   # 「新建地图」弹窗（宽/高/预设，文件菜单调；内存新建不落盘）
 
 # 撤销/重做：以整图快照为单位，每项 {"snap":Dictionary, "label":String}
 var _undo_stack := []
@@ -231,42 +232,37 @@ func _build_ui() -> void:
 	var bar_wrap := _panelize(bar)   # 顶栏也给个深底，与画布分开
 	root.add_child(bar_wrap)
 
-	if not embedded:   # 嵌入 Game 时由 Game 顶栏提供「主菜单」，这里不重复
-		var menu_btn := Button.new()
-		menu_btn.text = "主菜单"
-		menu_btn.pressed.connect(_on_back_to_menu)
-		bar.add_child(menu_btn)
-		bar.add_child(VSeparator.new())
+	# 菜单栏（绘图软件式下拉，替代平铺按钮）：文件 / 编辑 / 视图。仅「类型」+ 状态常驻。
+	# 文件菜单：新建地图…(0) / 保存(1) / 另存为…(2) / 加载…(3) / 返回主菜单(4，嵌入 Game 时省略——由 Game 顶栏提供)
+	var file_menu := _make_menu("文件")
+	var fp := file_menu.get_popup()
+	fp.add_item("新建地图…", 0)
+	fp.add_separator()
+	fp.add_item("保存  (Ctrl+S)", 1)
+	fp.add_item("另存为…", 2)
+	fp.add_item("加载…", 3)
+	if not embedded:
+		fp.add_separator()
+		fp.add_item("返回主菜单", 4)
+	fp.id_pressed.connect(_on_file_menu)
+	bar.add_child(file_menu)
 
-	bar.add_child(_make_label("宽"))
-	width_spin = SpinBox.new()
-	width_spin.min_value = 1
-	width_spin.max_value = MAX_W
-	width_spin.value = width
-	bar.add_child(width_spin)
+	var edit_menu := _make_menu("编辑")
+	var ep := edit_menu.get_popup()
+	ep.add_item("撤销  (Ctrl+Z)", 0)
+	ep.add_item("重做  (Ctrl+Y)", 1)
+	ep.id_pressed.connect(func(id: int): if id == 0: undo() else: redo())
+	bar.add_child(edit_menu)
 
-	bar.add_child(_make_label("高"))
-	height_spin = SpinBox.new()
-	height_spin.min_value = 1
-	height_spin.max_value = MAX_H
-	height_spin.value = height
-	bar.add_child(height_spin)
-
-	bar.add_child(_make_label("预设"))
-	var preset_option := OptionButton.new()
-	for p in SIZE_PRESETS:
-		preset_option.add_item(p.label)
-	preset_option.item_selected.connect(_on_preset_selected)
-	bar.add_child(preset_option)
-
-	var new_btn := Button.new()
-	new_btn.text = "新建"
-	new_btn.pressed.connect(_on_new_pressed)
-	bar.add_child(new_btn)
+	var view_menu := _make_menu("视图")
+	var vp := view_menu.get_popup()
+	vp.add_item("适配窗口", 0)
+	vp.id_pressed.connect(func(_id: int): _on_reset_view())
+	bar.add_child(view_menu)
 
 	bar.add_child(VSeparator.new())
 
-	# 地图类型（battle/overworld）：决定笔刷 scope 过滤 + 线/地点层是否可用（数据随图存盘）
+	# 地图类型（battle/overworld）常驻可见（是编辑模式开关，决定笔刷 scope + 线/地点层可用性）
 	bar.add_child(_make_label("类型"))
 	_map_type_opt = OptionButton.new()
 	_map_type_opt.add_item("战斗图", 0)
@@ -276,43 +272,8 @@ func _build_ui() -> void:
 	bar.add_child(_map_type_opt)
 
 	bar.add_child(VSeparator.new())
-
-	var save_btn := Button.new()
-	save_btn.text = "保存"
-	save_btn.pressed.connect(_save_shortcut)
-	bar.add_child(save_btn)
-
-	var save_as_btn := Button.new()
-	save_as_btn.text = "另存为"
-	save_as_btn.pressed.connect(_on_save_as_pressed)
-	bar.add_child(save_as_btn)
-
-	var load_btn := Button.new()
-	load_btn.text = "加载"
-	load_btn.pressed.connect(_on_load_pressed)
-	bar.add_child(load_btn)
-
-	bar.add_child(VSeparator.new())
-
-	var undo_btn := Button.new()
-	undo_btn.text = "撤销"
-	undo_btn.pressed.connect(undo)
-	bar.add_child(undo_btn)
-
-	var redo_btn := Button.new()
-	redo_btn.text = "重做"
-	redo_btn.pressed.connect(redo)
-	bar.add_child(redo_btn)
-
-	bar.add_child(VSeparator.new())
-
-	var reset_view_btn := Button.new()
-	reset_view_btn.text = "适配窗口"
-	reset_view_btn.pressed.connect(_on_reset_view)
-	bar.add_child(reset_view_btn)
-
-	bar.add_child(VSeparator.new())
 	status_label = Label.new()
+	status_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bar.add_child(status_label)
 
 	# ---- 主体：左笔刷栏 + 中画布 + 右历史栏 ----
@@ -361,7 +322,7 @@ func _build_ui() -> void:
 	_confirm_dlg.canceled.connect(_refresh_map_highlight)  # 取消切换则恢复列表选中
 	add_child(_confirm_dlg)
 
-	# 新建地图弹窗（输入文件名，尺寸用顶栏的宽/高）
+	# 新建地图弹窗（输入文件名，尺寸取 width_spin/height_spin＝新尺寸弹窗里的值）
 	_newmap_dlg = ConfirmationDialog.new()
 	_newmap_dlg.title = "新建地图"
 	_newmap_dlg.ok_button_text = "创建"
@@ -376,6 +337,38 @@ func _build_ui() -> void:
 	_newmap_dlg.register_text_enter(_newmap_name)
 	_newmap_dlg.confirmed.connect(_create_map)
 	add_child(_newmap_dlg)
+
+	# 新尺寸弹窗（文件菜单「新建地图…」调）：宽/高/预设从顶栏迁进来——width_spin/height_spin 在此创建
+	_newsize_dlg = ConfirmationDialog.new()
+	_newsize_dlg.title = "新建地图"
+	_newsize_dlg.ok_button_text = "创建"
+	_newsize_dlg.get_cancel_button().text = "取消"
+	var ns_box := VBoxContainer.new()
+	var ns_row := HBoxContainer.new()
+	ns_row.add_child(_make_label("宽"))
+	width_spin = SpinBox.new()
+	width_spin.min_value = 1
+	width_spin.max_value = MAX_W
+	width_spin.value = width
+	ns_row.add_child(width_spin)
+	ns_row.add_child(_make_label("  高"))
+	height_spin = SpinBox.new()
+	height_spin.min_value = 1
+	height_spin.max_value = MAX_H
+	height_spin.value = height
+	ns_row.add_child(height_spin)
+	ns_box.add_child(ns_row)
+	var ns_prow := HBoxContainer.new()
+	ns_prow.add_child(_make_label("预设"))
+	var preset_option := OptionButton.new()
+	for p in SIZE_PRESETS:
+		preset_option.add_item(p.label)
+	preset_option.item_selected.connect(_on_preset_selected)
+	ns_prow.add_child(preset_option)
+	ns_box.add_child(ns_prow)
+	_newsize_dlg.add_child(ns_box)
+	_newsize_dlg.confirmed.connect(_on_new_pressed)
+	add_child(_newsize_dlg)
 
 	# 区域改名弹窗
 	_region_rename_dlg = ConfirmationDialog.new()
@@ -2128,6 +2121,23 @@ func _sb(bg: Color, border: Color) -> StyleBoxFlat:
 	s.set_corner_radius_all(3)
 	s.set_content_margin_all(4)
 	return s
+
+# 顶栏下拉菜单按钮（文件/编辑/视图）——弹出项由调用方 get_popup().add_item 填
+func _make_menu(title: String) -> MenuButton:
+	var mb := MenuButton.new()
+	mb.text = title
+	mb.focus_mode = Control.FOCUS_NONE
+	mb.get_popup().add_theme_constant_override("v_separation", 3)
+	return mb
+
+# 文件菜单分派：新建地图…/保存/另存为…/加载…/返回主菜单
+func _on_file_menu(id: int) -> void:
+	match id:
+		0: _newsize_dlg.popup_centered()
+		1: _save_shortcut()
+		2: _on_save_as_pressed()
+		3: _on_load_pressed()
+		4: _on_back_to_menu()
 
 # 把一个侧栏 VBox 包进带深色底 + 内边距的面板（与画布视觉分开）
 func _panelize(inner: Control) -> PanelContainer:
