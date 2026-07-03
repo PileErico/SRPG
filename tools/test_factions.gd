@@ -23,7 +23,7 @@ func _initialize() -> void:
 	print("=== M9 派系声望测试开始 ===")
 
 	# 1) 注册表
-	for want in ["empire", "lizardmen", "bandits"]:
+	for want in ["player", "empire", "wildlife", "bandits"]:   # 名册校正 2026-07-03：lizardmen→wildlife、+player
 		ck(FactionDB.faction(want) != null, "派系表含 %s" % want)
 	ck(FactionDB.label("empire") == "帝国", "label 中文")
 	ck(FactionDB.faction("no_such") == null and FactionDB.label("no_such") == "no_such", "未登记派系兜底")
@@ -81,8 +81,8 @@ func _initialize() -> void:
 	# 6) EventEngine 动作：add_rep / set_flag 注册 + 转发 + bool 解析
 	ck(not EventEngine.action_def("add_rep").is_empty() and not EventEngine.action_def("set_flag").is_empty(), "动作注册表含 add_rep/set_flag")
 	var ow2 = OverworldScript.new()
-	EventEngine.execute_action({"action": "add_rep", "faction_id": "lizardmen", "delta": -25}, ow2)
-	ck(FactionDB.rep_of(ws, "lizardmen") == -25 and FactionDB.hostile(ws, "lizardmen"), "add_rep 动作落账并敌对")
+	EventEngine.execute_action({"action": "add_rep", "faction_id": "wildlife", "delta": -25}, ow2)
+	ck(FactionDB.rep_of(ws, "wildlife") == -25 and FactionDB.hostile(ws, "wildlife"), "add_rep 动作落账并敌对")
 	EventEngine.execute_action({"action": "set_flag", "key": "helped_lizard", "value": "true"}, ow2)
 	ck(ws.flags.get("helped_lizard") == true, "set_flag 动作：\"true\" 解析为 bool")
 	EventEngine.execute_action({"action": "set_flag", "key": "route", "value": "north"}, ow2)
@@ -92,7 +92,7 @@ func _initialize() -> void:
 	# 7) 声望存档往返
 	ck(SaveIO.save_campaign(ws, SLOT), "save 成功")
 	var ld = SaveIO.load_campaign(SLOT)
-	ck(ld != null and FactionDB.rep_of(ld, "lizardmen") == -25, "声望往返")
+	ck(ld != null and FactionDB.rep_of(ld, "wildlife") == -25, "声望往返")
 	ck(FactionDB.rep_of(ld, "bandits") == -50, "读档后未记录派系仍走默认")
 	SaveIO.delete_slot(SLOT)
 

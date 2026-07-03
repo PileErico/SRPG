@@ -7,6 +7,7 @@ extends SceneTree
 const BattleState := preload("res://BattleState.gd")
 const UnitFactory := preload("res://UnitFactory.gd")
 const WorldState := preload("res://WorldState.gd")
+const TerrainDB := preload("res://TerrainDB.gd")
 
 var _fail := 0
 
@@ -138,6 +139,25 @@ func _initialize() -> void:
 	var cells := {Vector2i(3, 4): true, Vector2i(0, 0): true}
 	ck(BattleState.cells_from_json(BattleState.cells_to_json(cells)).size() == 2, "cells 编解码往返")
 	ck(BattleState.cells_from_json(null).is_empty() and BattleState.cells_from_json([[1]]).is_empty(), "编解码容错")
+
+	# —— 6) 地块效果惰性接入（森林掩蔽→守方闪避效能，仅地面态；命中/因子对拍）——
+	var atk = UnitFactory.make_unit(protos[0], "player", 0, 1)
+	var tgt = UnitFactory.make_unit(protos[0], "enemy", 4, 4)
+	atk.stats["acc"] = 100   # 命中基数拉高、避开 5/95 钳制以露出 ×0.85 差异
+	tgt.stats["eva"] = 20
+	var hc_plain := s._hit_chance(atk, tgt)   # 目标站草原（无地块效果）
+	s.tiles[4][4] = {"terrain": "forest", "variant": "forest"}   # (4,4) 改森林、目标站其上
+	tgt.tags = ["ground"]
+	var hc_forest := s._hit_chance(atk, tgt)
+	tgt.tags = ["flying"]
+	var hc_fly := s._hit_chance(atk, tgt)
+	ck(hc_forest < hc_plain, "森林掩蔽压低对地面目标命中率（%d<%d）" % [hc_forest, hc_plain])
+	ck(hc_fly == hc_plain, "森林掩蔽对飞行态不生效（when.occupant_lacks_tags[flying]）")
+	ck(is_equal_approx(s._terrain_eff_factor(tgt, "eva_eff", false), 1.0), "飞行态森林闪避效能因子=1")
+	tgt.tags = ["ground"]
+	ck(is_equal_approx(s._terrain_eff_factor(tgt, "eva_eff", false), 0.85), "地面态森林闪避效能因子=0.85")
+	ck(is_equal_approx(s._terrain_eff_factor(atk, "eva_eff", false), 1.0), "攻方站草原无地块效能（=1）")
+	ck(TerrainDB.active_grants(null, []).is_empty(), "无地块 active_grants 空")
 
 	if _fail == 0:
 		print("=== 全部断言 PASS ===")

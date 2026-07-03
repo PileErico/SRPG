@@ -98,10 +98,18 @@
 
   {"id": "human", "cn": "人类", "cat": "race", "status": "in_use"},
   {"id": "harpy", "cn": "鸟人", "cat": "race", "status": "in_use"},
-  {"id": "monster", "cn": "怪物", "cat": "race", "status": "planned"},
-  {"id": "beast", "cn": "野兽", "cat": "race", "status": "planned"},
+  {"id": "lizardmen", "cn": "蜥蜴人", "cat": "race", "status": "planned"},
 
-  {"id": "elite", "cn": "精锐", "cat": "char", "status": "in_use", "color": "#C86BD5", "desc": "精锐/特殊单位标记：敌方带此 tag 才有死门资格（我方/友方全体天然有）；见需求 §1.11"},
+  {"id": "monster", "cn": "怪物", "cat": "biotype", "status": "planned", "desc": "生物类型：怪物（供屠龙者等条件特性、克制关系）"},
+  {"id": "beast", "cn": "野兽", "cat": "biotype", "status": "planned", "desc": "生物类型：野兽"},
+
+  {"id": "camp_player", "cn": "玩家", "cat": "camp", "status": "in_use", "color": "#3A7BD5", "desc": "派系归属：玩家。tag=camp_<factions.json id>；影响声望/敌对(FactionDB)、供 tag 条件（对某派系+X）。区别于阵营立场(player/ally/enemy/neutral)"},
+  {"id": "camp_empire", "cn": "帝国", "cat": "camp", "status": "in_use", "color": "#5B84C8", "desc": "派系归属：帝国"},
+  {"id": "camp_wildlife", "cn": "野生生物", "cat": "camp", "status": "in_use", "color": "#4FA85F", "desc": "派系归属：野生生物"},
+  {"id": "camp_lizardmen", "cn": "蜥蜴人部落", "cat": "camp", "status": "planned", "color": "#7FA84F", "desc": "派系归属：蜥蜴人部落（lizardmen 作阵营 tag；与种族 tag lizardmen〔蜥蜴人〕分开）"},
+  {"id": "camp_bandits", "cn": "流寇", "cat": "camp", "status": "in_use", "color": "#C25B4E", "desc": "派系归属：流寇"},
+
+  {"id": "elite", "cn": "精锐", "cat": "unit_status", "status": "in_use", "color": "#C86BD5", "desc": "精锐/特殊单位标记：敌方带此 tag 才有死门资格（我方/友方全体天然有）；见需求 §1.11"},
 
   {"id": "deaths_door", "cn": "死门", "cat": "unit_status", "status": "in_use", "color": "#C86BD5", "desc": "死门中：占格可被攻击、无法行动；每回合 1d20+体力 检定 ±1、被命中 −1；条 −3 倒下 / +3 爬回"},
   {"id": "injured", "cn": "重伤", "cat": "unit_status", "status": "in_use", "color": "#D5453A", "desc": "重伤：死门 −3 离场（非铁人）或 +3 爬回的 debuff 载体；战后休整 injured_until 前不可出战"},

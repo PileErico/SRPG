@@ -215,17 +215,6 @@
     "two_handed": false
   },
   {
-    "attack": {
-      "ap_cost": 1,
-      "coeff": 1,
-      "damage_kind": "physical",
-      "icon": "",
-      "name": "普通攻击",
-      "range": 1,
-      "tags": [
-        "single_target"
-      ]
-    },
     "icon": "res://icons/Items/Weapons/wood_kite_shield.png",
     "id": "wood_kite_shield",
     "innate": false,

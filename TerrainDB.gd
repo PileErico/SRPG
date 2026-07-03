@@ -102,6 +102,39 @@ static func effects_text(entry) -> String:
 		parts.append("%s：%s" % [nm, d] if (nm != "" and d != "") else nm + d)
 	return "；".join(parts)
 
+# 占据者视角「当前生效」的地块效果 grant 列表：逐条评估 when 条件、只回条件通过者的 grant。
+# **惰性读取用**（战斗命中/伤害结算即时调用，不材质化成持久 buff——见 docs/单位系统设计.md「森林掩蔽」🔒）。
+# when 目前支持 occupant_lacks_tags（缺这些 tag 才生效，如森林对飞行态不生效）/ occupant_has_tags（须全有）。
+# grant 语义／战斗桶映射＝战斗域知识，留在 BattleState._terrain_eff_factor；本函数只做「数据×条件」过滤，保持地形层纯粹。
+static func active_grants(entry, occupant_tags: Array) -> Array:
+	var out := []
+	if entry == null:
+		return out
+	var effs = entry.get("effects", [])
+	if typeof(effs) != TYPE_ARRAY:
+		return out
+	for ef in effs:
+		if typeof(ef) != TYPE_DICTIONARY:
+			continue
+		if not _when_passes(ef.get("when", {}), occupant_tags):
+			continue
+		var g = ef.get("grant", null)
+		if typeof(g) == TYPE_DICTIONARY:
+			out.append(g)
+	return out
+
+# 地块效果 when 条件判定（tag 驱动，统一判断）：occupant_lacks_tags 缺其一才过 / occupant_has_tags 须全有。缺省=无条件通过。
+static func _when_passes(when, occupant_tags: Array) -> bool:
+	if typeof(when) != TYPE_DICTIONARY:
+		return true
+	for t in when.get("occupant_lacks_tags", []):
+		if t in occupant_tags:
+			return false
+	for t in when.get("occupant_has_tags", []):
+		if t not in occupant_tags:
+			return false
+	return true
+
 # 地形 tags → 中文串（悬停信息用）；无则空串
 static func tags_cn(entry) -> String:
 	if entry == null or typeof(entry.get("tags")) != TYPE_ARRAY:

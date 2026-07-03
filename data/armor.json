@@ -2,7 +2,13 @@
   {
     "icon": "res://icons/Items/Armors/Special_Desmond_1.png",
     "id": "Desmond_Head",
-    "mods": [],
+    "mods": [
+      {
+        "op": "state",
+        "stat": "vision_state",
+        "value": "nightvision"
+      }
+    ],
     "name": "狼人的头",
     "requires": [
       "char_desmond"
@@ -52,12 +58,12 @@
       {
         "op": "flat",
         "stat": "armor_max",
-        "value": 75.0
+        "value": 75
       },
       {
         "op": "flat",
         "stat": "armor_res_phys",
-        "value": 30.0
+        "value": 30
       }
     ],
     "name": "板胸甲",

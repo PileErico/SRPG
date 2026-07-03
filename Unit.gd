@@ -36,6 +36,8 @@ var faction: String:
 # —— 身份 / 养成（非战斗数值，显示在角色状态页左区）——
 var uid := 0                 # 存档域唯一 id 🔒（WorldState.mint_uid 分配，unit/item 共用计数器；0=未分配＝临时对象，如沙盒测试单位）
 var proto_id := ""           # 来源原型 id（图鉴编号/击杀统计按它归类；空=手捏单位）
+# 派系归属＝ tag（`camp_<factions.json id>`，见 data/tags.json cat "camp"）——走 tags 统一判断，不设专门字段。
+# 区别于 faction(阵营立场 player/ally/enemy/neutral，关卡决定)：camp 是单位内在派系（帝国/流寇…），影响声望/敌对(FactionDB)。
 var level := 1               # 等级
 var exp := 0                 # 当前经验
 var exp_max := 100           # 升级所需经验
@@ -255,23 +257,24 @@ func set_trait(id: String) -> void:
 	recompute_derived()   # 特性可能改四维（如天性武者 +体力）→ 重算派生属性
 
 # 装备（模板 id 便捷入口）：从模板**造新实例**再装——原型/预设/沙盒路径零改动。
-# 装失败回收孤儿实例。成功 true。
-func equip(item_id: String) -> bool:
+# 装失败回收孤儿实例。成功 true。target_slot 非空＝指定目标槽（单手武器装进副手等，见 equip_instance）。
+func equip(item_id: String, target_slot := "") -> bool:
 	var iuid := ItemInstances.create(item_id)
 	if iuid == 0:
 		return false
-	if equip_instance(iuid):
+	if equip_instance(iuid, target_slot):
 		return true
 	ItemInstances.destroy(iuid)
 	return false
 
 # 装备一件**已存在的实例**（按实例 iuid）；双手武器占 main_hand+off_hand（同一 iuid）。
 # campaign 读档重挂 / 将来背包·铁匠都走这条。目标槽被天生武器占用＝装备失败（innate 永不被顶）。
-func equip_instance(iuid: int) -> bool:
+# target_slot 非空＝**指定放进哪个槽**（如单手武器装进 off_hand 双持；须 EquipSlots.accepts 该槽）；空＝按物品 slot 字段（默认，旧行为零改动）。
+func equip_instance(iuid: int, target_slot := "") -> bool:
 	var item = ItemInstances.view(iuid)
 	if item == null or not can_equip(item):
 		return false
-	var primary := str(item.get("slot", ""))
+	var primary := target_slot if target_slot != "" else str(item.get("slot", ""))
 	if primary == "":
 		return false
 	if not EquipSlots.accepts(primary, item):   # tag 驱动槽位资格（innate 豁免、旧物品回退 slot 字段）
@@ -374,6 +377,24 @@ func remove_modifiers_by_source(source: String) -> void:
 # 按前缀摘修正（装备实例的多条 mod 共享 "equip:<uid>:" 前缀）
 func remove_modifiers_by_source_prefix(prefix: String) -> void:
 	modifiers = modifiers.filter(func(m): return not str(m.get("source", "")).begins_with(prefix))
+
+# —— 视觉状态（非数值状态旗，经 mod stat=="vision_state" 承载；装备/特性/buff 任意来源可赋予）——
+# 是否具备某视觉状态（如 "nightvision" 夜视 / "blind" 无视力）。扫全部修正。
+func has_vision_state(state: String) -> bool:
+	for m in modifiers:
+		if str(m.get("stat", "")) == "vision_state" and str(m.get("value", "")) == state:
+			return true
+	return false
+
+# 实际视野半径：面板 sight × 日夜乘子（宿主传入）叠加视觉状态——
+#   无视力→0；夜视→免夜间减半（乘子提回 ≥1，白天/增益乘子保留）。下限 0。
+func effective_sight(time_mult: float) -> int:
+	if has_vision_state("blind"):
+		return 0
+	var m := time_mult
+	if has_vision_state("nightvision"):
+		m = maxf(m, 1.0)
+	return maxi(0, int(round(effective_stat("sight") * m)))
 
 # ============ 技能（已学状态 / 学习 / 冷却 / 本战次数）============
 # 数值口径：冷却 = floor(base + 智力×per_int)（≥0）；本战次数 = floor(base + 智力×per_int)（≥1）。

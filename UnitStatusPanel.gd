@@ -10,6 +10,7 @@ extends Control
 
 const DiagonalFrame := preload("res://DiagonalFrame.gd")
 const ItemInstances := preload("res://ItemInstances.gd")   # 装备槽经合成视图取物品（equipment 存实例 uid）
+const ItemDB := preload("res://ItemDB.gd")                 # 编辑器背包格取模板（bag_items 存模板 id）
 const ItemSlot := preload("res://ItemSlot.gd")
 const TraitDB := preload("res://TraitDB.gd")
 const SkillDB := preload("res://SkillDB.gd")
@@ -47,6 +48,17 @@ var host = null                        # 宿主（Sandbox）：翻页取同阵�
 var _unit = null                       # 当前查看的单位
 var _current_tab := 0                  # 记住当前 Tab（翻页时保持）
 
+# —— 编辑器模式（角色编辑器嵌用；默认 false → 游戏内查看行为逐字节零改动）——
+# 打开＝设 editor_mode=true + 注入回调后 open(u)。可编辑：头像点选 / 四维填 / 姓名·等级 / 特性下拉 / 装备槽点选 / 背包。
+var editor_mode := false               # true=可编辑 + docked 填充 + 无拖动/翻页/ESC 关闭
+var on_portrait_pick := Callable()     # 点头像 → 宿主开文件对话框（无参）
+var on_equip_slot := Callable()        # 点装备槽 → 宿主开物品选择器（参：slot_id:String）
+var on_bag_slot := Callable()          # 点背包格 → 宿主开物品选择器（参：index:int）
+var on_edit := Callable()              # 面板内任一编辑后 → 宿主标脏（无参）
+var bag_items: Array = []              # 编辑器背包内容（item id 列表；仅编辑器态显示，不入档）
+var _stats_col: VBoxContainer = null   # 右侧派生属性列引用（四维/特性改后就地刷新，免整卡重建）
+var _trait_ids: Array = []             # 编辑器特性下拉的 index→id 映射
+
 func open(u) -> void:
 	_unit = u
 	_build(u)
@@ -60,8 +72,8 @@ func close() -> void:
 func _input(event: InputEvent) -> void:
 	if not visible:
 		return
-	# ESC 关闭
-	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+	# ESC 关闭（编辑器模式下面板是主界面，不关闭）
+	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE and not editor_mode:
 		close()
 		get_viewport().set_input_as_handled()
 		return
@@ -81,10 +93,14 @@ func _build(u) -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE   # 非模态：卡片以外一律穿透，照常操作战斗
 
-	# 卡片（固定尺寸、可自由摆放/拖动）
+	# 卡片：游戏内＝固定尺寸居中可拖动；编辑器＝仍固定 CARD_SIZE（不随窗口拉伸！），
+	# 填满 self（self 由宿主 CharacterEditor 钉死为 CARD_SIZE 并套 ScrollContainer 兜溢出）。
 	var card := PanelContainer.new()
-	card.custom_minimum_size = CARD_SIZE
-	card.size = CARD_SIZE
+	if editor_mode:
+		card.set_anchors_preset(Control.PRESET_FULL_RECT)
+	else:
+		card.custom_minimum_size = CARD_SIZE
+		card.size = CARD_SIZE
 	card.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(card)
 	_card = card
@@ -139,7 +155,8 @@ func _build(u) -> void:
 	frame.corner_scale = FRAME_SCALE
 	card.add_child(frame)
 
-	_place_card()
+	if not editor_mode:
+		_place_card()
 	if host != null:
 		host.set_viewed_unit(u)
 
@@ -150,8 +167,9 @@ func _make_header(u) -> Control:
 	var bar := VBoxContainer.new()
 	bar.custom_minimum_size = Vector2(0, HEADER_H)
 	bar.mouse_filter = Control.MOUSE_FILTER_STOP
-	bar.mouse_default_cursor_shape = Control.CURSOR_MOVE
-	bar.gui_input.connect(_on_header_input)
+	if not editor_mode:                    # 编辑器模式不拖动、不翻页
+		bar.mouse_default_cursor_shape = Control.CURSOR_MOVE
+		bar.gui_input.connect(_on_header_input)
 
 	# 整行往下挪一点，不贴顶边
 	var pad := MarginContainer.new()
@@ -164,8 +182,9 @@ func _make_header(u) -> Control:
 	row.add_theme_constant_override("separation", 14)
 	pad.add_child(row)
 
-	row.add_child(_nav_button("<", -1, "上一个同阵营单位"))
-	row.add_child(_nav_button(">", 1, "下一个同阵营单位"))
+	if not editor_mode:
+		row.add_child(_nav_button("<", -1, "上一个同阵营单位"))
+		row.add_child(_nav_button(">", 1, "下一个同阵营单位"))
 
 	var title := Label.new()
 	title.text = "%s · %s" % [TagDB.cn(u.faction), str(u.unit_name)]
@@ -173,7 +192,7 @@ func _make_header(u) -> Control:
 	row.add_child(title)
 
 	var hint := Label.new()
-	hint.text = "（拖动此处移动 · ESC 关闭）"
+	hint.text = "（可编辑：点头像/填四维/点装备槽）" if editor_mode else "（拖动此处移动 · ESC 关闭）"
 	hint.add_theme_color_override("font_color", Color(1, 1, 1, 0.35))
 	hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(hint)
@@ -266,6 +285,7 @@ func _build_status_page(u) -> Control:
 	top.add_child(stats)
 	_build_info(info, u)
 	_build_stats(stats, u)
+	_stats_col = stats   # 编辑器：四维/特性改后就地刷新这列（免整卡重建、不丢 spinbox 焦点）
 
 	page.add_child(HSeparator.new())
 
@@ -621,39 +641,175 @@ func _build_info(info: VBoxContainer, u) -> void:
 	var top := HBoxContainer.new()
 	top.add_theme_constant_override("separation", 14)
 	info.add_child(top)
+	if editor_mode:
+		top.add_child(_editable_portrait(u))   # 空＝大「＋」，点击开文件对话框；有图＝显示且可换
+	else:
+		var tex = TextureCache.get_tex(u.portrait)
+		if tex != null:
+			var av := TextureRect.new()
+			av.texture = tex
+			av.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST   # 像素图放大不糊
+			av.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			av.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			av.custom_minimum_size = Vector2(132, 150)
+			av.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN   # 靠左
+			top.add_child(av)
+		else:
+			var ph := Label.new()
+			ph.text = "[无立绘]"
+			ph.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			ph.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+			ph.custom_minimum_size = Vector2(132, 150)
+			ph.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+			top.add_child(ph)
+	top.add_child(VSeparator.new())
+	_build_four_dims(top, u)          # 四维：头像右边、上下居中（编辑器＝可填 spinbox）
+
+	info.add_child(HSeparator.new())
+
+	# ② 身份：姓名 / 特性 / 等级（整行铺开；编辑器＝可编辑）
+	var ident := VBoxContainer.new()
+	ident.add_theme_constant_override("separation", 6)
+	info.add_child(ident)
+	if editor_mode:
+		ident.add_child(_edit_line_row("姓名", str(u.unit_name), _on_edit_name))
+		ident.add_child(_trait_dropdown_row(u))
+		ident.add_child(_edit_spin_row("等级", int(u.level), 1, 99, _on_edit_level))
+	else:
+		_kv(ident, "姓名", str(u.unit_name))
+		ident.add_child(_trait_row(u))    # 特性：稀有度色 + 悬停富 tooltip
+		_kv(ident, "等级", str(u.level))
+
+	# ③ 底部：完整一条经验槽（独立、不与等级重叠；数值悬停可见）
+	info.add_child(_exp_bar(u))
+
+# ============ 编辑器专用小件（editor_mode；游戏内查看路径不触及）============
+
+func _emit_edit() -> void:
+	if on_edit.is_valid():
+		on_edit.call()
+
+# 右列派生属性就地刷新（四维/特性改后调；不整卡重建 → 保住左侧 spinbox 焦点）
+func _refresh_stats_col(u) -> void:
+	if _stats_col == null or not is_instance_valid(_stats_col):
+		return
+	for c in _stats_col.get_children():
+		c.free()   # 纯静态标签行、无正发信号的对象（spinbox 在左列不在此），立即释放避免一帧双影
+	_build_stats(_stats_col, u)
+
+func _on_edit_name(t: String) -> void:
+	if _unit == null: return
+	_unit.unit_name = t
+	_emit_edit()
+
+func _on_edit_level(v: float) -> void:
+	if _unit == null: return
+	_unit.level = int(v)
+	_emit_edit()
+
+func _on_edit_dim(v: float, key: String) -> void:
+	if _unit == null: return
+	_unit.stats[key] = int(v)
+	_unit.recompute_derived()   # 四维改 → 重算派生 → 右列即时反映
+	_refresh_stats_col(_unit)
+	_emit_edit()
+
+func _on_edit_trait(idx: int) -> void:
+	if _unit == null: return
+	_unit.set_trait(str(_trait_ids[idx]) if idx < _trait_ids.size() else "")
+	_refresh_stats_col(_unit)   # 特性可改四维/派生
+	_emit_edit()
+
+# 可点头像：空＝132×150 大「＋」框；有图＝显示立绘；整块点击 → on_portrait_pick
+func _editable_portrait(u) -> Control:
+	var box := _slot_box(Vector2(132, 150))
+	box.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	box.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	box.tooltip_text = "点击选择立绘图片"
 	var tex = TextureCache.get_tex(u.portrait)
 	if tex != null:
 		var av := TextureRect.new()
 		av.texture = tex
-		av.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST   # 像素图放大不糊
+		av.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 		av.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		av.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		av.custom_minimum_size = Vector2(132, 150)
-		av.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN   # 靠左
-		top.add_child(av)
+		av.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		box.add_child(av)
 	else:
-		var ph := Label.new()
-		ph.text = "[无立绘]"
-		ph.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		ph.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		ph.custom_minimum_size = Vector2(132, 150)
-		ph.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-		top.add_child(ph)
-	top.add_child(VSeparator.new())
-	_build_four_dims(top, u)          # 四维：头像右边、上下居中
+		var plus := Label.new()
+		plus.text = "＋"
+		plus.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		plus.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		plus.add_theme_font_size_override("font_size", 48)
+		plus.add_theme_color_override("font_color", Color(1, 1, 1, 0.35))
+		plus.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		box.add_child(plus)
+	box.gui_input.connect(_on_portrait_input)
+	return box
 
-	info.add_child(HSeparator.new())
+func _on_portrait_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		if on_portrait_pick.is_valid():
+			on_portrait_pick.call()
 
-	# ② 身份：姓名 / 特性 / 等级（整行铺开）
-	var ident := VBoxContainer.new()
-	ident.add_theme_constant_override("separation", 6)
-	info.add_child(ident)
-	_kv(ident, "姓名", str(u.unit_name))
-	ident.add_child(_trait_row(u))    # 特性：稀有度色 + 悬停富 tooltip
-	_kv(ident, "等级", str(u.level))
+# 「标签 + LineEdit」一行（编辑器身份区）
+func _edit_line_row(label: String, value: String, on_change: Callable) -> Control:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	var l := Label.new()
+	l.text = "%s：" % label
+	l.custom_minimum_size = Vector2(56, 0)
+	row.add_child(l)
+	var le := LineEdit.new()
+	le.text = value
+	le.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	le.text_changed.connect(on_change)
+	row.add_child(le)
+	return row
 
-	# ③ 底部：完整一条经验槽（独立、不与等级重叠；数值悬停可见）
-	info.add_child(_exp_bar(u))
+# 「标签 + SpinBox」一行
+func _edit_spin_row(label: String, value: int, mn: int, mx: int, on_change: Callable) -> Control:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	var l := Label.new()
+	l.text = "%s：" % label
+	l.custom_minimum_size = Vector2(56, 0)
+	row.add_child(l)
+	var sp := SpinBox.new()
+	sp.min_value = mn
+	sp.max_value = mx
+	sp.step = 1
+	sp.value = value
+	sp.custom_minimum_size = Vector2(80, 0)
+	sp.value_changed.connect(on_change)
+	row.add_child(sp)
+	return row
+
+# 特性下拉行（编辑器；替代只读 _trait_row）
+func _trait_dropdown_row(u) -> Control:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	var l := Label.new()
+	l.text = "特性："
+	l.custom_minimum_size = Vector2(56, 0)
+	row.add_child(l)
+	var opt := OptionButton.new()
+	opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_trait_ids = [""]
+	opt.add_item("（无）", 0)
+	var i := 1
+	for id in TraitDB.all().keys():
+		var t = TraitDB.all()[id]
+		opt.add_item("%s（%s）" % [str(t.get("name", id)), TagDB.cn(str(t.get("rarity", "")))], i)
+		_trait_ids.append(id)
+		if str(u.trait_id) == str(id):
+			opt.select(i)
+		i += 1
+	if str(u.trait_id) == "":
+		opt.select(0)
+	opt.item_selected.connect(_on_edit_trait)
+	row.add_child(opt)
+	return row
 
 # 经验槽：整条横向进度条（fill = 经验/上限）；左叠淡「经验」标识；悬停出「经验：x / x」。
 # 配色：浅紫底 + 稍深黑边框 + 明显紫填充。
@@ -709,9 +865,25 @@ func _build_four_dims(parent: Node, u) -> void:
 		v.add_child(_dim_row(u, d))
 	parent.add_child(v)
 
-# 一条四维：键名 + 着色数值（受修正变高绿/变低红）；整行悬停出基础值+来源 tooltip
+# 一条四维：键名 + 着色数值（受修正变高绿/变低红）；整行悬停出基础值+来源 tooltip。
+# 编辑器模式：数值换成可填 SpinBox（改基础值 → 重算派生 → 右列即时刷新）。
 func _dim_row(u, d: Dictionary) -> Control:
 	var key := str(d["key"])
+	if editor_mode:
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 4)
+		var kl := Label.new()
+		kl.text = "%s：" % str(d["cn"])
+		row.add_child(kl)
+		var sp := SpinBox.new()
+		sp.min_value = 1
+		sp.max_value = 99
+		sp.step = 1
+		sp.value = float(u.stats.get(key, 5))
+		sp.custom_minimum_size = Vector2(72, 0)
+		sp.value_changed.connect(_on_edit_dim.bind(key))
+		row.add_child(sp)
+		return row
 	var base := float(u.stats.get(key, 0))
 	var eff := float(u.effective_stat_f(key))
 	var h := HBoxContainer.new()
@@ -876,6 +1048,8 @@ func _aggregate_equip_mods(u) -> Array:
 	for m in u.modifiers:
 		if not str(m.get("source", "")).begins_with("equip:"):
 			continue
+		if str(m.get("stat", "")) == "vision_state":
+			continue   # 视觉状态＝非数值状态旗，不进「装备加成总计」（角色面板不显示）
 		var stat := str(m.get("stat", ""))
 		var op := str(m.get("op", "flat"))
 		var k := stat + "|" + op
@@ -926,6 +1100,9 @@ func _equip_cell(u, slot_label: String, slot_id: String) -> Control:
 	box.set_meta("slot_id", slot_id)
 	box.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	_fill_equip_slot(box, u, slot_id)
+	if editor_mode:                       # 点槽 → 宿主开物品选择器（按 slot 筛选）
+		box.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		box.gui_input.connect(_on_equip_slot_input.bind(slot_id))
 	v.add_child(box)
 	var l := Label.new()
 	l.text = slot_label
@@ -933,10 +1110,25 @@ func _equip_cell(u, slot_label: String, slot_id: String) -> Control:
 	v.add_child(l)
 	return v
 
+# 编辑器：点装备槽 → 回调宿主开选择器（左键）
+func _on_equip_slot_input(event: InputEvent, slot_id: String) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		if on_equip_slot.is_valid():
+			on_equip_slot.call(slot_id)
+
 # 槽内已装备 → 按稀有度上色边框 + 叠物品图标；双手武器占用的副手槽（非主槽）→ 灰色滤镜
 func _fill_equip_slot(box: Control, u, slot_id: String) -> void:
 	var iuid := int(u.equipment.get(slot_id, 0))
 	if iuid == 0:
+		if editor_mode:                   # 空槽在编辑器里显示淡「＋」，示意可点选
+			var plus := Label.new()
+			plus.text = "＋"
+			plus.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			plus.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+			plus.add_theme_color_override("font_color", Color(1, 1, 1, 0.30))
+			plus.add_theme_font_size_override("font_size", 22)
+			plus.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			box.add_child(plus)
 		return
 	var item = ItemInstances.view(iuid)
 	if item == null:
@@ -966,8 +1158,9 @@ func _fill_equip_slot(box: Control, u, slot_id: String) -> void:
 	box.add_child(ic)
 
 # 中下：物品栏（占位）。实画 4×4，前 BAG_USABLE 个可用，其余锁定画 ✕。
+# 编辑器模式：可用格显示 bag_items 内容、点击开选择器（任意物品）；⚠ 背包暂不入档（先占位）。
 func _build_bag(parent: VBoxContainer, _u) -> void:
-	_section(parent, "物品栏")
+	_section(parent, "物品栏（编辑器：可放任意物品，暂不入档）" if editor_mode else "物品栏")
 	var grid := GridContainer.new()
 	grid.columns = 4
 	grid.size_flags_horizontal = Control.SIZE_SHRINK_CENTER   # 整组槽位在本列内居中
@@ -976,9 +1169,46 @@ func _build_bag(parent: VBoxContainer, _u) -> void:
 	parent.add_child(grid)
 	for i in BAG_TOTAL:
 		if i < BAG_USABLE:
-			grid.add_child(_slot_box(Vector2(44, 44)))
+			var box := _slot_box(Vector2(44, 44))
+			if editor_mode:
+				_fill_bag_slot(box, i)
+				box.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+				box.gui_input.connect(_on_bag_slot_input.bind(i))
+			grid.add_child(box)
 		else:
 			grid.add_child(_locked_slot(Vector2(44, 44)))
+
+# 编辑器背包格：有物品叠图标（无图标叠首字），点击 → 回调宿主
+func _fill_bag_slot(box: Control, idx: int) -> void:
+	if idx >= bag_items.size():
+		return
+	var item = ItemDB.get_item(str(bag_items[idx]))
+	if item == null:
+		return
+	box.item = item
+	box.tooltip_builder = _build_item_tooltip
+	box.tooltip_text = str(item.get("name", ""))
+	var tex = TextureCache.get_tex(str(item.get("icon", "")))
+	if tex != null:
+		var ic := TextureRect.new()
+		ic.texture = tex
+		ic.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		ic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		ic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		box.add_child(ic)
+	else:
+		var lb := Label.new()
+		lb.text = str(item.get("name", "?")).substr(0, 1)
+		lb.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		lb.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		lb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		box.add_child(lb)
+
+func _on_bag_slot_input(event: InputEvent, idx: int) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		if on_bag_slot.is_valid():
+			on_bag_slot.call(idx)
 
 # 右下：效果 / buff 列表（带滚动条）。排序：常驻在前、限时在后；同组内 增益在 debuff 前。
 func _build_effects(parent: VBoxContainer, u) -> void:

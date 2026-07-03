@@ -93,7 +93,7 @@ static func unit_to_proto(u) -> Dictionary:
 	for k in StatMeta.SERIALIZABLE_BASE_STATS:
 		if u.stats.has(k):
 			stat_ov[k] = u.stats[k]
-	return {
+	var proto := {
 		"name": u.unit_name,
 		"id": u.proto_id,
 		"default_faction": u.faction,
@@ -110,6 +110,15 @@ static func unit_to_proto(u) -> Dictionary:
 		"stats": stat_ov,
 		"_preset": true,
 	}
+	# 敌方 AI 警觉字段：仅对 enemy/neutral 写出（player/ally 忽略这些字段——不写省噪音）。
+	# make_unit 读回时按缺省兜底（ai_threat 默认 true）；补上后 proto/preset 往返不再丢 AI 配置。
+	if u.faction in ["enemy", "neutral"]:
+		proto["ai_threat"] = u.ai_threat
+		if u.ai_region != "":
+			proto["ai_region"] = u.ai_region
+		if u.ai_group != "":
+			proto["ai_group"] = u.ai_group
+	return proto
 
 # ============ campaign 层（战役续存，供 WorldState 调用）============
 # campaign 条目 = proto（定义/养成）⊕ 跨战运行态（uid / 当前 HP / 当前护甲）。
@@ -250,6 +259,77 @@ static func all_prototypes() -> Array:
 				if typeof(e) == TYPE_DICTIONARY:
 					out.append(e)
 	return out
+
+# ============ 原型库写盘（角色编辑器编内置原型 res://data/unit_prototypes.json，仿 ItemDB.save_item）============
+# all_prototypes 每次现读文件、无内存缓存，故写盘后无需 reload——下次读即最新（编辑器/沙盒各自 _ready 现取）。
+
+# 按 id 取一条内置原型（找不到返回 {}）。
+static func get_prototype(id: String) -> Dictionary:
+	if id == "":
+		return {}
+	for p in all_prototypes():
+		if str(p.get("id", "")) == id:
+			return p
+	return {}
+
+# 保存一条原型（按 id upsert）→ 写回 unit_prototypes.json。返回是否写盘成功。
+# replace_id：改 id 时传旧 id——旧条目一并移除（否则「改名」变「复制」，旧 id 残留）。
+static func save_prototype(proto: Dictionary, replace_id := "") -> bool:
+	var id := str(proto.get("id", ""))
+	if id == "":
+		return false
+	var arr := all_prototypes()
+	var out := []
+	var replaced := false
+	for e in arr:
+		var eid := str(e.get("id", ""))
+		if replace_id != "" and replace_id != id and eid == replace_id:
+			continue   # 改 id：旧条目移除
+		if eid == id:
+			out.append(proto)   # upsert：同 id 覆盖
+			replaced = true
+		else:
+			out.append(e)
+	if not replaced:
+		out.append(proto)
+	return _write_protos(out)
+
+# 删除一条原型（按 id）→ 写回。写盘失败＝false。
+static func delete_prototype(id: String) -> bool:
+	if id == "":
+		return false
+	var arr := all_prototypes()
+	var out := arr.filter(func(e): return str(e.get("id", "")) != id)
+	if out.size() == arr.size():
+		return false   # 没找到＝没删
+	return _write_protos(out)
+
+# 写数组（2 空格缩进，与工程其它数据文件一致）；写前整数归一化（JSON 读回全是 float，避免 1→1.0 噪音 diff）。
+static func _write_protos(arr: Array) -> bool:
+	var f := FileAccess.open(PROTOS_PATH, FileAccess.WRITE)
+	if f == null:
+		push_warning("UnitFactory：写入失败（%s）——文件被占用/只读？" % PROTOS_PATH)
+		return false
+	f.store_string(JSON.stringify(_intify(arr), "  "))
+	f.close()
+	return true
+
+# 递归把「值为整数的 float」还原为 int（1.0→1；1.5 保留）——只影响落盘表示，不改语义（仿 ItemDB._intify）。
+static func _intify(v):
+	match typeof(v):
+		TYPE_FLOAT:
+			return int(v) if v == floorf(v) else v
+		TYPE_ARRAY:
+			var a := []
+			for e in v:
+				a.append(_intify(e))
+			return a
+		TYPE_DICTIONARY:
+			var d := {}
+			for k in v:
+				d[k] = _intify(v[k])
+			return d
+	return v
 
 static func load_presets() -> Array:
 	if not FileAccess.file_exists(PRESETS_PATH):

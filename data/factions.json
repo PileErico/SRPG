@@ -2,11 +2,14 @@
   "_note": "派系单一数据源（M9）。id=声望字典键（WorldState.reputation）；start_rep=未记录时的默认声望（读端兜底，无需开局种子）；hostile_below=声望低于此值即敌对；ambush=敌对时大地图遭袭参数（chance %/每格、cooldown_hours 冷却、battle_map 战斗图、text 遭遇文案）——转成 enter_tile 伪触发器走 EventEngine 评估（冷却随档持久）。声望取值域 [-100,100]（FactionDB.add_rep 钳制）。FactionDB 读本文件。",
   "format_version": 1,
   "factions": [
+    {"id": "player", "label": "玩家", "color": "#3A7BD5", "start_rep": 100, "hostile_below": -1000},
     {"id": "empire", "label": "帝国", "color": "#5B84C8", "start_rep": 0, "hostile_below": -20,
       "ambush": {"chance": 10, "cooldown_hours": 48, "battle_map": "res://maps/sandbox.json", "text": "帝国巡骑拦住了去路——他们对你们没什么好脸色。"}},
-    {"id": "lizardmen", "label": "蜥蜴人", "color": "#4FA85F", "start_rep": 0, "hostile_below": -20,
+    {"id": "wildlife", "label": "野生生物", "color": "#4FA85F", "start_rep": 0, "hostile_below": -20,
+      "ambush": {"chance": 10, "cooldown_hours": 48, "battle_map": "res://maps/sandbox.json", "text": "草丛里窜出的野兽对闯入者呲牙咧嘴，扑了上来！"}},
+    {"id": "lizardmen", "label": "蜥蜴人部落", "color": "#7FA84F", "start_rep": 0, "hostile_below": -20,
       "ambush": {"chance": 10, "cooldown_hours": 48, "battle_map": "res://maps/sandbox.json", "text": "草丛里窜出几名蜥蜴人猎手，斥骂着扑了上来！"}},
-    {"id": "bandits", "label": "劫道者", "color": "#C25B4E", "start_rep": -50, "hostile_below": -20,
-      "ambush": {"chance": 12, "cooldown_hours": 24, "battle_map": "res://maps/sandbox.json", "text": "劫道者盯上了你们的行囊！"}}
+    {"id": "bandits", "label": "流寇", "color": "#C25B4E", "start_rep": -50, "hostile_below": -20,
+      "ambush": {"chance": 12, "cooldown_hours": 24, "battle_map": "res://maps/sandbox.json", "text": "流寇盯上了你们的行囊！"}}
   ]
 }

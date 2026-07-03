@@ -374,17 +374,56 @@ func _has_los(a: Vector2i, b: Vector2i) -> bool:
 			return false
 	return true
 
-# 单位当前【实际】视野半径 ＝ round( 面板 sight〔含所有加减〕 × 日夜最终乘子 )，下限 0。
+# 单位当前【实际】视野半径：面板 sight × 日夜最终乘子，再叠视觉状态（夜视/无视力）——逻辑在 Unit.effective_sight。
 func _effective_sight(u) -> int:
-	return maxi(0, int(round(u.effective_stat("sight") * _time_sight_mult)))
+	return u.effective_sight(_time_sight_mult)
+
+# ============ 地块效果（惰性接入攻防效能；grant→战斗效能桶映射的单一处）============
+
+# grant.stat（人话属性名）→ 战斗效能桶。地块效果以「修正对象」语义进管线，但**不材质化持久 buff**：
+# 命中/伤害结算时读所在地块 effects、评估 when、按此表折成连乘因子（docs/单位系统设计.md「森林掩蔽」🔒）。
+const _TERRAIN_EFF_BUCKET := {
+	"evasion": "eva_eff",   # 守方：压低敌命中（减免向）
+	"accuracy": "hit_eff",  # 攻方：抬升命中（增益向）
+	"attack": "atk_eff",    # 攻方：增伤（增益向）
+	"defense": "def_eff",   # 守方：减伤（减免向，折进全域减伤 G）
+}
+
+# 单位所站地块的地形定义（越界/无单位＝null）。地块效果按 tile identity 取，图级 move 覆盖不改 effects。
+func _terrain_at_unit(u):
+	if u == null or not _cell_in_bounds(u.col, u.row):
+		return null
+	return _terrain_entry(tiles[u.row][u.col])
+
+# 单位所站地块对某效能桶的连乘因子（惰性、占据者视角）。无地块/无匹配效果＝1.0（与无地形一致）。
+# gain_dir=true：增益向 ×(1+percent/100)（命中/攻击效能）；false：减免向 ×(1−percent/100)（闪避/防御效能）。
+# nature=debuff 取负；同桶多条连乘（与 eff_mult/eff_reduce 同律）；下限 clamp 0（防负因子翻转，同效能层🔒）。
+func _terrain_eff_factor(u, bucket: String, gain_dir: bool) -> float:
+	var entry = _terrain_at_unit(u)
+	if entry == null:
+		return 1.0
+	var factor := 1.0
+	for g in TerrainDB.active_grants(entry, u.tags):
+		if str(g.get("layer", "效能")) != "效能":
+			continue   # 只折效能层；补正层（flat/pct）不在攻防乘算链里
+		if str(_TERRAIN_EFF_BUCKET.get(str(g.get("stat", "")), "")) != bucket:
+			continue
+		var p := float(g.get("percent", 0.0))
+		if str(g.get("nature", "buff")) == "debuff":
+			p = -p
+		factor *= maxf(0.0, (1.0 + p / 100.0) if gain_dir else (1.0 - p / 100.0))
+	return factor
 
 # ============ 战斗结算（掷骰/伤害/异常；展示渲染在宿主 _resolve_one）============
 
 # 命中率（%）= clamp( (命中 − 闪避) × Π命中效能, 5, 95 )，读 effective_stat。
-# Π命中效能 = 攻方命中效能(增益向) × 守方闪避效能(减免向)——无效能修正时 =1.0（与旧行为一致）。
+# Π命中效能 = 攻方命中效能(增益向) × 守方闪避效能(减免向) × 攻方地块命中效能 × 守方地块闪避效能（森林掩蔽）——
+# 无效能修正 / 无地块效果时 =1.0（与旧行为一致）。地块贡献惰性读取，见 _terrain_eff_factor。
 func _hit_chance(attacker, target) -> int:
 	var base: int = attacker.effective_stat("acc") - target.effective_stat("eva")
 	var eff: float = attacker.eff_mult("hit_eff") * target.eff_reduce("eva_eff")
+	eff *= _terrain_eff_factor(attacker, "hit_eff", true)    # 攻方地块命中效能（增益向）
+	eff *= _terrain_eff_factor(target, "eva_eff", false)     # 守方地块闪避效能（森林掩蔽·减免向）
 	return clampi(int(round(float(base) * eff)), 5, 95)
 
 # 技能伤害补正（flat、不吃效能）：bonus = Σ(指定四维/属性) × mult。无则 0。
@@ -415,7 +454,7 @@ func _resolve_compute(attacker, target, skill) -> Dictionary:
 	# 伤害 = 攻击 × 系数 [× 暴击] [× 效能≠100%]
 	var coeff := float(skill.get("coeff", 1.0))
 	var cmult := (float(attacker.effective_stat_f("crit_dmg")) / 100.0) if crit else 1.0
-	var aeff: float = attacker.eff_mult("atk_eff")   # 攻击效能桶：面板 atk_eff/100 × Π效能修正
+	var aeff: float = attacker.eff_mult("atk_eff") * _terrain_eff_factor(attacker, "atk_eff", true)   # 攻击效能桶：面板 atk_eff/100 × Π效能修正 × 攻方地块攻击效能
 	var atk := float(attacker.effective_stat_f("atk"))
 	var out := atk * coeff * cmult * aeff
 	# 伤害补正：额外 flat 伤害，不吃效能（如撕裂/抓取的 (力量+灵巧)×0.5）
@@ -428,7 +467,7 @@ func _resolve_compute(attacker, target, skill) -> Dictionary:
 	var bp := float(target.effective_stat_f("block_power")) if blocked else 0.0
 	# 防御效能 def_eff：base 100=中性、越高越减伤。def_factor = max(0, 2 − def_eff/100)
 	var deff: float = float(target.effective_stat_f("def_eff"))
-	var def_factor := maxf(0.0, 2.0 - deff / 100.0)
+	var def_factor := maxf(0.0, 2.0 - deff / 100.0) * _terrain_eff_factor(target, "def_eff", false)   # ×守方地块防御效能（减免向，折进减伤链）
 	var g := maxf(0.0, 1.0 - bp / 100.0) * def_factor
 	# 分量：普攻单分量(先进甲)；穿甲 armor_pen 拆 人/甲 两分量。element 默认物理。
 	var elem := str(skill.get("element", "physical"))

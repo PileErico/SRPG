@@ -1,6 +1,6 @@
 {
   "_note": "地形单一数据源：编辑器取 label/color/accent/decor/tags 绘制；战斗取 move（通行性+成本）与 effects（地块效果）。move.passable_by: \"all\"=任何单位可进 / \"none\"=不可通行 / [tag,...]=仅含其中之一可进（如深水仅<飞行>）；move.cost=基础通行成本，tag_cost 按单位 tag 取更优（最小）；effects=站在该格的单位获得的效果，带 when 条件，伤害结算时惰性读取。 scope=地形适用图类型：battle=仅战场 / overworld=仅大地图 / both=通用（缺省 both，旧数据零迁移）——编辑器笔刷栏按当前地图 map_type 过滤，渲染/通行不受影响。",
-  "format_version": 2,
+  "format_version": 2.0,
   "terrains": [
     {
       "accent": "#7BB35C",
@@ -10,16 +10,16 @@
       "id": "grassland",
       "label": "草原",
       "move": {
-        "cost": 1,
+        "cost": 1.0,
         "passable_by": "all"
       },
+      "scope": "both",
       "tags": [
         "ground",
         "open"
       ],
       "terrain": "plain",
-      "variant": "grassland",
-      "scope": "both"
+      "variant": "grassland"
     },
     {
       "accent": "#806237",
@@ -29,17 +29,17 @@
       "id": "wasteland",
       "label": "荒原",
       "move": {
-        "cost": 1,
+        "cost": 1.0,
         "passable_by": "all"
       },
+      "scope": "both",
       "tags": [
         "ground",
         "open",
         "barren"
       ],
       "terrain": "plain",
-      "variant": "wasteland",
-      "scope": "both"
+      "variant": "wasteland"
     },
     {
       "accent": "#6FB23F",
@@ -51,7 +51,7 @@
           "grant": {
             "layer": "效能",
             "nature": "buff",
-            "percent": 15,
+            "percent": 15.0,
             "stat": "evasion"
           },
           "name": "森林掩蔽",
@@ -65,12 +65,13 @@
       "id": "forest",
       "label": "森林",
       "move": {
-        "cost": 2,
+        "cost": 2.0,
         "passable_by": "all",
         "tag_cost": {
-          "flying": 1
+          "flying": 1.0
         }
       },
+      "scope": "both",
       "tags": [
         "ground",
         "cover",
@@ -78,8 +79,7 @@
         "blocks_sight"
       ],
       "terrain": "forest",
-      "variant": "forest",
-      "scope": "both"
+      "variant": "forest"
     },
     {
       "accent": "#4A443C",
@@ -89,12 +89,13 @@
       "id": "mountain",
       "label": "山地",
       "move": {
-        "cost": 3,
+        "cost": 3.0,
         "passable_by": "all",
         "tag_cost": {
-          "flying": 1
+          "flying": 1.0
         }
       },
+      "scope": "both",
       "tags": [
         "ground",
         "highland",
@@ -102,8 +103,7 @@
         "blocks_sight"
       ],
       "terrain": "mountain",
-      "variant": "mountain",
-      "scope": "both"
+      "variant": "mountain"
     },
     {
       "accent": "#9CC6E8",
@@ -113,19 +113,19 @@
       "id": "shallow_water",
       "label": "浅水",
       "move": {
-        "cost": 2,
+        "cost": 2.0,
         "passable_by": "all",
         "tag_cost": {
-          "flying": 1
+          "flying": 1.0
         }
       },
+      "scope": "both",
       "tags": [
         "water",
         "shallow"
       ],
       "terrain": "water",
-      "variant": "shallow",
-      "scope": "both"
+      "variant": "shallow"
     },
     {
       "accent": "#5E89B6",
@@ -135,18 +135,18 @@
       "id": "deep_water",
       "label": "深水",
       "move": {
-        "cost": 1,
+        "cost": 1.0,
         "passable_by": [
           "flying"
         ]
       },
+      "scope": "both",
       "tags": [
         "water",
         "deep"
       ],
       "terrain": "water",
-      "variant": "deep",
-      "scope": "both"
+      "variant": "deep"
     },
     {
       "accent": "#6E5F45",
@@ -156,17 +156,17 @@
       "id": "road",
       "label": "道路",
       "move": {
-        "cost": 1,
+        "cost": 1.0,
         "passable_by": "all"
       },
+      "scope": "battle",
       "tags": [
         "ground",
         "open",
         "road"
       ],
       "terrain": "road",
-      "variant": "road",
-      "scope": "battle"
+      "variant": "road"
     },
     {
       "accent": "#7FB04A",
@@ -176,17 +176,17 @@
       "id": "bush",
       "label": "灌木",
       "move": {
-        "cost": 1,
+        "cost": 1.0,
         "passable_by": "all"
       },
+      "scope": "battle",
       "tags": [
         "ground",
         "cover",
         "flammable"
       ],
       "terrain": "bush",
-      "variant": "bush",
-      "scope": "battle"
+      "variant": "bush"
     },
     {
       "accent": "#A6B36A",
@@ -196,20 +196,20 @@
       "id": "hill",
       "label": "丘陵",
       "move": {
-        "cost": 2,
+        "cost": 2.0,
         "passable_by": "all",
         "tag_cost": {
-          "flying": 1
+          "flying": 1.0
         }
       },
+      "scope": "both",
       "tags": [
         "ground",
         "highland",
         "open"
       ],
       "terrain": "hill",
-      "variant": "hill",
-      "scope": "both"
+      "variant": "hill"
     },
     {
       "accent": "#B0935A",
@@ -219,20 +219,20 @@
       "id": "sand",
       "label": "沙地",
       "move": {
-        "cost": 2,
+        "cost": 2.0,
         "passable_by": "all",
         "tag_cost": {
-          "flying": 1
+          "flying": 1.0
         }
       },
+      "scope": "both",
       "tags": [
         "ground",
         "open",
         "barren"
       ],
       "terrain": "sand",
-      "variant": "sand",
-      "scope": "both"
+      "variant": "sand"
     },
     {
       "accent": "#9FBBD0",
@@ -242,20 +242,20 @@
       "id": "snow",
       "label": "雪地",
       "move": {
-        "cost": 2,
+        "cost": 2.0,
         "passable_by": "all",
         "tag_cost": {
-          "flying": 1
+          "flying": 1.0
         }
       },
+      "scope": "both",
       "tags": [
         "ground",
         "open",
         "cold"
       ],
       "terrain": "snow",
-      "variant": "snow",
-      "scope": "both"
+      "variant": "snow"
     },
     {
       "accent": "#544E45",
@@ -265,12 +265,13 @@
       "id": "rubble",
       "label": "废墟",
       "move": {
-        "cost": 2,
+        "cost": 2.0,
         "passable_by": "all",
         "tag_cost": {
-          "flying": 1
+          "flying": 1.0
         }
       },
+      "scope": "battle",
       "tags": [
         "ground",
         "cover",
@@ -278,8 +279,7 @@
         "blocks_sight"
       ],
       "terrain": "rubble",
-      "variant": "rubble",
-      "scope": "battle"
+      "variant": "rubble"
     },
     {
       "accent": "#332E2A",
@@ -289,124 +289,124 @@
       "id": "wall",
       "label": "墙",
       "move": {
-        "cost": 1,
+        "cost": 1.0,
         "passable_by": [
           "flying",
           "spectral"
         ]
       },
+      "scope": "battle",
       "tags": [
         "wall",
         "blocks_sight"
       ],
       "terrain": "wall",
-      "variant": "wall",
-      "scope": "battle"
+      "variant": "wall"
     },
     {
-      "id": "swamp",
-      "label": "沼泽",
-      "terrain": "swamp",
-      "variant": "swamp",
-      "scope": "overworld",
-      "color": "#4E5E3E",
       "accent": "#8FA86A",
+      "color": "#4E5E3E",
       "decor": "swamp",
       "effects": [],
+      "id": "swamp",
+      "label": "沼泽",
       "move": {
-        "cost": 3,
+        "cost": 3.0,
         "passable_by": "all",
         "tag_cost": {
-          "flying": 1
+          "flying": 1.0
         }
       },
+      "scope": "overworld",
       "tags": [
         "ground",
         "rough"
-      ]
+      ],
+      "terrain": "swamp",
+      "variant": "swamp"
     },
     {
-      "id": "farmland",
-      "label": "农田",
-      "terrain": "farmland",
-      "variant": "farmland",
-      "scope": "overworld",
-      "color": "#B5A34E",
       "accent": "#6E6230",
+      "color": "#B5A34E",
       "decor": "farm",
       "effects": [],
+      "id": "farmland",
+      "label": "农田",
       "move": {
-        "cost": 1,
+        "cost": 1.0,
         "passable_by": "all"
       },
+      "scope": "overworld",
       "tags": [
         "ground",
         "open"
-      ]
+      ],
+      "terrain": "farmland",
+      "variant": "farmland"
     },
     {
-      "id": "tundra",
-      "label": "冻原",
-      "terrain": "tundra",
-      "variant": "tundra",
-      "scope": "overworld",
-      "color": "#AEBFBC",
       "accent": "#5F7A78",
+      "color": "#AEBFBC",
       "decor": "tundra",
       "effects": [],
+      "id": "tundra",
+      "label": "冻原",
       "move": {
-        "cost": 2,
+        "cost": 2.0,
         "passable_by": "all",
         "tag_cost": {
-          "flying": 1
+          "flying": 1.0
         }
       },
+      "scope": "overworld",
       "tags": [
         "ground",
         "open",
         "cold"
-      ]
+      ],
+      "terrain": "tundra",
+      "variant": "tundra"
     },
     {
-      "id": "coast",
-      "label": "海岸浅滩",
-      "terrain": "coast",
-      "variant": "coast",
-      "scope": "overworld",
-      "color": "#6E9EC2",
       "accent": "#E3DAB4",
+      "color": "#6E9EC2",
       "decor": "coast",
       "effects": [],
+      "id": "coast",
+      "label": "海岸浅滩",
       "move": {
-        "cost": 2,
+        "cost": 2.0,
         "passable_by": "all",
         "tag_cost": {
-          "flying": 1
+          "flying": 1.0
         }
       },
+      "scope": "overworld",
       "tags": [
         "water",
         "shallow"
-      ]
+      ],
+      "terrain": "coast",
+      "variant": "coast"
     },
     {
-      "id": "bridge",
-      "label": "桥面",
-      "terrain": "bridge",
-      "variant": "bridge",
-      "scope": "battle",
-      "color": "#8A6A42",
       "accent": "#4E3A22",
+      "color": "#8A6A42",
       "decor": "plank",
       "effects": [],
+      "id": "bridge",
+      "label": "桥面",
       "move": {
-        "cost": 1,
+        "cost": 1.0,
         "passable_by": "all"
       },
+      "scope": "battle",
       "tags": [
         "ground",
         "road"
-      ]
+      ],
+      "terrain": "bridge",
+      "variant": "bridge"
     }
   ]
 }

@@ -39,6 +39,7 @@ func _ready() -> void:
 	box.add_child(_menu_button("沙盒模式", _on_sandbox, false))
 	box.add_child(_menu_button("地图编辑", _on_map_editor, false))
 	box.add_child(_menu_button("物品编辑器", _on_item_editor, false))
+	box.add_child(_menu_button("角色编辑器", _on_char_editor, false))
 	box.add_child(_menu_button("设置（暂未开放）", Callable(), true))
 	box.add_child(_spacer(8))
 	box.add_child(_menu_button("退出", _on_quit, false))
@@ -80,6 +81,9 @@ func _on_map_editor() -> void:
 
 func _on_item_editor() -> void:
 	get_tree().change_scene_to_file("res://ItemEditor.tscn")
+
+func _on_char_editor() -> void:
+	get_tree().change_scene_to_file("res://CharacterEditor.tscn")
 
 func _on_quit() -> void:
 	get_tree().quit()
