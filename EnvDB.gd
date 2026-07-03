@@ -64,6 +64,11 @@ static func weather_desc(id: String) -> String:
 	var e = weather(id)
 	return str(e.get("desc", "")) if e != null else ""
 
+# 天气的全屏染色滤镜色（含 alpha 的 hex，空＝无叠层）——大气调色（雨/雾/雪/沙暴…），与日夜 tint 同机制。
+static func weather_tint(id: String) -> String:
+	var e = weather(id)
+	return str(e.get("tint", "")) if e != null else ""
+
 # —— 日夜 ——
 static func all_times() -> Array:
 	_ensure()
@@ -111,9 +116,9 @@ static func time_tint(id: String) -> String:
 	var e = time(id)
 	return str(e.get("tint", "")) if e != null else ""
 
-# —— 日夜变暗叠层小工具（战斗/大地图共用；「tint 空串＝无叠层」语义的唯一实现处）——
+# —— 全屏染色叠层小工具（日夜变暗 / 天气调色共用；「tint 空串＝无叠层」语义的唯一实现处）——
 
-# 造一个标准变暗叠层（满铺、点击穿透、初始隐藏）；调用方自行 add_child 定层级
+# 造一个标准染色叠层（满铺、点击穿透、初始隐藏）；调用方自行 add_child 定层级
 static func make_time_overlay() -> ColorRect:
 	var rect := ColorRect.new()
 	rect.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -121,13 +126,20 @@ static func make_time_overlay() -> ColorRect:
 	rect.visible = false
 	return rect
 
-# 按日夜 id 刷新叠层：有 tint 上色显示、无 tint 隐藏
-static func apply_time_tint(rect: ColorRect, id: String) -> void:
+# 按 tint hex 刷新叠层：非空上色显示、空则隐藏（日夜/天气共用的单一实现）
+static func apply_tint_overlay(rect: ColorRect, tint: String) -> void:
 	if rect == null:
 		return
-	var tint := time_tint(id)
 	if tint != "":
 		rect.color = Color.html(tint)
 		rect.visible = true
 	else:
 		rect.visible = false
+
+# 按日夜 id 刷新叠层（全屏变暗滤镜）
+static func apply_time_tint(rect: ColorRect, id: String) -> void:
+	apply_tint_overlay(rect, time_tint(id))
+
+# 按天气 id 刷新叠层（大气调色滤镜）
+static func apply_weather_tint(rect: ColorRect, id: String) -> void:
+	apply_tint_overlay(rect, weather_tint(id))

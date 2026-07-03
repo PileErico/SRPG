@@ -46,6 +46,7 @@ var _map_bridges := []
 var _river_edges := {}
 var _road_edges := {}
 var _bridge_edges := {}
+var _map_regions := []        # 地图 regions 字段：大地图按「区域外轮廓虚线」渲染（派系领地/区域解锁可视化，纯视觉）
 
 var canvas
 var _time_label: Label
@@ -84,6 +85,7 @@ func _load_map() -> void:
 		_map_terrain_overrides = res.get("terrain_overrides", {})
 		_setup_locations(res.get("locations", []))
 		_setup_line_features(res)
+		_map_regions = res.get("regions", [])   # 区域（外轮廓虚线渲染；透传原始 [[x,y]] 形，绘制时转 Vector2i）
 		if str(res.get("map_type", "battle")) != "overworld":
 			push_warning("Overworld：地图 %s 的 map_type 不是 overworld（照常加载）" % MAP_PATH)
 		# 世界层触发器必须有 id：once/冷却/timer 状态按 id 随档持久，无 id 会退化成数组下标 key（"#N"），
@@ -184,6 +186,24 @@ func pick_brush_at(_col: int, _row: int) -> void: pass
 # 线特征渲染钩子（HexCanvas has_method 可选契约；与编辑器/战斗侧同名同形）
 func line_features() -> Dictionary:
 	return {"rivers": _map_rivers, "roads": _map_roads, "bridges": _map_bridges}
+
+# 区域轮廓渲染钩子（OverworldCanvas 静态层描边用）：[{cells:[Vector2i…], color:Color, label}]。
+# 界内格才收（越界数据丢弃）；color 缺省白。纯视觉——派系领地/区域解锁可视化。
+func regions_for_draw() -> Array:
+	var out := []
+	for reg in _map_regions:
+		if typeof(reg) != TYPE_DICTIONARY:
+			continue
+		var cells := []
+		for cp in reg.get("cells", []):
+			if typeof(cp) == TYPE_ARRAY and cp.size() >= 2:
+				var v := Vector2i(int(cp[0]), int(cp[1]))
+				if _cell_in_bounds(v.x, v.y):
+					cells.append(v)
+		if cells.is_empty():
+			continue
+		out.append({"cells": cells, "color": Color.html(str(reg.get("color", "#FFFFFF"))), "label": str(reg.get("label", ""))})
+	return out
 
 func hover_text(col: int, row: int) -> String:
 	if not _cell_in_bounds(col, row):
@@ -591,6 +611,8 @@ func locations_for_draw() -> Array:
 			"color": LocationDB.type_color(type_id),
 			"label": str(loc.get("label", "")),
 			"active": not LocationDB.is_site(type_id) or LocationDB.site_ready(loc, WorldState.current),
+			"type": type_id,
+			"icon": str(loc.get("icon", "")),
 		})
 	return out
 

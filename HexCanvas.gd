@@ -7,6 +7,8 @@ extends Control
 
 const HexGrid := preload("res://HexGrid.gd")   # 纯六边形几何前置（取整器 single source）
 const HexTileRender := preload("res://HexTileRender.gd")   # 地块渲染单一实现（底色+decor；笔刷缩略图同用）
+const LocationMarker := preload("res://LocationMarker.gd")   # 地点标记线稿库（按类型画符号；将来位图素材可覆盖）
+const TextureCache := preload("res://TextureCache.gd")   # 纹理加载缓存（地点位图素材覆盖用）
 const HEX_SIZE := 24.0
 const MIN_ZOOM := 0.2
 const MAX_ZOOM := 4.0
@@ -29,10 +31,107 @@ var _info_panel: PanelContainer   # 左下可扩展信息栏（含底 + 内边�
 var _info_extra: VBoxContainer    # 扩展段（宿主经 hover_extra 填，如单位卡）；无则空
 var _need_fit := false   # 新建/加载后置位：待布局尺寸就绪时在 _draw 里自动适配窗口
 
+# —— 静态层：地形/过渡边**分块** + 线特征/区域轮廓，拆成独立子树（§7 性能·分块版）——
+# 结构：_static_root(Node2D，承载视图变换 position/scale) 下挂 ①_chunks 网格（每块画自己那片格+过渡边）
+# ②_line_layer（线特征+区域轮廓，画在块之上）。收益：**涂一格只重画所在块**（~9ms 而非全图 93ms）；
+# 平移/缩放走 _static_root 节点变换（GPU、不重画）；Godot 按各块**内容 AABB 自动剔除离屏块** →
+# 成本 ∝ 可见面积、与地图总大小无关（大图可行）。用 Node2D（按内容剔除，规避 Control size=(0,0) 被误剔的坑）。
+const CHUNK := 16   # 每块 16×16 格
+
+class _StaticNode extends Node2D:
+	var host
+	var cx := -1   # 地形块列/行；cx<0 ＝ 线特征层（非地形块）
+	var cy := -1
+	func _draw() -> void:
+		if host == null:
+			return
+		if cx < 0:
+			host._paint_line_layer(self)
+		else:
+			host._paint_chunk(self, cx, cy)
+
+var _static_root: Node2D
+var _chunks := []          # _chunks[cy][cx] = _StaticNode（地形块）
+var _line_layer: _StaticNode
+var _chunk_cols := 0
+var _chunk_rows := 0
+
 func _ready() -> void:
-	clip_contents = true  # 缩放/平移后越界的格子裁掉，不溢出到侧边栏
+	clip_contents = true  # 缩放/平移越界的格子裁掉、不溢出侧边栏（裁整棵静态子树）
+	_static_root = Node2D.new()
+	_static_root.show_behind_parent = true   # 整棵静态子树画在本体动态层之下
+	add_child(_static_root)
+	_sync_static_transform()
 	mouse_exited.connect(_on_mouse_exit)
 	_make_info_label()
+
+# 视图变换（平移 view_offset + 缩放 view_zoom）→ _static_root 节点变换。平移/缩放只调这个（GPU、不重画）。
+func _sync_static_transform() -> void:
+	if _static_root != null:
+		_static_root.position = view_offset
+		_static_root.scale = Vector2(view_zoom, view_zoom)
+
+# 纯视图变化（平移/缩放）：只移 _static_root + 重画动态层。块随之移动、Godot 自动剔除离屏块 → 不卡。
+func _apply_view() -> void:
+	_sync_static_transform()
+	queue_redraw()   # 动态层（悬停/范围/单位）随新变换重画，成本低
+
+# 按地图尺寸(重)建分块网格（尺寸变才重建；否则复用）。每块一个 Node2D，画世界坐标下自己那片格。
+func _rebuild_chunks() -> void:
+	if editor == null or _static_root == null:
+		return
+	var ncols := int(ceil(float(editor.width) / float(CHUNK)))
+	var nrows := int(ceil(float(editor.height) / float(CHUNK)))
+	if ncols == _chunk_cols and nrows == _chunk_rows and not _chunks.is_empty():
+		return
+	for line in _chunks:
+		for ch in line:
+			ch.queue_free()
+	_chunks = []
+	_chunk_cols = ncols
+	_chunk_rows = nrows
+	for cy in nrows:
+		var line := []
+		for cx in ncols:
+			var ch := _StaticNode.new()
+			ch.host = self
+			ch.cx = cx
+			ch.cy = cy
+			_static_root.add_child(ch)
+			line.append(ch)
+		_chunks.append(line)
+	if _line_layer == null:
+		_line_layer = _StaticNode.new()
+		_line_layer.host = self
+		_static_root.add_child(_line_layer)   # 最后加＝画在块之上（线特征/区域轮廓压地形）
+	else:
+		_static_root.move_child(_line_layer, _static_root.get_child_count() - 1)
+
+# 地图数据变化（加载/新建/线特征/区域/terrain 数据编辑…）：全量重画所有块 + 线层 + 同步变换 + 动态层。
+func refresh_static() -> void:
+	_rebuild_chunks()
+	_sync_static_transform()
+	for line in _chunks:
+		for ch in line:
+			ch.queue_redraw()
+	if _line_layer != null:
+		_line_layer.queue_redraw()
+	queue_redraw()
+
+# 涂/改单格（编辑器涂格用）：只重画该格所在块 + 邻格所在块（含跨块过渡边）。不动线层/动态层 → 便宜。
+func refresh_cell(col: int, row: int) -> void:
+	_queue_chunk_at(col, row)
+	for nb in HexGrid.neighbors(Vector2i(col, row)):
+		_queue_chunk_at(nb.x, nb.y)
+
+@warning_ignore("integer_division")
+func _queue_chunk_at(col: int, row: int) -> void:
+	if col < 0 or row < 0 or _chunks.is_empty():
+		return
+	var cx := col / CHUNK
+	var cy := row / CHUNK
+	if cy < _chunks.size() and cx < _chunks[cy].size():
+		_chunks[cy][cx].queue_redraw()
 
 # 左下「光标位置信息」栏：可扩展——底段永远是地形文字；宿主可经 hover_extra 在其上叠一段（如单位卡）。
 func _make_info_label() -> void:
@@ -66,13 +165,13 @@ func _make_info_label() -> void:
 func reset_view() -> void:
 	view_offset = Vector2(20, 20)
 	view_zoom = 1.0
-	queue_redraw()
+	refresh_static()   # 视图变换：静态层随新变换重绘
 
 # 请求「适配窗口」：布局尺寸此刻可能还没就绪（如启动/新建时），
 # 故只置位，等 _draw 拿到有效 size 再真正适配（见 _draw 顶部）。
 func request_fit() -> void:
 	_need_fit = true
-	queue_redraw()
+	refresh_static()
 
 # 整张地图缩放居中铺满画布（留一点边距）；尺寸未就绪则退回安全默认
 func fit_to_view() -> void:
@@ -87,7 +186,7 @@ func fit_to_view() -> void:
 	z = clampf(z, MIN_ZOOM, MAX_ZOOM)
 	view_zoom = z
 	view_offset = size * 0.5 - b.get_center() * z
-	queue_redraw()
+	refresh_static()
 
 # 全部格子的世界坐标包围盒（含六边形自身半径）
 func _map_bounds() -> Rect2:
@@ -105,7 +204,7 @@ func _map_bounds() -> Rect2:
 # 把某格移到画布正中（保持当前缩放）。world = view_offset + w*zoom，令其 = 画布中心。
 func center_on_cell(col: int, row: int) -> void:
 	view_offset = size * 0.5 - hex_center(col, row) * view_zoom
-	queue_redraw()
+	refresh_static()
 
 # ---- 六边形几何（世界坐标，未经视图变换）----
 
@@ -166,22 +265,64 @@ func _world_from_screen(p: Vector2) -> Vector2:
 
 # ---- 绘制 ----
 
+# 画一个地形块（cx,cy）：本块覆盖的格（底色+描边+decor）+ 这些格「向后」方向的过渡边（去重、每内边一次）。
+# 按世界坐标细分（视图变换由 _static_root 承载）；decor 恒画（细分只在数据变时发生、随节点缩放，不卡）。
+func _paint_chunk(ci: CanvasItem, cx: int, cy: int) -> void:
+	if editor == null:
+		return
+	var col0 := cx * CHUNK
+	var row0 := cy * CHUNK
+	var col1 := mini(editor.width, col0 + CHUNK)
+	var row1 := mini(editor.height, row0 + CHUNK)
+	for row in range(row0, row1):
+		for col in range(col0, col1):
+			var tile = editor.tiles[row][col]
+			var seed: int = col * 73856093 ^ row * 19349663   # 每格确定性种子（扰动去印章感；纯函数、重绘不闪）
+			HexTileRender.draw_tile(ci, hex_center(col, row), HEX_SIZE, editor.color_for_tile(tile), editor.accent_for_tile(tile), editor.decor_for_tile(tile), seed, true)
+	for row in range(row0, row1):
+		for col in range(col0, col1):
+			_seam_cell(ci, col, row)
+
+# 单格的地形过渡边（§4.4）：向「更靠后」邻格（下方/同行右侧）的**不同底色**公共边描一道「同色系更深」软线，
+# 让地形分界比同地形内边更清晰、柔化平涂拼接（极简：只加深、不渐变贴图）。去重使每条内边恰好画一次
+# （含跨块边——从「更靠前」那格所在块画，涂格时 refresh_cell 连带重画邻块保证边随两侧色更新）。
+func _seam_cell(ci: CanvasItem, col: int, row: int) -> void:
+	var c0: Color = editor.color_for_tile(editor.tiles[row][col])
+	for nb in HexGrid.neighbors(Vector2i(col, row)):
+		if not _in_bounds(nb) or nb.y < row or (nb.y == row and nb.x <= col):
+			continue
+		var c1: Color = editor.color_for_tile(editor.tiles[nb.y][nb.x])
+		var diff := absf(c0.r - c1.r) + absf(c0.g - c1.g) + absf(c0.b - c1.b)
+		if diff < 0.12:   # 近似同色（同地形/同色系变体）→ 不额外描，免噪
+			continue
+		var pts := edge_points(Vector2i(col, row), nb)
+		var seam := c0.lerp(c1, 0.5).darkened(0.4)   # 两侧同色系的更深调
+		seam.a = 0.5
+		ci.draw_line(pts[0], pts[1], seam, 2.2)
+
+# 线特征层：河/路/桥 + 子类静态覆盖（大地图区域轮廓）。只随数据变（refresh_static）重画，涂格不动它。
+func _paint_line_layer(ci: CanvasItem) -> void:
+	if editor == null:
+		return
+	_draw_line_features(ci)   # 线特征 overlay（河/路/桥；宿主经 line_features() 可选提供）
+	_static_overlay(ci)       # 子类静态覆盖（如大地图区域外轮廓虚线）
+
+# 子类可覆盖：在静态层（线层）上叠额外静态内容（如大地图区域外轮廓虚线）。基类空。
+func _static_overlay(_ci: CanvasItem) -> void:
+	pass
+
 func _draw() -> void:
 	if editor == null:
 		return
+	# 自愈：宿主某些进场路径未显式 refresh_static/request_fit（如 Sandbox 默认图）→ 有 editor 却无静态块时补建。
+	# 延迟调用避免在 _draw 内 add_child；块建好后 _chunks 非空、不再触发（幂等）。
+	if _chunks.is_empty() and editor.width > 0 and editor.height > 0:
+		call_deferred("request_fit")
 	if _need_fit and size.x >= 1.0 and size.y >= 1.0:
 		_need_fit = false
-		fit_to_view()   # 此刻直接更新 view_offset/zoom，本帧即用新值绘制
+		fit_to_view()   # 视图适配只在本体 _draw 解析（size 就绪时）；fit_to_view 会 refresh_static 同步静态层变换+细分
 	draw_set_transform(view_offset, 0.0, Vector2(view_zoom, view_zoom))
-	var show_decor := view_zoom >= DECOR_MIN_ZOOM
-	for row in editor.height:
-		for col in editor.width:
-			var tile = editor.tiles[row][col]
-			# 地块渲染（底色+描边+decor 扰动）走 HexTileRender 单一实现——与笔刷缩略图逐笔一致
-			var seed: int = col * 73856093 ^ row * 19349663   # 每格确定性种子（扰动去印章感；纯函数、重绘不闪）
-			HexTileRender.draw_tile(self, hex_center(col, row), HEX_SIZE, editor.color_for_tile(tile), editor.accent_for_tile(tile), editor.decor_for_tile(tile), seed, show_decor)
-	_draw_line_features()   # 线特征 overlay（河/路/桥；宿主经 line_features() 可选提供）
-	# 悬停高亮（黄框，线宽按缩放反算，保持屏幕上恒定粗细）
+	# 悬停高亮（黄框，线宽按缩放反算，保持屏幕上恒定粗细）——动态层，随鼠标换格重绘（地形/线特征在静态层，不动）
 	if _in_bounds(hover_cell):
 		var hp := hex_corners(hex_center(hover_cell.x, hover_cell.y))
 		hp.append(hp[0])
@@ -190,13 +331,15 @@ func _draw() -> void:
 # ---- 线特征 overlay（v4 schema：rivers/roads/bridges，格对＝相邻两格共享边）----
 # 宿主可选契约：editor.line_features() -> {rivers:[{pairs:[…]}], roads:[{pairs:[…]}], bridges:[格对…]}。
 # 三画布（编辑器/战斗/大地图）共享这一份渲染；通行语义只在大地图（Overworld），这里纯视觉。
-const RIVER_UNDER := Color(0.10, 0.22, 0.38, 0.9)   # 河：深色衬底
-const RIVER_WATER := Color(0.38, 0.66, 0.92, 0.95)  # 河：亮水面
-const ROAD_COLOR := Color(0.72, 0.24, 0.16, 0.85)   # 路：红虚线（格心连线，参考图同款）
+const RIVER_WATER := Color(0.227, 0.431, 0.647)     # 河：＝浅水底色 #3A6EA5（保持一致；无深蓝描边）
+const RIVER_WIDTH := 6.0                            # 河宽（世界坐标，略宽于旧 4px 水面）
+const ROAD_COLOR := Color(0.72, 0.24, 0.16, 0.88)   # 路：红虚线（蜿蜒土径，参考图同款）
+const ROAD_DASH := [7.0, 6.5, 3.0, 6.5]             # 交错虚线图案（世界单位）：长划-空-短划-空（空隙拉开、划段更疏朗）
+const ROAD_WIDTH := 2.6                              # 路线宽（世界坐标，随缩放同比）
 const BRIDGE_DARK := Color(0.30, 0.20, 0.10, 0.95)  # 桥：深木衬底
 const BRIDGE_WOOD := Color(0.62, 0.44, 0.24, 1.0)   # 桥：亮木面
 
-func _draw_line_features() -> void:
+func _draw_line_features(ci: CanvasItem) -> void:
 	if editor == null or not editor.has_method("line_features"):
 		return
 	var lf: Dictionary = editor.line_features()
@@ -209,23 +352,18 @@ func _draw_line_features() -> void:
 			var e := _edge_from_pair(p)
 			if not e.is_empty():
 				segs.append(edge_points(e[0], e[1]))
-	# 河：先全画衬底再全画水面（衬底不被相邻段水面盖住）；端点补圆头，接缝连续
-	for wpass in [[RIVER_UNDER, 7.0], [RIVER_WATER, 4.0]]:
-		var c: Color = wpass[0]
-		var w: float = wpass[1]
-		for s in segs:
-			draw_line(s[0], s[1], c, w)
-			draw_circle(s[0], w * 0.5, c)
-			draw_circle(s[1], w * 0.5, c)
-	# 路：格对＝格心连线虚线（红），路径下的格保持地形底色
+	# 河：单色（＝浅水底色）连续线，无深色描边；端点补圆头使相邻段接缝连续
+	for s in segs:
+		ci.draw_line(s[0], s[1], RIVER_WATER, RIVER_WIDTH)
+		ci.draw_circle(s[0], RIVER_WIDTH * 0.5, RIVER_WATER)
+		ci.draw_circle(s[1], RIVER_WIDTH * 0.5, RIVER_WATER)
+	# 路：柔化的蜿蜒土径。锚点＝格间边中点（穿越位置固定、点位准确），格内穿过一个「抖动过的格心」，
+	# 用 Chaikin 平滑成弧（拐角变柔），再按长短交错虚线画（土路观感）。逐格渲染：共享边中点两侧各画一半，
+	# 天然在边中点接续 → 无缝、且穿越点始终落在正确的边上。路径下的格保持地形底色（overlay，不吞地形）。
 	for road in lf.get("roads", []):
 		if typeof(road) != TYPE_DICTIONARY:
 			continue
-		for p in road.get("pairs", []):
-			var e := _edge_from_pair(p)
-			if e.is_empty():
-				continue
-			draw_dashed_line(hex_center(e[0].x, e[0].y), hex_center(e[1].x, e[1].y), ROAD_COLOR, 2.4, 5.0)
+		_draw_road_group(ci, road.get("pairs", []))
 	# 桥：沿心连线方向横跨河边的木板（深衬底 + 亮木面 + 两道板缝）
 	for p in lf.get("bridges", []):
 		var e := _edge_from_pair(p)
@@ -236,12 +374,117 @@ func _draw_line_features() -> void:
 		var mid := (ca + cb) * 0.5
 		var dir := (cb - ca).normalized()
 		var half := dir * (HEX_SIZE * 0.34)
-		draw_line(mid - half, mid + half, BRIDGE_DARK, 9.0)
-		draw_line(mid - half, mid + half, BRIDGE_WOOD, 6.0)
+		ci.draw_line(mid - half, mid + half, BRIDGE_DARK, 9.0)
+		ci.draw_line(mid - half, mid + half, BRIDGE_WOOD, 6.0)
 		var perp := dir.orthogonal() * 3.4
 		for t: float in [-0.4, 0.0, 0.4]:
 			var q: Vector2 = mid + dir * (HEX_SIZE * 0.34 * t)
-			draw_line(q - perp, q + perp, BRIDGE_DARK, 1.2)
+			ci.draw_line(q - perp, q + perp, BRIDGE_DARK, 1.2)
+
+# 一组道路（格对集合）→ 逐格蜿蜒虚线。建「格→有路的邻格」邻接后逐格画：
+# 2 端口（穿越格）＝两边中点 + 抖动格心的 Chaikin 平滑弧；其余（端点/岔路口）＝每条边中点直连格心一段。
+# 端口＝相邻格心中点＝共享边中点：两侧格用同一端口 → 接缝处严丝合缝、穿越点恒在正确边上。
+func _draw_road_group(ci: CanvasItem, pairs) -> void:
+	if typeof(pairs) != TYPE_ARRAY:
+		return
+	var inc := {}   # Vector2i 格 -> Array[Vector2i] 有路邻格
+	var seen := {}  # 归一化边键去重：手编地图若把同一边写两次/正反各一次，端口数不该虚增（否则穿越格误落岔路分支、半路重叠）
+	for p in pairs:
+		var e := _edge_from_pair(p)
+		if e.is_empty():
+			continue
+		var a: Vector2i = e[0]
+		var b: Vector2i = e[1]
+		var ek := HexGrid.edge_key(a, b)   # 无向归一（编辑器/通行索引同一口径）
+		if seen.has(ek):
+			continue
+		seen[ek] = true
+		if not inc.has(a):
+			inc[a] = []
+		if not inc.has(b):
+			inc[b] = []
+		inc[a].append(b)
+		inc[b].append(a)
+	for cell in inc:
+		var base := hex_center(cell.x, cell.y)
+		var ctr := base + _road_jitter(cell)           # 抖动过的格心（去笔直感；确定性、重绘不闪）
+		var ports := []
+		for nb in inc[cell]:
+			ports.append((base + hex_center(nb.x, nb.y)) * 0.5)   # 边中点＝穿越锚点
+		if ports.size() == 2:
+			_draw_road_dash(ci, _chaikin([ports[0], ctr, ports[1]], 2), ROAD_WIDTH)
+		else:
+			for pt in ports:
+				_draw_road_dash(ci, PackedVector2Array([pt, ctr]), ROAD_WIDTH)
+
+# 道路格心的确定性微扰（纯格坐标 hash，重绘不闪）。幅度小（0.06~0.18 HEX）——只弯路身、不动边中点锚点。
+func _road_jitter(cell: Vector2i) -> Vector2:
+	var h: int = (cell.x * 73856093) ^ (cell.y * 19349663)
+	var ang := float(h & 1023) / 1023.0 * TAU
+	var mag := (0.06 + float((h >> 10) & 255) / 255.0 * 0.12) * HEX_SIZE
+	return Vector2(cos(ang), sin(ang)) * mag
+
+# Chaikin 切角平滑（保端点）：每段取 1/4、3/4 点替换拐角，迭代后折线变圆滑；首尾端点不动＝道路穿越锚点稳定。
+static func _chaikin(pts: Array, iterations: int) -> PackedVector2Array:
+	var p := PackedVector2Array(pts)
+	for _it in iterations:
+		if p.size() < 3:
+			break
+		var out := PackedVector2Array()
+		out.append(p[0])
+		for i in range(p.size() - 1):
+			out.append(p[i].lerp(p[i + 1], 0.25))
+			out.append(p[i].lerp(p[i + 1], 0.75))
+		out.append(p[p.size() - 1])
+		p = out
+	return p
+
+# 沿折线按弧长走 ROAD_DASH 图案，把「实线区间」逐段画成圆头子折线（长短交错 + 柔和端头）。
+func _draw_road_dash(ci: CanvasItem, poly: PackedVector2Array, w: float) -> void:
+	var n := poly.size()
+	if n < 2:
+		return
+	var pat := ROAD_DASH
+	var pat_i := 0
+	var rem: float = pat[0]
+	var drawing := true          # 图案首元素＝实线
+	var cur: Vector2 = poly[0]
+	var span := PackedVector2Array()
+	span.append(cur)
+	var i := 1
+	while i < n:
+		var nxt: Vector2 = poly[i]
+		var seg := cur.distance_to(nxt)
+		if seg <= 0.0001:
+			cur = nxt
+			i += 1
+			continue
+		if seg < rem:
+			rem -= seg
+			cur = nxt
+			if drawing:
+				span.append(cur)
+			i += 1
+		else:
+			var cut := cur.lerp(nxt, rem / seg)   # 在图案元素边界处切断
+			if drawing:
+				span.append(cut)
+				_road_stroke(ci, span, w)
+				span = PackedVector2Array()
+			pat_i = (pat_i + 1) % pat.size()
+			rem = pat[pat_i]
+			drawing = not drawing
+			cur = cut
+			if drawing:
+				span.append(cur)
+	if drawing and span.size() >= 2:
+		_road_stroke(ci, span, w)
+
+# 一段实线：圆头子折线（抗锯齿 + 两端补圆点，使虚线端头柔和而非齐口）
+func _road_stroke(ci: CanvasItem, span: PackedVector2Array, w: float) -> void:
+	ci.draw_polyline(span, ROAD_COLOR, w, true)
+	ci.draw_circle(span[0], w * 0.5, ROAD_COLOR)
+	ci.draw_circle(span[span.size() - 1], w * 0.5, ROAD_COLOR)
 
 # 格对 JSON 形 [[x1,y1],[x2,y2]] → [Vector2i, Vector2i]；坏形/非相邻/越界返回 []
 func _edge_from_pair(p) -> Array:
@@ -258,17 +501,38 @@ func _edge_from_pair(p) -> Array:
 	return [va, vb]
 
 # 地点旗帜（大地图地点 / 编辑器地点层共用）：底座 + 旗杆 + 旗面 + 名字（缩放够大才画字）
-func draw_location_flag(c2: Vector2, col: Color, loc_label: String) -> void:
-	draw_circle(c2 + Vector2(0, 5), 4.5, col.darkened(0.45))
-	draw_line(c2 + Vector2(0, 7), c2 + Vector2(0, -11), Color(0.22, 0.17, 0.08), 2.0)
-	draw_colored_polygon(PackedVector2Array([c2 + Vector2(0, -11), c2 + Vector2(10, -7.5), c2 + Vector2(0, -4)]), col)
+# 地点标记（大地图地点 / 编辑器地点层共用）：按类型画矢量线稿符号（LocationMarker）+ 名字。
+# active=false（据点已肃清）→ 灰显。icon 非空且能载入 → **优先画位图**（将来引入更精细素材的替换口：
+# 位图按 token 尺寸居中绘，锐/糊由画布 texture_filter 决定，源分辨率建议见 docs/地块美术升级.md）；否则回退矢量。
+func draw_location_marker(c2: Vector2, type_id: String, base_col: Color, loc_label: String, active := true, icon := "") -> void:
+	var col := base_col if active else Color(0.52, 0.52, 0.55)
+	var tex: Texture2D = TextureCache.get_tex(icon) if icon != "" else null
+	if tex != null:
+		var s := HEX_SIZE * 1.15   # 位图显示尺寸（约一格宽）
+		draw_texture_rect(tex, Rect2(c2 - Vector2(s, s) * 0.5 + Vector2(0, -2), Vector2(s, s)), false, Color(1, 1, 1) if active else Color(0.6, 0.6, 0.62))
+	else:
+		LocationMarker.draw(self, c2, type_id, col)
 	if view_zoom >= DECOR_MIN_ZOOM and loc_label != "":
 		var font := get_theme_default_font()
 		var fs := 9
 		var tw := font.get_string_size(loc_label, HORIZONTAL_ALIGNMENT_CENTER, -1, fs).x
 		var tp := c2 + Vector2(-tw * 0.5, 19.0)
 		draw_string(font, tp + Vector2(0.8, 0.8), loc_label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0, 0, 0, 0.55))
-		draw_string(font, tp, loc_label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0.98, 0.95, 0.85))
+		draw_string(font, tp, loc_label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0.98, 0.95, 0.85) if active else Color(0.72, 0.72, 0.74))
+
+# 区域外轮廓虚线（大地图领地/区域解锁可视化，纯视觉；大地图/编辑器可共用）：区域内每格，凡「跨边邻格
+# 不在区域内」的边＝边界边，画成虚线（深色衬底 + 区域/派系色）。逐边界边只从区域内那侧画一次（含内孔边界）。
+func draw_region_outline(ci: CanvasItem, cells: Array, col: Color, w: float = 2.0, dash: float = 4.0) -> void:
+	var inside := {}
+	for c in cells:
+		inside[c] = true
+	for c in cells:
+		for nb in HexGrid.neighbors(c):
+			if inside.has(nb):
+				continue
+			var pts := edge_points(c, nb)   # 共享边两端点（几何对越界邻格同样成立）
+			ci.draw_dashed_line(pts[0], pts[1], Color(0.05, 0.05, 0.07, 0.55), w + 1.6, dash)   # 深色衬底（对比）
+			ci.draw_dashed_line(pts[0], pts[1], col, w, dash)
 
 # ---- 输入 ----
 
@@ -296,7 +560,7 @@ func _gui_input(event: InputEvent) -> void:
 	elif event is InputEventMouseMotion:
 		if panning:
 			view_offset += event.relative
-			queue_redraw()
+			_apply_view()   # 平移：只移静态层节点变换（不重画地形）→ 不卡
 		elif painting:
 			_paint_at(event.position)
 		_update_hover(event.position)
@@ -356,4 +620,4 @@ func _zoom_at(screen_pos: Vector2, factor: float) -> void:
 	var world := (screen_pos - view_offset) / view_zoom  # 缩放围绕光标下的世界点保持不动
 	view_offset = screen_pos - world * nz
 	view_zoom = nz
-	queue_redraw()
+	_apply_view()   # 缩放只移节点变换（GPU），永不重细分地形 → 无卡顿（decor 常驻、随节点缩放，见 _paint_chunk）

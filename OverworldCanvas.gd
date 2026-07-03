@@ -17,16 +17,22 @@ func _gui_input(event: InputEvent) -> void:
 			return
 	super(event)
 
+# 静态覆盖（画在线特征层、地形块之上）：区域外轮廓虚线（派系领地/区域解锁可视化，纯视觉）。
+# 区域是静态地图数据（游玩中不变）→ 随地图/视图变化重绘，不参与悬停/涂格重绘。
+func _static_overlay(ci: CanvasItem) -> void:
+	if editor != null and editor.has_method("regions_for_draw"):
+		for reg in editor.regions_for_draw():
+			draw_region_outline(ci, reg["cells"], reg["color"], 2.0)
+
 func _draw() -> void:
 	super()   # 地形 + 悬停高亮；draw_set_transform 已是视图变换，下面直接用世界坐标
 	if editor == null:
 		return
-	# 地点标记（M7）：旗帜 + 名字（据点已肃清＝灰显）——绘制单一实现在 HexCanvas.draw_location_flag（编辑器地点层同用）
+	# 地点标记（M7）：按类型线稿符号 + 名字（据点已肃清＝灰显）——绘制单一实现在 HexCanvas.draw_location_marker（编辑器地点层同用）
 	var font := get_theme_default_font()
 	for loc in editor.locations_for_draw():
 		var cell2: Vector2i = loc["cell"]
-		var col: Color = loc["color"] if loc["active"] else Color(0.5, 0.5, 0.52)
-		draw_location_flag(hex_center(cell2.x, cell2.y), col, str(loc["label"]))
+		draw_location_marker(hex_center(cell2.x, cell2.y), str(loc.get("type", "")), loc["color"], str(loc["label"]), loc["active"], str(loc.get("icon", "")))
 	# 动态单位 token（WorldSim v1）：派系色圆 + 类型字形；敌对加红外环
 	for wu in editor.world_units_for_draw():
 		var wc: Vector2i = wu["cell"]

@@ -150,6 +150,7 @@ var zoc_triggered: Dictionary:
 var _dialogue = null           # 战场内对话（M8）：触发器 do:dialogue 打开，模态覆盖战斗 UI（唯一有接口成本的触发场景，需求 §1.8）
 var _weather_vfx             # 天气视觉叠层（WeatherVFX，挂在 canvas 下；随 _cur_weather 播放）
 var _night_overlay: ColorRect  # 夜晚整体变暗滤镜（挂 canvas 下、在天气 VFX 之下）
+var _weather_overlay: ColorRect  # 天气大气调色滤镜（挂 canvas 下、在夜晚变暗之上、天气 VFX 之下）
 
 # —— 选中 / 移动指令状态 ——
 var selected_unit = null   # 左键选中的单位（用于唤出选单 / 移动）
@@ -631,7 +632,10 @@ func _build_ui() -> void:
 	# ① 夜晚变暗滤镜（先加＝在下层，压暗地形/单位/迷雾；构造/刷新单一实现在 EnvDB，大地图同用）
 	_night_overlay = EnvDB.make_time_overlay()
 	canvas.add_child(_night_overlay)
-	# ② 天气 VFX（后加＝在上层，雨雪雾画在变暗之上）
+	# ② 天气调色滤镜（大气染色：雨冷灰/雾灰白/雪冷白/沙暴暖黄…；在变暗之上、VFX 之下；EnvDB 单一实现）
+	_weather_overlay = EnvDB.make_time_overlay()
+	canvas.add_child(_weather_overlay)
+	# ③ 天气 VFX（后加＝在上层，雨雪雾粒子画在调色之上）
 	_weather_vfx = WeatherVFX.new()
 	canvas.add_child(_weather_vfx)
 	# ③ 调试快捷键提示（战场右下角，最上层、点击穿透）
@@ -2276,8 +2280,9 @@ func _apply_env_modifiers() -> void:
 	if phase == "battle":
 		_recompute_vision()
 
-# 刷新环境视觉叠层：夜晚全屏变暗滤镜（EnvDB.apply_time_tint 单一实现）+ 天气 VFX（读 _cur_weather）。
+# 刷新环境视觉叠层：夜晚变暗 + 天气调色（EnvDB tint 单一实现）+ 天气 VFX 粒子（读 _cur_weather）。
 func _update_env_overlays() -> void:
 	EnvDB.apply_time_tint(_night_overlay, _cur_time)
+	EnvDB.apply_weather_tint(_weather_overlay, _cur_weather)
 	if _weather_vfx != null:
 		_weather_vfx.set_weather(_cur_weather)

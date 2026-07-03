@@ -3,7 +3,6 @@ extends "res://HexCanvas.gd"
 ## 在地形之上叠画单位 token。输入沿用父类（中键平移、滚轮缩放、悬停）；
 ## 左右键在 sandbox 宿主里是空操作（不绘制地形）。
 
-const TextureCache := preload("res://TextureCache.gd")   # 图标加载 + 缓存单一入口
 var _fly_phase := 0.0   # 飞行漂浮相位（_process 累加，仅在场上有飞行单位时推进+重绘）
 
 func _ready() -> void:

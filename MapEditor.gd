@@ -1198,9 +1198,10 @@ func locations_for_draw() -> Array:
 	for l in map_locations:
 		if typeof(l) != TYPE_DICTIONARY:
 			continue
-		var tdef = LocationDB.type_def(str(l.get("type", "")))
+		var type_id := str(l.get("type", ""))
+		var tdef = LocationDB.type_def(type_id)
 		var col := Color.html(str(tdef.get("color", "#CCCCCC"))) if tdef != null else Color(0.8, 0.8, 0.8)
-		out.append({"cell": Vector2i(int(l.get("col", 0)), int(l.get("row", 0))), "color": col, "label": str(l.get("label", "")), "active": true})
+		out.append({"cell": Vector2i(int(l.get("col", 0)), int(l.get("row", 0))), "color": col, "label": str(l.get("label", "")), "active": true, "type": type_id, "icon": str(l.get("icon", ""))})
 	return out
 
 # 区域工具：列表（选当前）+ 新建/改名/删除 + 颜色
@@ -2435,7 +2436,7 @@ func paint_cell(col: int, row: int) -> void:
 	_stroke_count += 1
 	_dirty = true
 	if canvas:
-		canvas.refresh_static()
+		canvas.refresh_cell(col, row)   # 只重画该格所在块（+邻块过渡边），不重画整张 → 大图涂格不卡（§7 分块）
 
 # 画布查表（未知地形 -> 品红，便于发现数据异常）；统一走 TerrainDB 的 O(1) 查表
 func color_for_tile(tile) -> Color:

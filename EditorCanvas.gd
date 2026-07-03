@@ -8,7 +8,6 @@ extends "res://HexCanvas.gd"
 ##   区域层：左＝把格加入当前区域 / 右＝从当前区域移除（均支持拖动）
 ## 中键平移 / 滚轮缩放 / 悬停 复用父类几何与状态。
 
-const TextureCache := preload("res://TextureCache.gd")   # 图标加载 + 缓存单一入口
 var _secondary_down := false   # 右键是否按住（区域层用来拖动擦除）
 var _hover_edge := []          # 线特征层悬停的格间边 [Vector2i a, Vector2i b]（空＝无）
 
@@ -28,7 +27,7 @@ func _draw_hover_edge() -> void:
 	var pts := edge_points(_hover_edge[0], _hover_edge[1])
 	draw_line(pts[0], pts[1], Color(1.0, 0.95, 0.2, 0.9), 3.0 / view_zoom)
 
-# 地点层：旗帜（绘制单一实现在 HexCanvas.draw_location_flag，与大地图同款）；选中地点加金圈
+# 地点层：按类型画标记（绘制单一实现在 HexCanvas.draw_location_marker，与大地图同款）；选中地点加金圈
 func _draw_locations() -> void:
 	if not editor.has_method("locations_for_draw"):
 		return
@@ -43,7 +42,7 @@ func _draw_locations() -> void:
 		var c := hex_center(cell.x, cell.y)
 		if editor.current_layer == "location" and cell == acell:
 			draw_arc(c, HEX_SIZE * 0.72, 0.0, TAU, 24, Color(1.0, 0.85, 0.25, 0.95), 2.5 / view_zoom)
-		draw_location_flag(c, loc["color"], str(loc["label"]))
+		draw_location_marker(c, str(loc.get("type", "")), loc["color"], str(loc["label"]), true, str(loc.get("icon", "")))
 
 # 单位层：画「这一关的单位」棋子（阵营色圆 + 黑描边 + 原型图标）。
 # 非单位层时半透明，便于一边看地形/区域一边知道单位在哪。
@@ -128,7 +127,7 @@ func _gui_input(event: InputEvent) -> void:
 	elif event is InputEventMouseMotion:
 		if panning:
 			view_offset += event.relative
-			queue_redraw()
+			_apply_view()   # 平移：只移静态层节点变换（不重画地形）→ 不卡
 		elif painting:
 			_primary_at(event.position)
 		elif _secondary_down:
