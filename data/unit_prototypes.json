@@ -1,26 +1,43 @@
 [
   {
+    "_preset": true,
     "default_faction": "player",
     "equip": [
       "claw_wing",
       "claw_foot"
     ],
     "exp": 35,
+    "exp_max": 100,
     "four": {
       "DEX": 5,
-      "INT": 3,
-      "STA": 4,
-      "STR": 3
+      "INT": 6,
+      "STA": 5,
+      "STR": 4
     },
     "icon": "res://icons/Unit_Icons/Player_Special_Belooz.png",
     "id": "belooz",
     "level": 5,
     "name": "比路兹",
     "portrait": "res://icons/Characters/Plyer_Special_Belooz.png",
-    "skills": [
-      "battlefield_heal"
-    ],
+    "skills": {
+      "battlefield_heal": 1
+    },
+    "stats": {
+      "AP_max": 2,
+      "armor_max": 0,
+      "atk_eff": 100,
+      "def_eff": 100,
+      "move": 6,
+      "res_fire": 0,
+      "res_holy": 0,
+      "res_ice": 0,
+      "res_phys": 0,
+      "res_thunder": 0,
+      "sight": 5,
+      "speed": 5
+    },
     "tags": [
+      "ground",
       "char_belooz",
       "harpy"
     ],
@@ -107,8 +124,51 @@
       "speed": 5
     },
     "tags": [
-      "ground",
-      "lizardmen"
+      "lizardmen",
+      "camp_lizardmen",
+      "ground"
+    ],
+    "trait": ""
+  },
+  {
+    "_preset": true,
+    "ai_threat": true,
+    "default_faction": "neutral",
+    "equip": [],
+    "exp": 0,
+    "exp_max": 100,
+    "four": {
+      "DEX": 10,
+      "INT": 8,
+      "STA": 4,
+      "STR": 6
+    },
+    "icon": "res://icons/Unit_Icons/Lizardmen_Blue.png",
+    "id": "lizardmen_blue",
+    "level": 1,
+    "name": "蓝蜥蜴人",
+    "portrait": "res://icons/Characters/Lizardmen_Blue.png",
+    "skills": {
+
+    },
+    "stats": {
+      "AP_max": 2,
+      "armor_max": 0,
+      "atk_eff": 100,
+      "def_eff": 100,
+      "move": 6,
+      "res_fire": 0,
+      "res_holy": 0,
+      "res_ice": 0,
+      "res_phys": 0,
+      "res_thunder": 0,
+      "sight": 5,
+      "speed": 5
+    },
+    "tags": [
+      "lizardmen",
+      "camp_lizardmen",
+      "ground"
     ],
     "trait": ""
   }

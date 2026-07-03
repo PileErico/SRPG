@@ -227,11 +227,11 @@ func _refresh_list() -> void:
 		_apply_row_selected(_rows[_selected_id], true)
 
 
-# 一行原型卡片：棋子图标（无则淡显）+ 名字（阵营色）/ id（小灰）。
+# 一行原型卡片：立绘缩略（无则退棋子图标/淡显）+ 名字（阵营色）/ id（小灰）。
 func _make_unit_row(proto: Dictionary, fac: String) -> Button:
 	var id := str(proto.get("id", ""))
 	var b := Button.new()
-	b.custom_minimum_size = Vector2(0, 42)
+	b.custom_minimum_size = Vector2(0, 54)
 	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	b.clip_contents = true
 	b.pressed.connect(func(): _on_row_click(id))
@@ -244,13 +244,16 @@ func _make_unit_row(proto: Dictionary, fac: String) -> Button:
 	hb.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hb.add_theme_constant_override("separation", 8)
 	var icon := TextureRect.new()
-	icon.custom_minimum_size = Vector2(32, 32)
+	icon.custom_minimum_size = Vector2(42, 48)
 	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	var tex = TextureCache.get_tex(str(proto.get("icon", "")))
+	# 优先立绘（大图更直观；棋子图标常抽象）→ 退棋子图标 → 淡显占位
+	var tex = TextureCache.get_tex(str(proto.get("portrait", "")))
+	if tex == null:
+		tex = TextureCache.get_tex(str(proto.get("icon", "")))
 	if tex != null:
 		icon.texture = tex
 	else:
@@ -494,11 +497,6 @@ func _on_race_changed() -> void:
 func _on_biotype_changed() -> void:
 	_sync_tags()
 
-func _on_home_faction_changed() -> void:
-	if _unit == null: return
-	_unit.home_faction = str(_f_home_faction.get_selected_metadata())
-	_mark_dirty()
-
 func _on_id_changed(_t := "") -> void:
 	if _unit == null: return
 	_unit.proto_id = _f_id.text.strip_edges()
@@ -518,8 +516,8 @@ func _build_free_tag_ui() -> void:
 	_free_tags = []
 	for t in _unit.tags:
 		var s := str(t)
-		# 排除：阵营 / 运行时态 / 默认 ground / 专属下拉管的类（faction·race·biotype）/ 单位状态（elite=勾选、余=运行时）
-		if FACTIONS.has(s) or RUNTIME_TAGS.has(s) or s == "ground":
+		# 排除：阵营 / 运行时态 / 默认 ground / 派系 camp_* / 专属下拉管的类（faction·race·biotype·camp）/ 单位状态（elite=勾选、余=运行时）
+		if FACTIONS.has(s) or RUNTIME_TAGS.has(s) or s == "ground" or s.begins_with("camp_"):
 			continue
 		var c := _cat_of(s)
 		if c in MANAGED_CATS or c == "unit_status":
@@ -572,7 +570,7 @@ func _fill_free_options(ob: OptionButton) -> void:
 		var c := str(all[id].get("cat", "其他"))
 		if c in MANAGED_CATS or c == "unit_status" or c in NON_UNIT_CATS:
 			continue
-		if id in RUNTIME_TAGS or id == "ground":
+		if id in RUNTIME_TAGS or id == "ground" or id.begins_with("camp_"):
 			continue
 		if not cats.has(c):
 			cats[c] = []

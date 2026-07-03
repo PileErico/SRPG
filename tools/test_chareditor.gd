@@ -172,14 +172,27 @@ func _test_scene() -> void:
 	ck(not free_ids.has("elite"), "自由选择器排除 elite（有勾选）")
 	picker.free()
 
-	# 派系归属 home_faction（FactionDB；区别于阵营立场）→ 选 empire → 入 proto
-	ed._select_meta(ed._f_home_faction, "empire")
-	ed._on_home_faction_changed()
-	ck(ed._unit.home_faction == "empire", "选派系 empire → unit.home_faction")
-	ck(str(ed._collect_proto().get("home_faction", "")) == "empire", "home_faction 写进 proto")
-	# 派系名册＝用户要的 4 个（player/empire/wildlife/bandits），world_units 的 wildlife 引用不再悬空
-	for fid in ["player", "empire", "wildlife", "bandits"]:
+	# 派系归属＝ camp_<id> tag（faction 作 tag 用）→ 选帝国 → camp_empire 入 unit.tags + proto.tags
+	ed._select_meta(ed._f_home_faction, "camp_empire")
+	ed._sync_tags()
+	ck(ed._unit.tags.has("camp_empire"), "选派系 → unit 带 camp_empire tag")
+	ck(ed._collect_proto().get("tags", []).has("camp_empire"), "camp_empire 写进 proto.tags")
+	# 派系名册（factions.json）＝ player/empire/wildlife/lizardmen/bandits；world_units 的 wildlife 引用不再悬空
+	for fid in ["player", "empire", "wildlife", "lizardmen", "bandits"]:
 		ck(FactionDB.faction(fid) != null, "factions.json 含派系 %s" % fid)
+	# camp tag 在 tags.json(cat camp) + lizardmen 双身份：种族「蜥蜴人」/ 派系「蜥蜴人部落」
+	ck(str(TagDB.get_tag("camp_lizardmen").get("cat", "")) == "camp", "camp_lizardmen 归 camp 类")
+	ck(str(TagDB.get_tag("camp_lizardmen").get("cn", "")) == "蜥蜴人部落", "camp_lizardmen cn=蜥蜴人部落")
+	ck(str(TagDB.get_tag("lizardmen").get("cn", "")) == "蜥蜴人", "race lizardmen cn=蜥蜴人（双身份分开）")
+	# 自由选择器排除 camp 派系 tag（有派系下拉）
+	var picker2 := OptionButton.new()
+	ed._fill_free_options(picker2)
+	var has_camp := false
+	for i in picker2.item_count:
+		if str(picker2.get_item_metadata(i)).begins_with("camp_"):
+			has_camp = true
+	ck(not has_camp, "自由选择器排除 camp 派系 tag")
+	picker2.free()
 
 	# 棋子图标 icon：设 → 入 proto（用户用它给棋子叠图；立绘在卡片头像「＋」）
 	ed._on_icon_text("res://icons/Unit_Icons/Test.png")
