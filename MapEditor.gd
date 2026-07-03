@@ -14,6 +14,9 @@ const DeployPanel := preload("res://DeployPanel.gd")   # 复用单位编辑器�
 const EnvDB := preload("res://EnvDB.gd")   # 环境注册表（天气/日夜，环境面板下拉数据源）
 const TagDB := preload("res://TagDB.gd")   # faction→中文走单一源
 const EventEngine := preload("res://EventEngine.gd")   # 动作元数据注册表单一源：触发器动作菜单/缺省值/表单全据此生成
+const HexGrid := preload("res://HexGrid.gd")   # 纯六边形几何（边键归一/相邻判定/连线——线特征层用）
+const LocationDB := preload("res://LocationDB.gd")   # 地点类型注册表（地点层类型列表/校验数据源）
+const TerrainSwatch := preload("res://TerrainSwatch.gd")   # 地块缩略图控件（笔刷显示完整六边形；与地图格同一份渲染）
 
 const MAX_W := 50
 const MAX_H := 50
@@ -55,16 +58,20 @@ var map_units := []        # 预置单位（地图 units 字段）：单位层�
 var map_triggers := []     # 触发器（地图 triggers 字段）：触发器层可编辑（列表+when 表单+do 动作）；存盘写回、含撤销
 var map_terrain_overrides := {}   # 图级地形覆盖 { "terrain/variant": {move} }：地形数据「本图」范围写的，只改这张图；存盘写回、含撤销
 var map_environment := {}   # 环境 { time, weather_table:[{weather,weight,min_rounds,max_rounds}] }：环境面板写的；存盘写回、含撤销
-var map_type := "battle"    # 地图类型（battle/overworld）：读入记住、存盘透传（编辑 UI 暂无——overworld 图先由脚本/手改 json 定型）
-var map_locations := []     # 地点实例（地图 locations 字段，大地图 M7）：读入记住、存盘透传（编辑 UI 暂无，同 map_type 待遇）
+var map_type := "battle"    # 地图类型（battle/overworld）：顶栏可切换；决定笔刷 scope 过滤与 线/地点 层是否可用
+var map_locations := []     # 地点实例（地图 locations 字段，大地图 M7）：地点层可编辑（放置/表单/删）；存盘写回、含撤销
+var map_rivers := []        # 线特征·河（[{id,label,pairs:[[[x,y],[x,y]],…]}]）：线特征层河刷；存盘写回、含撤销
+var map_roads := []         # 线特征·路（同河形；格对＝格心连线段）：线特征层路刷
+var map_bridges := []       # 线特征·桥（[格对,…]；须架在河边上）：线特征层桥刷
 var brush_index := 0
 var embedded := false      # 嵌入 Game 统一宿主时为 true：隐藏自己的「主菜单」按钮（由 Game 顶栏统一提供）
 
-# —— 图层（地形底层 + 叠加层）。四层齐：terrain / region / unit / trigger ——
+# —— 图层（地形底层 + 叠加层）。六层：terrain / line / region / unit / trigger / location ——
 # 区域层：给一片格子命名（"前厅"/"守军房"），喂战斗侧 AI 的 ai_region 仇恨触发。
 # 内存形：regions[i] = {id, label, color, kind, cells:{Vector2i:true}}；存盘转 cells:[[x,y],…]（见 _regions_to_json）。
 # kind=区域类型：aggro=AI 仇恨/触发区（敌人 ai_region 引用）；deploy=玩家部署区（战斗只许玩家放区内）。缺省 aggro。
-var current_layer := "terrain"      # "terrain" | "region" | "unit" | "trigger"
+# 线特征层（line）/ 地点层（location）＝大地图专属（map_type=overworld 才显示按钮；数据对战斗图仍透传保真）。
+var current_layer := "terrain"      # "terrain" | "line" | "region" | "unit" | "trigger" | "location"
 var regions := []
 var _active_region_idx := -1
 # 区域配色循环池（新建区域时按序取）
@@ -88,6 +95,29 @@ var _editing_index := -1             # 被编辑单位在 map_units 的下标
 var _unit_edit_snap_pushed := false  # 本次编辑会话是否已压过撤销快照（整段编辑 = 一步撤销）
 var _unit_stroke_action := ""        # 单位层一次拖动的动作锁（""未定 / "edit" 编辑 / "place" 落子）
 
+# —— 线特征层（大地图专属）：河=边刷 / 路=格心连线刷 / 桥=河边豁免点 ——
+# 存储即 schema 形（map_rivers/map_roads=[{id,label,pairs}]、map_bridges=[格对]）；边键归一走 HexGrid.edge_key。
+const LINE_MODES := [["river", "河流（沿边画）"], ["road", "道路（沿格拖）"], ["bridge", "桥（点河边）"]]
+var _line_mode := "river"
+var _line_panel: Control
+var _road_last_cell := Vector2i(-1, -1)   # 路刷：一次拖动中上一格（连线成对）
+
+# —— 地点层（大地图专属）：放置/编辑地图 locations 实例（类型定义在 data/locations.json）——
+var _loc_panel: Control
+var _loc_type_list: ItemList        # 放置用类型列表（LocationDB.all_types）
+var _loc_types := []                # 与类型列表行对应的类型定义
+var _loc_type_idx := 0              # 当前选中的放置类型
+var _loc_list: ItemList             # 已放置地点列表
+var _active_loc_idx := -1           # 选中的已放置地点（表单编辑对象）
+var _loc_id_edit: LineEdit
+var _loc_label_edit: LineEdit
+var _loc_type_opt: OptionButton     # 选中地点的类型下拉
+var _loc_battle_edit: LineEdit
+var _loc_dialogue_edit: LineEdit
+var _loc_loading := false           # 填表单时抑制回写
+var _loc_stroke_placed := false     # place 模式下一次拖动只放一个地点（防拖动连放）
+var _loc_stroke_action := ""        # 一次拖动的动作锁（""未定 / "select" 首格命中地点 / "place" 首格空）——仿单位层，防「点选地点后拖出误放」
+
 # —— 触发器层：authoring 关卡事件（when 条件 → do 动作），存进地图 triggers 字段 ——
 const TRIG_FACTIONS := [["player", "玩家"], ["any", "任意"]]
 var _trigger_panel: Control
@@ -108,6 +138,8 @@ var height_spin: SpinBox
 var status_label: Label
 var canvas
 var brush_buttons := []
+var _map_type_opt: OptionButton   # 顶栏地图类型切换（战斗图/大地图）——决定笔刷 scope 过滤与 线/地点 层门禁
+var _layer_btns := {}             # layer_id → 图层按钮（线/地点按 map_type 显隐）
 # —— 图层切换 + 区域工具（左侧栏）——
 # 地形数据编辑（选中笔刷的战斗属性 → 写回 terrains.json，全局共用）
 const TERR_PASS_OPTS := [["all", "任何单位"], ["none", "不可通行"], ["tag", "限定tag"]]
@@ -222,6 +254,17 @@ func _build_ui() -> void:
 	new_btn.text = "新建"
 	new_btn.pressed.connect(_on_new_pressed)
 	bar.add_child(new_btn)
+
+	bar.add_child(VSeparator.new())
+
+	# 地图类型（battle/overworld）：决定笔刷 scope 过滤 + 线/地点层是否可用（数据随图存盘）
+	bar.add_child(_make_label("类型"))
+	_map_type_opt = OptionButton.new()
+	_map_type_opt.add_item("战斗图", 0)
+	_map_type_opt.add_item("大地图", 1)
+	_map_type_opt.tooltip_text = "battle=战场关卡 / overworld=大地图。\n影响：地形笔刷按 scope 过滤；线特征（河/路/桥）与地点层仅大地图可编。"
+	_map_type_opt.item_selected.connect(_on_map_type_selected)
+	bar.add_child(_map_type_opt)
 
 	bar.add_child(VSeparator.new())
 
@@ -351,22 +394,27 @@ func _build_brush_sidebar() -> Control:
 	var sidebar := VBoxContainer.new()
 	sidebar.custom_minimum_size = Vector2(180, 0)
 
-	# —— 图层切换：地形 / 区域（互斥）——
+	# —— 图层切换（互斥）：地形/线/区域/单位/触发/地点——线与地点仅大地图显示（_apply_map_type 门禁）
 	sidebar.add_child(_make_label("图层"))
-	var layer_row := HBoxContainer.new()
+	var layer_grid := GridContainer.new()
+	layer_grid.columns = 3
 	var lg := ButtonGroup.new()
-	var terr_btn := _layer_button("地形", "terrain", lg)
-	terr_btn.button_pressed = true
-	layer_row.add_child(terr_btn)
-	layer_row.add_child(_layer_button("区域", "region", lg))
-	layer_row.add_child(_layer_button("单位", "unit", lg))
-	layer_row.add_child(_layer_button("触发", "trigger", lg))
-	sidebar.add_child(layer_row)
+	_layer_btns = {}
+	for pair in [["地形", "terrain"], ["线", "line"], ["区域", "region"], ["单位", "unit"], ["触发", "trigger"], ["地点", "location"]]:
+		var b := _layer_button(str(pair[0]), str(pair[1]), lg)
+		layer_grid.add_child(b)
+		_layer_btns[str(pair[1])] = b
+	_layer_btns["terrain"].button_pressed = true
+	sidebar.add_child(layer_grid)
 	sidebar.add_child(HSeparator.new())
 
 	# 地形笔刷区（当前层=地形时显示）
 	_terrain_panel = _build_terrain_brushes()
 	sidebar.add_child(_terrain_panel)
+	# 线特征工具区（当前层=线时显示）
+	_line_panel = _build_line_tools()
+	_line_panel.visible = false
+	sidebar.add_child(_line_panel)
 	# 区域工具区（当前层=区域时显示）
 	_region_panel = _build_region_tools()
 	_region_panel.visible = false
@@ -379,6 +427,10 @@ func _build_brush_sidebar() -> Control:
 	_trigger_panel = _build_trigger_tools()
 	_trigger_panel.visible = false
 	sidebar.add_child(_trigger_panel)
+	# 地点工具区（当前层=地点时显示）
+	_loc_panel = _build_location_tools()
+	_loc_panel.visible = false
+	sidebar.add_child(_loc_panel)
 	return sidebar
 
 # 图层切换按钮（toggle，分组互斥）
@@ -398,23 +450,36 @@ func _set_layer(id: String) -> void:
 	if id != "unit":
 		_close_unit_edit()   # 离开单位层，关掉深编面板
 	if _terrain_panel: _terrain_panel.visible = (id == "terrain")
+	if _line_panel: _line_panel.visible = (id == "line")
 	if _region_panel: _region_panel.visible = (id == "region")
 	if _unit_panel: _unit_panel.visible = (id == "unit")
 	if _trigger_panel: _trigger_panel.visible = (id == "trigger")
+	if _loc_panel: _loc_panel.visible = (id == "location")
 	if id == "trigger":
 		_refresh_trigger_list()
 		if _active_trigger_idx < 0 and not map_triggers.is_empty():
 			_active_trigger_idx = 0
 		_load_trigger_form()
+	if id == "location":
+		_refresh_loc_list()
+		_load_loc_form()
 	if canvas: canvas.queue_redraw()
-	if id == "region" and regions.is_empty():
-		set_status("区域层：点「＋ 新建区域」再左键画、右键擦")
-	elif id == "unit":
-		set_status("单位层：选原型 + 阵营 → 左键落子 / 右键删除（摆这一关的单位）")
-	elif id == "trigger":
-		set_status("触发器层：＋新建 → 选区域 + 事件 + 配 do 动作（关卡事件）")
-	else:
-		set_status("当前层：%s" % ("地形" if id == "terrain" else "区域"))
+	match id:
+		"line":
+			set_status("线特征层：河=沿格间边画（左画右擦）/ 路=沿格拖 / 桥=点已有河边")
+		"region":
+			if regions.is_empty():
+				set_status("区域层：点「＋ 新建区域」再左键画、右键擦")
+			else:
+				set_status("当前层：区域")
+		"unit":
+			set_status("单位层：选原型 + 阵营 → 左键落子 / 右键删除（摆这一关的单位）")
+		"trigger":
+			set_status("触发器层：＋新建 → 选区域 + 事件 + 配 do 动作（关卡事件）")
+		"location":
+			set_status("地点层：选类型 → 左键放置 / 点已放地点编辑 / 右键删除")
+		_:
+			set_status("当前层：地形")
 
 # 地形笔刷竖列（原 _build_brush_sidebar 内容）
 func _build_terrain_brushes() -> Control:
@@ -687,6 +752,460 @@ func _on_save_terrain_data() -> void:
 		set_status("已保存地形数据 → terrains.json（影响所有地图，编辑器与战斗共用）")
 	else:
 		set_status("保存失败：无法写入 terrains.json")
+
+# ============ 地图类型（battle/overworld）切换 + 笔刷 scope 过滤 ============
+
+func _on_map_type_selected(idx: int) -> void:
+	var nt := "overworld" if idx == 1 else "battle"
+	if nt == map_type:
+		return
+	_push_undo(_snapshot(), "地图类型")
+	map_type = nt
+	_dirty = true
+	_update_file_label()
+	_apply_map_type()
+	set_status("地图类型：%s（笔刷已按 scope 过滤；%s）" % [
+		"大地图" if nt == "overworld" else "战斗图",
+		"线特征/地点层已开放" if nt == "overworld" else "线特征/地点层已隐藏（数据保留）"])
+
+# map_type 落地（切换/载入/撤销后调）：同步顶栏下拉 + 笔刷 scope 过滤 + 线/地点层门禁。
+# 越 scope 的已画地形不动——scope 只管笔刷栏 authoring，渲染/通行照常（旧图零破坏）。
+func _apply_map_type() -> void:
+	if _map_type_opt != null:
+		_map_type_opt.select(1 if map_type == "overworld" else 0)
+	_apply_brush_filter()
+	var on_ow := map_type == "overworld"
+	for lid in ["line", "location"]:
+		if _layer_btns.has(lid):
+			_layer_btns[lid].visible = on_ow
+	if not on_ow and (current_layer == "line" or current_layer == "location"):
+		_layer_btns["terrain"].button_pressed = true   # 触发 toggled → _set_layer("terrain")
+
+# 笔刷按 scope 过滤：只动按钮可见性（brush_index 仍是 PALETTE 裸下标，约 10 处消费不重排）。
+# 当前笔刷被隐藏 → 自动跳到首个可见笔刷。
+func _apply_brush_filter() -> void:
+	var first_visible := -1
+	for i in PALETTE.size():
+		if i >= brush_buttons.size():
+			break
+		var ok: bool = TerrainDB.in_scope(PALETTE[i], map_type)
+		brush_buttons[i].visible = ok
+		if ok and first_visible < 0:
+			first_visible = i
+	if first_visible >= 0 and not TerrainDB.in_scope(PALETTE[brush_index], map_type):
+		brush_buttons[first_visible].button_pressed = true   # 触发 toggled → select_brush
+
+# 当前可见（scope 内）笔刷的 PALETTE 下标序列——数字键 1~9 按此映射
+func _visible_brush_indices() -> Array:
+	var out := []
+	for i in PALETTE.size():
+		if TerrainDB.in_scope(PALETTE[i], map_type):
+			out.append(i)
+	return out
+
+# ============ 线特征层（河/路/桥；大地图专属 authoring）============
+
+func _build_line_tools() -> Control:
+	var v := VBoxContainer.new()
+	v.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	v.add_child(_make_label("线特征（左键画 / 右键擦）"))
+	var mrow := HBoxContainer.new()
+	mrow.add_child(_make_label("工具"))
+	var mopt := OptionButton.new()
+	for i in LINE_MODES.size():
+		mopt.add_item(LINE_MODES[i][1], i)
+	mopt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	mopt.item_selected.connect(_on_line_mode_selected)
+	mrow.add_child(mopt)
+	v.add_child(mrow)
+	var hint := _make_label("河=移动阻隔（过河须桥）；路=沿路跨边成本折为1；桥=河上通行点。语义仅大地图生效。")
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hint.add_theme_color_override("font_color", Color(0.7, 0.74, 0.82))
+	v.add_child(hint)
+	var clr := Button.new()
+	clr.text = "清空本图线特征"
+	clr.pressed.connect(_on_clear_lines)
+	v.add_child(clr)
+	return v
+
+func _on_line_mode_selected(idx: int) -> void:
+	_line_mode = LINE_MODES[idx][0]
+	match _line_mode:
+		"river": set_status("河刷：沿两格间的边拖动画河（右键擦；擦河会顺带拆桥）")
+		"road": set_status("路刷：沿格拖动连路（红虚线；右键沿边擦段）")
+		"bridge": set_status("桥刷：左键点已有河的边架桥 / 右键拆桥")
+
+func _on_clear_lines() -> void:
+	if map_rivers.is_empty() and map_roads.is_empty() and map_bridges.is_empty():
+		return
+	_push_undo(_snapshot(), "清空线特征")
+	map_rivers = []
+	map_roads = []
+	map_bridges = []
+	_dirty = true
+	_update_file_label()
+	set_status("已清空本图全部河/路/桥")
+	if canvas: canvas.queue_redraw()
+
+# 画布线层输入入口：对边 (a,b) 施加当前工具（add=左键画 / 右键擦）。走 stroke → 一段拖动一次撤销。
+func line_paint_edge(a: Vector2i, b: Vector2i, add: bool) -> void:
+	match _line_mode:
+		"river":
+			if add:
+				_river_add_edge(a, b)
+			else:
+				_river_remove_edge(a, b)
+		"road":
+			if not add:
+				_road_remove_edge(a, b)
+			# 路的「画」走 road_paint_cell（格轨迹连线），边入口只管擦
+		"bridge":
+			if add:
+				_bridge_add_edge(a, b)
+			else:
+				_bridge_remove_edge(a, b)
+
+# 路刷（左键拖格）：与上一格连线成段；跳格（快速拖动）用 HexGrid.line 补中间格
+func road_paint_cell(col: int, row: int) -> void:
+	var cur := Vector2i(col, row)
+	if _road_last_cell.x < 0:
+		_road_last_cell = cur
+		return
+	if cur == _road_last_cell:
+		return
+	var chain := [_road_last_cell, cur] if HexGrid.adjacent(_road_last_cell, cur) else HexGrid.line(_road_last_cell, cur)
+	for i in range(chain.size() - 1):
+		_road_add_edge(chain[i], chain[i + 1])
+	_road_last_cell = cur
+
+# —— 河 ——（编辑器只维护单条缺省河 river_1；多条命名河可手改 json，读写保真）
+func _river_add_edge(a: Vector2i, b: Vector2i) -> void:
+	if _feature_has_edge(map_rivers, a, b):
+		return
+	if map_rivers.is_empty():
+		map_rivers.append({"id": "river_1", "label": "河流", "pairs": []})
+	map_rivers[0]["pairs"].append(_pair_json(a, b))
+	_line_touched()
+
+func _river_remove_edge(a: Vector2i, b: Vector2i) -> void:
+	var removed := _feature_remove_edge(map_rivers, a, b)
+	# 河没了桥就悬空：擦河顺带拆该边的桥
+	if _remove_pair(map_bridges, a, b):
+		removed = true
+	if removed:
+		_line_touched()
+
+# —— 路 ——
+func _road_add_edge(a: Vector2i, b: Vector2i) -> void:
+	if not HexGrid.adjacent(a, b) or _feature_has_edge(map_roads, a, b):
+		return
+	if map_roads.is_empty():
+		map_roads.append({"id": "road_1", "label": "道路", "pairs": []})
+	map_roads[0]["pairs"].append(_pair_json(a, b))
+	_line_touched()
+
+func _road_remove_edge(a: Vector2i, b: Vector2i) -> void:
+	if _feature_remove_edge(map_roads, a, b):
+		_line_touched()
+
+# —— 桥 ——（须架在河边上）
+func _bridge_add_edge(a: Vector2i, b: Vector2i) -> void:
+	if not _feature_has_edge(map_rivers, a, b):
+		set_status("桥须架在河上——先用河刷在这条边画河")
+		return
+	if _pair_index(map_bridges, a, b) >= 0:
+		return
+	map_bridges.append(_pair_json(a, b))
+	_line_touched()
+
+func _bridge_remove_edge(a: Vector2i, b: Vector2i) -> void:
+	if _remove_pair(map_bridges, a, b):
+		_line_touched()
+
+func _line_touched() -> void:
+	_stroke_dirty = true
+	_stroke_count += 1
+	_dirty = true
+	if canvas: canvas.queue_redraw()
+
+# —— 格对工具（JSON 形 [[x,y],[x,y]]；无向，键归一走 HexGrid.edge_key）——
+
+func _pair_json(a: Vector2i, b: Vector2i) -> Array:
+	return [[a.x, a.y], [b.x, b.y]]
+
+func _pair_matches(p, a: Vector2i, b: Vector2i) -> bool:
+	if typeof(p) != TYPE_ARRAY or p.size() < 2:
+		return false
+	var pa = p[0]
+	var pb = p[1]
+	if typeof(pa) != TYPE_ARRAY or pa.size() < 2 or typeof(pb) != TYPE_ARRAY or pb.size() < 2:
+		return false
+	return HexGrid.edge_key(Vector2i(int(pa[0]), int(pa[1])), Vector2i(int(pb[0]), int(pb[1]))) == HexGrid.edge_key(a, b)
+
+func _pair_index(pairs: Array, a: Vector2i, b: Vector2i) -> int:
+	for i in pairs.size():
+		if _pair_matches(pairs[i], a, b):
+			return i
+	return -1
+
+func _remove_pair(pairs: Array, a: Vector2i, b: Vector2i) -> bool:
+	var i := _pair_index(pairs, a, b)
+	if i < 0:
+		return false
+	pairs.remove_at(i)
+	return true
+
+# 特征列表（[{pairs:[…]}]）是否含边 / 移除边（全列表扫；空壳特征保留，避免撤销语义复杂化）
+func _feature_has_edge(features: Array, a: Vector2i, b: Vector2i) -> bool:
+	for f in features:
+		if typeof(f) == TYPE_DICTIONARY and _pair_index(f.get("pairs", []), a, b) >= 0:
+			return true
+	return false
+
+func _feature_remove_edge(features: Array, a: Vector2i, b: Vector2i) -> bool:
+	var removed := false
+	for f in features:
+		if typeof(f) != TYPE_DICTIONARY:
+			continue
+		var pairs = f.get("pairs", [])
+		if typeof(pairs) == TYPE_ARRAY and _remove_pair(pairs, a, b):
+			removed = true
+	return removed
+
+# 画布渲染钩子（HexCanvas has_method 可选契约；三宿主同名）
+func line_features() -> Dictionary:
+	return {"rivers": map_rivers, "roads": map_roads, "bridges": map_bridges}
+
+# ============ 地点层（大地图 locations 实例 authoring）============
+
+func _build_location_tools() -> Control:
+	var v := VBoxContainer.new()
+	v.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	v.add_child(_make_label("地点（左键放置/选中，右键删）"))
+	v.add_child(_make_label("放置类型"))
+	_loc_type_list = ItemList.new()
+	_loc_type_list.custom_minimum_size = Vector2(0, 92)
+	_loc_type_list.item_selected.connect(func(idx: int):
+		_loc_type_idx = idx
+		if idx >= 0 and idx < _loc_types.size():
+			set_status("将放置：%s——左键点格放置" % str(_loc_types[idx].get("label", ""))))
+	v.add_child(_loc_type_list)
+	_loc_types = LocationDB.all_types()
+	for t in _loc_types:
+		_loc_type_list.add_item(str(t.get("label", t.get("id", "地点"))))
+	if not _loc_types.is_empty():
+		_loc_type_list.select(0)
+	v.add_child(HSeparator.new())
+	v.add_child(_make_label("已放置"))
+	_loc_list = ItemList.new()
+	_loc_list.custom_minimum_size = Vector2(0, 92)
+	_loc_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_loc_list.item_selected.connect(func(idx: int):
+		_active_loc_idx = idx
+		_load_loc_form()
+		var loc := active_location()
+		if not loc.is_empty() and canvas:
+			canvas.center_on_cell(int(loc.get("col", 0)), int(loc.get("row", 0))))
+	v.add_child(_loc_list)
+	v.add_child(HSeparator.new())
+	v.add_child(_make_label("选中地点"))
+	_loc_id_edit = _loc_form_line("id（改名慎重：触发器/存档肃清账/world_units.json 的 home 均按此 id 引用，改了会断）", func(t: String): _set_loc_field("id", t))
+	v.add_child(_loc_id_edit)
+	_loc_label_edit = _loc_form_line("名字", func(t: String):
+		_set_loc_field("label", t)
+		_refresh_loc_list())
+	v.add_child(_loc_label_edit)
+	var trow := HBoxContainer.new()
+	trow.add_child(_make_label("类型"))
+	_loc_type_opt = OptionButton.new()
+	for t in _loc_types:
+		_loc_type_opt.add_item(str(t.get("label", "")))
+	_loc_type_opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_loc_type_opt.item_selected.connect(_on_loc_type_changed)
+	trow.add_child(_loc_type_opt)
+	v.add_child(trow)
+	_loc_battle_edit = _loc_form_line("battle_map（据点讨伐地图路径）", func(t: String): _set_loc_field_or_erase("battle_map", t))
+	v.add_child(_loc_battle_edit)
+	_loc_dialogue_edit = _loc_form_line("dialogue_id（交谈对话）", func(t: String): _set_loc_field_or_erase("dialogue_id", t))
+	v.add_child(_loc_dialogue_edit)
+	return v
+
+func _loc_form_line(placeholder: String, cb: Callable) -> LineEdit:
+	var le := LineEdit.new()
+	le.placeholder_text = placeholder
+	le.tooltip_text = placeholder
+	le.text_changed.connect(cb)
+	return le
+
+func active_location() -> Dictionary:
+	if _active_loc_idx >= 0 and _active_loc_idx < map_locations.size():
+		var loc = map_locations[_active_loc_idx]
+		if typeof(loc) == TYPE_DICTIONARY:
+			return loc
+	return {}
+
+func _loc_index_at(col: int, row: int) -> int:
+	for i in range(map_locations.size() - 1, -1, -1):
+		var e = map_locations[i]
+		if typeof(e) == TYPE_DICTIONARY and int(e.get("col", -1)) == col and int(e.get("row", -1)) == row:
+			return i
+	return -1
+
+func _unique_loc_id(type_id: String) -> String:
+	var used := {}
+	for l in map_locations:
+		used[str(l.get("id", ""))] = true
+	var n := 1
+	while used.has("%s_%d" % [type_id, n]):
+		n += 1
+	return "%s_%d" % [type_id, n]
+
+# 地点层左键：一次拖动在首格锁定动作——首格命中地点=选中它（拖出不放子）；首格空=放置当前类型（拖动只放一个）。
+func _loc_paint(col: int, row: int) -> void:
+	if _loc_stroke_action == "":
+		var idx0 := _loc_index_at(col, row)
+		_loc_stroke_action = "select" if idx0 >= 0 else "place"
+		if _loc_stroke_action == "select":
+			_active_loc_idx = idx0
+			_refresh_loc_list()
+			_load_loc_form()
+			set_status("选中地点：%s（左侧表单可编辑）" % str(map_locations[idx0].get("label", "")))
+			return
+	if _loc_stroke_action == "select":
+		return   # 选中模式：后续拖动格不落子
+	if _loc_stroke_placed:
+		return
+	if _loc_type_idx < 0 or _loc_type_idx >= _loc_types.size():
+		set_status("先在左侧选一个地点类型")
+		return
+	var tdef: Dictionary = _loc_types[_loc_type_idx]
+	var tid := str(tdef.get("id", ""))
+	_push_undo(_snapshot(), "放置地点")
+	var loc := {"id": _unique_loc_id(tid), "type": tid, "label": str(tdef.get("label", "地点")), "col": col, "row": row}
+	if bool(tdef.get("site", false)):
+		loc["battle_map"] = "res://maps/sandbox.json"   # 据点型默认给个可打的图，表单可改
+	map_locations.append(loc)
+	_active_loc_idx = map_locations.size() - 1
+	_loc_stroke_placed = true
+	_dirty = true
+	_update_file_label()
+	_refresh_loc_list()
+	_load_loc_form()
+	set_status("已放置：%s @(%d,%d)" % [str(loc["label"]), col, row])
+	if canvas: canvas.queue_redraw()
+
+func _loc_remove(col: int, row: int) -> void:
+	var idx := _loc_index_at(col, row)
+	if idx < 0:
+		return
+	_push_undo(_snapshot(), "删除地点")
+	var nm := str(map_locations[idx].get("label", ""))
+	map_locations.remove_at(idx)
+	if _active_loc_idx == idx:
+		_active_loc_idx = -1
+	elif _active_loc_idx > idx:
+		_active_loc_idx -= 1
+	_dirty = true
+	_update_file_label()
+	_refresh_loc_list()
+	_load_loc_form()
+	set_status("已删除地点：%s" % nm)
+	if canvas: canvas.queue_redraw()
+
+func _refresh_loc_list() -> void:
+	if _loc_list == null:
+		return
+	_loc_list.clear()
+	for l in map_locations:
+		if typeof(l) != TYPE_DICTIONARY:
+			continue
+		var tdef = LocationDB.type_def(str(l.get("type", "")))
+		var tl := str(tdef.get("label", l.get("type", "?"))) if tdef != null else str(l.get("type", "?"))
+		_loc_list.add_item("%s〔%s〕(%d,%d)" % [str(l.get("label", "")), tl, int(l.get("col", 0)), int(l.get("row", 0))])
+	if _active_loc_idx >= 0 and _active_loc_idx < map_locations.size():
+		_loc_list.select(_active_loc_idx)
+
+func _load_loc_form() -> void:
+	if _loc_id_edit == null:
+		return
+	_loc_loading = true
+	var loc := active_location()
+	var has := not loc.is_empty()
+	for le in [_loc_id_edit, _loc_label_edit, _loc_battle_edit, _loc_dialogue_edit]:
+		le.editable = has
+	_loc_id_edit.text = str(loc.get("id", "")) if has else ""
+	_loc_label_edit.text = str(loc.get("label", "")) if has else ""
+	_loc_battle_edit.text = str(loc.get("battle_map", "")) if has else ""
+	_loc_dialogue_edit.text = str(loc.get("dialogue_id", "")) if has else ""
+	if has:
+		var tid := str(loc.get("type", ""))
+		for i in _loc_types.size():
+			if str(_loc_types[i].get("id", "")) == tid:
+				_loc_type_opt.select(i)
+				break
+	_loc_loading = false
+
+# 表单回写（文本高频输入不逐击入撤销栈——与区域颜色同待遇，只标脏）
+func _set_loc_field(key: String, val: String) -> void:
+	if _loc_loading:
+		return
+	var loc := active_location()
+	if loc.is_empty():
+		return
+	if key == "id":
+		var v := val.strip_edges()
+		if v == "":
+			set_status("id 不能为空")
+			return
+		for i in map_locations.size():
+			if i != _active_loc_idx and str(map_locations[i].get("id", "")) == v:
+				set_status("⚠ id 与「%s」重复——触发器/存档按 id 引用，请改成唯一" % str(map_locations[i].get("label", "")))
+		loc["id"] = v
+	else:
+		loc[key] = val
+	_dirty = true
+	_update_file_label()
+
+# 可选字段：清空文本＝删键（保持 schema 干净，不落空串）
+func _set_loc_field_or_erase(key: String, val: String) -> void:
+	if _loc_loading:
+		return
+	var loc := active_location()
+	if loc.is_empty():
+		return
+	if val.strip_edges() == "":
+		loc.erase(key)
+	else:
+		loc[key] = val.strip_edges()
+	_dirty = true
+	_update_file_label()
+
+func _on_loc_type_changed(idx: int) -> void:
+	if _loc_loading or idx < 0 or idx >= _loc_types.size():
+		return
+	var loc := active_location()
+	if loc.is_empty():
+		return
+	var tid := str(_loc_types[idx].get("id", ""))
+	if str(loc.get("type", "")) == tid:
+		return
+	_push_undo(_snapshot(), "地点类型")
+	loc["type"] = tid
+	_dirty = true
+	_update_file_label()
+	_refresh_loc_list()
+	if canvas: canvas.queue_redraw()
+
+# 画布地点层数据（EditorCanvas 画旗帜用；颜色走 LocationDB 类型色）
+func locations_for_draw() -> Array:
+	var out := []
+	for l in map_locations:
+		if typeof(l) != TYPE_DICTIONARY:
+			continue
+		var tdef = LocationDB.type_def(str(l.get("type", "")))
+		var col := Color.html(str(tdef.get("color", "#CCCCCC"))) if tdef != null else Color(0.8, 0.8, 0.8)
+		out.append({"cell": Vector2i(int(l.get("col", 0)), int(l.get("row", 0))), "color": col, "label": str(l.get("label", "")), "active": true})
+	return out
 
 # 区域工具：列表（选当前）+ 新建/改名/删除 + 颜色
 func _build_region_tools() -> Control:
@@ -1435,8 +1954,9 @@ func _scan_maps() -> void:
 	dir.list_dir_end()
 	names.sort()
 	for n in names:
-		_map_paths.append(_join(_map_dir, n))
-		_map_list.add_item(n)
+		var p := _join(_map_dir, n)
+		_map_paths.append(p)
+		_map_list.add_item(n + ("  〔大地图〕" if MapIO.peek_type(p) == "overworld" else ""))
 	_refresh_map_highlight()
 
 func _join(d: String, f: String) -> String:
@@ -1513,32 +2033,46 @@ func _make_label(t: String) -> Label:
 	l.text = t
 	return l
 
+# 笔刷按钮＝左侧地块缩略图（完整六边形，与地图格同一份 HexTileRender 渲染）+ 右侧地形名。
+# 底色改中性深底（地块颜色已由缩略图承载）；选中＝亮黄描边。
 func _make_brush_button(entry: Dictionary, group: ButtonGroup) -> Button:
 	var b := Button.new()
 	b.text = entry.label
 	b.toggle_mode = true
 	b.button_group = group
 	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	b.custom_minimum_size = Vector2(0, 34)
+	b.custom_minimum_size = Vector2(0, 50)
 	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	b.clip_text = true
 	b.tooltip_text = "%s（terrain=%s, variant=%s）\ntags: %s" % [
 		entry.label, entry.terrain, entry.variant, ", ".join(entry.tags)]
 
-	var swatch := Color.html(entry.color)
 	var sb := StyleBoxFlat.new()
-	sb.bg_color = swatch
-	sb.set_content_margin_all(6)
-	b.add_theme_stylebox_override("normal", sb)
-	b.add_theme_stylebox_override("hover", sb)
+	sb.bg_color = Color(0.16, 0.17, 0.20)
+	sb.set_corner_radius_all(3)
+	sb.content_margin_left = 52   # 给左侧缩略图让位
+	sb.content_margin_right = 6
+	sb.content_margin_top = 4
+	sb.content_margin_bottom = 4
+	var sb_hover := sb.duplicate()
+	sb_hover.bg_color = Color(0.22, 0.24, 0.28)
 	var sb_pressed := sb.duplicate()
-	sb_pressed.border_color = Color.WHITE
-	sb_pressed.set_border_width_all(3)
+	sb_pressed.bg_color = Color(0.26, 0.30, 0.36)
+	sb_pressed.border_color = Color(1.0, 0.9, 0.35)
+	sb_pressed.set_border_width_all(2)
+	b.add_theme_stylebox_override("normal", sb)
+	b.add_theme_stylebox_override("hover", sb_hover)
 	b.add_theme_stylebox_override("pressed", sb_pressed)
-
-	var lum := 0.299 * swatch.r + 0.587 * swatch.g + 0.114 * swatch.b
-	var fg := Color.BLACK if lum > 0.6 else Color.WHITE
+	b.add_theme_stylebox_override("focus", sb_pressed)
 	for c in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
-		b.add_theme_color_override(c, fg)
+		b.add_theme_color_override(c, Color(0.9, 0.92, 0.96))
+
+	# 左侧缩略图（点击穿透到按钮；固定 46×44、竖向居中于 50px 行高）
+	var sw := TerrainSwatch.new()
+	sw.set_tile(str(entry.terrain), str(entry.variant))
+	sw.position = Vector2(3, 3)
+	sw.size = Vector2(46, 44)
+	b.add_child(sw)
 	return b
 
 func _make_file_dialog(mode: int) -> FileDialog:
@@ -1569,11 +2103,12 @@ func _unhandled_input(event: InputEvent) -> void:
 				_save_shortcut()
 				get_viewport().set_input_as_handled()
 		return
-	# 数字键 1~9 快速选笔刷（仅地形层；焦点在输入框时该键被其消费、不会落到这里）
+	# 数字键 1~9 快速选笔刷（仅地形层；按 scope 过滤后的可见序映射；焦点在输入框时该键被其消费、不会落到这里）
 	if current_layer == "terrain" and event.keycode >= KEY_1 and event.keycode <= KEY_9:
 		var idx: int = event.keycode - KEY_1
-		if idx < brush_buttons.size():
-			brush_buttons[idx].button_pressed = true  # 触发 toggled -> select_brush
+		var vis := _visible_brush_indices()
+		if idx < vis.size():
+			brush_buttons[vis[idx]].button_pressed = true  # 触发 toggled -> select_brush
 			get_viewport().set_input_as_handled()
 
 # 有未保存改动时先确认再执行 action（新建/加载共用）
@@ -1637,6 +2172,11 @@ func pick_brush_at(col: int, row: int) -> void:
 	for i in PALETTE.size():
 		var e = PALETTE[i]
 		if e.terrain == tile.get("terrain") and e.variant == tile.get("variant"):
+			# 越 scope 的地块（如战斗图上残留的 swamp）：其笔刷已被过滤隐藏，取色它会造成「无可见选中 + brush_index 越界」。
+			# 拒绝取色、只提示——保留当前有效选中不动。
+			if not TerrainDB.in_scope(e, map_type):
+				set_status("「%s」不属于当前地图类型（%s），未取色" % [str(e.label), "大地图" if map_type == "overworld" else "战斗图"])
+				return
 			if i < brush_buttons.size():
 				brush_buttons[i].button_pressed = true  # 触发 toggled -> select_brush
 			set_status("取色：" + e.label)
@@ -1645,12 +2185,18 @@ func pick_brush_at(col: int, row: int) -> void:
 
 # ------------------------------------------------------------------ 图层分派 + 区域
 
-# 画布左键 → 按当前层：地形=画地形 / 区域=把格加入当前区域
+# 画布左键 → 按当前层：地形=画地形 / 区域=把格加入当前区域 / 线(路刷)=沿格连路 / 地点=放置或选中
+# 线层的河/桥走边拾取入口 line_paint_edge（EditorCanvas 按 _line_mode 分流，不进这里）。
 func primary_paint(col: int, row: int) -> void:
 	if current_layer == "region":
 		_region_paint(col, row, true)
 	elif current_layer == "unit":
 		_unit_paint(col, row)
+	elif current_layer == "line":
+		if _line_mode == "road":
+			road_paint_cell(col, row)
+	elif current_layer == "location":
+		_loc_paint(col, row)
 	else:
 		paint_cell(col, row)
 
@@ -1666,12 +2212,17 @@ func _unit_paint(col: int, row: int) -> void:
 		return
 	_place_unit(col, row)
 
-# 画布右键 → 按当前层：地形=取色 / 区域=从当前区域移除格 / 单位=删除该格单位
+# 画布右键 → 按当前层：地形=取色 / 区域=从当前区域移除格 / 单位=删除该格单位 / 地点=删除地点
+# 线层右键（擦边）走 line_paint_edge(add=false)，不进这里。
 func secondary_paint(col: int, row: int) -> void:
 	if current_layer == "region":
 		_region_paint(col, row, false)
 	elif current_layer == "unit":
 		_remove_unit(col, row)
+	elif current_layer == "location":
+		_loc_remove(col, row)
+	elif current_layer == "line":
+		pass
 	else:
 		pick_brush_at(col, row)
 
@@ -1857,15 +2408,22 @@ func new_map(w: int, h: int) -> void:
 	map_environment = {}         # 新图：清空环境
 	map_type = "battle"          # 新图：回缺省战斗图
 	map_locations = []           # 新图：清空地点
+	map_rivers = []              # 新图：清空线特征
+	map_roads = []
+	map_bridges = []
 	_active_region_idx = -1
+	_active_loc_idx = -1
 	current_path = ""
 	_dirty = false
 	if width_spin: width_spin.value = width
 	if height_spin: height_spin.value = height
 	if canvas: canvas.request_fit()
+	_apply_map_type()
 	_refresh_canvas()
 	_refresh_region_list()
 	_refresh_env_panel()
+	_refresh_loc_list()
+	_load_loc_form()
 	_update_file_label()
 	_refresh_map_highlight()
 	set_status("新建地图 %d×%d" % [width, height])
@@ -1904,7 +2462,35 @@ func hover_text(col: int, row: int) -> String:
 	var rtxt := _regions_at(col, row)
 	if rtxt != "":
 		base += "\n区域: " + rtxt
+	var li := _loc_index_at(col, row)
+	if li >= 0:
+		base += "\n地点: %s（%s）" % [str(map_locations[li].get("label", "")), str(map_locations[li].get("id", ""))]
+	var ln := _line_summary_at(col, row)
+	if ln != "":
+		base += "\n" + ln
 	return base
+
+# 该格六条边上的线特征概览（悬停信息）：如「河边×2 · 路×1 · 桥×1」
+func _line_summary_at(col: int, row: int) -> String:
+	var cell := Vector2i(col, row)
+	var nr := 0
+	var nd := 0
+	var nb := 0
+	for nbr in HexGrid.neighbors(cell):
+		if _feature_has_edge(map_rivers, cell, nbr):
+			nr += 1
+		if _feature_has_edge(map_roads, cell, nbr):
+			nd += 1
+		if _pair_index(map_bridges, cell, nbr) >= 0:
+			nb += 1
+	var parts := []
+	if nr > 0:
+		parts.append("河边×%d" % nr)
+	if nd > 0:
+		parts.append("路×%d" % nd)
+	if nb > 0:
+		parts.append("桥×%d" % nb)
+	return " · ".join(parts)
 
 func _refresh_canvas() -> void:
 	if canvas:
@@ -1923,7 +2509,7 @@ func _update_file_label() -> void:
 # ------------------------------------------------------------------ 撤销 / 重做
 
 func _snapshot() -> Dictionary:
-	return {"width": width, "height": height, "tiles": _copy_tiles(tiles), "regions": _copy_regions(regions), "map_units": _copy_map_units(map_units), "map_triggers": _copy_map_triggers(map_triggers), "map_terrain_overrides": map_terrain_overrides.duplicate(true), "map_environment": map_environment.duplicate(true)}
+	return {"width": width, "height": height, "tiles": _copy_tiles(tiles), "regions": _copy_regions(regions), "map_units": _copy_map_units(map_units), "map_triggers": _copy_map_triggers(map_triggers), "map_terrain_overrides": map_terrain_overrides.duplicate(true), "map_environment": map_environment.duplicate(true), "map_type": map_type, "map_locations": map_locations.duplicate(true), "map_rivers": map_rivers.duplicate(true), "map_roads": map_roads.duplicate(true), "map_bridges": map_bridges.duplicate(true)}
 
 # 深拷贝单位层（含 proto 嵌套字典）——撤销快照要把单位层一起拷，否则落子/删单位无法撤销
 func _copy_map_units(src: Array) -> Array:
@@ -1984,10 +2570,17 @@ func _apply_snapshot(snap: Dictionary) -> void:
 	map_triggers = snap.get("map_triggers", map_triggers)
 	map_terrain_overrides = snap.get("map_terrain_overrides", {})
 	map_environment = snap.get("map_environment", {})
+	map_type = str(snap.get("map_type", map_type))
+	map_locations = snap.get("map_locations", map_locations)
+	map_rivers = snap.get("map_rivers", map_rivers)
+	map_roads = snap.get("map_roads", map_roads)
+	map_bridges = snap.get("map_bridges", map_bridges)
 	_active_region_idx = clampi(_active_region_idx, -1, regions.size() - 1)
 	_active_trigger_idx = clampi(_active_trigger_idx, -1, map_triggers.size() - 1)
+	_active_loc_idx = clampi(_active_loc_idx, -1, map_locations.size() - 1)
 	if width_spin: width_spin.value = width
 	if height_spin: height_spin.value = height
+	_apply_map_type()         # map_type 可能随快照回退 → 同步顶栏下拉/笔刷过滤/层门禁
 	_refresh_canvas()
 	_refresh_region_list()
 	_refresh_env_panel()      # 撤销/重做后同步环境面板
@@ -1995,12 +2588,18 @@ func _apply_snapshot(snap: Dictionary) -> void:
 	if _trigger_panel != null and _trigger_panel.visible:
 		_refresh_trigger_list()
 		_load_trigger_form()
+	if _loc_panel != null and _loc_panel.visible:
+		_refresh_loc_list()
+		_load_loc_form()
 
 func begin_stroke() -> void:
 	_stroke_snapshot = _snapshot()
 	_stroke_dirty = false
 	_stroke_count = 0
 	_unit_stroke_action = ""   # 单位层：新一次拖动重置动作锁（第一格再定 编辑/落子）
+	_road_last_cell = Vector2i(-1, -1)   # 路刷：新一次拖动重起连线
+	_loc_stroke_placed = false           # 地点层：place 模式一次拖动只放一个
+	_loc_stroke_action = ""              # 地点层：新一次拖动重置动作锁（首格再定 选中/放置）
 
 func end_stroke() -> void:
 	if _stroke_dirty and _stroke_snapshot != null:
@@ -2008,6 +2607,8 @@ func end_stroke() -> void:
 		match current_layer:
 			"region": lbl = "区域编辑"
 			"unit": lbl = "单位编辑"
+			"line": lbl = "线特征编辑"
+			"location": lbl = "地点编辑"
 			_: lbl = "绘制 %s ×%d" % [PALETTE[brush_index].label, _stroke_count]
 		_push_undo(_stroke_snapshot, lbl)
 		_update_file_label()
@@ -2059,7 +2660,14 @@ func _refresh_history() -> void:
 # ------------------------------------------------------------------ 存档 / 读档
 
 func to_json_dict() -> Dictionary:
-	return MapIO.to_dict(width, height, tiles, _regions_to_json(), map_units, map_triggers, map_terrain_overrides, map_environment, map_type, map_locations)
+	return MapIO.to_dict(width, height, tiles, _map_opts())
+
+# 存盘/试玩共用的 MapIO opts 包（字段清单唯一处）
+func _map_opts() -> Dictionary:
+	return {"regions": _regions_to_json(), "units": map_units, "triggers": map_triggers,
+		"terrain_overrides": map_terrain_overrides, "environment": map_environment,
+		"map_type": map_type, "locations": map_locations,
+		"rivers": map_rivers, "roads": map_roads, "bridges": map_bridges}
 
 # 区域 → JSON：cells 集合转 [[x,y],…]（确定性排序，利于 diff）
 func _regions_to_json() -> Array:
@@ -2098,7 +2706,7 @@ func _regions_from_json(raw, mw: int, mh: int) -> Array:
 	return out
 
 func save_to_file(path: String) -> void:
-	if not MapIO.write_map(path, width, height, tiles, _regions_to_json(), map_units, map_triggers, map_terrain_overrides, map_environment, map_type, map_locations):
+	if not MapIO.write_map(path, width, height, tiles, _map_opts()):
 		set_status("保存失败：无法写入文件")
 		return
 	current_path = path
@@ -2131,17 +2739,24 @@ func load_from_file(path: String) -> void:
 	map_triggers = res["triggers"]   # 触发器（触发器层可编辑）
 	map_terrain_overrides = res.get("terrain_overrides", {})   # 图级地形覆盖（地形数据「本图」范围）
 	map_environment = res.get("environment", {})   # 环境（日夜/天气）
-	map_type = str(res.get("map_type", "battle"))   # 地图类型（透传保真，防存盘打回缺省）
-	map_locations = res.get("locations", [])   # 地点实例（透传保真，防存盘丢字段）
+	map_type = str(res.get("map_type", "battle"))   # 地图类型（顶栏可切换；决定笔刷过滤/层门禁）
+	map_locations = res.get("locations", [])   # 地点实例（地点层可编辑）
+	map_rivers = res.get("rivers", [])   # 线特征（线特征层可编辑）
+	map_roads = res.get("roads", [])
+	map_bridges = res.get("bridges", [])
 	_active_region_idx = -1 if regions.is_empty() else 0
+	_active_loc_idx = -1
 	current_path = path
 	_dirty = false
 	if width_spin: width_spin.value = width
 	if height_spin: height_spin.value = height
 	if canvas: canvas.request_fit()
+	_apply_map_type()         # 同步顶栏下拉/笔刷 scope 过滤/线·地点层门禁
 	_refresh_canvas()
 	_refresh_region_list()
 	_refresh_env_panel()      # 载入后同步环境面板
+	_refresh_loc_list()
+	_load_loc_form()
 	_update_file_label()
 	_refresh_map_highlight()
 	set_status("已加载：%s (%d×%d)" % [path, width, height])

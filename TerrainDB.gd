@@ -69,6 +69,15 @@ static func label_of(tile) -> String:
 	var e = entry_for(tile)
 	return str(e.label) if e != null else "未知"
 
+# 地形条目是否适用于某图类型（map_type: "battle"|"overworld"）。
+# scope: "battle"=仅战场 / "overworld"=仅大地图 / "both"（缺省，旧数据零迁移）。
+# 编辑器笔刷栏过滤的单一判定——只影响 authoring，渲染/通行照常认 tile（旧图越 scope 地形不受影响）。
+static func in_scope(entry, map_type: String) -> bool:
+	if typeof(entry) != TYPE_DICTIONARY:
+		return false
+	var s := str(entry.get("scope", "both"))
+	return s == "both" or s == map_type
+
 # tile 的有效 move 块：图级覆盖（overrides["terrain/variant"].move 整块替换）?? 全局表兜底。
 # 覆盖键格式/合并规则的单一实现——战斗（Sandbox._effective_move）与大地图（Overworld）共用，防两端解释分叉。
 static func effective_move(tile, overrides: Dictionary = {}) -> Dictionary:

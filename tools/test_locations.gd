@@ -65,7 +65,7 @@ func _initialize() -> void:
 
 	# 4) MapIO：locations 透传 + 旧图缺省 []
 	var locs := [{"id": "a", "type": "city", "label": "甲城", "col": 1, "row": 1}]
-	ck(MapIO.write_map(TMP_MAP, 4, 4, MapIO.grassland(4, 4), [], [], [], {}, {}, "overworld", locs), "write_map(locations) 成功")
+	ck(MapIO.write_map(TMP_MAP, 4, 4, MapIO.grassland(4, 4), {"map_type": "overworld", "locations": locs}), "write_map(locations) 成功")
 	var res := MapIO.read_file(TMP_MAP)
 	var rl: Array = res.get("locations", [])
 	ck(rl.size() == 1 and str(rl[0].get("id")) == "a", "locations 往返")

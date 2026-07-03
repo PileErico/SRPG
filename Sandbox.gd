@@ -80,6 +80,15 @@ var _map_terrain_overrides: Dictionary:
 var _map_locations: Array:
 	get: return _state._map_locations
 	set(v): _state._map_locations = v
+var _map_rivers: Array:
+	get: return _state._map_rivers
+	set(v): _state._map_rivers = v
+var _map_roads: Array:
+	get: return _state._map_roads
+	set(v): _state._map_roads = v
+var _map_bridges: Array:
+	get: return _state._map_bridges
+	set(v): _state._map_bridges = v
 var _all_region_cells: Dictionary:
 	get: return _state._all_region_cells
 	set(v): _state._all_region_cells = v
@@ -248,6 +257,9 @@ func _load_map() -> void:
 	_map_locations = [] # 默认无地点（旧图 / 加载失败）
 	_map_terrain_overrides = {}   # 默认无图级地形覆盖
 	_map_environment = {}   # 默认无环境设定（＝昼·晴）
+	_map_rivers = []    # 默认无线特征（旧图 / 加载失败）
+	_map_roads = []
+	_map_bridges = []
 	# 优先用「选地图」界面传入的路径（SandboxConfig.map_path）；空则用默认战斗图
 	var path: String = SandboxConfig.map_path if SandboxConfig.map_path != "" else MAP_PATH
 	var res := MapIO.read_file(path)   # 统一读 / 钳制（与 MapEditor 共用 MapIO）
@@ -262,6 +274,9 @@ func _load_map() -> void:
 		_map_environment = res.get("environment", {})   # 环境（日夜/天气；向后兼容，旧图无此键=空）
 		_map_type = str(res.get("map_type", "battle"))
 		_map_locations = res.get("locations", [])   # 地点实例（大地图 M7；战斗侧不消费、存图透传保真）
+		_map_rivers = res.get("rivers", [])   # 线特征 v4（战斗侧只渲染不参与规则；存图透传保真）
+		_map_roads = res.get("roads", [])
+		_map_bridges = res.get("bridges", [])
 		return
 	if FileAccess.file_exists(path):
 		push_warning("战斗地图 %s 格式无效，回退全草原" % path)
@@ -288,6 +303,9 @@ func load_from_memory(map_dict: Dictionary) -> void:
 	_map_environment = res.get("environment", {})
 	_map_type = str(res.get("map_type", "battle"))
 	_map_locations = res.get("locations", [])
+	_map_rivers = res.get("rivers", [])
+	_map_roads = res.get("roads", [])
+	_map_bridges = res.get("bridges", [])
 	_setup_regions()
 	# 场上清空、roster 收回待命（保留玩家自带军，跨试玩不丢）
 	units = []
@@ -323,7 +341,11 @@ func save_units_to_map() -> bool:
 		proto["ai_group"] = u.ai_group
 		units_json.append({"proto": proto, "col": u.col, "row": u.row, "faction": u.faction})
 	var path: String = SandboxConfig.map_path if SandboxConfig.map_path != "" else MAP_PATH
-	if MapIO.write_map(path, width, height, tiles, _map_regions, units_json, _map_triggers, _map_terrain_overrides, _map_environment, _map_type, _map_locations):
+	var opts := {"regions": _map_regions, "units": units_json, "triggers": _map_triggers,
+		"terrain_overrides": _map_terrain_overrides, "environment": _map_environment,
+		"map_type": _map_type, "locations": _map_locations,
+		"rivers": _map_rivers, "roads": _map_roads, "bridges": _map_bridges}
+	if MapIO.write_map(path, width, height, tiles, opts):
 		_map_units = units_json   # 同步内存：R 重开 / exit_battle 从这里重建
 		return true
 	return false
@@ -775,6 +797,10 @@ func decor_for_tile(tile) -> String:
 func accent_for_tile(tile) -> Color:
 	var e = _terrain_entry(tile)
 	return Color.html(e.accent) if e != null else Color(1, 0, 1)
+
+# 线特征渲染钩子（HexCanvas has_method 可选契约）：战斗侧只做视觉展示、不参与战斗规则（通行语义在大地图）。
+func line_features() -> Dictionary:
+	return {"rivers": _map_rivers, "roads": _map_roads, "bridges": _map_bridges}
 
 func unit_at(col: int, row: int):
 	return _state.unit_at(col, row)

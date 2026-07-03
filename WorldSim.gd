@@ -5,7 +5,8 @@ extends RefCounted
 ## 职责：① ensure_spawned＝按类型生成规则落初始单位（进 ws.world_units，随档）
 ##      ② tick(ws, hours, world)＝逐单位推进（trade_route/patrol/wander/hunt 四行为）+ 交互判定，
 ##         返回事件列表交宿主表现（engage_player=追上玩家→战斗 / skirmish=单位间摩擦战 / caravan_arrive）。
-## world＝宿主鸭子接口（Overworld）：find_path(a,b) / _move_cost_at(c,r) / _map_locations / width/height——
+## world＝宿主鸭子接口（Overworld）：find_path(a,b) / _move_cost_at(c,r) / _map_locations / width/height
+## + 可选 _move_cost_between(fc,fr,c,r)（边感知通行：河阻断/桥豁免——游荡邻格判定优先用它，缺省退格通行）。
 ## 本模块不认识场景节点，headless new() 的 Overworld 即可测。
 ## 实例形（纯 JSON 兼容 dict，随档）：{uid,type,faction,col,row,budget,target_loc,wait_until,calm_until}。
 
@@ -78,7 +79,7 @@ static func tick(ws, hours: int, world) -> Array:
 			u["budget"] -= hpc
 			steps += 1
 			_step(ws, u, t, world, events)
-			if _check_engage_player(ws, u, t, events):
+			if _check_engage_player(ws, u, t, world, events):
 				break   # 追上玩家：本单位停下（事件交宿主开战）
 			if not ws.world_units.has(u):
 				break   # 摩擦战里输了
@@ -106,9 +107,9 @@ static func _step(ws, u: Dictionary, t: Dictionary, world, events: Array) -> voi
 			_step_hunt(ws, u, t, world)
 		_:
 			_step_wander(u, t, world)
-	# 巡逻类：落位后判猎物摩擦战（同格/邻格）
+	# 巡逻类：落位后判猎物摩擦战（同格/边可跨的邻格）
 	if (t.get("hunts", []) as Array).size() > 0:
-		_check_skirmish(ws, u, t, events)
+		_check_skirmish(ws, u, t, world, events)
 
 # 商队：无目标 → 随机挑一个城/村；有目标 → 沿最短路走一步；到站 → 停靠 rest_hours 再换目标
 static func _step_trade(ws, u: Dictionary, t: Dictionary, world, events: Array) -> void:
@@ -189,26 +190,37 @@ static func _step_along_path(u: Dictionary, from: Vector2i, to: Vector2i, world)
 
 # ============ 交互判定 ============
 
-# 敌对单位追上玩家（同格/邻格）→ engage 事件 + 冷静期（防战败归来原地连环追击）
-static func _check_engage_player(ws, u: Dictionary, _t: Dictionary, events: Array) -> bool:
+# 边感知相邻：几何相邻 + 该边可跨（河阻断/桥豁免——与移动同源）。宿主未实现 _move_cost_between 时退回纯几何相邻。
+# 交战/摩擦战都用它，杜绝「隔着过不去的河 engage/结算」（与 find_path/_travel 的河屏障语义一致）。
+static func _reachable_adjacent(world, a: Vector2i, b: Vector2i) -> bool:
+	if a == b:
+		return true
+	if HexGrid.distance(a, b) != 1:
+		return false
+	if world != null and world.has_method("_move_cost_between"):
+		return world._move_cost_between(a.x, a.y, b.x, b.y) >= 0
+	return true
+
+# 敌对单位追上玩家（同格/边可跨的邻格）→ engage 事件 + 冷静期（防战败归来原地连环追击）
+static func _check_engage_player(ws, u: Dictionary, _t: Dictionary, world, events: Array) -> bool:
 	if not FactionDB.hostile(ws, str(u.get("faction", ""))):
 		return false
 	if ws.clock_hours < int(u.get("calm_until", 0)):
 		return false
-	if HexGrid.distance(_cell(u), _party_cell(ws)) > 1:
-		return false
+	if not _reachable_adjacent(world, _cell(u), _party_cell(ws)):
+		return false   # 隔着无桥的河够不到玩家：不硬拽进战斗（与移动侧河屏障一致）
 	u["calm_until"] = ws.clock_hours + CALM_HOURS
 	events.append({"kind": "engage_player", "unit": u})
 	return true
 
-# 摩擦战：hunts 派系的单位在同格/邻格 → d4+power 高者胜、输家移除（平＝猎手胜）。抽象结算，不进战斗场景。
-static func _check_skirmish(ws, u: Dictionary, t: Dictionary, events: Array) -> void:
+# 摩擦战：hunts 派系的单位在同格/边可跨的邻格 → d4+power 高者胜、输家移除（平＝猎手胜）。抽象结算，不进战斗场景。
+static func _check_skirmish(ws, u: Dictionary, t: Dictionary, world, events: Array) -> void:
 	var hunts: Array = t.get("hunts", [])
 	for other in ws.world_units.duplicate():
 		if other == u or not hunts.has(str(other.get("faction", ""))):
 			continue
-		if HexGrid.distance(_cell(u), _cell(other)) > 1:
-			continue
+		if not _reachable_adjacent(world, _cell(u), _cell(other)):
+			continue   # 隔着无桥的河：不能隔河「击溃」对岸单位
 		var ot = WorldUnitDB.type_def(str(other.get("type", "")))
 		var atk := int(t.get("power", 1)) + randi() % 4
 		var def := (int(ot.get("power", 1)) if ot != null else 1) + randi() % 4
@@ -257,10 +269,15 @@ static func _pick_settlement(world, cur: Vector2i) -> String:
 			opts.append(str(loc.get("id", "")))
 	return opts[randi() % opts.size()] if not opts.is_empty() else ""
 
+# 游荡可走邻格：优先跨边成本（河阻断/桥豁免，宿主实现 _move_cost_between 才有边语义；
+# 定向移动走 world.find_path 已天然吃边）——否则退回纯格通行（简化宿主/旧契约兼容）。
 static func _passable_neighbors(world, cell: Vector2i) -> Array:
 	var out := []
+	var edge_aware: bool = world.has_method("_move_cost_between")
 	for nb in HexGrid.neighbors(cell):
-		if world._move_cost_at(nb.x, nb.y) >= 0:
+		var ok: bool = world._move_cost_between(cell.x, cell.y, nb.x, nb.y) >= 0 if edge_aware \
+			else world._move_cost_at(nb.x, nb.y) >= 0
+		if ok:
 			out.append(nb)
 	return out
 

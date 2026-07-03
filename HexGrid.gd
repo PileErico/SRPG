@@ -63,6 +63,21 @@ static func neighbor_in_dir(cell: Vector2i, d: int) -> Vector2i:
 	var tbl = NB_ODD if (cell.x & 1) == 1 else NB_EVEN
 	return Vector2i(cell.x + tbl[d].x, cell.y + tbl[d].y)
 
+# 两格是否相邻（共享一条边）
+static func adjacent(a: Vector2i, b: Vector2i) -> bool:
+	return distance(a, b) == 1
+
+# ============ 边（格对共享边）============
+
+# 相邻格对的归一化边键（无向：两端排序后拼串）。线特征（河/桥/道路）索引共用这一份，
+# 防编辑器/大地图/测试各写一套键序。非相邻格对不设防——调用方保证 adjacent。
+static func edge_key(a: Vector2i, b: Vector2i) -> String:
+	if b.x < a.x or (b.x == a.x and b.y < a.y):
+		var t := a
+		a = b
+		b = t
+	return "%d,%d|%d,%d" % [a.x, a.y, b.x, b.y]
+
 # ============ 连线（两种语义，刻意不合并）============
 
 # 任意两格间的唯一连线：cube 线性插值 + round，返回含 a、b 的格序列。微 epsilon 避顶点歧义。

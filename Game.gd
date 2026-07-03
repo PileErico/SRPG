@@ -67,8 +67,15 @@ func _make_tab(text: String, grp: ButtonGroup, cb: Callable) -> Button:
 	b.pressed.connect(cb)
 	return b
 
-# 试玩：把编辑器当前内存地图直接喂给战斗（免存盘），切到战斗模式停在布置阶段
+# 试玩：把编辑器当前内存地图直接喂给战斗（免存盘），切到战斗模式停在布置阶段。
+# 大地图（map_type=overworld）没有战斗试玩语义——留在编辑模式并提示（大地图从主菜单「战役」跑）。
 func enter_playtest() -> void:
+	if _editor != null and str(_editor.map_type) == "overworld":
+		# 大地图无战斗试玩语义；且战役固定读 res://maps/overworld/world.json——要让战役用上这张图须另存为它。
+		_editor.set_status("大地图不支持战斗试玩；战役读取的大地图固定为 res://maps/overworld/world.json（另存为它才会被战役加载）")
+		mode = "edit"
+		_apply_mode()
+		return
 	if _editor != null and _battle != null:
 		_battle.load_from_memory(_editor.to_json_dict())
 	mode = "battle"

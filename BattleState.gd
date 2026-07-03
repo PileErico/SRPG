@@ -31,6 +31,9 @@ var _map_terrain_overrides := {}   # 图级地形覆盖 { "terrain/variant": {mo
 var _map_locations := []           # locations 原始数据（大地图 M7；战斗侧只透传）
 var _map_environment := {}         # environment {time, weather_table:[…]}
 var _map_type := "battle"          # 地图类型（overworld/battle）
+var _map_rivers := []              # 线特征 v4（大地图专属语义；战斗侧只透传保真）
+var _map_roads := []
+var _map_bridges := []
 
 # —— 区域派生（由 _map_regions 经 _setup_regions 全量重建，不入存档）——
 var aggro_regions := {}      # {region_id: {Vector2i:true}}（仇恨/触发区）
@@ -827,6 +830,7 @@ func to_dict() -> Dictionary:
 		"map_regions": _map_regions, "map_units": _map_units, "map_triggers": _map_triggers,
 		"map_terrain_overrides": _map_terrain_overrides, "map_locations": _map_locations,
 		"map_environment": _map_environment, "map_type": _map_type,
+		"map_rivers": _map_rivers, "map_roads": _map_roads, "map_bridges": _map_bridges,
 		"unit_pool": snaps, "last_hit_by": last_hit,
 		"units": units.map(func(u): return idx[u]),
 		"roster": roster.map(func(u): return idx[u]),
@@ -859,6 +863,9 @@ func restore(d: Dictionary) -> bool:
 	_map_locations = d.get("map_locations", [])
 	_map_environment = d.get("map_environment", {})
 	_map_type = str(d.get("map_type", "battle"))
+	_map_rivers = d.get("map_rivers", [])
+	_map_roads = d.get("map_roads", [])
+	_map_bridges = d.get("map_bridges", [])
 	var pool := []
 	for s in d.get("unit_pool", []):
 		pool.append(UnitFactory.unit_from_battle_snapshot(s))

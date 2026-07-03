@@ -3,6 +3,7 @@ extends Control
 ## 目录扫描照搬地图编辑器「地图库」那套（DirAccess.list_dir）。
 
 const SandboxConfig := preload("res://SandboxConfig.gd")
+const MapIO := preload("res://MapIO.gd")
 const MAP_DIR := "res://maps"
 
 var _list: ItemList
@@ -64,7 +65,9 @@ func _scan() -> void:
 	dir.list_dir_begin()
 	var f := dir.get_next()
 	while f != "":
-		if not dir.current_is_dir() and f.to_lower().ends_with(".json"):
+		# 大地图（map_type=overworld）不进沙盒列表——沙盒＝战斗测试场，大地图从主菜单「战役」进
+		if not dir.current_is_dir() and f.to_lower().ends_with(".json") \
+				and MapIO.peek_type(MAP_DIR + "/" + f) != "overworld":
 			names.append(f)
 		f = dir.get_next()
 	dir.list_dir_end()

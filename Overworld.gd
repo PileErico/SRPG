@@ -39,6 +39,13 @@ var _map_triggers := []
 var _map_terrain_overrides := {}
 var _map_locations := []      # 地图 locations 字段（M7）：地点实例 [{id,type,label,col,row,battle_map?,dialogue_id?}]
 var _loc_by_cell := {}        # {Vector2i: loc} 落格索引（悬停/点击/抵达 O(1) 查）
+# 线特征（schema v4）：原始数据（渲染钩子透出）+ 边索引（{HexGrid.edge_key: true}，跨边通行 O(1) 查）
+var _map_rivers := []
+var _map_roads := []
+var _map_bridges := []
+var _river_edges := {}
+var _road_edges := {}
+var _bridge_edges := {}
 
 var canvas
 var _time_label: Label
@@ -76,6 +83,7 @@ func _load_map() -> void:
 		_map_triggers = res.get("triggers", [])
 		_map_terrain_overrides = res.get("terrain_overrides", {})
 		_setup_locations(res.get("locations", []))
+		_setup_line_features(res)
 		if str(res.get("map_type", "battle")) != "overworld":
 			push_warning("Overworld：地图 %s 的 map_type 不是 overworld（照常加载）" % MAP_PATH)
 		# 世界层触发器必须有 id：once/冷却/timer 状态按 id 随档持久，无 id 会退化成数组下标 key（"#N"），
@@ -101,6 +109,39 @@ func _setup_locations(raw: Array) -> void:
 			continue
 		_map_locations.append(loc)
 		_loc_by_cell[cell] = loc
+
+# 装线特征（v4）：留原始数据（渲染）+ 建边索引（通行）。坏格对（非相邻/越界）忽略。
+func _setup_line_features(res: Dictionary) -> void:
+	_map_rivers = res.get("rivers", [])
+	_map_roads = res.get("roads", [])
+	_map_bridges = res.get("bridges", [])
+	_river_edges = _edge_index(_pairs_of(_map_rivers))
+	_road_edges = _edge_index(_pairs_of(_map_roads))
+	_bridge_edges = _edge_index(_map_bridges)
+
+# 特征列表（[{pairs:[…]}]）→ 扁平格对列表
+func _pairs_of(features: Array) -> Array:
+	var out := []
+	for f in features:
+		if typeof(f) == TYPE_DICTIONARY and typeof(f.get("pairs")) == TYPE_ARRAY:
+			out.append_array(f["pairs"])
+	return out
+
+# 格对列表 → {边键: true}（键归一走 HexGrid.edge_key；坏形/非相邻丢弃）
+func _edge_index(pairs: Array) -> Dictionary:
+	var out := {}
+	for p in pairs:
+		if typeof(p) != TYPE_ARRAY or p.size() < 2:
+			continue
+		var a = p[0]
+		var b = p[1]
+		if typeof(a) != TYPE_ARRAY or a.size() < 2 or typeof(b) != TYPE_ARRAY or b.size() < 2:
+			continue
+		var va := Vector2i(int(a[0]), int(a[1]))
+		var vb := Vector2i(int(b[0]), int(b[1]))
+		if HexGrid.adjacent(va, vb):
+			out[HexGrid.edge_key(va, vb)] = true
+	return out
 
 # 首进战役：party 未落位 → 从地图中心 BFS 外扩找第一个可走格
 func _ensure_party_placed() -> void:
@@ -140,13 +181,28 @@ func end_stroke() -> void: pass
 func paint_cell(_col: int, _row: int) -> void: pass
 func pick_brush_at(_col: int, _row: int) -> void: pass
 
+# 线特征渲染钩子（HexCanvas has_method 可选契约；与编辑器/战斗侧同名同形）
+func line_features() -> Dictionary:
+	return {"rivers": _map_rivers, "roads": _map_roads, "bridges": _map_bridges}
+
 func hover_text(col: int, row: int) -> String:
 	if not _cell_in_bounds(col, row):
 		return ""
 	var tile = tiles[row][col]
 	var cost := _move_cost_at(col, row)
-	var pass_txt := "不可通行" if cost < 0 else "行程 %d 小时/格" % (cost * HOURS_PER_COST)
+	# 格自身通行性（地形 base 成本，非最终耗时——过河/沿路的实际扣时按「边」算，见下方从当前位置进入的提示）
+	var pass_txt := "不可通行（地形）" if cost < 0 else "地形成本 %d（约 %d 小时）" % [cost, cost * HOURS_PER_COST]
 	var txt := "地形：%s（%d, %d）\n%s" % [TerrainDB.label_of(tile), col, row, pass_txt]
+	# 若与队伍相邻：给出「从当前位置进入这一格」的真实边成本（吃河阻断/桥·路折扣，与寻路/行程同源）
+	var ws0 = WorldState.current
+	if ws0 != null and cost >= 0:
+		var from := Vector2i(ws0.party_col, ws0.party_row)
+		if HexGrid.distance(from, Vector2i(col, row)) == 1:
+			var ec := _move_cost_between(from.x, from.y, col, row)
+			if ec < 0:
+				txt += "\n⚠ 从当前位置：隔河，须绕行到桥"
+			else:
+				txt += "\n从当前位置进入：约 %d 小时" % (ec * HOURS_PER_COST)
 	var loc = _loc_by_cell.get(Vector2i(col, row))
 	if loc != null:
 		txt = "📍 %s（%s）%s\n%s" % [str(loc.get("label", "")), LocationDB.type_label(str(loc.get("type", ""))), _site_status_text(loc), txt]
@@ -200,7 +256,21 @@ func _move_cost_at(col: int, row: int) -> int:
 		return -1
 	return TerrainDB.move_cost(TerrainDB.effective_move(tiles[row][col], _map_terrain_overrides), PARTY_TAGS)
 
-# Dijkstra 最小成本路径（含起终点的格序列）；不可达返回 []
+# 跨边通行成本（from→to 相邻格；-1=不可跨）——线特征语义的单一实现：
+#   河边无桥＝硬阻断；有桥＝可跨且享道路折扣；道路边＝成本折为 min(目的格成本, 1)（穿林翻山的大道）。
+# 寻路（find_path）与行程扣时（_travel）都读这里，保证「路径成本＝实际耗时」不脱节；WorldSim 游荡同用。
+func _move_cost_between(from_col: int, from_row: int, col: int, row: int) -> int:
+	var base := _move_cost_at(col, row)
+	if base < 0:
+		return -1
+	var key := HexGrid.edge_key(Vector2i(from_col, from_row), Vector2i(col, row))
+	if _river_edges.has(key) and not _bridge_edges.has(key):
+		return -1
+	if _road_edges.has(key) or _bridge_edges.has(key):
+		return mini(base, 1)
+	return base
+
+# Dijkstra 最小成本路径（含起终点的格序列）；不可达返回 []。步进成本＝跨边成本（河阻断/桥豁免/道路折扣）。
 func find_path(from: Vector2i, to: Vector2i) -> Array:
 	if not _cell_in_bounds(to.x, to.y) or _move_cost_at(to.x, to.y) < 0:
 		return []
@@ -217,7 +287,7 @@ func find_path(from: Vector2i, to: Vector2i) -> Array:
 		if cur == to:
 			break
 		for nb in HexGrid.neighbors(cur):
-			var step := _move_cost_at(nb.x, nb.y)
+			var step := _move_cost_between(cur.x, cur.y, nb.x, nb.y)
 			if step < 0:
 				continue
 			var nc: int = best[cur] + step
@@ -234,16 +304,17 @@ func find_path(from: Vector2i, to: Vector2i) -> Array:
 		path.push_front(walker)
 	return path
 
-# 沿路径逐格行进：每格＝落位 → 推进时钟（成本×HOURS_PER_COST，经 WorldClock 走恢复调度）→ 评估事件 → 重绘停顿
+# 沿路径逐格行进：每格＝落位 → 推进时钟（跨边成本×HOURS_PER_COST，与寻路同源）→ 评估事件 → 重绘停顿
 func _travel(path: Array) -> void:
 	_moving = true
 	_move_target = path.back()
 	var ws = WorldState.current
 	for i in range(1, path.size()):
+		var prev: Vector2i = path[i - 1]
 		var cell: Vector2i = path[i]
 		ws.party_col = cell.x
 		ws.party_row = cell.y
-		_advance_world(_move_cost_at(cell.x, cell.y) * HOURS_PER_COST)
+		_advance_world(maxi(_move_cost_between(prev.x, prev.y, cell.x, cell.y), 0) * HOURS_PER_COST)
 		_refresh_time_ui()
 		_check_cell_events(cell)
 		if _dialogue != null and is_inside_tree():

@@ -10,13 +10,40 @@ extends "res://HexCanvas.gd"
 
 const TextureCache := preload("res://TextureCache.gd")   # 图标加载 + 缓存单一入口
 var _secondary_down := false   # 右键是否按住（区域层用来拖动擦除）
+var _hover_edge := []          # 线特征层悬停的格间边 [Vector2i a, Vector2i b]（空＝无）
 
 func _draw() -> void:
-	super()   # 先画地形 + 悬停高亮（父类已 draw_set_transform 视图变换，且保留到本函数）
+	super()   # 先画地形 + 线特征 + 悬停高亮（父类已 draw_set_transform 视图变换，且保留到本函数）
 	if editor == null:
 		return
 	_draw_regions()
 	_draw_units()
+	_draw_locations()
+	_draw_hover_edge()
+
+# 线特征层：悬停边高亮（黄色短线，指示河刷/桥刷/擦除将作用的边）
+func _draw_hover_edge() -> void:
+	if editor.current_layer != "line" or _hover_edge.size() != 2:
+		return
+	var pts := edge_points(_hover_edge[0], _hover_edge[1])
+	draw_line(pts[0], pts[1], Color(1.0, 0.95, 0.2, 0.9), 3.0 / view_zoom)
+
+# 地点层：旗帜（绘制单一实现在 HexCanvas.draw_location_flag，与大地图同款）；选中地点加金圈
+func _draw_locations() -> void:
+	if not editor.has_method("locations_for_draw"):
+		return
+	var active := {}
+	if editor.has_method("active_location"):
+		active = editor.active_location()
+	var acell := Vector2i(int(active.get("col", -1)), int(active.get("row", -1))) if not active.is_empty() else Vector2i(-1, -1)
+	for loc in editor.locations_for_draw():
+		var cell: Vector2i = loc["cell"]
+		if not _in_bounds(cell):
+			continue
+		var c := hex_center(cell.x, cell.y)
+		if editor.current_layer == "location" and cell == acell:
+			draw_arc(c, HEX_SIZE * 0.72, 0.0, TAU, 24, Color(1.0, 0.85, 0.25, 0.95), 2.5 / view_zoom)
+		draw_location_flag(c, loc["color"], str(loc["label"]))
 
 # 单位层：画「这一关的单位」棋子（阵营色圆 + 黑描边 + 原型图标）。
 # 非单位层时半透明，便于一边看地形/区域一边知道单位在哪。
@@ -68,6 +95,7 @@ func _draw_regions() -> void:
 				draw_polyline(pts, oc, 2.0 / view_zoom)
 
 # —— 输入：左/右键按当前层分派；中键平移、滚轮缩放、悬停 复用父类逻辑 ——
+# 线特征层：河/桥＝边拾取（nearest_edge_at）、路＝格轨迹；右键一律边擦除。均走 stroke=一段拖动一次撤销。
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		match event.button_index:
@@ -80,12 +108,12 @@ func _gui_input(event: InputEvent) -> void:
 					editor.end_stroke()
 			MOUSE_BUTTON_RIGHT:
 				if event.pressed:
-					if editor.current_layer == "region" or editor.current_layer == "unit":
+					if editor.current_layer in ["region", "unit", "line"]:
 						_secondary_down = true
-						editor.begin_stroke()   # 区域擦除走 stroke → 整段拖动一次撤销
+						editor.begin_stroke()   # 擦除走 stroke → 整段拖动一次撤销
 						_secondary_at(event.position)
 					else:
-						_secondary_at(event.position)   # 地形：单击取色
+						_secondary_at(event.position)   # 地形：单击取色 / 地点：单击删除
 				elif _secondary_down:
 					_secondary_down = false
 					editor.end_stroke()
@@ -106,13 +134,34 @@ func _gui_input(event: InputEvent) -> void:
 		elif _secondary_down:
 			_secondary_at(event.position)
 		_update_hover(event.position)
+		_update_hover_edge(event.position)
 
 func _primary_at(screen_pos: Vector2) -> void:
+	# 线特征层的河/桥工具吃「边」不吃「格」：拾取最近边交给宿主；路刷仍走格轨迹（primary_paint 分派）
+	if editor.current_layer == "line" and editor._line_mode != "road":
+		var e := nearest_edge_at(_world_from_screen(screen_pos))
+		if e.size() == 2:
+			editor.line_paint_edge(e[0], e[1], true)
+		return
 	var off := pixel_to_offset(_world_from_screen(screen_pos))
 	if _in_bounds(off):
 		editor.primary_paint(off.x, off.y)
 
 func _secondary_at(screen_pos: Vector2) -> void:
+	if editor.current_layer == "line":
+		var e := nearest_edge_at(_world_from_screen(screen_pos))
+		if e.size() == 2:
+			editor.line_paint_edge(e[0], e[1], false)
+		return
 	var off := pixel_to_offset(_world_from_screen(screen_pos))
 	if _in_bounds(off):
 		editor.secondary_paint(off.x, off.y)
+
+# 线特征层悬停边（黄色指示线）；非线层清空
+func _update_hover_edge(screen_pos: Vector2) -> void:
+	var ne := []
+	if editor != null and editor.current_layer == "line":
+		ne = nearest_edge_at(_world_from_screen(screen_pos))
+	if ne != _hover_edge:
+		_hover_edge = ne
+		queue_redraw()

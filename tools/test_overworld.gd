@@ -24,7 +24,7 @@ func _initialize() -> void:
 
 	# 1) MapIO map_type：写读往返 + 旧图缺省 battle
 	var tiles := MapIO.grassland(4, 4)
-	ck(MapIO.write_map(TMP_MAP, 4, 4, tiles, [], [], [], {}, {}, "overworld"), "write_map(map_type) 成功")
+	ck(MapIO.write_map(TMP_MAP, 4, 4, tiles, {"map_type": "overworld"}), "write_map(map_type) 成功")
 	var res := MapIO.read_file(TMP_MAP)
 	ck(res.get("ok", false) and str(res.get("map_type")) == "overworld", "map_type 往返")
 	ck(str(MapIO.normalize({"width": 3, "height": 3, "tiles": []}).get("map_type")) == "battle", "旧图缺省 battle")

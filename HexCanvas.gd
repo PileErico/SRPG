@@ -6,6 +6,7 @@ extends Control
 ## 视图变换由 view_offset(平移) + view_zoom(缩放) 表达，绘制时统一套用。
 
 const HexGrid := preload("res://HexGrid.gd")   # 纯六边形几何前置（取整器 single source）
+const HexTileRender := preload("res://HexTileRender.gd")   # 地块渲染单一实现（底色+decor；笔刷缩略图同用）
 const HEX_SIZE := 24.0
 const MIN_ZOOM := 0.2
 const MAX_ZOOM := 4.0
@@ -120,6 +121,33 @@ func hex_corners(center: Vector2) -> PackedVector2Array:
 		pts.append(center + Vector2(cos(ang), sin(ang)) * HEX_SIZE)
 	return pts
 
+# 相邻格对 (a,b) 的共享边两端点（世界坐标）。任意相邻方向通用：
+# 边中点＝两格心中点，边向量⊥心连线、半长＝HEX_SIZE/2（flat-top 六边形边长＝HEX_SIZE）。
+func edge_points(a: Vector2i, b: Vector2i) -> PackedVector2Array:
+	var ca := hex_center(a.x, a.y)
+	var cb := hex_center(b.x, b.y)
+	var mid := (ca + cb) * 0.5
+	var perp := (cb - ca).normalized().orthogonal() * (HEX_SIZE * 0.5)
+	return PackedVector2Array([mid - perp, mid + perp])
+
+# 世界坐标 → 最近的格间共享边（[格A, 格B]；出界/无界内邻居返回 []）。编辑器河刷/桥刷的边拾取原语。
+func nearest_edge_at(world: Vector2) -> Array:
+	var cell := pixel_to_offset(world)
+	if not _in_bounds(cell):
+		return []
+	var best := []
+	var best_d := INF
+	var ca := hex_center(cell.x, cell.y)
+	for nb in HexGrid.neighbors(cell):
+		if not _in_bounds(nb):
+			continue
+		var mid := (ca + hex_center(nb.x, nb.y)) * 0.5
+		var d := world.distance_squared_to(mid)
+		if d < best_d:
+			best_d = d
+			best = [cell, Vector2i(nb)]
+	return best
+
 func axial_round(qf: float, rf: float) -> Vector2i:
 	# axial(q,r,s) 映射到 cube(x,y,z) 后复用唯一取整器；分支/取整与旧实现逐位一致（对拍验证）。
 	var c := HexGrid.cube_round(qf, rf, -qf - rf)
@@ -149,144 +177,98 @@ func _draw() -> void:
 	for row in editor.height:
 		for col in editor.width:
 			var tile = editor.tiles[row][col]
-			var color: Color = editor.color_for_tile(tile)
-			var center := hex_center(col, row)
-			var pts := hex_corners(center)
-			draw_colored_polygon(pts, color)
-			var outline := PackedVector2Array(pts)
-			outline.append(pts[0])
-			draw_polyline(outline, Color(0, 0, 0, 0.35), 1.0)
-			if show_decor:
-				_draw_decor(editor.decor_for_tile(tile), center, editor.accent_for_tile(tile))
+			# 地块渲染（底色+描边+decor 扰动）走 HexTileRender 单一实现——与笔刷缩略图逐笔一致
+			var seed: int = col * 73856093 ^ row * 19349663   # 每格确定性种子（扰动去印章感；纯函数、重绘不闪）
+			HexTileRender.draw_tile(self, hex_center(col, row), HEX_SIZE, editor.color_for_tile(tile), editor.accent_for_tile(tile), editor.decor_for_tile(tile), seed, show_decor)
+	_draw_line_features()   # 线特征 overlay（河/路/桥；宿主经 line_features() 可选提供）
 	# 悬停高亮（黄框，线宽按缩放反算，保持屏幕上恒定粗细）
 	if _in_bounds(hover_cell):
 		var hp := hex_corners(hex_center(hover_cell.x, hover_cell.y))
 		hp.append(hp[0])
 		draw_polyline(hp, Color(1.0, 0.95, 0.2, 0.95), 2.5 / view_zoom)
 
-# 所有纹理＝单一 accent 色的线稿（描边，不填充），每格仅“底色 + 纹理色”两色。
-const DECOR_WIDTH := 1.6
+# ---- 线特征 overlay（v4 schema：rivers/roads/bridges，格对＝相邻两格共享边）----
+# 宿主可选契约：editor.line_features() -> {rivers:[{pairs:[…]}], roads:[{pairs:[…]}], bridges:[格对…]}。
+# 三画布（编辑器/战斗/大地图）共享这一份渲染；通行语义只在大地图（Overworld），这里纯视觉。
+const RIVER_UNDER := Color(0.10, 0.22, 0.38, 0.9)   # 河：深色衬底
+const RIVER_WATER := Color(0.38, 0.66, 0.92, 0.95)  # 河：亮水面
+const ROAD_COLOR := Color(0.72, 0.24, 0.16, 0.85)   # 路：红虚线（格心连线，参考图同款）
+const BRIDGE_DARK := Color(0.30, 0.20, 0.10, 0.95)  # 桥：深木衬底
+const BRIDGE_WOOD := Color(0.62, 0.44, 0.24, 1.0)   # 桥：亮木面
 
-func _draw_decor(decor: String, center: Vector2, accent: Color) -> void:
-	match decor:
-		"tree":
-			_draw_trees(center, accent)
-		"wave":
-			_draw_waves(center, accent)
-		"peak":
-			_draw_peak(center, accent)
-		"grass":
-			_draw_grass(center, accent)
-		"crack":
-			_draw_crack(center, accent)
-		"path":
-			_draw_path(center, accent)
-		"bush":
-			_draw_bush(center, accent)
-		"hill":
-			_draw_hill(center, accent)
-		"dune":
-			_draw_dune(center, accent)
-		"snow":
-			_draw_snow(center, accent)
-		"rubble":
-			_draw_rubble(center, accent)
-		"brick":
-			_draw_brick(center, accent)
+func _draw_line_features() -> void:
+	if editor == null or not editor.has_method("line_features"):
+		return
+	var lf: Dictionary = editor.line_features()
+	# 收集河边段（世界坐标端点对）；坏格对（非相邻）跳过
+	var segs := []
+	for riv in lf.get("rivers", []):
+		if typeof(riv) != TYPE_DICTIONARY:
+			continue
+		for p in riv.get("pairs", []):
+			var e := _edge_from_pair(p)
+			if not e.is_empty():
+				segs.append(edge_points(e[0], e[1]))
+	# 河：先全画衬底再全画水面（衬底不被相邻段水面盖住）；端点补圆头，接缝连续
+	for wpass in [[RIVER_UNDER, 7.0], [RIVER_WATER, 4.0]]:
+		var c: Color = wpass[0]
+		var w: float = wpass[1]
+		for s in segs:
+			draw_line(s[0], s[1], c, w)
+			draw_circle(s[0], w * 0.5, c)
+			draw_circle(s[1], w * 0.5, c)
+	# 路：格对＝格心连线虚线（红），路径下的格保持地形底色
+	for road in lf.get("roads", []):
+		if typeof(road) != TYPE_DICTIONARY:
+			continue
+		for p in road.get("pairs", []):
+			var e := _edge_from_pair(p)
+			if e.is_empty():
+				continue
+			draw_dashed_line(hex_center(e[0].x, e[0].y), hex_center(e[1].x, e[1].y), ROAD_COLOR, 2.4, 5.0)
+	# 桥：沿心连线方向横跨河边的木板（深衬底 + 亮木面 + 两道板缝）
+	for p in lf.get("bridges", []):
+		var e := _edge_from_pair(p)
+		if e.is_empty():
+			continue
+		var ca := hex_center(e[0].x, e[0].y)
+		var cb := hex_center(e[1].x, e[1].y)
+		var mid := (ca + cb) * 0.5
+		var dir := (cb - ca).normalized()
+		var half := dir * (HEX_SIZE * 0.34)
+		draw_line(mid - half, mid + half, BRIDGE_DARK, 9.0)
+		draw_line(mid - half, mid + half, BRIDGE_WOOD, 6.0)
+		var perp := dir.orthogonal() * 3.4
+		for t: float in [-0.4, 0.0, 0.4]:
+			var q: Vector2 = mid + dir * (HEX_SIZE * 0.34 * t)
+			draw_line(q - perp, q + perp, BRIDGE_DARK, 1.2)
 
-# 底边中点 base_mid 处画一个等腰三角形描边
-func _tri_outline(base_mid: Vector2, half_w: float, h: float, color: Color) -> void:
-	var apex := base_mid + Vector2(0, -h)
-	var bl := base_mid + Vector2(-half_w, 0)
-	var br := base_mid + Vector2(half_w, 0)
-	draw_polyline(PackedVector2Array([bl, apex, br, bl]), color, DECOR_WIDTH)
+# 格对 JSON 形 [[x1,y1],[x2,y2]] → [Vector2i, Vector2i]；坏形/非相邻/越界返回 []
+func _edge_from_pair(p) -> Array:
+	if typeof(p) != TYPE_ARRAY or p.size() < 2:
+		return []
+	var a = p[0]
+	var b = p[1]
+	if typeof(a) != TYPE_ARRAY or a.size() < 2 or typeof(b) != TYPE_ARRAY or b.size() < 2:
+		return []
+	var va := Vector2i(int(a[0]), int(a[1]))
+	var vb := Vector2i(int(b[0]), int(b[1]))
+	if not (_in_bounds(va) and _in_bounds(vb)) or not HexGrid.adjacent(va, vb):
+		return []
+	return [va, vb]
 
-func _draw_peak(center: Vector2, accent: Color) -> void:
-	# 两个简单三角形（描边），仿参考图：左小右大，略重叠
-	_tri_outline(center + Vector2(-5, 6), 8.0, 11.0, accent)
-	_tri_outline(center + Vector2(6, 6), 11.0, 15.0, accent)
-
-func _draw_trees(center: Vector2, accent: Color) -> void:
-	# 两棵松树：小三角 + 短树干
-	for s in [Vector2(-7, 2), Vector2(6, 6)]:
-		var b: Vector2 = center + s
-		_tri_outline(b, 5.0, 12.0, accent)
-		draw_line(b, b + Vector2(0, 4), accent, DECOR_WIDTH)
-
-func _draw_grass(center: Vector2, accent: Color) -> void:
-	# 三丛草：每丛两短斜线
-	for s in [Vector2(-6, 6), Vector2(2, 7), Vector2(8, 5)]:
-		var b: Vector2 = center + s
-		draw_line(b, b + Vector2(-2, -6), accent, DECOR_WIDTH)
-		draw_line(b, b + Vector2(2, -6), accent, DECOR_WIDTH)
-
-func _draw_crack(center: Vector2, accent: Color) -> void:
-	# 两道干裂短纹
-	draw_line(center + Vector2(-7, -2), center + Vector2(-1, 1), accent, DECOR_WIDTH)
-	draw_line(center + Vector2(3, 3), center + Vector2(8, 0), accent, DECOR_WIDTH)
-
-func _draw_waves(center: Vector2, accent: Color) -> void:
-	# 两道水波线
-	for ry in [-5.0, 4.0]:
-		var pts := PackedVector2Array([
-			center + Vector2(-10, ry),
-			center + Vector2(-5, ry - 2.5),
-			center + Vector2(0, ry),
-			center + Vector2(5, ry - 2.5),
-			center + Vector2(10, ry),
-		])
-		draw_polyline(pts, accent, DECOR_WIDTH)
-
-func _draw_path(center: Vector2, accent: Color) -> void:
-	# 两行虚线＝路面车辙
-	for ry in [-4.0, 5.0]:
-		for dx in [-10.0, -1.0, 8.0]:
-			var a: Vector2 = center + Vector2(dx, ry)
-			draw_line(a, a + Vector2(5, 0), accent, DECOR_WIDTH)
-
-func _draw_bush(center: Vector2, accent: Color) -> void:
-	# 三丛圆灌木（上半弧）
-	for s in [Vector2(-6, 5), Vector2(3, 6), Vector2(8, 3)]:
-		draw_arc(center + s, 4.0, PI, TAU, 10, accent, DECOR_WIDTH)
-
-func _draw_hill(center: Vector2, accent: Color) -> void:
-	# 两道低缓圆丘（区别于山地的尖三角）
-	draw_arc(center + Vector2(-3, 7), 9.0, PI, TAU, 14, accent, DECOR_WIDTH)
-	draw_arc(center + Vector2(8, 7), 5.0, PI, TAU, 10, accent, DECOR_WIDTH)
-
-func _draw_dune(center: Vector2, accent: Color) -> void:
-	# 平缓沙丘曲线 + 两粒沙点
-	var pts := PackedVector2Array([
-		center + Vector2(-10, 2),
-		center + Vector2(-3, -2),
-		center + Vector2(4, 1),
-		center + Vector2(10, -2),
-	])
-	draw_polyline(pts, accent, DECOR_WIDTH)
-	draw_line(center + Vector2(-5, 7), center + Vector2(-4, 7), accent, DECOR_WIDTH)
-	draw_line(center + Vector2(4, 6), center + Vector2(5, 6), accent, DECOR_WIDTH)
-
-func _draw_snow(center: Vector2, accent: Color) -> void:
-	# 几片雪＝小十字
-	for s in [Vector2(-6, -2), Vector2(4, 2), Vector2(8, -5), Vector2(-2, 6)]:
-		var b: Vector2 = center + s
-		draw_line(b + Vector2(-2.5, 0), b + Vector2(2.5, 0), accent, DECOR_WIDTH)
-		draw_line(b + Vector2(0, -2.5), b + Vector2(0, 2.5), accent, DECOR_WIDTH)
-
-func _draw_rubble(center: Vector2, accent: Color) -> void:
-	# 散落碎石＝两个小方块 + 一个小三角描边
-	draw_rect(Rect2(center + Vector2(-9, 0), Vector2(6, 5)), accent, false, DECOR_WIDTH)
-	draw_rect(Rect2(center + Vector2(1, 3), Vector2(5, 4)), accent, false, DECOR_WIDTH)
-	_tri_outline(center + Vector2(6, -2), 4.0, 6.0, accent)
-
-func _draw_brick(center: Vector2, accent: Color) -> void:
-	# 砖墙：三道横向砖缝 + 错缝竖隔
-	for y in [-7.0, -1.0, 5.0]:
-		draw_line(center + Vector2(-11, y), center + Vector2(11, y), accent, DECOR_WIDTH)
-	for x in [-5.0, 5.0]:  # 上排竖缝
-		draw_line(center + Vector2(x, -7), center + Vector2(x, -1), accent, DECOR_WIDTH)
-	for x in [-10.0, 0.0, 10.0]:  # 下排错缝
-		draw_line(center + Vector2(x, -1), center + Vector2(x, 5), accent, DECOR_WIDTH)
+# 地点旗帜（大地图地点 / 编辑器地点层共用）：底座 + 旗杆 + 旗面 + 名字（缩放够大才画字）
+func draw_location_flag(c2: Vector2, col: Color, loc_label: String) -> void:
+	draw_circle(c2 + Vector2(0, 5), 4.5, col.darkened(0.45))
+	draw_line(c2 + Vector2(0, 7), c2 + Vector2(0, -11), Color(0.22, 0.17, 0.08), 2.0)
+	draw_colored_polygon(PackedVector2Array([c2 + Vector2(0, -11), c2 + Vector2(10, -7.5), c2 + Vector2(0, -4)]), col)
+	if view_zoom >= DECOR_MIN_ZOOM and loc_label != "":
+		var font := get_theme_default_font()
+		var fs := 9
+		var tw := font.get_string_size(loc_label, HORIZONTAL_ALIGNMENT_CENTER, -1, fs).x
+		var tp := c2 + Vector2(-tw * 0.5, 19.0)
+		draw_string(font, tp + Vector2(0.8, 0.8), loc_label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0, 0, 0, 0.55))
+		draw_string(font, tp, loc_label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0.98, 0.95, 0.85))
 
 # ---- 输入 ----
 

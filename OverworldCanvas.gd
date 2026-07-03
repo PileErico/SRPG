@@ -21,22 +21,12 @@ func _draw() -> void:
 	super()   # 地形 + 悬停高亮；draw_set_transform 已是视图变换，下面直接用世界坐标
 	if editor == null:
 		return
-	# 地点标记（M7）：旗帜 + 名字（据点已肃清＝灰显）；名字仅在缩放足够时画（与地形纹理同门槛）
+	# 地点标记（M7）：旗帜 + 名字（据点已肃清＝灰显）——绘制单一实现在 HexCanvas.draw_location_flag（编辑器地点层同用）
 	var font := get_theme_default_font()
 	for loc in editor.locations_for_draw():
 		var cell2: Vector2i = loc["cell"]
-		var c2 := hex_center(cell2.x, cell2.y)
 		var col: Color = loc["color"] if loc["active"] else Color(0.5, 0.5, 0.52)
-		draw_circle(c2 + Vector2(0, 5), 4.5, col.darkened(0.45))   # 底座
-		draw_line(c2 + Vector2(0, 7), c2 + Vector2(0, -11), Color(0.22, 0.17, 0.08), 2.0)   # 旗杆
-		draw_colored_polygon(PackedVector2Array([c2 + Vector2(0, -11), c2 + Vector2(10, -7.5), c2 + Vector2(0, -4)]), col)   # 旗面
-		if view_zoom >= DECOR_MIN_ZOOM:
-			var loc_label: String = loc["label"]
-			var fs := 9
-			var tw := font.get_string_size(loc_label, HORIZONTAL_ALIGNMENT_CENTER, -1, fs).x
-			var tp := c2 + Vector2(-tw * 0.5, 19.0)
-			draw_string(font, tp + Vector2(0.8, 0.8), loc_label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0, 0, 0, 0.55))   # 阴影衬底
-			draw_string(font, tp, loc_label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0.98, 0.95, 0.85))
+		draw_location_flag(hex_center(cell2.x, cell2.y), col, str(loc["label"]))
 	# 动态单位 token（WorldSim v1）：派系色圆 + 类型字形；敌对加红外环
 	for wu in editor.world_units_for_draw():
 		var wc: Vector2i = wu["cell"]
