@@ -1740,11 +1740,16 @@ func _build_action_field(a: Dictionary, f: Dictionary) -> Control:
 			le.text_changed.connect(func(t: String): _set_action_field(a, key, t))
 			return le
 
+# 右栏与左栏对称：最近操作（折叠·右上，对位左栏图层）/ 地图库（主内容撑满，对位地形笔刷）/ 环境（折叠·向上展开·右下，与左栏底部地形数据对称）
 func _build_side_panel() -> Control:
 	var side := VBoxContainer.new()
 	side.custom_minimum_size = Vector2(240, 0)
 
-	# —— 地图库（文件夹 + 其中地图列表）——
+	# —— 最近操作（撤销栈）＝右上角折叠（默认收起，需要时展开看）——
+	side.add_child(_make_foldable("最近操作（顶＝下一个撤销）", _build_history_panel(), true))
+	side.add_child(HSeparator.new())
+
+	# —— 地图库（文件夹 + 其中地图列表）＝主内容，撑满中段 ——
 	side.add_child(_section_title("地图库"))
 	_dir_label = _make_label("")
 	_dir_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -1774,21 +1779,23 @@ func _build_side_panel() -> Control:
 	new_map_btn.pressed.connect(_on_new_map_in_dir)
 	side.add_child(new_map_btn)
 
-	# —— 环境（日夜 + 天气表；地图级 authoring）——默认折叠，进阶段
-	side.add_child(_make_foldable("环境（天气·日夜）", _build_env_section(), true))
-
 	# —— 当前文件 ——
 	_file_label = _make_label("文件：(未保存)")
 	_file_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	side.add_child(_file_label)
 
-	# —— 最近操作（撤销栈）——
-	side.add_child(_section_title("最近操作（顶＝下一个撤销）"))
-	_history_list = ItemList.new()
-	_history_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_history_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	side.add_child(_history_list)
+	# —— 环境（日夜 + 天气表；地图级 authoring）＝右下角折叠·向上展开，与左栏底部「地形数据」对称 ——
+	side.add_child(_make_foldable("环境（天气·日夜）", _build_env_section(), true, true))
 	return side
+
+# 撤销历史面板（收进右上折叠区）：一个固定高度的列表
+func _build_history_panel() -> Control:
+	var v := VBoxContainer.new()
+	_history_list = ItemList.new()
+	_history_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_history_list.custom_minimum_size = Vector2(0, 150)
+	v.add_child(_history_list)
+	return v
 
 # ------------------------------------------------------------------ 环境（日夜 + 天气表）
 
