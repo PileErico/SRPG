@@ -233,8 +233,8 @@ func _build_ui() -> void:
 	var bar_wrap := _panelize(bar)   # 顶栏也给个深底，与画布分开
 	root.add_child(bar_wrap)
 
-	# 菜单栏（绘图软件式下拉，替代平铺按钮）：文件 / 编辑 / 视图。仅「类型」+ 状态常驻。
-	# 文件菜单：新建地图…(0) / 保存(1) / 另存为…(2) / 加载…(3) / 返回主菜单(4，嵌入 Game 时省略——由 Game 顶栏提供)
+	# 菜单栏（绘图软件式下拉，替代平铺按钮）：文件 / 编辑 / 视图。仅「类型」+ 状态常驻；返回主菜单＝右上角常驻（高频，不藏子菜单）。
+	# 文件菜单：新建地图…(0) / 保存(1) / 另存为…(2) / 加载…(3)
 	var file_menu := _make_menu("文件")
 	var fp := file_menu.get_popup()
 	fp.add_item("新建地图…", 0)
@@ -242,9 +242,6 @@ func _build_ui() -> void:
 	fp.add_item("保存  (Ctrl+S)", 1)
 	fp.add_item("另存为…", 2)
 	fp.add_item("加载…", 3)
-	if not embedded:
-		fp.add_separator()
-		fp.add_item("返回主菜单", 4)
 	fp.id_pressed.connect(_on_file_menu)
 	bar.add_child(file_menu)
 
@@ -275,6 +272,13 @@ func _build_ui() -> void:
 	status_label = Label.new()
 	status_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bar.add_child(status_label)
+
+	# 返回主菜单＝右上角常驻（高频操作，不藏子菜单；跨编辑器统一习惯）。嵌入 Game 时由 Game 顶栏提供，省略。
+	if not embedded:
+		var back_btn := Button.new()
+		back_btn.text = "← 主菜单"
+		back_btn.pressed.connect(_on_back_to_menu)
+		bar.add_child(back_btn)
 
 	# ---- 主体：左笔刷栏 + 中画布 + 右历史栏 ----
 	var main := HBoxContainer.new()
@@ -512,8 +516,9 @@ func _build_terrain_brushes() -> Control:
 		b.toggled.connect(_on_brush_toggled.bind(i))
 		list.add_child(b)
 		brush_buttons.append(b)
-	# 地形数据（编辑选中笔刷战斗属性）＝进阶段，默认折叠给笔刷让出空间
-	box.add_child(_make_foldable("地形数据（选中笔刷）", _build_terrain_data(), true))
+	# 地形数据（编辑选中笔刷战斗属性）＝进阶段，默认折叠给笔刷让出空间；
+	# 向上展开（expand_up）：header 钉在侧栏最底不动，展开时内容向上顶开笔刷区——开合位置一致，符合人体工学。
+	box.add_child(_make_foldable("地形数据（选中笔刷）", _build_terrain_data(), true, true))
 	return box
 
 # 地形数据编辑区（移动成本/通行/tag 成本 + 全局·本图范围）——被 _build_terrain_brushes 包进折叠区
@@ -2060,8 +2065,9 @@ func _section_title(text: String) -> Control:
 	p.add_child(l)
 	return p
 
-# 折叠区：点标题栏（▾/▸）收起/展开 content。进阶/占空间的段默认收起，给主内容让位。
-func _make_foldable(title: String, content: Control, collapsed: bool) -> VBoxContainer:
+# 折叠区：点标题栏收起/展开 content。进阶/占空间的段默认收起，给主内容让位。
+# expand_up=true：底部停靠段——content 在 header 之上（向上展开），header 钉死在底部原地不随开合上下跳（人体工学）。
+func _make_foldable(title: String, content: Control, collapsed: bool, expand_up: bool = false) -> VBoxContainer:
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 2)
 	var hdr := Button.new()
@@ -2078,15 +2084,21 @@ func _make_foldable(title: String, content: Control, collapsed: bool) -> VBoxCon
 	hdr.add_theme_stylebox_override("hover", sb)
 	hdr.add_theme_stylebox_override("pressed", sb)
 	hdr.add_theme_color_override("font_color", Color(0.86, 0.9, 0.96))
+	# 箭头：普通段 ▸收起/▾展开；向上展开段 ▴收起(点了向上开)/▾展开(点了向下收)
 	var _upd := func(open: bool):
-		hdr.text = ("▾ " if open else "▸ ") + title
+		var a := ("▾ " if open else "▴ ") if expand_up else ("▾ " if open else "▸ ")
+		hdr.text = a + title
 	_upd.call(not collapsed)
 	content.visible = not collapsed
 	hdr.toggled.connect(func(pressed: bool):
 		content.visible = pressed
 		_upd.call(pressed))
-	box.add_child(hdr)
-	box.add_child(content)
+	if expand_up:
+		box.add_child(content)   # content 在上、header 在下 → 展开时内容向上长，header 留在底部
+		box.add_child(hdr)
+	else:
+		box.add_child(hdr)
+		box.add_child(content)
 	return box
 
 # 统一深色主题（挂在编辑器根 Control，全部子控件继承；per-instance override 仍优先——如笔刷缩略图）
@@ -2146,7 +2158,6 @@ func _on_file_menu(id: int) -> void:
 		1: _save_shortcut()
 		2: _on_save_as_pressed()
 		3: _on_load_pressed()
-		4: _on_back_to_menu()
 
 # 把一个侧栏 VBox 包进带深色底 + 内边距的面板（与画布视觉分开）
 func _panelize(inner: Control) -> PanelContainer:
@@ -2577,20 +2588,26 @@ func accent_for_tile(tile) -> Color:
 	return TerrainDB.accent_of(tile)
 
 # 左下角悬停信息：坐标 + 地块标签/类型/外观/tags
+# 左下角悬停信息：结合战斗版（地形/可通行性/特殊效果）与编辑器版（tag汉化/区域/地点/线特征）。
+# 通行性·效果·tag汉化 走 TerrainDB 共用文案单一实现（与战斗侧同源）。
 func hover_text(col: int, row: int) -> String:
 	if row < 0 or row >= tiles.size() or col < 0 or col >= tiles[row].size():
 		return ""
 	var t = tiles[row][col]
 	var e = TerrainDB.entry_for(t)
 	var label := str(e.label) if e != null else "未知"
-	var tags := ", ".join(e.tags) if e != null else ""
-	var base := "(%d, %d)  %s  %s/%s\ntags: %s" % [col, row, label, t.get("terrain"), t.get("variant"), tags]
+	var base := "地形：%s（%d, %d）" % [label, col, row]
+	base += "\n可通行性：%s" % TerrainDB.passability_text(TerrainDB.effective_move(t, map_terrain_overrides))
+	base += "\n特殊效果：%s" % TerrainDB.effects_text(e)
+	var tcn := TerrainDB.tags_cn(e)
+	if tcn != "":
+		base += "\ntags：%s" % tcn
 	var rtxt := _regions_at(col, row)
 	if rtxt != "":
-		base += "\n区域: " + rtxt
+		base += "\n区域：" + rtxt
 	var li := _loc_index_at(col, row)
 	if li >= 0:
-		base += "\n地点: %s（%s）" % [str(map_locations[li].get("label", "")), str(map_locations[li].get("id", ""))]
+		base += "\n地点：%s（%s）" % [str(map_locations[li].get("label", "")), str(map_locations[li].get("id", ""))]
 	var ln := _line_summary_at(col, row)
 	if ln != "":
 		base += "\n" + ln

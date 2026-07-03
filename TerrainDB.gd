@@ -6,6 +6,7 @@ extends RefCounted
 ## 取代了 MapEditor / Sandbox 各自的 _load_terrains + 逐格线性扫描查表（每帧 ×格数 的开销）。
 
 const TERRAINS_PATH := "res://terrains.json"
+const TagDB := preload("res://TagDB.gd")   # 移动型/地形 tag → 中文（通行性文案本地化用）
 
 static var _palette := []      # 有序地形定义（笔刷栏顺序 / 战斗调色都按这个）
 static var _by_key := {}       # "terrain/variant" -> entry，O(1) 查表
@@ -68,6 +69,47 @@ static func decor_of(tile) -> String:
 static func label_of(tile) -> String:
 	var e = entry_for(tile)
 	return str(e.label) if e != null else "未知"
+
+# —— 悬停/信息用的文案（编辑器与战斗共用单一实现，防两端文案分叉）——
+
+# 通行性文案：读 move 块 passable_by → 可通行 / 不可通行 / 仅<地面/飞行…>（tag 走 TagDB.cn 本地化）
+static func passability_text(mv) -> String:
+	if typeof(mv) != TYPE_DICTIONARY:
+		return "未知"
+	var pb = mv.get("passable_by", "all")
+	if typeof(pb) == TYPE_ARRAY:
+		if pb.is_empty():
+			return "不可通行"
+		var names := []
+		for tg in pb:
+			names.append(TagDB.cn(str(tg)))
+		return "仅<%s>" % "/".join(names)
+	if pb == "none":
+		return "不可通行"
+	return "可通行"
+
+# 特殊效果文案：列出 entry.effects 的 name：desc；无则「无」
+static func effects_text(entry) -> String:
+	if entry == null:
+		return "无"
+	var effs = entry.get("effects", [])
+	if typeof(effs) != TYPE_ARRAY or effs.is_empty():
+		return "无"
+	var parts := []
+	for ef in effs:
+		var nm := str(ef.get("name", ""))
+		var d := str(ef.get("desc", ""))
+		parts.append("%s：%s" % [nm, d] if (nm != "" and d != "") else nm + d)
+	return "；".join(parts)
+
+# 地形 tags → 中文串（悬停信息用）；无则空串
+static func tags_cn(entry) -> String:
+	if entry == null or typeof(entry.get("tags")) != TYPE_ARRAY:
+		return ""
+	var names := []
+	for tg in entry["tags"]:
+		names.append(TagDB.cn(str(tg)))
+	return "、".join(names)
 
 # 地形条目是否适用于某图类型（map_type: "battle"|"overworld"）。
 # scope: "battle"=仅战场 / "overworld"=仅大地图 / "both"（缺省，旧数据零迁移）。

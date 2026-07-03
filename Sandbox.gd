@@ -806,37 +806,12 @@ func unit_at(col: int, row: int):
 	return _state.unit_at(col, row)
 
 # 通行性文字：可通行 / 不可通行 / 仅<tag1/tag2>（读有效 move.passable_by，含图级覆盖）
+# 通行性/特殊效果文案＝TerrainDB 共用单一实现（与编辑器悬停同源，防文案分叉）。薄委托保留原方法名。
 func _passability_text(mv) -> String:
-	if typeof(mv) != TYPE_DICTIONARY:
-		return "未知"
-	var pb = mv.get("passable_by", "all")
-	if typeof(pb) == TYPE_ARRAY:
-		if pb.is_empty():
-			return "不可通行"
-		var names := []
-		for tg in pb:
-			names.append(TagDB.cn(str(tg)))
-		return "仅<%s>" % "/".join(names)
-	if pb == "none":
-		return "不可通行"
-	return "可通行"
+	return TerrainDB.passability_text(mv)
 
-# 特殊效果文字：列出 effects 的 name（desc）；无则「无」
 func _effects_text(entry) -> String:
-	if entry == null:
-		return "无"
-	var effs = entry.get("effects", [])
-	if typeof(effs) != TYPE_ARRAY or effs.is_empty():
-		return "无"
-	var parts := []
-	for ef in effs:
-		var nm = str(ef.get("name", ""))
-		var d = str(ef.get("desc", ""))
-		if nm != "" and d != "":
-			parts.append("%s：%s" % [nm, d])
-		else:
-			parts.append(nm + d)
-	return "；".join(parts)
+	return TerrainDB.effects_text(entry)
 
 # 左下角悬停信息：坐标 + 名称 + 通行性 + 特殊效果 +（该格单位）
 func hover_text(col: int, row: int) -> String:
