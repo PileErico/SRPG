@@ -1,13 +1,13 @@
 {
-  "_note": "环境单一数据源（天气 + 日夜）。天气：sight(视野加减,负=减,flat) + vfx(weather/individual_frames 文件夹名,48帧循环) + tint(叠层染色) + vfx_fps。日夜：from_hour(时段起始的当日小时,WorldClock 小时→日夜映射用;最早时段之前环回前一日最后时段,如 0~5 点=夜;无此键的时段不参与映射、只能被地图显式指定) + sight_mult(视野【最终乘子】,在天气/装备/技能等所有加减之后再乘,夜=0.5减半) + tint(全屏变暗滤镜色,含alpha)。近期环境只影响视野(见 docs/感知系统.md Phase 2)。VFX 素材＝Alenia Studios〔CC BY 4.0，署名见 CREDITS.md〕。EnvDB 读本文件。",
+  "_note": "环境单一数据源（天气 + 日夜）。天气：sight(视野加减,负=减,flat) + tint(全屏大气调色叠层,含alpha,Sandbox 叠) + fx(仅走 shader 的天气填,如雾=fog,可选 fx_intensity 0~1)。天气 VFX 全自绘/程序化(WeatherVFX,无第三方素材)：雨/雪/沙暴/雷暴=GPUParticles2D 粒子(参数写死在 WeatherVFX._build_particles),雾=weather_fog.gdshader,雷暴叠全屏闪光。日夜：from_hour(时段起始的当日小时,WorldClock 小时→日夜映射用;最早时段之前环回前一日最后时段,如 0~5 点=夜;无此键的时段不参与映射、只能被地图显式指定) + sight_mult(视野【最终乘子】,在天气/装备/技能等所有加减之后再乘,夜=0.5减半) + tint(全屏变暗滤镜色,含alpha)。近期环境只影响视野(见 docs/感知系统.md Phase 2)。EnvDB 读本文件。",
   "format_version": 1,
   "weathers": [
     {"id": "clear", "label": "晴", "sight": 0, "desc": "天气晴朗，视野正常"},
-    {"id": "rain", "label": "雨", "sight": -1, "desc": "降雨，视野略降", "vfx": "clima_lluvia_estetica", "tint": "#3C4E6030", "vfx_fps": 16},
-    {"id": "fog", "label": "雾", "sight": -2, "desc": "浓雾弥漫，视野大降", "vfx": "clima_niebla_espesa", "tint": "#AEB6BE44", "vfx_fps": 10},
-    {"id": "snow", "label": "雪", "sight": -1, "desc": "落雪，视野略降", "vfx": "clima_nieve_cozy", "tint": "#CBDDF236", "vfx_fps": 12},
-    {"id": "sandstorm", "label": "沙暴", "sight": -2, "desc": "风沙蔽日，视野大降", "vfx": "clima_viento_estetico", "tint": "#E4C88C55", "vfx_fps": 18},
-    {"id": "storm", "label": "雷暴", "sight": -2, "desc": "雷暴闪电，视野受阻", "vfx": "clima_tormenta_electrica", "tint": "#2A34482C", "vfx_fps": 16}
+    {"id": "rain", "label": "雨", "sight": -1, "desc": "降雨，视野略降", "tint": "#3C4E6030"},
+    {"id": "fog", "label": "雾", "sight": -2, "desc": "浓雾弥漫，视野大降", "fx": "fog", "fx_intensity": 0.6, "tint": "#AEB6BE44"},
+    {"id": "snow", "label": "雪", "sight": -1, "desc": "落雪，视野略降", "tint": "#CBDDF236"},
+    {"id": "sandstorm", "label": "沙暴", "sight": -2, "desc": "风沙蔽日，视野大降", "tint": "#E4C88C55"},
+    {"id": "storm", "label": "雷暴", "sight": -2, "desc": "雷暴闪电，视野受阻", "tint": "#2A34482C"}
   ],
   "times": [
     {"id": "day", "label": "昼", "from_hour": 6, "sight_mult": 1.0, "desc": "白昼，视野正常"},

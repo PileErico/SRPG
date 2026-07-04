@@ -10,7 +10,7 @@
 - **关卡编辑器**：**六图层齐**（地形 / 线特征〔河·路·桥〕/ 区域〔部署·触发〕/ 单位〔含深编〕/ 触发器 / 地点，均可编辑+存盘+试玩）+ **地图类型切换（战斗图/大地图）+ 地形 scope 过滤** + 全局/图级地形数据 + 地图库 + 物品编辑器。**笔刷显示完整六边形地块**（`HexTileRender` 单一实现，与地图格逐笔一致）。**关卡编辑器补完**（2026-07-03，见 [docs/实现现状.md](docs/实现现状.md)「关卡编辑器补完」）。
 - **战斗 sandbox**：四维派生属性、装备+修正管线、命中/格挡/暴击判定、ZOC+借机、敌方 AI（警觉/仇恨）、行动顺序槽、攻击动画+音效、胜负+重开、主动技能首条。战斗数学（回合结构·单 AP+移动力·命中/伤害/护甲/抗性）已敲定 🔒。
 - **战斗数值地基**（管线已通）：eff 效能桶 + `CombatResolver` 伤害分量化减伤链 + buff↔modifier 桥。剩元素系统**内容**待填（管线就绪）。
-- **感知系统 P1+P2**：视野 `sight` + LOS + 三态战争迷雾 + AI 视野驱动；日夜 + 天气 + 天气 VFX 叠层。⚠️ VFX 用 Alenia Studios 素材（CC BY 4.0），**上线前须游戏内署名** → [CREDITS.md](CREDITS.md)。
+- **感知系统 P1+P2**：视野 `sight` + LOS + 三态战争迷雾 + AI 视野驱动；日夜 + 天气 + 天气 VFX 叠层。天气 VFX **全自绘/程序化**（GPU 粒子＝雨/雪/沙暴/雷暴 + 程序化 shader＝雾 + 全屏闪光＝雷暴；`WeatherVFX.gd`）——无第三方素材、无署名负担（原 Alenia 素材已删）。
 - **Meta 层 M1~M9 全部完成**：M1 持久化+物品实例化 / M2 WorldClock / M3 EventEngine / M4 Overworld 大地图 / M5 死门+BattleIO+战役战斗闭环 / M6 营地职务 / M7 地点系统 / M8 对话 / M9 派系声望。需求真值 🔒 → [docs/meta层需求提炼_1.md](docs/meta层需求提炼_1.md)。
 - **Sandbox 解耦 Phase 0~4**：`HexGrid` 纯几何 + `BattleState` 战斗模型层（RefCounted，30 字段+53 规则方法+战中 suspend 快照 `to_dict/restore`）；Sandbox=视图/输入/编排宿主。战略与决策 → [docs/解耦规划.md](docs/解耦规划.md)。
 - **地块美术升级 P1~P3**（2026-07-03，方案 A 🔒）：地形 `scope` 分层 + 5 新地形 + **边线河流转正**（河/路/桥＝格对线特征，schema v4）+ decor 坐标扰动。渲染单一实现 `HexTileRender`；大地图通行 `Overworld._move_cost_between`（河阻断/桥·路折扣）。→ [docs/地块美术升级.md](docs/地块美术升级.md)。
