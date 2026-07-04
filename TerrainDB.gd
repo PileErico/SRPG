@@ -12,6 +12,10 @@ static var _palette := []      # 有序地形定义（笔刷栏顺序 / 战斗�
 static var _by_key := {}       # "terrain/variant" -> entry，O(1) 查表
 static var _root := {}         # 原始顶层字典（含 format_version/_note）——save 时保留这些字段
 static var _loaded := false
+static var _path_override := ""   # 测试缝：非空则读/写此路径，绝不碰真 terrains.json（仿 AppearanceDB）
+
+static func _path() -> String:
+	return _path_override if _path_override != "" else TERRAINS_PATH
 
 static func _ensure() -> void:
 	if _loaded:
@@ -20,8 +24,8 @@ static func _ensure() -> void:
 	_palette = []
 	_by_key = {}
 	_root = {}
-	if FileAccess.file_exists(TERRAINS_PATH):
-		var f = FileAccess.open(TERRAINS_PATH, FileAccess.READ)
+	if FileAccess.file_exists(_path()):
+		var f = FileAccess.open(_path(), FileAccess.READ)
 		var data = JSON.parse_string(f.get_as_text())
 		f.close()
 		if typeof(data) == TYPE_DICTIONARY and typeof(data.get("terrains")) == TYPE_ARRAY:
@@ -65,6 +69,13 @@ static func accent_of(tile) -> Color:
 static func decor_of(tile) -> String:
 	var e = entry_for(tile)
 	return str(e.decor) if e != null else "none"
+
+# 某地形 entry 的手绘瓦片变体路径数组（无则空数组）；渲染 O(1) 取它、有则优先于程序烘。
+static func art_of(entry) -> Array:
+	if typeof(entry) != TYPE_DICTIONARY:
+		return []
+	var a = entry.get("art", [])
+	return a if typeof(a) == TYPE_ARRAY else []
 
 static func label_of(tile) -> String:
 	var e = entry_for(tile)
@@ -191,11 +202,20 @@ static func move_cost(mv, tags: Array) -> int:
 # —— 写回 / 热重载（编辑器「地形数据」编辑用；仿 ItemDB 的 reload/save 范式）——
 # palette() 返回的是 _palette 的 live 引用：编辑器原地改 entry.move 即改这里，沙盒同进程立即可见；
 # save() 把整张表写回 terrains.json（持久化，影响所有地图）。
+# 设某地形的手绘瓦片变体路径数组（原地改 live entry；调用方随后 save() 落盘）。工坊单一写口。
+static func set_art(tile, paths: Array) -> bool:
+	var e = entry_for(tile)
+	if typeof(e) != TYPE_DICTIONARY:
+		return false
+	var d: Dictionary = e   # 引用类型：改 d 即改 _palette 里的 live entry（save() 落盘）
+	d["art"] = paths
+	return true
+
 static func save() -> bool:
 	_ensure()
 	var out := _root if typeof(_root) == TYPE_DICTIONARY and not _root.is_empty() else {}
 	out["terrains"] = _palette   # 保留 format_version/_note 等顶层字段，只更新 terrains
-	var f = FileAccess.open(TERRAINS_PATH, FileAccess.WRITE)
+	var f = FileAccess.open(_path(), FileAccess.WRITE)
 	if f == null:
 		return false
 	f.store_string(JSON.stringify(out, "  "))

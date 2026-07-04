@@ -12,7 +12,9 @@ const ZOOMS := [2, 3, 4, 6, 8, 10, 12, 16, 20, 24, 32, 40, 48, 64]
 
 var img: Image
 var onion: Texture2D
-var px_size := 32
+var px_size := 32          # 画布宽（向后兼容：setup(size) 时 px_h 也 = size）
+var px_h := 32             # 画布高（非方形瓦片用；setup_wh 分别设）
+var paint_mask := {}       # {Vector2i:true} 限定可落笔像素（空＝自由画）；工坊用它把笔锁在六边形内
 var brush := Color(0.5, 0.5, 0.5, 1.0)
 var tool := "pencil"          # pencil/eraser/fill/pick/line/rect/rectf/select/wand
 var mirror_x := false
@@ -43,13 +45,18 @@ var _move_origin := Vector2i.ZERO
 var _clip: Array = []         # 剪贴板（归一化到最小角）
 
 func setup(size: int, initial: Image, onion_tex: Texture2D) -> void:
-	px_size = size
+	setup_wh(size, size, initial, onion_tex)   # 方形（外观工坊用）＝非方形的特例
+
+# 非方形画布（宽 w × 高 h）；地块工坊画 24×21 六边形瓦片用。
+func setup_wh(w: int, h: int, initial: Image, onion_tex: Texture2D) -> void:
+	px_size = w
+	px_h = h
 	if initial != null:
 		img = initial.duplicate()
 		if img.get_format() != Image.FORMAT_RGBA8:
 			img.convert(Image.FORMAT_RGBA8)
 	else:
-		img = Image.create(size, size, false, Image.FORMAT_RGBA8)
+		img = Image.create(w, h, false, Image.FORMAT_RGBA8)
 		img.fill(Color(0, 0, 0, 0))
 	onion = onion_tex
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
@@ -58,6 +65,10 @@ func setup(size: int, initial: Image, onion_tex: Texture2D) -> void:
 	custom_minimum_size = Vector2(560, 560)
 	_fitted = false
 	_rebuild()
+
+func set_onion(tex: Texture2D) -> void:
+	onion = tex
+	queue_redraw()
 
 func set_tool(t: String) -> void:
 	if t != "select" and t != "wand":
@@ -99,9 +110,9 @@ func _rebuild() -> void:
 func _fit() -> void:
 	if size.x < 4 or size.y < 4:
 		return
-	var z := int(floor(min(size.x, size.y) * 0.9 / float(px_size)))
+	var z := int(floor(min(size.x / float(px_size), size.y / float(px_h)) * 0.9))
 	zoom = clampi(z, ZOOMS[0], ZOOMS[ZOOMS.size() - 1])
-	pan = (size - Vector2(px_size * zoom, px_size * zoom)) * 0.5
+	pan = (size - Vector2(px_size * zoom, px_h * zoom)) * 0.5
 	_fitted = true
 
 func _zi() -> int:
@@ -126,13 +137,14 @@ func _draw() -> void:
 		_fit()
 	draw_rect(Rect2(Vector2.ZERO, size), Color(0.09, 0.10, 0.12))
 	var w := px_size * zoom
-	for gy in px_size:
+	var h := px_h * zoom
+	for gy in px_h:
 		for gx in px_size:
 			draw_rect(Rect2(pan + Vector2(gx, gy) * zoom, Vector2(zoom, zoom)), CHECK_A if (gx + gy) % 2 == 0 else CHECK_B)
 	if onion != null:
-		draw_texture_rect(onion, Rect2(pan, Vector2(w, w)), false, Color(1, 1, 1, 0.30))
+		draw_texture_rect(onion, Rect2(pan, Vector2(w, h)), false, Color(1, 1, 1, 0.30))
 	if _tex != null:
-		draw_texture_rect(_tex, Rect2(pan, Vector2(w, w)), false)
+		draw_texture_rect(_tex, Rect2(pan, Vector2(w, h)), false)
 	# 浮动块
 	if not _float.is_empty():
 		for e in _float:
@@ -148,8 +160,9 @@ func _draw() -> void:
 	if show_grid and zoom >= 8:
 		var gc := Color(1, 1, 1, 0.08)
 		for i in range(px_size + 1):
-			draw_line(pan + Vector2(i * zoom, 0), pan + Vector2(i * zoom, w), gc, 1.0)
-			draw_line(pan + Vector2(0, i * zoom), pan + Vector2(w, i * zoom), gc, 1.0)
+			draw_line(pan + Vector2(i * zoom, 0), pan + Vector2(i * zoom, h), gc, 1.0)
+		for j in range(px_h + 1):
+			draw_line(pan + Vector2(0, j * zoom), pan + Vector2(w, j * zoom), gc, 1.0)
 	# 选区轮廓（含浮动块）
 	_draw_sel_outline()
 	# 矩形选取拖动框
@@ -157,7 +170,7 @@ func _draw() -> void:
 		var xa := mini(_sel_rect_a.x, _sel_rect_b.x); var xb := maxi(_sel_rect_a.x, _sel_rect_b.x)
 		var ya := mini(_sel_rect_a.y, _sel_rect_b.y); var yb := maxi(_sel_rect_a.y, _sel_rect_b.y)
 		draw_rect(Rect2(pan + Vector2(xa, ya) * zoom, Vector2((xb - xa + 1) * zoom, (yb - ya + 1) * zoom)), Color(1, 1, 1, 0.9), false, 1.0)
-	draw_rect(Rect2(pan, Vector2(w, w)), Color(0, 0, 0, 0.6), false, 1.0)
+	draw_rect(Rect2(pan, Vector2(w, h)), Color(0, 0, 0, 0.6), false, 1.0)
 
 func _draw_sel_outline() -> void:
 	var cells := {}
@@ -252,7 +265,7 @@ func _key(e: InputEventKey) -> void:
 			KEY_C: _copy(); accept_event()
 			KEY_X: _snapshot(); _copy(); _delete_sel(); accept_event()
 			KEY_V: _paste(); accept_event()
-			KEY_A: _select_rect(Vector2i(0, 0), Vector2i(px_size - 1, px_size - 1)); accept_event()
+			KEY_A: _select_rect(Vector2i(0, 0), Vector2i(px_size - 1, px_h - 1)); accept_event()
 			KEY_Z: undo(); accept_event()
 	else:
 		match e.keycode:
@@ -263,7 +276,7 @@ func _px(pos: Vector2) -> Vector2i:
 	return Vector2i(int(floor((pos.x - pan.x) / zoom)), int(floor((pos.y - pan.y) / zoom)))
 
 func _in(p: Vector2i) -> bool:
-	return p.x >= 0 and p.y >= 0 and p.x < px_size and p.y < px_size
+	return p.x >= 0 and p.y >= 0 and p.x < px_size and p.y < px_h
 
 func _mir(p: Vector2i) -> Vector2i:
 	return Vector2i(px_size - 1 - p.x, p.y)
@@ -277,9 +290,13 @@ func _all_pts(list: Array) -> Array:
 	return out
 
 func _put(p: Vector2i) -> void:
-	if not _in(p):
+	if not _in(p) or not _mask_ok(p):
 		return
 	img.set_pixelv(p, Color(0, 0, 0, 0) if tool == "eraser" else brush)
+
+# 落笔遮罩：空 mask＝自由画；否则只允许 mask 内像素（工坊锁在六边形内）。铅笔/线/矩形经 _put，填充另在 _flood 判。
+func _mask_ok(p: Vector2i) -> bool:
+	return paint_mask.is_empty() or paint_mask.has(p)
 
 func _paint(p: Vector2i) -> void:
 	_put(p)
@@ -341,6 +358,8 @@ func _flood(p: Vector2i) -> void:
 		var q: Vector2i = stack.pop_back()
 		if not _in(q) or not img.get_pixelv(q).is_equal_approx(target):
 			continue
+		if not _mask_ok(q):   # 填充不越六边形
+			continue
 		img.set_pixelv(q, brush)
 		stack.append(Vector2i(q.x + 1, q.y)); stack.append(Vector2i(q.x - 1, q.y))
 		stack.append(Vector2i(q.x, q.y + 1)); stack.append(Vector2i(q.x, q.y - 1))
@@ -349,7 +368,7 @@ func _flood(p: Vector2i) -> void:
 func _select_rect(a: Vector2i, b: Vector2i) -> void:
 	_sel = {}
 	var xa := clampi(mini(a.x, b.x), 0, px_size - 1); var xb := clampi(maxi(a.x, b.x), 0, px_size - 1)
-	var ya := clampi(mini(a.y, b.y), 0, px_size - 1); var yb := clampi(maxi(a.y, b.y), 0, px_size - 1)
+	var ya := clampi(mini(a.y, b.y), 0, px_h - 1); var yb := clampi(maxi(a.y, b.y), 0, px_h - 1)
 	for y in range(ya, yb + 1):
 		for x in range(xa, xb + 1):
 			_sel[Vector2i(x, y)] = true
@@ -392,7 +411,7 @@ func _commit_float() -> void:
 	var ns := {}
 	for e in _float:
 		var fp: Vector2i = e["p"] + _float_off
-		if _in(fp) and e["c"].a > 0.0:
+		if _in(fp) and _mask_ok(fp) and e["c"].a > 0.0:   # 落定也守遮罩（与 _put/_flood 一致，选区拖移/粘贴不越六边形）
 			img.set_pixelv(fp, e["c"])
 			ns[fp] = true
 	_float = []; _float_off = Vector2i.ZERO

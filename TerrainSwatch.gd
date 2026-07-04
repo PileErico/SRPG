@@ -13,6 +13,7 @@ var _tile := {"terrain": "plain", "variant": "grassland"}
 func _init() -> void:
 	custom_minimum_size = Vector2(46, 44)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE   # 点击穿透到父按钮（选笔刷）
+	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST   # 像素瓦片放大不糊（Control 不继承）
 
 func set_tile(terrain: String, variant: String) -> void:
 	_tile = {"terrain": String(terrain), "variant": String(variant)}
@@ -23,4 +24,5 @@ func _draw() -> void:
 	if e == null:
 		return
 	# seed=0：笔刷缩略图不做坐标扰动（要规整、可代表该地形），与地图格的「同一份绘制」只差扰动种子
-	HexTileRender.draw_tile(self, size * 0.5, RADIUS, Color.html(e.color), Color.html(e.accent), str(e.get("decor", "none")), 0)
+	var art: Array = e.get("art", [])   # 有手绘变体则笔刷也显手绘（art[0] 代表版）
+	HexTileRender.draw_tile(self, size * 0.5, RADIUS, Color.html(e.color), Color.html(e.accent), str(e.get("decor", "none")), 0, true, art)

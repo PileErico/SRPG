@@ -7,19 +7,162 @@ extends RefCounted
 ## 注意：decor 偏移按半径 24（地图原始尺寸）设计；draw_tile 的 size 只改六边形大小，decor 用原生偏移——
 ##       故笔刷缩略图用接近 24 的半径（如 21）即与地图格一致；要更小的缩略图再引入 scale。
 
-const OUTLINE := Color(0, 0, 0, 0.35)
-const DECOR_WIDTH := 1.6
+const TextureCache := preload("res://TextureCache.gd")   # 手绘瓦片贴图加载（get_tex：优先导入资源，回落 Image.load）
 
-# 画一个地块：hex 多边形(color) + 黑描边 + decor(accent 线稿)。
-# center=格心；size=中心到顶点半径；seed=decor 扰动种子（0＝不扰动，用于笔刷缩略图）；with_decor=false 时只画底色+描边。
-static func draw_tile(ci: CanvasItem, center: Vector2, size: float, color: Color, accent: Color, decor: String, seed: int = 0, with_decor: bool = true) -> void:
-	var pts := corners(center, size)
-	ci.draw_colored_polygon(pts, color)
-	var outline := PackedVector2Array(pts)
-	outline.append(pts[0])
-	ci.draw_polyline(outline, OUTLINE, 1.0)
-	if with_decor:
+const DECOR_WIDTH := 1.6
+# —— 像素地块烘焙参数 ——
+# 瓦片美术分辨率（flat-top hex 外接框 宽×高）＝对齐 Unciv FantasyHex 底地形 32×28，也与角色 32px 素材统一像素密度。
+# 32/28=1.143 正是 flat-top 比例（2/√3）；地图格宽 48 → 贴图 32 → NEAREST 放大 1.5× 呈块状像素。
+const TILE_W := 32
+const TILE_H := 28
+const SQRT3 := 1.7320508
+const TILE_VARIANTS := 3     # 每地形烘几张变体，散列选用破"印章"重复感
+const SHADE_TOP := 0.08      # 顶光：上缘提亮
+const SHADE_BOT := 0.10      # 顶光：下缘压暗
+const EDGE_DARK := 0.14      # 像素边缘一圈压暗（格网可读 + 立体；别太重免鳞缝感）
+const TILE_OVERLAP := 1.14   # 瓦片放大系数(>1)：相邻格重叠，后排先画→前排实心顶盖住后排烘死底边侧壁；
+                             # 内部无缝(仿 Unciv 拼接)，只边界/高差/无前格处露边。也顺带消透明缝黑点。
+const NOISE_HI := 0.90       # 抖色阈值：> 提亮（稀疏——只点缀 ~10% 像素，避免"重噪糊感"）
+const NOISE_LO := 0.10       # 抖色阈值：< 压暗（~10%）
+# 已烘成像素 decor 的地形（这些不再叠矢量 decor；其余仍走矢量线稿，后续逐步补）
+const BAKED_DECOR := ["grass", "wave"]
+
+static var _tile_cache := {}   # "颜色_accent_decor_变体" -> ImageTexture（程序烘焙，缓存复用）
+
+# 画一个地块：程序烘焙的像素 hex 底(含已像素化的 decor) + 未像素化 decor 暂留矢量线稿。
+# center=格心；size=中心到顶点半径；seed=变体/扰动种子（0＝变体0，用于笔刷缩略图）；with_decor=false 时只画底。
+static func draw_tile(ci: CanvasItem, center: Vector2, size: float, color: Color, accent: Color, decor: String, seed: int = 0, with_decor: bool = true, art: Array = []) -> void:
+	# 底边对齐 + 放大重叠：贴图按宽缩放、底缘钉在 hex 底、可向上探出（山/林高出格）。
+	# 放大 TILE_OVERLAP 让相邻格重叠，后排(上)先画→前排(下)后画盖住后排烘死底边侧壁 → 内部无缝、只边界露边。
+	var dw := 2.0 * size * TILE_OVERLAP
+	var bottom := center.y + SQRT3 * size * 0.5
+	# 优先：手绘变体贴图（按 seed 确定性选一张）；自带 decor/边缘，不再叠程序 decor
+	# get_tex_file＝强制原始文件解码，免工坊运行期覆写后命中旧 .ctex
+	if not art.is_empty():
+		var htex := TextureCache.get_tex_file(pick_art(art, seed))
+		if htex != null:
+			_draw_anchored(ci, htex, center.x, bottom, dw)
+			return
+	# 兜底：程序烘焙像素底（顶光/轻噪/像素 decor/像素边缘都已烘进纹理）
+	var tex := _tile_tex(color, accent, decor, absi(seed) % TILE_VARIANTS)
+	_draw_anchored(ci, tex, center.x, bottom, dw)
+	if with_decor and not BAKED_DECOR.has(decor):
 		draw_decor(ci, decor, center, accent, seed)
+
+# 底边对齐画贴图：按目标宽 dw 等比缩放，底缘钉在 bottom，超出的高度向上探出（覆盖后排上格）。
+static func _draw_anchored(ci: CanvasItem, tex: Texture2D, cx: float, bottom: float, dw: float) -> void:
+	var tw := float(maxi(1, tex.get_width()))
+	var scale := dw / tw
+	var dh := float(tex.get_height()) * scale
+	ci.draw_texture_rect(tex, Rect2(cx - dw * 0.5, bottom - dh, dw, dh), false)
+
+# 手绘瓦片贴图分辨率（＝程序烘的 24×21，两条路 1:1 对齐）。
+static func tile_px_size() -> Vector2i:
+	return Vector2i(TILE_W, TILE_H)
+
+# 像素坐标 (x,y) 是否落在瓦片 flat-top 六边形内（工坊 mask/轮廓与烘焙同一判定，永不漂移）。
+static func tile_hex_contains(x: int, y: int) -> bool:
+	var s := tile_px_size()
+	return _in_hex(float(x) - float(s.x - 1) * 0.5, float(y) - float(s.y - 1) * 0.5, float(s.x) * 0.5)
+
+# 按 seed 从变体数组确定性选一张路径（空→""）。纯函数、可测。
+static func pick_art(art: Array, seed: int) -> String:
+	return "" if art.is_empty() else str(art[absi(seed) % art.size()])
+
+# 程序烘焙一张像素 hex 地面贴图（flat-top，宽 2·24/PPU、高 √3·24/PPU）：顶光渐变 + 轻噪 + 像素 decor + 像素边缘。
+# 按 (color, accent, decor, variant) 缓存——同参只烘一次，画进静态块、per-frame 零成本。
+static func _tile_tex(color: Color, accent: Color, decor: String, variant: int) -> ImageTexture:
+	var key := "%d_%d_%s_%d" % [color.to_rgba32(), accent.to_rgba32(), decor, variant]
+	if _tile_cache.has(key):
+		return _tile_cache[key]
+	var w := TILE_W    # 32
+	var h := TILE_H    # 28
+	var img := Image.create(w, h, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0, 0, 0, 0))
+	var cx := (w - 1) * 0.5
+	var cy := (h - 1) * 0.5
+	var r := w * 0.5
+	# 1) 填 hex 内部：顶光竖向渐变 + 稀疏轻噪（点缀而非满屏抖）
+	for y in h:
+		for x in w:
+			if not _in_hex(float(x) - cx, float(y) - cy, r):
+				continue
+			var vt: float = clampf((float(y) - cy) / (h * 0.5), -1.0, 1.0)
+			var c := color.lightened(-vt * SHADE_TOP) if vt < 0.0 else color.darkened(vt * SHADE_BOT)
+			var n := _hash01(x, y, variant)
+			if n > NOISE_HI:
+				c = c.lightened(0.05)
+			elif n < NOISE_LO:
+				c = c.darkened(0.06)
+			img.set_pixel(x, y, c)
+	# 2) 像素化 decor（认真做草/水；其余地形靠矢量 decor 暂代）
+	match decor:
+		"grass": _bake_grass(img, accent, variant)
+		"wave": _bake_wave(img, accent, variant)
+	# 3) 像素边缘：hex 内、任一四邻为透明的贴边像素压暗（alpha 不变、边判定稳定）
+	for y in h:
+		for x in w:
+			if img.get_pixel(x, y).a <= 0.0:
+				continue
+			var edge := false
+			for d: Vector2i in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+				var nx := x + d.x
+				var ny := y + d.y
+				if nx < 0 or ny < 0 or nx >= w or ny >= h or img.get_pixel(nx, ny).a <= 0.0:
+					edge = true
+					break
+			if edge:
+				img.set_pixel(x, y, img.get_pixel(x, y).darkened(EDGE_DARK))
+	var tex := ImageTexture.create_from_image(img)
+	_tile_cache[key] = tex
+	return tex
+
+# 只在 hex 地面内(不透明)落一个像素——像素 decor 的落笔单元。
+static func _put(img: Image, x: int, y: int, c: Color) -> void:
+	if x < 0 or y < 0 or x >= img.get_width() or y >= img.get_height():
+		return
+	if img.get_pixel(x, y).a <= 0.0:
+		return
+	img.set_pixel(x, y, c)
+
+# 草地：几丛像素草叶（accent 亮绿竖 2~3px + 暗根 + 点缀亮点），位置按 variant 散列。
+static func _bake_grass(img: Image, accent: Color, variant: int) -> void:
+	var w := img.get_width()
+	var h := img.get_height()
+	var dark := accent.darkened(0.22)
+	for i in 5:
+		var bx := int(3.0 + _hash01(i * 13 + 1, variant, 3) * float(w - 6))
+		var by := int(float(h) * 0.5 + _hash01(i * 13 + 2, variant, 7) * float(h) * 0.36)
+		_put(img, bx, by, dark)          # 根
+		_put(img, bx, by - 1, accent)    # 叶
+		_put(img, bx, by - 2, accent)
+		_put(img, bx + 1, by - 1, dark)  # 旁叶
+
+# 水面：几行像素波纹（accent 亮蓝短横 dash，行间错相），位置按 variant 散列。
+static func _bake_wave(img: Image, accent: Color, variant: int) -> void:
+	var w := img.get_width()
+	var h := img.get_height()
+	for ri in 3:
+		var ry := int(float(h) * (0.28 + 0.23 * float(ri)))
+		var x := 2 + int(_hash01(ri + 1, variant, 5) * 4.0)
+		while x < w - 2:
+			_put(img, x, ry, accent)
+			_put(img, x + 1, ry, accent)
+			x += 5
+
+# 点 (px,py)（相对格心）是否在 flat-top 六边形内（外接半径 r）。
+static func _in_hex(px: float, py: float, r: float) -> bool:
+	var hy := absf(py)
+	if hy > r * (SQRT3 * 0.5):
+		return false
+	return SQRT3 * absf(px) + hy <= SQRT3 * r
+
+# 确定性 [0,1) 值噪声（抖色种子；同 (x,y,variant) 恒定 → 不闪）。
+static func _hash01(x: int, y: int, v: int) -> float:
+	var hh := (x * 374761393 + y * 668265263 + v * 362437) & 0x7fffffff
+	hh = (hh ^ (hh >> 13)) * 1274126177
+	hh = hh ^ (hh >> 16)
+	return float(hh & 0xffff) / 65535.0
 
 # 平顶六边形顶点（世界/局部坐标）
 static func corners(center: Vector2, size: float) -> PackedVector2Array:

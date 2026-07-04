@@ -9,6 +9,7 @@ const HexGrid := preload("res://HexGrid.gd")   # 纯六边形几何前置（取�
 const HexTileRender := preload("res://HexTileRender.gd")   # 地块渲染单一实现（底色+decor；笔刷缩略图同用）
 const LocationMarker := preload("res://LocationMarker.gd")   # 地点标记线稿库（按类型画符号；将来位图素材可覆盖）
 const TextureCache := preload("res://TextureCache.gd")   # 纹理加载缓存（地点位图素材覆盖用）
+const TerrainDB := preload("res://TerrainDB.gd")   # 取地形 entry 的手绘瓦片 art（有则优先于程序烘）
 const HEX_SIZE := 24.0
 const MIN_ZOOM := 0.2
 const MAX_ZOOM := 4.0
@@ -60,6 +61,7 @@ func _ready() -> void:
 	clip_contents = true  # 缩放/平移越界的格子裁掉、不溢出侧边栏（裁整棵静态子树）
 	_static_root = Node2D.new()
 	_static_root.show_behind_parent = true   # 整棵静态子树画在本体动态层之下
+	_static_root.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST   # 像素地块贴图放大不糊（子块继承）
 	add_child(_static_root)
 	_sync_static_transform()
 	mouse_exited.connect(_on_mouse_exit)
@@ -68,7 +70,7 @@ func _ready() -> void:
 # 视图变换（平移 view_offset + 缩放 view_zoom）→ _static_root 节点变换。平移/缩放只调这个（GPU、不重画）。
 func _sync_static_transform() -> void:
 	if _static_root != null:
-		_static_root.position = view_offset
+		_static_root.position = view_offset.round()   # 整像素对齐：像素地块平移不撕裂（Stage 1 再做缩放量化+动态层同源）
 		_static_root.scale = Vector2(view_zoom, view_zoom)
 
 # 纯视图变化（平移/缩放）：只移 _static_root + 重画动态层。块随之移动、Godot 自动剔除离屏块 → 不卡。
@@ -274,11 +276,20 @@ func _paint_chunk(ci: CanvasItem, cx: int, cy: int) -> void:
 	var row0 := cy * CHUNK
 	var col1 := mini(editor.width, col0 + CHUNK)
 	var row1 := mini(editor.height, row0 + CHUNK)
+	# Diamond Down：按屏幕 y 升序画（下方格后画→盖住上方格的左下+右下侧壁），内部无缝、只边界/无下邻格处露边。
+	var _cells := []
 	for row in range(row0, row1):
 		for col in range(col0, col1):
-			var tile = editor.tiles[row][col]
-			var seed: int = col * 73856093 ^ row * 19349663   # 每格确定性种子（扰动去印章感；纯函数、重绘不闪）
-			HexTileRender.draw_tile(ci, hex_center(col, row), HEX_SIZE, editor.color_for_tile(tile), editor.accent_for_tile(tile), editor.decor_for_tile(tile), seed, true)
+			_cells.append(Vector2i(col, row))
+	_cells.sort_custom(func(a, b): return hex_center(a.x, a.y).y < hex_center(b.x, b.y).y)
+	for _c: Vector2i in _cells:
+		var col := _c.x
+		var row := _c.y
+		var tile = editor.tiles[row][col]
+		var seed: int = col * 73856093 ^ row * 19349663   # 每格确定性种子（扰动去印章感；纯函数、重绘不闪）
+		var _e = TerrainDB.entry_for(tile)                 # O(1) 取地形 entry → 手绘 art（有则优先）
+		var _art: Array = TerrainDB.art_of(_e)             # 经单一源守卫访问器：null/非数组都安全返 []
+		HexTileRender.draw_tile(ci, hex_center(col, row), HEX_SIZE, editor.color_for_tile(tile), editor.accent_for_tile(tile), editor.decor_for_tile(tile), seed, true, _art)
 	for row in range(row0, row1):
 		for col in range(col0, col1):
 			_seam_cell(ci, col, row)
