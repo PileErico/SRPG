@@ -2,18 +2,22 @@
   "empire_infantry": {
     "palettes": {
       "body": "",
+      "cslot_1": "",
       "cslot_2": "",
+      "hair": "",
       "helmet": ""
     },
     "parts": {
       "body": "body_base_body_32x32",
+      "cslot_1": "shield_new",
       "cslot_2": "cslot_2_new",
+      "hair": "hair_new",
       "helmet": "helmet_new"
     },
     "piece": {
-      "dx": 1,
-      "dy": 19,
-      "scale": 2
+      "dx": 0,
+      "dy": 0,
+      "size_mult": 1
     }
   }
 }

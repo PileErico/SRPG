@@ -13,6 +13,8 @@ const TextureCache := preload("res://TextureCache.gd")
 
 # 亮度权重（Rec.601），与换色 shader 一致。
 const LUMA := Vector3(0.299, 0.587, 0.114)
+# 判定「不透明」的 alpha 阈值（度量锚点用；NEAREST 像素图基本非 0 即 1，留点余量容边缘半透）。
+const ALPHA_EPS := 0.02
 
 static var _bake_cache := {}   # 配方签名 -> ImageTexture（换装/换色才重烘）
 static var _img_cache := {}    # 部件贴图 Image 缓存（编辑部件后须 clear_cache 清，否则显示旧图）
@@ -125,6 +127,57 @@ static func export_png(recipe: Dictionary, path: String, scale: int = 1) -> bool
 	if scale > 1:
 		img.resize(img.get_width() * scale, img.get_height() * scale, Image.INTERPOLATE_NEAREST)
 	return img.save_png(path) == OK
+
+# —— 度量（棋子锚点）——
+# 扫一张合成/导出图的不透明像素，量出「归一化站立锚点」，供 UnitPiece 自动对齐底盘 + 归一高度 + 贴身环宽。
+# 返回全画布相对 [0,1]（与画布边长/导出倍数无关，同一配方 32×32 bake 与 N× 导出量得一致）：
+#   fx = 站立中心 x（底部脚层不透明质心）  fy = 脚底 y（最低不透明行下沿）
+#   bh = 角色实高占比（包围盒高 ÷ 画布高，高度归一用）  fw = 站宽占比（脚层不透明宽 ÷ 画布宽，环宽用）
+# 纯函数、不改入参。空图/全透明 → 居中站底兜底。
+static func measure_anchor(img: Image) -> Dictionary:
+	var fallback := {"fx": 0.5, "fy": 1.0, "bh": 1.0, "fw": 0.5}
+	if img == null:
+		return fallback
+	var w := img.get_width()
+	var h := img.get_height()
+	if w <= 0 or h <= 0:
+		return fallback
+	var minx := w
+	var maxx := -1
+	var miny := h
+	var maxy := -1
+	for y in h:
+		for x in w:
+			if img.get_pixel(x, y).a > ALPHA_EPS:
+				minx = mini(minx, x)
+				maxx = maxi(maxx, x)
+				miny = mini(miny, y)
+				maxy = maxi(maxy, y)
+	if maxx < 0:   # 全透明
+		return fallback
+	var bbox_h := maxy - miny + 1
+	# 脚层＝包围盒底部若干行（≥2 行或 15% 高），取其不透明质心/宽度作站立点/站宽
+	var foot_rows := maxi(2, int(round(float(bbox_h) * 0.15)))
+	var y0 := maxi(miny, maxy - foot_rows + 1)
+	var fminx := w
+	var fmaxx := -1
+	var sum_x := 0.0
+	var cnt := 0
+	for y in range(y0, maxy + 1):
+		for x in range(minx, maxx + 1):
+			if img.get_pixel(x, y).a > ALPHA_EPS:
+				fminx = mini(fminx, x)
+				fmaxx = maxi(fmaxx, x)
+				sum_x += float(x)
+				cnt += 1
+	var foot_cx := (sum_x / float(cnt)) if cnt > 0 else float(minx + maxx) * 0.5
+	var foot_w := (fmaxx - fminx + 1) if fmaxx >= 0 else (maxx - minx + 1)
+	return {
+		"fx": (foot_cx + 0.5) / float(w),
+		"fy": (float(maxy) + 1.0) / float(h),
+		"bh": float(bbox_h) / float(h),
+		"fw": float(foot_w) / float(w),
+	}
 
 static func clear_cache() -> void:
 	_bake_cache.clear()

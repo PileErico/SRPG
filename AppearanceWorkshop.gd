@@ -12,9 +12,11 @@ const TextureCache := preload("res://TextureCache.gd")
 const PixelDrawCanvas := preload("res://PixelDrawCanvas.gd")
 const UnitFactory := preload("res://UnitFactory.gd")
 const PiecePreview := preload("res://PiecePreview.gd")
+const UnitPiece := preload("res://UnitPiece.gd")
 
 # 棋子放置微调（存进 look，供战场 UnitPiece 用）：scale 0=自动
 const FAC_COLORS := {"player": Color(0.36, 0.62, 0.32), "enemy": Color(0.72, 0.28, 0.26), "ally": Color(0.30, 0.55, 0.70), "neutral": Color(0.55, 0.55, 0.58)}
+const SWATCHES_PATH := "res://data/appearance_swatches.json"   # 取色器色块预设持久化（游戏内 ColorPicker 不自动存，手动落盘）
 
 const PREVIEW_SCALE := 8
 const TILE := 52
@@ -30,7 +32,7 @@ var _scale_opt: OptionButton
 var _import_slot: OptionButton
 var _part_tiles := {}   # slot_id -> { part_id_or_"": Button }
 var _pal_tiles := {}    # slot_id -> { pal_id: Button }
-var _piece := {"scale": 2.0, "dx": 0.0, "dy": 24.0}   # 棋子放置微调（scale＝画布像素→世界像素）默认对齐值
+var _piece := {"size_mult": 1.0, "dx": 0.0, "dy": 0.0}   # 棋子微调：size_mult＝体型倍数(1=归一基准)，dx/dy＝可选微调(底盘对齐已自动)
 var _piece_preview: PiecePreview
 var _piece_fac := Color(0.36, 0.62, 0.32)
 var _piece_sliders := {}
@@ -82,6 +84,7 @@ func _titlebar() -> Control:
 	title.add_theme_font_size_override("font_size", 22)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bar.add_child(title)
+	bar.add_child(EditorUI.workshop_switch(self, "appearance"))   # 角色⇄地块 直达（共享组件）
 	var back := Button.new()
 	back.text = "返回主菜单"
 	back.pressed.connect(func(): get_tree().change_scene_to_file("res://StartMenu.tscn"))
@@ -147,6 +150,7 @@ func _slot_content(slot: Dictionary) -> Control:
 	for part in AppearanceDB.parts_in_slot(slot_id):
 		grid.add_child(_part_tile(slot_id, str(part.get("id", "")), part))
 	grid.add_child(_draw_tile(slot_id))                    # ＋ 绘制
+	grid.add_child(_import_tile(slot_id))                  # ⭳ 导入 PNG（进本总类文件夹）
 	box.add_child(grid)
 
 	if AppearanceDB.parts_in_slot(slot_id).any(func(p): return bool(p.get("recolorable", false))):
@@ -204,6 +208,61 @@ func _draw_tile(slot_id: String) -> Button:
 	b.add_theme_stylebox_override("normal", EditorTheme.sb(Color(0.16, 0.22, 0.18), Color(0.35, 0.55, 0.4)))
 	b.pressed.connect(func(): _open_draw(slot_id))
 	return b
+
+# 每总类一个「导入 PNG」格：直接导入进【本】总类文件夹（不再受右上角下拉默认身体影响）。
+func _import_tile(slot_id: String) -> Button:
+	var b := Button.new()
+	b.custom_minimum_size = Vector2(TILE, TILE)
+	b.focus_mode = Control.FOCUS_NONE
+	b.text = "⬇PNG"
+	b.add_theme_font_size_override("font_size", 11)
+	var s = AppearanceDB.get_slot(slot_id)
+	b.tooltip_text = "导入 PNG 到「%s」总类（复制进 icons/Parts/%s/）" % [str(s.get("cn", slot_id)) if s != null else slot_id, slot_id]
+	b.add_theme_stylebox_override("normal", EditorTheme.sb(Color(0.16, 0.2, 0.27), Color(0.4, 0.5, 0.64)))
+	b.pressed.connect(func(): _open_import(slot_id))
+	return b
+
+func _open_import(slot_id: String) -> void:
+	var dlg := EditorUI.make_file_dialog(FileDialog.FILE_MODE_OPEN_FILE, FileDialog.ACCESS_FILESYSTEM, [["*.png", "PNG 图片"]], false)
+	add_child(dlg)
+	dlg.file_selected.connect(func(path: String):
+		_import_into_slot(slot_id, path)
+		dlg.queue_free())
+	dlg.canceled.connect(func(): dlg.queue_free())
+	dlg.popup_centered_ratio(0.7)
+
+# 导入一张 PNG 到指定部件总类：**复制**进 icons/Parts/<slot>/<pid>.png 并登记（自包含，不引用外部源路径）。
+func _import_into_slot(slot_id: String, src_path: String) -> void:
+	if slot_id == "":
+		_set_msg("请先选择部件总类", false); return
+	var img := Image.new()
+	if img.load(src_path) != OK:
+		_set_msg("导入失败：读不了图片 %s" % src_path, false); return
+	# 部件 id（全局唯一，用作文件名）＝ 源文件名清洗后，冲突则加序号
+	var base := _sanitize_id(src_path.get_file().get_basename().to_lower())
+	if base == "":
+		base = "part"
+	var pid := base
+	var n := 1
+	while AppearanceDB.get_part(pid) != null:
+		n += 1; pid = "%s_%d" % [base, n]
+	var dir := "res://icons/Parts/" + slot_id
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(dir))
+	var dst := "%s/%s.png" % [dir, pid]
+	if img.save_png(dst) != OK:
+		_set_msg("导入失败（写盘）：%s" % dst, false); return
+	_clear_caches()
+	var part := {"id": pid, "slot": slot_id, "cn": src_path.get_file().get_basename(), "path": dst, "tags": [], "recolorable": true}
+	var existing := AppearanceDB.parts_in_slot(slot_id)
+	if not existing.is_empty() and existing[0].has("default_palette"):
+		part["default_palette"] = existing[0]["default_palette"]
+	if AppearanceDB.save_part(part):
+		var s = AppearanceDB.get_slot(slot_id)
+		_set_msg("已导入部件 %s → 「%s」（存入 %s）" % [pid, str(s.get("cn", slot_id)) if s != null else slot_id, dst], true)
+		_rebuild()
+		_pick_part(slot_id, pid)
+	else:
+		_set_msg("导入失败（写盘）", false)
 
 func _palette_swatch_none(slot_id: String) -> Button:
 	var b := Button.new()
@@ -341,16 +400,20 @@ func _build_piece_section() -> Control:
 	_piece_preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	vb.add_child(_piece_preview)
 	_piece_sliders = {}
-	_piece_sliders["scale"] = _slider(vb, "缩放", 0.3, 5.0, 0.05, float(_piece["scale"]), func(v): _piece["scale"] = v; _update_piece_preview())
-	_piece_sliders["dx"] = _slider(vb, "水平", -32, 32, 1, float(_piece["dx"]), func(v): _piece["dx"] = v; _update_piece_preview())
-	_piece_sliders["dy"] = _slider(vb, "垂直", -24, 24, 1, float(_piece["dy"]), func(v): _piece["dy"] = v; _update_piece_preview())
+	_piece_sliders["size_mult"] = _slider(vb, "体型", 0.3, 3.0, 0.05, float(_piece["size_mult"]), func(v): _piece["size_mult"] = v; _update_piece_preview())
+	_piece_sliders["dx"] = _slider(vb, "水平微调", -16, 16, 1, float(_piece["dx"]), func(v): _piece["dx"] = v; _update_piece_preview())
+	_piece_sliders["dy"] = _slider(vb, "垂直微调", -16, 16, 1, float(_piece["dy"]), func(v): _piece["dy"] = v; _update_piece_preview())
 	var rst := Button.new(); rst.text = "↺ 复位微调"; rst.focus_mode = Control.FOCUS_NONE
 	rst.pressed.connect(func(): _piece = _default_piece(); _sync_piece_sliders(); _update_piece_preview())
 	vb.add_child(rst)
 	return frame
 
 func _default_piece() -> Dictionary:
-	return {"scale": 2.0, "dx": 0.0, "dy": 24.0}
+	return {"size_mult": 1.0, "dx": 0.0, "dy": 0.0}
+
+# 编辑部件/换装换色后清三处缓存（贴图/烘焙/棋子锚点），保证画面即时刷新、锚点重量。
+func _clear_caches() -> void:
+	TextureCache.clear(); PaperDoll.clear_cache(); UnitPiece.clear_anchor_cache()
 
 func _mini_label(text: String) -> Label:
 	var l := Label.new(); l.text = text; l.add_theme_font_size_override("font_size", 12)
@@ -379,21 +442,25 @@ func _sync_piece_sliders() -> void:
 
 func _update_piece_preview() -> void:
 	if _piece_preview != null and is_instance_valid(_piece_preview):
-		_piece_preview.set_piece(PaperDoll.bake(_recipe), float(_piece["scale"]), float(_piece["dx"]), float(_piece["dy"]), _piece_fac)
+		_piece_preview.set_piece(PaperDoll.bake(_recipe), float(_piece["size_mult"]), float(_piece["dx"]), float(_piece["dy"]), _piece_fac)
 
 # —— recipe 逻辑 ——
 func _init_recipe() -> void:
+	# 默认只挂底子槽（裸素体），其余槽一律留空——避免"默认有的显示有的没有"的随机观感。
 	_recipe = {"parts": {}, "palettes": {}}
-	for slot in AppearanceDB.slots():
-		var slot_id := str(slot.get("id", ""))
-		if slot_id in ["helmet", "weapon"]:
-			continue
-		var parts := AppearanceDB.parts_in_slot(slot_id)
-		if parts.is_empty():
-			continue
-		var p: Dictionary = parts[0]
-		_recipe["parts"][slot_id] = str(p.get("id"))
-		_recipe["palettes"][slot_id] = ""   # 默认不换色（部件原色）
+	var base := _base_slot_id()
+	var parts := AppearanceDB.parts_in_slot(base)
+	if not parts.is_empty():
+		_recipe["parts"][base] = str(parts[0].get("id"))
+		_recipe["palettes"][base] = ""   # 默认不换色（部件原色）
+
+# 底子槽 id：约定为 "body"；无则退回 z 序最底的槽（底层＝素体）。
+func _base_slot_id() -> String:
+	var slots := AppearanceDB.slots()
+	for s in slots:
+		if str(s.get("id", "")) == "body":
+			return "body"
+	return str(slots[0].get("id", "")) if not slots.is_empty() else "body"
 
 func _pick_part(slot_id: String, part_id: String) -> void:
 	if part_id == "":
@@ -465,25 +532,12 @@ func _on_export() -> void:
 	dlg.canceled.connect(func(): dlg.queue_free())
 	dlg.popup_centered_ratio(0.7)
 
+# 顶部下拉式导入（选目标总类后导入）——与每总类的 ⭳ 格共用 _import_into_slot（复制进对应文件夹）。
 func _on_import() -> void:
-	var dlg := EditorUI.make_file_dialog(FileDialog.FILE_MODE_OPEN_FILE, FileDialog.ACCESS_RESOURCES, [["*.png", "PNG 图片"]], false)
-	dlg.current_dir = "res://icons/Parts"
+	var dlg := EditorUI.make_file_dialog(FileDialog.FILE_MODE_OPEN_FILE, FileDialog.ACCESS_FILESYSTEM, [["*.png", "PNG 图片"]], false)
 	add_child(dlg)
 	dlg.file_selected.connect(func(path: String):
-		var slot_id := str(_import_slot.get_item_metadata(_import_slot.selected))
-		var base := path.get_file().get_basename()
-		var pid := _sanitize_id((slot_id + "_" + base).to_lower())
-		var part := {"id": pid, "slot": slot_id, "cn": base, "path": path, "tags": [], "recolorable": true}
-		var existing := AppearanceDB.parts_in_slot(slot_id)
-		if not existing.is_empty() and existing[0].has("default_palette"):
-			part["default_palette"] = existing[0]["default_palette"]
-		if AppearanceDB.save_part(part):
-			TextureCache.clear(); PaperDoll.clear_cache()
-			_set_msg("已导入部件：%s → %s 槽" % [pid, slot_id], true)
-			_rebuild()
-			_pick_part(slot_id, pid)
-		else:
-			_set_msg("导入失败（写盘）", false)
+		_import_into_slot(str(_import_slot.get_item_metadata(_import_slot.selected)), path)
 		dlg.queue_free())
 	dlg.canceled.connect(func(): dlg.queue_free())
 	dlg.popup_centered_ratio(0.7)
@@ -524,7 +578,7 @@ func _delete_part_dialog(slot_id: String, pid: String, cn: String, path: String)
 				extra = "（文件删除失败）"
 		_close_overlay()
 		if ok:
-			TextureCache.clear(); PaperDoll.clear_cache()
+			_clear_caches()
 			_set_msg("已删除部件：%s%s" % [cn, extra], true)
 			_rebuild()
 		else:
@@ -546,7 +600,7 @@ func _prune_missing() -> void:
 					if str(_recipe["parts"][slot_id]) == pid:
 						_recipe["parts"].erase(slot_id)
 	if removed > 0:
-		TextureCache.clear(); PaperDoll.clear_cache()
+		_clear_caches()
 		_set_msg("已清理 %d 个失效部件（文件不存在）" % removed, true)
 	else:
 		_set_msg("没有失效部件", true)
@@ -596,8 +650,10 @@ func _on_load_from_unit() -> void:
 		if typeof(look) == TYPE_DICTIONARY:
 			_recipe = {"parts": look.get("parts", {}).duplicate(), "palettes": look.get("palettes", {}).duplicate()}
 			var pc = look.get("piece", {})
-			if typeof(pc) == TYPE_DICTIONARY and not pc.is_empty():
-				_piece = {"scale": float(pc.get("scale", 2.0)), "dx": float(pc.get("dx", 0.0)), "dy": float(pc.get("dy", 24.0))}
+			if typeof(pc) == TYPE_DICTIONARY and pc.has("size_mult"):
+				_piece = {"size_mult": float(pc.get("size_mult", 1.0)), "dx": float(pc.get("dx", 0.0)), "dy": float(pc.get("dy", 0.0))}
+			else:
+				_piece = _default_piece()   # 旧配方(scale/dx/dy)按全自动重置
 			_rebuild()
 			_set_msg("已载入 %s 的外观" % id, true))
 
@@ -618,7 +674,7 @@ func _apply_to_proto(id: String, set_icon: bool, set_portrait: bool) -> void:
 	if set_icon: proto["icon"] = path; which.append("棋子图标")
 	if UnitFactory.save_prototype(proto):
 		AppearanceDB.save_look(id, {"parts": _recipe["parts"], "palettes": _recipe["palettes"], "piece": _piece})
-		TextureCache.clear(); PaperDoll.clear_cache()
+		_clear_caches()
 		_set_msg("已应用到「%s」：%s → %s" % [str(proto.get("name", id)), "/".join(which), path], true)
 	else:
 		_set_msg("保存原型失败（写盘）", false)
@@ -665,6 +721,8 @@ func _add_slot_dialog() -> void:
 	var t := Label.new(); t.text = "新增部件总类"; t.add_theme_font_size_override("font_size", 18); vb.add_child(t)
 	var name_edit := LineEdit.new(); name_edit.placeholder_text = "名称，如 披风 / 翅膀 / 尾巴"
 	vb.add_child(EditorUI.field_row("名称", name_edit, 60))
+	var id_edit := LineEdit.new(); id_edit.placeholder_text = "文件夹名（留空＝按名称；英文更稳，如 cape）"
+	vb.add_child(EditorUI.field_row("文件夹", id_edit, 60))
 	var z_spin := SpinBox.new(); z_spin.min_value = 0; z_spin.max_value = 999; z_spin.step = 1; z_spin.value = AppearanceDB.max_z() + 10
 	vb.add_child(EditorUI.field_row("层级 z", z_spin, 60))
 	var hint := Label.new(); hint.text = "z 越大越靠前（盖住 z 小的）"; hint.add_theme_color_override("font_color", Color(0.6, 0.64, 0.7)); hint.add_theme_font_size_override("font_size", 11)
@@ -675,12 +733,18 @@ func _add_slot_dialog() -> void:
 	ok.pressed.connect(func():
 		var cn := name_edit.text.strip_edges()
 		if cn == "":
-			return
-		var id := "cslot_1"; var n := 1
+			_set_msg("名称不能为空", false); return
+		# 文件夹 id：优先用户填的；留空＝按名称清洗（保留中文，A-Z 转小写，去空格/非法字符）
+		var id := _slot_folder_id(id_edit.text.strip_edges())
+		if id == "":
+			id = _slot_folder_id(cn)
+		if id == "":
+			id = "slot"
+		var base_id := id; var n := 1
 		while AppearanceDB.get_slot(id) != null:
-			n += 1; id = "cslot_%d" % n
+			n += 1; id = "%s_%d" % [base_id, n]   # 撞名才加序号，不再一律 cslot_N
 		if AppearanceDB.save_slot({"id": id, "cn": cn, "z": int(z_spin.value)}):
-			_set_msg("已新增部件总类：%s" % cn, true)
+			_set_msg("已新增部件总类：%s（文件夹 icons/Parts/%s/）" % [cn, id], true)
 			_close_overlay()
 			_rebuild()
 		else:
@@ -721,7 +785,7 @@ func _delete_slot_confirm(slot_id: String, cn: String) -> void:
 			_recipe["parts"].erase(slot_id)
 			_recipe["palettes"].erase(slot_id)
 			if AppearanceDB.delete_slot(slot_id):
-				TextureCache.clear(); PaperDoll.clear_cache()
+				_clear_caches()
 				_set_msg("已删除部件总类：%s" % cn, true)
 				_rebuild()
 			else:
@@ -825,13 +889,16 @@ func _open_draw(slot_id: String) -> void:
 	var cp := ColorPicker.new(); cp.edit_alpha = false; cp.color = _paint.brush; cp.custom_minimum_size = Vector2(240, 0)
 	cp.color_changed.connect(func(c): _paint.brush = c)
 	_color_btn = cp
+	_load_swatches(cp)   # 载入持久化色块预设（先载入再连信号，免载入触发重复保存）
+	cp.preset_added.connect(func(_c): _save_swatches(cp))
+	cp.preset_removed.connect(func(_c): _save_swatches(cp))
 	side.add_child(cp)
 	mid.add_child(side)
 
 	# 底：id + 保存/取消
 	var bottom := HBoxContainer.new(); bottom.add_theme_constant_override("separation", 8); col.add_child(bottom)
 	bottom.add_child(EditorUI.label("部件 id"))
-	_draw_id_edit = LineEdit.new(); _draw_id_edit.text = "%s_new" % slot_id; _draw_id_edit.custom_minimum_size = Vector2(200, 0)
+	_draw_id_edit = LineEdit.new(); _draw_id_edit.text = _fresh_part_id(slot_id); _draw_id_edit.custom_minimum_size = Vector2(200, 0)
 	bottom.add_child(_draw_id_edit)
 	bottom.add_child(_hspacer())
 	var cancel := Button.new(); cancel.text = "取消"; cancel.pressed.connect(_close_overlay)
@@ -899,17 +966,35 @@ func _sync_color(c: Color) -> void:
 	if _color_btn != null and is_instance_valid(_color_btn):
 		_color_btn.color = c
 
+# 为该槽生成不与现有部件撞车的默认 id：<slot>_new，占用则加序号（免默认 id 撞名静默覆盖前一个）。
+func _fresh_part_id(slot_id: String) -> String:
+	var base := "%s_new" % slot_id
+	var pid := base
+	var n := 1
+	while AppearanceDB.get_part(pid) != null:
+		n += 1; pid = "%s_%d" % [base, n]
+	return pid
+
 func _save_drawn_part() -> void:
 	var id := _sanitize_id(_draw_id_edit.text)
 	if id == "":
 		_set_msg("部件 id 不能为空", false); return
+	# 撞已有 id＝覆盖：默认 id 已避让，走到这多是「载入编辑后原地存」或手填撞名——覆盖前先确认，别静默压掉别的部件。
+	var dup = AppearanceDB.get_part(id)
+	if dup != null:
+		EditorUI.confirm(self, "已存在部件「%s」（id=%s），保存将覆盖它。继续？" % [str(dup.get("cn", id)), id],
+			"覆盖", func(): _write_drawn_part(id), Callable(), "覆盖已有部件")
+		return
+	_write_drawn_part(id)
+
+func _write_drawn_part(id: String) -> void:
 	var dir := "res://icons/Parts/" + _draw_slot
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(dir))
 	var path := "%s/%s.png" % [dir, id]
 	var out_img := _paint.get_image()
 	if out_img.save_png(path) != OK:
 		_set_msg("保存失败（写盘）：%s" % path, false); return
-	TextureCache.clear(); PaperDoll.clear_cache()   # 避免旧 null/旧图缓存命中
+	_clear_caches()   # 避免旧 null/旧图缓存命中
 	var part := {"id": id, "slot": _draw_slot, "cn": id, "path": path, "tags": [], "recolorable": true}
 	var existing := AppearanceDB.parts_in_slot(_draw_slot)
 	if not existing.is_empty() and existing[0].has("default_palette"):
@@ -986,3 +1071,42 @@ func _sanitize_id(s: String) -> String:
 		else:
 			res += "_"
 	return res
+
+# 部件总类 id / 文件夹名清洗：保留 a-z0-9_ 与中文汉字（允许中文文件夹名），A-Z 转小写，其余(空格/路径非法字符)丢弃。
+func _slot_folder_id(s: String) -> String:
+	var out := ""
+	for i in s.length():
+		var ch := s[i]
+		var c := s.unicode_at(i)
+		if (ch >= "a" and ch <= "z") or (ch >= "0" and ch <= "9") or ch == "_":
+			out += ch
+		elif ch >= "A" and ch <= "Z":
+			out += ch.to_lower()
+		elif c >= 0x4E00 and c <= 0x9FFF:   # CJK 统一表意（允许中文文件夹名）
+			out += ch
+	return out
+
+# —— 取色器色块预设持久化（RGB hex 列表存 data/appearance_swatches.json；游戏内 ColorPicker 预设默认不落盘）——
+func _load_swatches(cp: ColorPicker) -> void:
+	if not FileAccess.file_exists(SWATCHES_PATH):
+		return
+	var f = FileAccess.open(SWATCHES_PATH, FileAccess.READ)
+	if f == null:
+		return
+	var d = JSON.parse_string(f.get_as_text())
+	f.close()
+	if typeof(d) != TYPE_ARRAY:
+		return
+	for hex in d:
+		var h := str(hex)
+		if Color.html_is_valid(h):
+			cp.add_preset(Color.html(h))
+
+func _save_swatches(cp: ColorPicker) -> void:
+	var arr := []
+	for c in cp.get_presets():
+		arr.append(c.to_html(false))   # RGB hex（edit_alpha=false，不存 alpha）
+	var f = FileAccess.open(SWATCHES_PATH, FileAccess.WRITE)
+	if f != null:
+		f.store_string(JSON.stringify(arr, "  "))
+		f.close()

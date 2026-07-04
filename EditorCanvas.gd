@@ -56,7 +56,13 @@ func _draw_units() -> void:
 	if editor.map_units.is_empty():
 		return
 	var on_unit: bool = editor.current_layer == "unit"
-	for e in editor.map_units:
+	# 按屏幕 y 升序画：前排(y 大)后画压住后排——精灵从脚下往上立，避免后排盖住前排
+	var ordered: Array = editor.map_units.duplicate()
+	ordered.sort_custom(func(a, b):
+		var ay: float = hex_center(int(a.get("col", 0)), int(a.get("row", 0))).y if typeof(a) == TYPE_DICTIONARY else 0.0
+		var by: float = hex_center(int(b.get("col", 0)), int(b.get("row", 0))).y if typeof(b) == TYPE_DICTIONARY else 0.0
+		return ay < by)
+	for e in ordered:
 		if typeof(e) != TYPE_DICTIONARY:
 			continue
 		var col := int(e.get("col", 0))

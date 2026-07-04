@@ -9,7 +9,7 @@ const R := 24.0   # 用地图原始格半径感
 
 var tex: Texture2D
 var fac := Color(0.36, 0.62, 0.32)
-var pscale := 0.0     # 0＝自动
+var size_mult := 1.0   # 体型倍数（1＝归一基准高）
 var dx := 0.0
 var dy := 0.0
 
@@ -18,8 +18,8 @@ func _ready() -> void:
 	custom_minimum_size = Vector2(260, 280)
 	clip_contents = true
 
-func set_piece(t: Texture2D, s: float, ddx: float, ddy: float, f: Color) -> void:
-	tex = t; pscale = s; dx = ddx; dy = ddy; fac = f
+func set_piece(t: Texture2D, sm: float, ddx: float, ddy: float, f: Color) -> void:
+	tex = t; size_mult = sm; dx = ddx; dy = ddy; fac = f
 	queue_redraw()
 
 func _draw() -> void:
@@ -36,4 +36,4 @@ func _draw() -> void:
 		Vector2(1.5 * R, -h), Vector2(1.5 * R, h), Vector2(-1.5 * R, -h), Vector2(-1.5 * R, h)]
 	for off in offs:
 		HexTileRender.draw_tile(self, c + off, R, grass, accent, "grass", 0)
-	UnitPiece.draw_piece(self, c, R * 0.62, tex, fac, {"scale": pscale, "dx": dx, "dy": dy})
+	UnitPiece.draw_piece(self, c, R * 0.62, tex, fac, {"size_mult": size_mult, "dx": dx, "dy": dy})

@@ -153,6 +153,34 @@ func _initialize() -> void:
 	AppearanceDB._path_override = ""
 	PaperDoll.clear_cache()
 
+	# ---------- D) measure_anchor（站立锚点：站中心/脚底/实高/站宽，归一化 [0,1]）----------
+	# 偏左窄块 x[1..2] y[3..6] on 8×8 → fx=0.25(偏左) fy=0.875 bh=0.5 fw=0.25
+	var am := Image.create(8, 8, false, Image.FORMAT_RGBA8)
+	am.fill(Color(0, 0, 0, 0))
+	for yy in range(3, 7):
+		for xx in range(1, 3):
+			am.set_pixel(xx, yy, Color(1, 1, 1, 1))
+	var a := PaperDoll.measure_anchor(am)
+	ck(abs(float(a["fx"]) - 0.25) < 0.02, "anchor fx＝站立中心(偏左)")
+	ck(abs(float(a["fy"]) - 0.875) < 0.02, "anchor fy＝脚底行下沿")
+	ck(abs(float(a["bh"]) - 0.5) < 0.02, "anchor bh＝包围盒实高占比")
+	ck(abs(float(a["fw"]) - 0.25) < 0.02, "anchor fw＝站宽占比")
+	# 宽躯干 + 窄脚：确认 fw 取脚层宽(0.2)而非肩宽(0.6)——底盘贴脚不贴肩
+	var am2 := Image.create(10, 10, false, Image.FORMAT_RGBA8)
+	am2.fill(Color(0, 0, 0, 0))
+	for yy in range(1, 6):          # 宽躯干 x[2..7]
+		for xx in range(2, 8):
+			am2.set_pixel(xx, yy, Color(1, 1, 1, 1))
+	for yy in range(6, 9):          # 窄脚 x[3..4]
+		for xx in range(3, 5):
+			am2.set_pixel(xx, yy, Color(1, 1, 1, 1))
+	var a2 := PaperDoll.measure_anchor(am2)
+	ck(abs(float(a2["fw"]) - 0.2) < 0.03, "anchor fw 取脚层宽(非肩宽)")
+	ck(float(a2["fx"]) > 0.30 and float(a2["fx"]) < 0.50, "anchor fx 以脚层为准")
+	# 全透明 → 居中站底兜底
+	var a3 := PaperDoll.measure_anchor(Image.create(4, 4, false, Image.FORMAT_RGBA8))
+	ck(abs(float(a3["fx"]) - 0.5) < 0.001 and abs(float(a3["fy"]) - 1.0) < 0.001, "全透明→居中站底兜底")
+
 	# ---------- E) PixelDrawCanvas 选区引擎（提取/移动/复制粘贴/删除） ----------
 	var pdc = PixelDrawCanvas.new()
 	pdc.setup(8, null, null)

@@ -97,9 +97,14 @@ func _draw() -> void:
 	if editor.move_mode:
 		_draw_move_path()
 	_draw_hover_unit()   # 行动顺序槽悬停 → 高亮该单位所在格（在单位 token 之下）
+	# 按屏幕 y 升序画：后排(y 小)先画、前排(y 大)后画——前面的单位压住后面的（精灵是从脚下往上立的）
+	var _vis := []
 	for u in editor.units:
 		if editor._unit_hidden_by_fog(u):
 			continue     # 迷雾里的敌人不渲染（看不到）
+		_vis.append(u)
+	_vis.sort_custom(func(a, b): return hex_center(a.col, a.row).y < hex_center(b.col, b.row).y)
+	for u in _vis:
 		_draw_unit(u)
 
 # 把一组格按给定色填充（范围层通用）
