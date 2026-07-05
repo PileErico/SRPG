@@ -746,7 +746,7 @@ func _refresh_info() -> void:
 			env_txt += "（余%d）" % _weather_left
 		_add_info("环境", env_txt)
 	_add_info("行动", "%s [%s]" % [u.unit_name, u.faction])
-	_add_info("AP", "%d / %d" % [u.ap, int(u.stats.get("AP_max", 0))])
+	_add_info("AP", "%d / %d" % [u.ap, int(u.effective_stat("AP_max"))])   # effective：含 +AP_max 修正（与 refresh/pip 同口径）
 	_add_info("移动点", str(u.move_points))
 
 func _add_info(k: String, v: String) -> void:

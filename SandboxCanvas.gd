@@ -378,7 +378,7 @@ func _draw_stat_bar(c: Vector2, r: float, dy: float, frac: float, fill_color: Co
 
 # token 下方一排 AP 点：实心=剩余可用 / 空心=已花（共 AP_max 个）
 func _draw_ap_pips(u, c: Vector2, r: float) -> void:
-	var ap_max := int(u.stats.get("AP_max", 0))
+	var ap_max := int(u.effective_stat("AP_max"))   # effective：与 refresh 刷满口径一致，否则 buff 时轨道格数与实心点错位
 	if ap_max <= 0:
 		return
 	var cur := int(u.ap)

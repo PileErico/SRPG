@@ -463,7 +463,7 @@ func _init(p_name := "新兵", p_faction := "player", p_col := 0, p_row := 0) ->
 
 # turn 开始：AP 刷新到上限，移动点清零（上一 turn 零头作废），技能冷却各 −1（按本单位 turn 计）。
 func refresh_for_turn() -> void:
-	ap = int(stats.get("AP_max", 0))
+	ap = effective_stat("AP_max")   # 走 effective：+AP_max buff/装备须刷满有效上限（裸读会少给 AP）
 	move_points = 0
 	for id in skills:
 		var c := int(skills[id].get("cd", 0))
