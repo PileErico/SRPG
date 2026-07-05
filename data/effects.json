@@ -1,0 +1,25 @@
+[
+  {
+    "id": "bleeding",
+    "name": "流血",
+    "icon": "",
+    "desc": "每回合按最大生命的百分比失去生命（无视护甲）。",
+    "kind": "debuff",
+    "tags": [
+      "bleeding"
+    ],
+    "duration_model": "fixed",
+    "duration": {
+      "base": 2,
+      "per_stat": {}
+    },
+    "permanent": false,
+    "expire_timing": "turn_end",
+    "stackable": false,
+    "max_stacks": 0,
+    "dot_pct_max_hp": 5,
+    "hot_flat": 0,
+    "mods": [],
+    "on_expire_apply": ""
+  }
+]
