@@ -47,6 +47,8 @@ func _initialize() -> void:
 		{"id": "t_stack", "name": "叠层", "kind": "debuff", "duration": {"base": 2}, "stackable": true, "max_stacks": 3},
 		{"id": "t_seed", "name": "引信", "kind": "debuff", "duration": {"base": 1}, "on_expire_apply": "t_boom"},
 		{"id": "t_boom", "name": "爆发", "kind": "debuff", "duration": {"base": 2}, "mods": [{"stat": "eva", "op": "flat", "value": -5}]},
+		{"id": "t_ts", "name": "架势", "kind": "buff", "duration": {"base": 1}, "expire_timing": "turn_start"},
+		{"id": "t_stun", "name": "眩晕", "kind": "debuff", "duration": {"base": 2}, "tags": ["incapacitated"]},
 	], "  "))
 	f.close()
 	EffectDB.reload_data()
@@ -111,6 +113,21 @@ func _initialize() -> void:
 	ck(an != null and not an.has("id"), "匿名路径：有 name 无 id")
 	ck(str(an.get("source", "")) == "buff:匿名减速", "匿名 source=buff:<name>")
 	ck(u6.effective_stat("eva") == 13, "匿名 mods 桥：eva 10+3=13")
+
+	# 8) expire_timing turn_start：回合末不递减、回合开始 tick 才到期（DoT/HoT 恒 turn_end 不受影响）
+	var u7 = mk()
+	s._add_effect(u7, {"id": "t_ts"})
+	s._apply_turn_end_effects(u7)
+	ck(_fx_of(u7, "t_ts") != null and int(_fx_of(u7, "t_ts").get("duration", 0)) == 1, "turn_start 效果：回合末不递减（duration 仍 1）")
+	s._apply_turn_start_effects(u7)
+	ck(_fx_of(u7, "t_ts") == null, "turn_start 效果：回合开始 tick 到期移除")
+
+	# 9) has_state：扫活跃 effects tags（失能/失语状态机查询）
+	var u8 = mk()
+	ck(not u8.has_state("incapacitated"), "无效果 → 无 incapacitated 状态")
+	s._add_effect(u8, {"id": "t_stun"})
+	ck(u8.has_state("incapacitated"), "挂眩晕 → has_state incapacitated")
+	ck(not u8.has_state("silenced"), "眩晕不带 silenced")
 
 	# 收尾
 	EffectDB._path_override = ""

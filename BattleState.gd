@@ -707,24 +707,50 @@ func _apply_turn_end_effects(u) -> Array:
 			if newhp > cur:
 				u.stats["HP"] = newhp
 				events.append({"type": "hot", "name": str(e.get("name", "回血")), "heal": newhp - cur})
-		if e.get("permanent", false):
+		# 时长递减只对「回合末到期」的效果（turn_end/缺省）；turn_start/round_end 在各自 tick 点递减（DoT/HoT 恒在此）。
+		if e.get("permanent", false) or str(e.get("expire_timing", "turn_end")) != "turn_end":
 			keep.append(e)
 		else:
-			var dur := int(e.get("duration", 0)) - 1
-			if dur > 0:
-				e["duration"] = dur
-				keep.append(e)
-			else:
-				_remove_mods_by_source(u, str(e.get("source", "buff:" + str(e.get("name", "")))))   # 到期：连带摘掉其挂的修正
-				events.append({"type": "expired", "name": str(e.get("name", ""))})
-				var chain := str(e.get("on_expire_apply", ""))
-				if chain != "":
-					chains.append(chain)
+			_countdown_and_expire(u, e, keep, events, chains)
 	u.effects = keep
-	for cid in chains:   # 两段式：第一段到期 → 就地施加第二段（EffectDB id 路径）
+	_apply_expire_chains(u, chains, events)
+	return events
+
+# 回合开始对称 tick（§2.2）：只递减/到期 expire_timing=="turn_start" 的效果（长剑架势等到期在回合开头）。
+# 不结算 DoT/HoT（那些恒在 turn_end）。执行顺序锁定：本 tick → 失能检查 → 行动（宿主 _begin_active_turn）。
+func _apply_turn_start_effects(u) -> Array:
+	var events := []
+	if u == null or not ("effects" in u) or u.effects.is_empty():
+		return events
+	var keep := []
+	var chains := []
+	for e in u.effects:
+		if e.get("permanent", false) or str(e.get("expire_timing", "turn_end")) != "turn_start":
+			keep.append(e)
+		else:
+			_countdown_and_expire(u, e, keep, events, chains)
+	u.effects = keep
+	_apply_expire_chains(u, chains, events)
+	return events
+
+# 单条效果时长 −1：>0 留下；≤0 到期（摘修正 + 记 expired 事件 + 收集 on_expire 连锁）。turn_start/turn_end 共用。
+func _countdown_and_expire(u, e, keep: Array, events: Array, chains: Array) -> void:
+	var dur := int(e.get("duration", 0)) - 1
+	if dur > 0:
+		e["duration"] = dur
+		keep.append(e)
+	else:
+		_remove_mods_by_source(u, str(e.get("source", "buff:" + str(e.get("name", "")))))   # 到期：连带摘掉其挂的修正
+		events.append({"type": "expired", "name": str(e.get("name", ""))})
+		var chain := str(e.get("on_expire_apply", ""))
+		if chain != "":
+			chains.append(chain)
+
+# 两段式连锁：到期效果的 on_expire_apply 第二段（循环外施加，防被 keep 覆盖）。决策20。
+func _apply_expire_chains(u, chains: Array, events: Array) -> void:
+	for cid in chains:
 		_add_effect(u, {"id": cid})
 		events.append({"type": "chain", "id": cid})
-	return events
 
 # ============ 死门 + 收尸（需求 §1.11 🔒；日志/编排在宿主）============
 

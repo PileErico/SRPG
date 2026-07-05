@@ -425,6 +425,14 @@ func effective_sight(time_mult: float) -> int:
 		m = maxf(m, 1.0)
 	return maxi(0, int(round(effective_stat("sight") * m)))
 
+# —— 状态机查询（§5）——是否具备某活跃状态 tag（扫活跃 effects 的 tags，不污染 permanent tags）。
+# 失能（incapacitated）/失语（silenced）等状态机消费点用；effects 到期即状态自然消失。
+func has_state(tag: String) -> bool:
+	for e in effects:
+		if (e.get("tags", []) as Array).has(tag):
+			return true
+	return false
+
 # ============ 技能（已学状态 / 学习 / 冷却 / 本战次数）============
 # 数值口径：冷却 = floor(base + 智力×per_int)（≥0）；本战次数 = floor(base + 智力×per_int)（≥1）。
 # 智力取 effective（含装备/特性修正）。
