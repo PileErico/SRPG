@@ -1090,6 +1090,10 @@ func _begin_active_turn() -> void:
 	var u = active_unit()
 	if u != null:
 		u.refresh_for_turn()   # AP 刷新、移动点清零
+		# 回合开始对称 tick（§2.2 顺序 tick→失能→行动）：递减/到期 turn_start 效果（架势等回合初到期）
+		for ev in _state._apply_turn_start_effects(u):
+			if str(ev.get("type", "")) == "expired":
+				_log_line("%s %s 结束" % [_cname(u), str(ev.get("name", ""))])
 	# 死门单位：无法移动/行动——自动检定后跳过 turn（仿 AI 未激活即过；call_deferred 断递归链防全员死门爆栈）
 	if u != null and u.tags.has("deaths_door"):
 		u.ap = 0
@@ -1097,6 +1101,14 @@ func _begin_active_turn() -> void:
 		_door_turn_check(u)
 		if not battle_over and active_unit() == u:   # 检定 −3 离场时 _handle_deaths 已推进，不再 end_turn
 			call_deferred("end_turn")
+		return
+	# 失能（眩晕/麻痹…带 incapacitated tag）：回合直接跳过——不行动即不行使 ZOC/借机（仿死门跳 turn）。
+	# DoT/时长仍在 end_turn 结算（失能状态自然随时长消退）。
+	if u != null and u.has_state("incapacitated"):
+		u.ap = 0
+		u.move_points = 0
+		_log_line("%s 失能，跳过回合" % _cname(u))
+		call_deferred("end_turn")
 		return
 	_clear_selection()         # 清掉上一单位的选中/移动状态
 	_refresh_info()
