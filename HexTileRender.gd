@@ -20,41 +20,80 @@ const TILE_VARIANTS := 3     # 每地形烘几张变体，散列选用破"印章
 const SHADE_TOP := 0.08      # 顶光：上缘提亮
 const SHADE_BOT := 0.10      # 顶光：下缘压暗
 const EDGE_DARK := 0.14      # 像素边缘一圈压暗（格网可读 + 立体；别太重免鳞缝感）
-const TILE_OVERLAP := 1.14   # 瓦片放大系数(>1)：相邻格重叠，后排先画→前排实心顶盖住后排烘死底边侧壁；
-                             # 内部无缝(仿 Unciv 拼接)，只边界/高差/无前格处露边。也顺带消透明缝黑点。
+# —— 对齐规范🔒（2026-07-04）——
+# 平顶六边形「最宽处」＝左右两顶点、在竖直正中，称「赤道」。瓦片按【最宽行 ↔ 格心水平线】对齐，
+# 等比缩放（目标宽 2·size / 贴图宽；art 32px → 48px 即 1.5×）。竖向的探出(山峰/树冠在赤道之上)
+# 与收缩(水/冰画得矮、缩在赤道附近)全由 art 像素自带 → 不手算竖向锚点、不放大基准六边形。
+# （旧 TILE_OVERLAP=1.14 会把「基准六边形」本身一起放大 → 美术溢出数学格、边线/点击错位，已废。）
 const NOISE_HI := 0.90       # 抖色阈值：> 提亮（稀疏——只点缀 ~10% 像素，避免"重噪糊感"）
 const NOISE_LO := 0.10       # 抖色阈值：< 压暗（~10%）
 # 已烘成像素 decor 的地形（这些不再叠矢量 decor；其余仍走矢量线稿，后续逐步补）
 const BAKED_DECOR := ["grass", "wave"]
 
 static var _tile_cache := {}   # "颜色_accent_decor_变体" -> ImageTexture（程序烘焙，缓存复用）
+static var _widest_cache := {}  # tex RID id -> 赤道行(最宽像素行中点)，加载时扫一遍缓存、per-frame 零成本
 
 # 画一个地块：程序烘焙的像素 hex 底(含已像素化的 decor) + 未像素化 decor 暂留矢量线稿。
 # center=格心；size=中心到顶点半径；seed=变体/扰动种子（0＝变体0，用于笔刷缩略图）；with_decor=false 时只画底。
 static func draw_tile(ci: CanvasItem, center: Vector2, size: float, color: Color, accent: Color, decor: String, seed: int = 0, with_decor: bool = true, art: Array = []) -> void:
-	# 底边对齐 + 放大重叠：贴图按宽缩放、底缘钉在 hex 底、可向上探出（山/林高出格）。
-	# 放大 TILE_OVERLAP 让相邻格重叠，后排(上)先画→前排(下)后画盖住后排烘死底边侧壁 → 内部无缝、只边界露边。
-	var dw := 2.0 * size * TILE_OVERLAP
-	var bottom := center.y + SQRT3 * size * 0.5
+	# 赤道对齐 + 等比 1.5×（见文件头「对齐规范」）：贴图最宽行钉在格心水平线、宽=2·size，竖向由 art 自带。
+	var dw := 2.0 * size
 	# 优先：手绘变体贴图（按 seed 确定性选一张）；自带 decor/边缘，不再叠程序 decor
 	# get_tex_file＝强制原始文件解码，免工坊运行期覆写后命中旧 .ctex
 	if not art.is_empty():
 		var htex := TextureCache.get_tex_file(pick_art(art, seed))
 		if htex != null:
-			_draw_anchored(ci, htex, center.x, bottom, dw)
+			_draw_equator(ci, htex, center, dw)
 			return
 	# 兜底：程序烘焙像素底（顶光/轻噪/像素 decor/像素边缘都已烘进纹理）
 	var tex := _tile_tex(color, accent, decor, absi(seed) % TILE_VARIANTS)
-	_draw_anchored(ci, tex, center.x, bottom, dw)
+	_draw_equator(ci, tex, center, dw)
 	if with_decor and not BAKED_DECOR.has(decor):
 		draw_decor(ci, decor, center, accent, seed)
 
-# 底边对齐画贴图：按目标宽 dw 等比缩放，底缘钉在 bottom，超出的高度向上探出（覆盖后排上格）。
-static func _draw_anchored(ci: CanvasItem, tex: Texture2D, cx: float, bottom: float, dw: float) -> void:
+# 赤道对齐画贴图：按目标宽 dw 等比缩放，令贴图「最宽行(赤道)」落在格心 center.y 上。
+# 竖向探出/收缩全由 art 像素相对赤道的位置决定（山峰在赤道上方、土坎在下方），不做额外锚点。
+static func _draw_equator(ci: CanvasItem, tex: Texture2D, center: Vector2, dw: float) -> void:
 	var tw := float(maxi(1, tex.get_width()))
 	var scale := dw / tw
 	var dh := float(tex.get_height()) * scale
-	ci.draw_texture_rect(tex, Rect2(cx - dw * 0.5, bottom - dh, dw, dh), false)
+	var top := center.y - _widest_row(tex) * scale
+	ci.draw_texture_rect(tex, Rect2(center.x - dw * 0.5, top, dw, dh), false)
+
+# 取贴图「赤道行」＝不透明像素最多的行里【最高(最靠上)的那一行】。
+# 为何取最高：最下面 3 行固定是崖裙（边线/假高度1/假高度2），会让贴图下半也接近满宽 → 最宽带向下延伸；
+# 取中点会被崖裙带偏低（贴图整体偏高、黄框看着比地块低）。最宽带的顶沿才是六边形真赤道。按 tex RID 缓存、只扫一次。
+static func _widest_row(tex: Texture2D) -> float:
+	var rid_id := tex.get_rid().get_id()
+	if _widest_cache.has(rid_id):
+		return _widest_cache[rid_id]
+	var row := _compute_widest_row(tex)
+	_widest_cache[rid_id] = row
+	return row
+
+static func _compute_widest_row(tex: Texture2D) -> float:
+	var img := tex.get_image()
+	if img == null:
+		return float(tex.get_height()) * 0.5   # 兜底：几何中点
+	var h := img.get_height()
+	var w := img.get_width()
+	var counts := PackedInt32Array()
+	counts.resize(h)
+	var best := 0
+	for y in h:
+		var cnt := 0
+		for x in w:
+			if img.get_pixel(x, y).a > 0.4:
+				cnt += 1
+		counts[y] = cnt
+		best = maxi(best, cnt)
+	if best <= 0:
+		return float(h) * 0.5
+	# 最宽带里【最高的一行】＝真赤道（崖裙在其下、会把最宽带向下拖，故不取中点/底沿）。
+	for y in h:
+		if counts[y] >= best:
+			return float(y)
+	return float(h) * 0.5
 
 # 手绘瓦片贴图分辨率（＝程序烘的 24×21，两条路 1:1 对齐）。
 static func tile_px_size() -> Vector2i:
