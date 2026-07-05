@@ -1,0 +1,106 @@
+extends SceneTree
+## 战斗伤害 golden 基线：对 BattleState._resolve_compute 的 out/伤害分量做数值断言。
+## 目的：把「一次命中 → 分量减伤链落血」的数学锁成不回归基线——阶段3 BAS 迁移、后续
+##       效能/护甲改动一旦静默改数就 FAIL（blocker 静默回归的可测护栏；见技能与效果系统.md §10 阶段0）。
+##
+## 确定化手法（无 flaky）：命中率 clamp[5,95] 无法钳到 100，但
+##   crit_rate=0 → randf()*100<0 恒 false（暴击结果与 RNG 无关）；
+##   block_rate=0 → 同理恒不格挡；
+##   施放前 seed(SEED) 使首个命中掷骰恒定 → 命中恒成立。
+## 故每个用例结果确定、可逐分量断言。
+## 运行：..._console.exe --headless --path "D:/1战棋" -s res://tools/test_combat_golden.gd（退出码 0=PASS）
+
+const BattleState := preload("res://BattleState.gd")
+const UnitC := preload("res://Unit.gd")
+
+const SEED := 20260705   # 该 seed 下首个 randf()*100 < 95 → 命中恒成立（_initialize 首条断言把关）
+
+var _fail := 0
+func ck(cond: bool, msg: String) -> void:
+	if not cond:
+		_fail += 1
+		push_error("[FAIL] " + msg)
+
+# 裸单位：清空修正/装备（effective==base），一套中性可控 stats，overrides 覆写。
+func mk(overrides: Dictionary):
+	var u = UnitC.new("测试", "player", 3, 3)   # 站草原（无效能层地块 grant → 地形因子=1.0）
+	u.modifiers = []
+	u.equipment = {}
+	var base := {
+		"HP": 100, "HP_max": 100, "armor": 0, "armor_max": 0,
+		"atk": 20, "acc": 200, "eva": 0,
+		"crit_rate": 0, "crit_dmg": 150,
+		"block_rate": 0, "block_power": 0,
+		"def_eff": 100, "atk_eff": 100,
+		"STR": 10, "DEX": 10, "INT": 5, "VIT": 5,
+		"res_phys": 0, "res_fire": 0, "res_ice": 0, "res_thunder": 0, "res_holy": 0,
+		"armor_res_phys": 0, "armor_res_fire": 0, "armor_res_ice": 0,
+		"armor_res_thunder": 0, "armor_res_holy": 0,
+		"dr_flat_human": 0, "dr_flat_armor": 0, "res_status": 0,
+	}
+	for k in overrides:
+		base[k] = overrides[k]
+	u.stats = base
+	return u
+
+# 确定化施放：每次施放前同 seed，命中/暴击/格挡结果恒定。
+func hit(s, a, t, skill) -> Dictionary:
+	seed(SEED)
+	return s._resolve_compute(a, t, skill)
+
+func _initialize() -> void:
+	print("=== 战斗伤害 golden 基线 测试开始 ===")
+	var s = BattleState.new()
+	s._new_grassland(9, 7)   # 草原棋盘：所有格无效能层 grant → 地形攻/防效能因子恒 1.0
+
+	# 0) 确定化前提：命中恒成立、暴击/格挡恒 false、效能/防御因子=1
+	var a0 = mk({})
+	a0.col = 1
+	a0.row = 1
+	var r0 := hit(s, a0, mk({"HP": 1000}), {"coeff": 1.0})
+	ck(r0["hit"], "命中恒成立（hc=95 + 固定 seed）")
+	ck(not r0["crit"], "crit_rate=0 → 恒不暴击")
+	ck(not r0["blocked"], "block_rate=0 → 恒不格挡")
+	ck(is_equal_approx(float(r0["aeff"]), 1.0), "atk_eff=100 且无地块 → 攻击效能因子=1")
+	ck(is_equal_approx(float(r0["def_factor"]), 1.0), "def_eff=100 → 防御因子=1")
+
+	# 1) 物理·无甲：out=atk×coeff=20；全进人（res=0）
+	var t1 = mk({"HP": 100})
+	var r1 := hit(s, a0, t1, {"coeff": 1.0})
+	ck(is_equal_approx(float(r1["out"]), 20.0), "out=20（atk20×coeff1）")
+	ck(int(r1["hp_loss"]) == 20 and int(r1["armor_loss"]) == 0, "无甲：hp_loss=20 armor_loss=0")
+	ck(int(t1.stats["HP"]) == 80, "落血后 HP=80")
+
+	# 2) 系数：coeff=0.5 → out=10
+	var r2 := hit(s, a0, mk({}), {"coeff": 0.5})
+	ck(is_equal_approx(float(r2["out"]), 10.0) and int(r2["hp_loss"]) == 10, "coeff0.5：out=10 hp_loss=10")
+
+	# 3) 甲吸收：armor=30 ≥ out20 → 全进甲、不伤血
+	var r3 := hit(s, a0, mk({"armor": 30}), {"coeff": 1.0})
+	ck(int(r3["armor_loss"]) == 20 and int(r3["hp_loss"]) == 0, "甲足：armor_loss=20 hp_loss=0")
+
+	# 4) 破甲溢出：armor=5 → 5 进甲、15 溢出进人
+	var r4 := hit(s, a0, mk({"armor": 5}), {"coeff": 1.0})
+	ck(int(r4["armor_loss"]) == 5 and int(r4["hp_loss"]) == 15, "溢出：armor_loss=5 hp_loss=15")
+
+	# 5) 人抗：res_phys=50 → hp_loss=out×0.5=10
+	var r5 := hit(s, a0, mk({"res_phys": 50}), {"coeff": 1.0})
+	ck(int(r5["hp_loss"]) == 10, "人抗50：hp_loss=10")
+
+	# 6) 穿甲：pen=0.5、甲厚不破（armor=1000）→ 人分量 10、甲分量 10
+	var r6 := hit(s, a0, mk({"armor": 1000}), {"coeff": 1.0, "armor_pen": 0.5})
+	ck(int(r6["hp_loss"]) == 10 and int(r6["armor_loss"]) == 10, "穿甲0.5：人10 甲10")
+
+	# 7) 格挡全域减伤：block_rate=100 恒格挡、block_power=50 → G=0.5 → hp_loss=10
+	var r7 := hit(s, a0, mk({"block_rate": 100, "block_power": 50}), {"coeff": 1.0})
+	ck(r7["blocked"] and int(r7["hp_loss"]) == 10, "格挡性能50：全域减伤×0.5 → hp_loss=10")
+
+	# 8) 补正：bonus{[STR,DEX]×0.5}=(10+10)×0.5=10（flat、不吃效能）→ out=30
+	var r8 := hit(s, a0, mk({}), {"coeff": 1.0, "bonus": {"stats": ["STR", "DEX"], "mult": 0.5}})
+	ck(is_equal_approx(float(r8["bonus"]), 10.0) and int(r8["hp_loss"]) == 30, "补正+10：out=30 hp_loss=30")
+
+	if _fail == 0:
+		print("=== 全部断言 PASS ===")
+	else:
+		print("=== 失败 %d 项 ===" % _fail)
+	quit(0 if _fail == 0 else 1)
