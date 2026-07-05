@@ -293,11 +293,27 @@ func _paint_chunk(ci: CanvasItem, cx: int, cy: int) -> void:
 	for row in range(row0, row1):
 		for col in range(col0, col1):
 			_seam_cell(ci, col, row)
+	# 放置物层：地形+过渡边之后，第二遍按 Diamond-Down 画带 object 的格 → 盖在地形之上
+	# （单位在动态层、仍高于此静态放置物层 → 单位＞放置物＞地形）。同 HexTileRender 赤道对齐，静态缓存。
+	for _c: Vector2i in _cells:
+		var ocell = editor.tiles[_c.y][_c.x]
+		if not (ocell is Dictionary):
+			continue
+		var obj = ocell.get("object")
+		if typeof(obj) != TYPE_DICTIONARY:
+			continue
+		var oseed: int = _c.x * 73856093 ^ _c.y * 19349663
+		var oart: Array = TerrainDB.art_of(TerrainDB.entry_for(obj))
+		HexTileRender.draw_tile(ci, hex_center(_c.x, _c.y), HEX_SIZE, TerrainDB.color_of(obj), TerrainDB.accent_of(obj), TerrainDB.decor_of(obj), oseed, true, oart)
 
 # 单格的地形过渡边（§4.4）：向「更靠后」邻格（下方/同行右侧）的**不同底色**公共边描一道「同色系更深」软线，
 # 让地形分界比同地形内边更清晰、柔化平涂拼接（极简：只加深、不渐变贴图）。去重使每条内边恰好画一次
 # （含跨块边——从「更靠前」那格所在块画，涂格时 refresh_cell 连带重画邻块保证边随两侧色更新）。
 func _seam_cell(ci: CanvasItem, col: int, row: int) -> void:
+	# 过渡边只给「无 art 的程序兜底块」描：art 瓦片自带像素边缘，再描一道纯属噪 → 有 art 直接跳过。
+	# （悬停高亮不受影响；整图皆 art 时等同关闭过渡边。见 HexTileRender 对齐规范。）
+	if not TerrainDB.art_of(TerrainDB.entry_for(editor.tiles[row][col])).is_empty():
+		return
 	var c0: Color = editor.color_for_tile(editor.tiles[row][col])
 	for nb in HexGrid.neighbors(Vector2i(col, row)):
 		if not _in_bounds(nb) or nb.y < row or (nb.y == row and nb.x <= col):

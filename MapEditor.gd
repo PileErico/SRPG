@@ -41,6 +41,19 @@ const CONFIG_PATH := "user://map_editor.cfg"   # 记住上次选的地图文件�
 # 每格仅两色：color（底色）+ accent（纹理线条色）。decor 决定线稿图案。
 var PALETTE := []
 
+# scope 过滤开关：false＝笔刷全通用(不分大/小地图)。机制(scope 字段 + in_scope)保留，将来置 true 恢复。
+const SCOPE_FILTER_ON := false
+
+# —— 笔刷分类管理（分组折叠 + ⋯ 菜单：新建/改名/删分类、笔刷改名/删除/移动）——
+var _brush_list_box: VBoxContainer      # 笔刷分组列表容器（重建时清空重填）
+var _brush_group: ButtonGroup           # 笔刷互斥组（重建复用）
+var _cat_collapsed := {}                # 分类名 -> 是否折叠（跨重建保留）
+var _prompt_dlg: ConfirmationDialog     # 通用文本输入弹窗（新建/改名分类、笔刷改名共用）
+var _prompt_edit: LineEdit
+var _prompt_lbl: Label
+var _prompt_cb := Callable()
+var _erase_object := false          # 橡皮·放置物：开则左键清除该格放置物
+
 # 新建画布的尺寸预设（下拉第 0 项是占位提示）
 const SIZE_PRESETS := [
 	{"label": "尺寸…", "w": 0,  "h": 0},
@@ -384,7 +397,7 @@ func _build_ui() -> void:
 
 func _build_brush_sidebar() -> Control:
 	var sidebar := VBoxContainer.new()
-	sidebar.custom_minimum_size = Vector2(180, 0)
+	sidebar.custom_minimum_size = Vector2(230, 0)
 
 	# —— 图层切换（互斥）：地形/线/区域/单位/触发/地点——线与地点仅大地图显示（_apply_map_type 门禁）
 	sidebar.add_child(EditorUI.section_title("图层"))
@@ -478,24 +491,302 @@ func _build_terrain_brushes() -> Control:
 	var box := VBoxContainer.new()
 	box.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	box.add_child(EditorUI.section_title("地形笔刷"))
+	var addcat := Button.new()
+	addcat.text = "＋ 新建分类"
+	addcat.pressed.connect(_on_new_category)
+	box.add_child(addcat)
+	var erase_chk := CheckButton.new()
+	erase_chk.text = "🧹 擦除放置物"
+	erase_chk.tooltip_text = "开启后：左键点格＝清除该格的放置物（不动地形）"
+	erase_chk.toggled.connect(func(on: bool): _erase_object = on)
+	box.add_child(erase_chk)
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	box.add_child(scroll)
-	var list := VBoxContainer.new()
-	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(list)
-	var bg := ButtonGroup.new()
-	brush_buttons = []
-	for i in PALETTE.size():
-		var b := _make_brush_button(PALETTE[i], bg)
-		b.toggled.connect(_on_brush_toggled.bind(i))
-		list.add_child(b)
-		brush_buttons.append(b)
+	_brush_list_box = VBoxContainer.new()
+	_brush_list_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(_brush_list_box)
+	_brush_group = ButtonGroup.new()
+	_rebuild_terrain_brushes()
 	# 地形数据（编辑选中笔刷战斗属性）＝进阶段，默认折叠给笔刷让出空间；
 	# 向上展开（expand_up）：header 钉在侧栏最底不动，展开时内容向上顶开笔刷区——开合位置一致，符合人体工学。
 	box.add_child(EditorUI.make_foldable("地形数据（选中笔刷）", _build_terrain_data(), true, true))
 	return box
+
+# ==================== 笔刷分类管理 ====================
+# 按分类分组重建笔刷列表。分组只是视觉：brush_buttons 仍与 PALETTE 下标对齐（裸下标消费不受影响）。
+func _rebuild_terrain_brushes() -> void:
+	if _brush_list_box == null:
+		return
+	for c in _brush_list_box.get_children():
+		c.queue_free()
+	brush_buttons = []
+	brush_buttons.resize(PALETTE.size())
+	# 分组：category -> [PALETTE 下标…]（保 PALETTE 顺序）；用户分类在前、待定垫最后
+	var groups := {}
+	var order := []
+	for cat in TerrainDB.categories():
+		var cs := str(cat)
+		if not groups.has(cs):
+			groups[cs] = []
+			order.append(cs)
+	for i in PALETTE.size():
+		var cat := TerrainDB.category_of(PALETTE[i])
+		if not groups.has(cat):
+			groups[cat] = []
+			order.append(cat)
+		groups[cat].append(i)
+	order.erase(TerrainDB.DEFAULT_CATEGORY)
+	order.append(TerrainDB.DEFAULT_CATEGORY)   # 待定恒在最后、恒显示（即便空，供移入）
+	for cat in order:
+		if not groups.has(cat):
+			groups[cat] = []
+		_brush_list_box.add_child(_make_category_group(str(cat), groups[cat]))
+	_apply_brush_filter()
+	if brush_index >= 0 and brush_index < brush_buttons.size() and brush_buttons[brush_index] != null:
+		brush_buttons[brush_index].button_pressed = true
+
+# 一个分类分组：标题行(折叠开关 + ⋯) + 该类笔刷行区
+func _make_category_group(cat: String, idxs: Array) -> Control:
+	var wrap := VBoxContainer.new()
+	wrap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	wrap.add_theme_constant_override("separation", 2)
+	var section := VBoxContainer.new()
+	section.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	for i in idxs:
+		section.add_child(_make_brush_row(int(i)))
+	var collapsed := bool(_cat_collapsed.get(cat, false))
+	section.visible = not collapsed
+	var hdr := HBoxContainer.new()
+	hdr.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var tgl := Button.new()
+	tgl.toggle_mode = true
+	tgl.button_pressed = not collapsed
+	tgl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	tgl.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	tgl.focus_mode = Control.FOCUS_NONE
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.18, 0.22, 0.28)
+	sb.set_corner_radius_all(3)
+	sb.set_content_margin_all(4)
+	for st in ["normal", "hover", "pressed"]:
+		tgl.add_theme_stylebox_override(st, sb)
+	tgl.add_theme_color_override("font_color", Color(0.86, 0.9, 0.96))
+	var cnt := idxs.size()
+	var upd := func(open: bool): tgl.text = ("▾ " if open else "▸ ") + "%s (%d)" % [cat, cnt]
+	upd.call(not collapsed)
+	tgl.toggled.connect(func(open: bool):
+		section.visible = open
+		_cat_collapsed[cat] = not open
+		upd.call(open))
+	hdr.add_child(tgl)
+	if cat != TerrainDB.DEFAULT_CATEGORY:   # 待定桶不给改名/删除
+		var mb := EditorUI.make_menu("⋯")
+		mb.custom_minimum_size = Vector2(30, 0)
+		var pop := mb.get_popup()
+		pop.add_item("上移", 2)
+		pop.add_item("下移", 3)
+		pop.add_separator()
+		pop.add_item("分类改名", 0)
+		pop.add_item("删除分类（笔刷回待定）", 1)
+		pop.id_pressed.connect(func(id: int):
+			if id == 0:
+				_on_rename_category(cat)
+			elif id == 1:
+				_on_delete_category(cat)
+			elif id == 2:
+				_on_move_category(cat, -1)
+			elif id == 3:
+				_on_move_category(cat, 1))
+		hdr.add_child(mb)
+	wrap.add_child(hdr)
+	wrap.add_child(section)
+	return wrap
+
+# 一个笔刷行：原笔刷按钮 + ⋯ 菜单（重命名 / 删除 / 移到分类）
+func _make_brush_row(i: int) -> Control:
+	var row := HBoxContainer.new()
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var b := _make_brush_button(PALETTE[i], _brush_group)
+	b.toggled.connect(_on_brush_toggled.bind(i))
+	brush_buttons[i] = b
+	row.add_child(b)
+	var mb := EditorUI.make_menu("⋯")
+	mb.custom_minimum_size = Vector2(30, 0)
+	var pop := mb.get_popup()
+	pop.add_item("重命名", 0)
+	pop.add_item("删除笔刷", 1)
+	pop.add_item("取消放置物" if TerrainDB.is_object(PALETTE[i]) else "设为放置物", 2)
+	pop.add_separator("移到分类")
+	var cats := _all_category_names()
+	for ci in cats.size():
+		pop.add_item("→ " + str(cats[ci]), 100 + ci)
+	pop.id_pressed.connect(func(id: int):
+		if id == 0:
+			_on_rename_brush(i)
+		elif id == 1:
+			_on_delete_brush(i)
+		elif id == 2:
+			_on_toggle_object(i)
+		elif id >= 100 and (id - 100) < cats.size():
+			_on_move_brush(i, str(cats[id - 100])))
+	row.add_child(mb)
+	return row
+
+# 全部分类名（用户分类 + 待定），供「移到分类」子菜单
+func _all_category_names() -> Array:
+	var out := []
+	for c in TerrainDB.categories():
+		out.append(str(c))
+	if not out.has(TerrainDB.DEFAULT_CATEGORY):
+		out.append(TerrainDB.DEFAULT_CATEGORY)
+	return out
+
+# 通用文本输入弹窗（懒建、复用；确定回调 _prompt_cb）
+func _text_prompt(title: String, initial: String, cb: Callable) -> void:
+	if _prompt_dlg == null:
+		_prompt_dlg = ConfirmationDialog.new()
+		_prompt_dlg.ok_button_text = "确定"
+		_prompt_dlg.get_cancel_button().text = "取消"
+		var vb := VBoxContainer.new()
+		_prompt_lbl = Label.new()
+		vb.add_child(_prompt_lbl)
+		_prompt_edit = LineEdit.new()
+		_prompt_edit.custom_minimum_size = Vector2(320, 0)
+		vb.add_child(_prompt_edit)
+		_prompt_dlg.add_child(vb)
+		_prompt_dlg.register_text_enter(_prompt_edit)
+		_prompt_dlg.confirmed.connect(func():
+			if _prompt_cb.is_valid():
+				_prompt_cb.call(_prompt_edit.text.strip_edges()))
+		add_child(_prompt_dlg)
+	_prompt_dlg.title = title
+	_prompt_lbl.text = title
+	_prompt_edit.text = initial
+	_prompt_cb = cb
+	_prompt_dlg.popup_centered(Vector2i(380, 150))
+	_prompt_edit.select_all()
+	_prompt_edit.grab_focus()
+
+func _on_new_category() -> void:
+	_text_prompt("新建分类名", "", func(nm: String):
+		if nm == "" or nm == TerrainDB.DEFAULT_CATEGORY:
+			return
+		var cats: Array = TerrainDB.categories()
+		if not cats.has(nm):
+			cats.append(nm)
+			TerrainDB.set_categories(cats)
+			TerrainDB.save()
+		_cat_collapsed[nm] = false
+		_rebuild_terrain_brushes())
+
+func _on_rename_category(cat: String) -> void:
+	_text_prompt("分类改名", cat, func(nm: String):
+		if nm == "" or nm == cat or nm == TerrainDB.DEFAULT_CATEGORY:
+			return
+		var cats: Array = TerrainDB.categories()
+		var idx := cats.find(cat)
+		if idx >= 0:
+			cats[idx] = nm
+			TerrainDB.set_categories(cats)
+		for e in PALETTE:
+			if str(e.get("category", "")) == cat:
+				e["category"] = nm
+		if _cat_collapsed.has(cat):
+			_cat_collapsed[nm] = _cat_collapsed[cat]
+			_cat_collapsed.erase(cat)
+		TerrainDB.save()
+		_rebuild_terrain_brushes())
+
+func _on_delete_category(cat: String) -> void:
+	EditorUI.confirm(self, "删除分类「%s」？其中的笔刷会退回「待定」（不删笔刷本身）。" % cat,
+		"删除分类", func():
+			var cats: Array = TerrainDB.categories()
+			cats.erase(cat)
+			TerrainDB.set_categories(cats)
+			for e in PALETTE:
+				if str(e.get("category", "")) == cat:
+					e.erase("category")
+			_cat_collapsed.erase(cat)
+			TerrainDB.save()
+			_rebuild_terrain_brushes(),
+		Callable(), "删除分类")
+
+# 分类排序：在 categories 数组里与相邻项交换（delta=-1 上移 / +1 下移）。待定不在数组、恒最后。
+func _on_move_category(cat: String, delta: int) -> void:
+	var cats: Array = TerrainDB.categories()
+	var idx := cats.find(cat)
+	if idx < 0:
+		return
+	var j := idx + delta
+	if j < 0 or j >= cats.size():
+		return
+	var tmp = cats[idx]
+	cats[idx] = cats[j]
+	cats[j] = tmp
+	TerrainDB.set_categories(cats)
+	TerrainDB.save()
+	_rebuild_terrain_brushes()
+
+func _on_rename_brush(i: int) -> void:
+	if i < 0 or i >= PALETTE.size():
+		return
+	var e = PALETTE[i]
+	_text_prompt("重命名笔刷", str(e.get("label", "")), func(nm: String):
+		if nm == "":
+			return
+		e["label"] = nm
+		TerrainDB.save()
+		if i < brush_buttons.size() and brush_buttons[i] != null:
+			brush_buttons[i].text = nm   # 原地改名、免全表重建
+		else:
+			_rebuild_terrain_brushes())
+
+func _on_delete_brush(i: int) -> void:
+	if i < 0 or i >= PALETTE.size():
+		return
+	var e = PALETTE[i]
+	EditorUI.confirm(self, "彻底删除笔刷「%s」？\n将从 terrains.json 整条移除（写盘，不可撤销）。" % str(e.get("label", "")),
+		"删除", func():
+			var cur_key := ""
+			if brush_index >= 0 and brush_index < PALETTE.size():
+				var ce = PALETTE[brush_index]
+				cur_key = "%s/%s" % [ce.get("terrain"), ce.get("variant")]
+			var del_key := "%s/%s" % [e.get("terrain"), e.get("variant")]
+			TerrainDB.delete_entry({"terrain": e.get("terrain"), "variant": e.get("variant")})
+			TerrainDB.save()   # PALETTE 是 _palette 活引用、已同步缩短
+			if cur_key == del_key or cur_key == "":
+				brush_index = clampi(brush_index, 0, maxi(0, PALETTE.size() - 1))
+			else:
+				var ni := -1
+				for j in PALETTE.size():
+					if "%s/%s" % [PALETTE[j].get("terrain"), PALETTE[j].get("variant")] == cur_key:
+						ni = j
+						break
+				brush_index = ni if ni >= 0 else clampi(brush_index, 0, maxi(0, PALETTE.size() - 1))
+			_rebuild_terrain_brushes(),
+		Callable(), "确认删除")
+
+func _on_move_brush(i: int, cat: String) -> void:
+	if i < 0 or i >= PALETTE.size():
+		return
+	var e = PALETTE[i]
+	if cat == "" or cat == TerrainDB.DEFAULT_CATEGORY:
+		e.erase("category")
+	else:
+		e["category"] = cat
+	TerrainDB.save()
+	_rebuild_terrain_brushes()
+
+# 切换「放置物笔刷」标记：标了的地形，画笔时落在放置物层（盖地形上、单位之下）
+func _on_toggle_object(i: int) -> void:
+	if i < 0 or i >= PALETTE.size():
+		return
+	var e = PALETTE[i]
+	TerrainDB.set_object({"terrain": e.get("terrain"), "variant": e.get("variant")}, not TerrainDB.is_object(e))
+	TerrainDB.save()
+	_rebuild_terrain_brushes()
 
 # 地形数据编辑区（移动成本/通行/tag 成本 + 全局·本图范围）——被 _build_terrain_brushes 包进折叠区
 func _build_terrain_data() -> Control:
@@ -782,20 +1073,25 @@ func _apply_map_type() -> void:
 func _apply_brush_filter() -> void:
 	var first_visible := -1
 	for i in PALETTE.size():
-		if i >= brush_buttons.size():
-			break
-		var ok: bool = TerrainDB.in_scope(PALETTE[i], map_type)
+		if i >= brush_buttons.size() or brush_buttons[i] == null:
+			continue
+		var ok: bool = (not SCOPE_FILTER_ON) or TerrainDB.in_scope(PALETTE[i], map_type)
 		brush_buttons[i].visible = ok
+		var row = brush_buttons[i].get_parent()   # 连整行(含 ⋯)一起隐，别留空壳（越 scope 的格才不会剩个孤零 ⋯）
+		if row is Control:
+			row.visible = ok
 		if ok and first_visible < 0:
 			first_visible = i
-	if first_visible >= 0 and not TerrainDB.in_scope(PALETTE[brush_index], map_type):
+	if brush_index < 0 or brush_index >= PALETTE.size():
+		brush_index = clampi(brush_index, 0, maxi(0, PALETTE.size() - 1))
+	if SCOPE_FILTER_ON and first_visible >= 0 and not TerrainDB.in_scope(PALETTE[brush_index], map_type):
 		brush_buttons[first_visible].button_pressed = true   # 触发 toggled → select_brush
 
 # 当前可见（scope 内）笔刷的 PALETTE 下标序列——数字键 1~9 按此映射
 func _visible_brush_indices() -> Array:
 	var out := []
 	for i in PALETTE.size():
-		if TerrainDB.in_scope(PALETTE[i], map_type):
+		if (not SCOPE_FILTER_ON) or TerrainDB.in_scope(PALETTE[i], map_type):
 			out.append(i)
 	return out
 
@@ -2044,7 +2340,7 @@ func _on_file_menu(id: int) -> void:
 # 底色改中性深底（地块颜色已由缩略图承载）；选中＝亮黄描边。
 func _make_brush_button(entry: Dictionary, group: ButtonGroup) -> Button:
 	var b := Button.new()
-	b.text = entry.label
+	b.text = ("⊕ " if TerrainDB.is_object(entry) else "") + str(entry.label)   # ⊕＝放置物笔刷
 	b.toggle_mode = true
 	b.button_group = group
 	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -2172,7 +2468,7 @@ func pick_brush_at(col: int, row: int) -> void:
 		if e.terrain == tile.get("terrain") and e.variant == tile.get("variant"):
 			# 越 scope 的地块（如战斗图上残留的 swamp）：其笔刷已被过滤隐藏，取色它会造成「无可见选中 + brush_index 越界」。
 			# 拒绝取色、只提示——保留当前有效选中不动。
-			if not TerrainDB.in_scope(e, map_type):
+			if SCOPE_FILTER_ON and not TerrainDB.in_scope(e, map_type):
 				set_status("「%s」不属于当前地图类型（%s），未取色" % [str(e.label), "大地图" if map_type == "overworld" else "战斗图"])
 				return
 			if i < brush_buttons.size():
@@ -2427,11 +2723,29 @@ func new_map(w: int, h: int) -> void:
 	set_status("新建地图 %d×%d" % [width, height])
 
 func paint_cell(col: int, row: int) -> void:
-	var b = PALETTE[brush_index]
 	var tile = tiles[row][col]
-	if tile.get("terrain") == b.terrain and tile.get("variant") == b.variant:
-		return
-	tiles[row][col] = {"terrain": b.terrain, "variant": b.variant}
+	if _erase_object:
+		# 橡皮·放置物：只清该格放置物，不动地形
+		if not (tile is Dictionary and tile.has("object")):
+			return
+		tile.erase("object")
+	else:
+		var b = PALETTE[brush_index]
+		if TerrainDB.is_object(b):
+			# 放置物笔刷 → 写该格放置物层，保留底下地形
+			var cur = tile.get("object")
+			if typeof(cur) == TYPE_DICTIONARY and str(cur.get("terrain")) == str(b.terrain) and str(cur.get("variant")) == str(b.variant):
+				return
+			tile["object"] = {"terrain": b.terrain, "variant": b.variant}
+		else:
+			# 普通地形 → 写地形层，保留已有放置物
+			if str(tile.get("terrain")) == str(b.terrain) and str(tile.get("variant")) == str(b.variant):
+				return
+			var keep = tile.get("object")
+			var nt := {"terrain": b.terrain, "variant": b.variant}
+			if keep != null:
+				nt["object"] = keep
+			tiles[row][col] = nt
 	_stroke_dirty = true
 	_stroke_count += 1
 	_dirty = true

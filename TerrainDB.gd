@@ -211,6 +211,72 @@ static func set_art(tile, paths: Array) -> bool:
 	d["art"] = paths
 	return true
 
+# —— 分类 / 改名 / 删除（地图编辑器笔刷管理；均原地改 live 表，调用方随后 save() 落盘）——
+const DEFAULT_CATEGORY := "待定"   # 未分类笔刷的默认桶：无 category 字段即属它
+
+# 用户自建分类的有序列表（存 _root["categories"]；待定不在其中、是隐式桶）
+static func categories() -> Array:
+	_ensure()
+	return _root.get("categories", []) if typeof(_root) == TYPE_DICTIONARY else []
+
+static func set_categories(arr: Array) -> void:
+	_ensure()
+	if typeof(_root) != TYPE_DICTIONARY or _root.is_empty():
+		_root = {"terrains": _palette}
+	_root["categories"] = arr
+
+# entry 归属的分类名（无 category 字段/空 → 待定）
+static func category_of(entry) -> String:
+	if typeof(entry) != TYPE_DICTIONARY:
+		return DEFAULT_CATEGORY
+	var c := str(entry.get("category", ""))
+	return c if c != "" else DEFAULT_CATEGORY
+
+# 改笔刷显示名（label）
+static func set_label(tile, label: String) -> bool:
+	var e = entry_for(tile)
+	if typeof(e) != TYPE_DICTIONARY:
+		return false
+	var d: Dictionary = e   # 经 typed 局部再改（同 set_art；直接对 entry_for 结果下标 parser 报 null）
+	d["label"] = label
+	return true
+
+# 把笔刷归入分类（待定/空 → 抹掉 category 字段）
+static func set_category(tile, cat: String) -> bool:
+	var e = entry_for(tile)
+	if typeof(e) != TYPE_DICTIONARY:
+		return false
+	var d: Dictionary = e
+	if cat == "" or cat == DEFAULT_CATEGORY:
+		d.erase("category")
+	else:
+		d["category"] = cat
+	return true
+
+# 彻底删除一条地形（从 _palette + _by_key 同步移除）
+static func delete_entry(tile) -> bool:
+	var e = entry_for(tile)
+	if typeof(e) != TYPE_DICTIONARY:
+		return false
+	_palette.erase(e)
+	_by_key.erase(_key(tile.get("terrain"), tile.get("variant")))
+	return true
+
+# —— 放置物笔刷标记（is_object）：标了的地形＝放置物，画时落在「放置物层」而非地形层 ——
+static func is_object(entry) -> bool:
+	return typeof(entry) == TYPE_DICTIONARY and bool(entry.get("is_object", false))
+
+static func set_object(tile, on: bool) -> bool:
+	var e = entry_for(tile)
+	if typeof(e) != TYPE_DICTIONARY:
+		return false
+	var d: Dictionary = e
+	if on:
+		d["is_object"] = true
+	else:
+		d.erase("is_object")
+	return true
+
 static func save() -> bool:
 	_ensure()
 	var out := _root if typeof(_root) == TYPE_DICTIONARY and not _root.is_empty() else {}

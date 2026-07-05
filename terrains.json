@@ -1,5 +1,16 @@
 {
   "_note": "地形单一数据源：编辑器取 label/color/accent/decor/tags 绘制；战斗取 move（通行性+成本）与 effects（地块效果）。move.passable_by: \"all\"=任何单位可进 / \"none\"=不可通行 / [tag,...]=仅含其中之一可进（如深水仅<飞行>）；move.cost=基础通行成本，tag_cost 按单位 tag 取更优（最小）；effects=站在该格的单位获得的效果，带 when 条件，伤害结算时惰性读取。 scope=地形适用图类型：battle=仅战场 / overworld=仅大地图 / both=通用（缺省 both，旧数据零迁移）——编辑器笔刷栏按当前地图 map_type 过滤，渲染/通行不受影响。",
+  "categories": [
+    "草原",
+    "稀树草原",
+    "沙漠",
+    "雪地",
+    "山",
+    "水",
+    "放置物",
+    "旧的内容",
+    "怪的东西"
+  ],
   "format_version": 2.0,
   "terrains": [
     {
@@ -7,6 +18,7 @@
       "art": [
         "res://icons/Tiles/plain_grassland/0.png"
       ],
+      "category": "草原",
       "color": "#4A7C3A",
       "decor": "grass",
       "effects": [],
@@ -29,11 +41,12 @@
       "art": [
         "res://icons/Tiles/plain_wasteland/0.png"
       ],
+      "category": "稀树草原",
       "color": "#B89B6A",
       "decor": "crack",
       "effects": [],
       "id": "wasteland",
-      "label": "荒原",
+      "label": "稀疏草原",
       "move": {
         "cost": 1.0,
         "passable_by": "all"
@@ -52,6 +65,7 @@
       "art": [
         "res://icons/Tiles/forest_forest/0.png"
       ],
+      "category": "放置物",
       "color": "#2D5016",
       "decor": "tree",
       "effects": [
@@ -72,6 +86,7 @@
         }
       ],
       "id": "forest",
+      "is_object": true,
       "label": "森林",
       "move": {
         "cost": 2.0,
@@ -95,11 +110,12 @@
       "art": [
         "res://icons/Tiles/mountain_mountain/0.png"
       ],
+      "category": "山",
       "color": "#7C7268",
       "decor": "peak",
       "effects": [],
       "id": "mountain",
-      "label": "山地",
+      "label": "山",
       "move": {
         "cost": 3.0,
         "passable_by": "all",
@@ -122,6 +138,7 @@
       "art": [
         "res://icons/Tiles/water_shallow/0.png"
       ],
+      "category": "水",
       "color": "#3A6EA5",
       "decor": "wave",
       "effects": [],
@@ -147,6 +164,7 @@
       "art": [
         "res://icons/Tiles/water_deep/0.png"
       ],
+      "category": "水",
       "color": "#1E3F66",
       "decor": "wave",
       "effects": [],
@@ -168,6 +186,7 @@
     },
     {
       "accent": "#6E5F45",
+      "category": "旧的内容",
       "color": "#9B8B6E",
       "decor": "path",
       "effects": [],
@@ -188,6 +207,7 @@
     },
     {
       "accent": "#7FB04A",
+      "category": "旧的内容",
       "color": "#3E6B2E",
       "decor": "bush",
       "effects": [],
@@ -208,6 +228,7 @@
     },
     {
       "accent": "#A6B36A",
+      "category": "旧的内容",
       "color": "#6E7A48",
       "decor": "hill",
       "effects": [],
@@ -234,6 +255,7 @@
       "art": [
         "res://icons/Tiles/sand_sand/0.png"
       ],
+      "category": "沙漠",
       "color": "#D6C088",
       "decor": "dune",
       "effects": [],
@@ -260,6 +282,7 @@
       "art": [
         "res://icons/Tiles/snow_snow/0.png"
       ],
+      "category": "雪地",
       "color": "#D6E2EC",
       "decor": "snow",
       "effects": [],
@@ -283,6 +306,7 @@
     },
     {
       "accent": "#544E45",
+      "category": "旧的内容",
       "color": "#8A8478",
       "decor": "rubble",
       "effects": [],
@@ -307,6 +331,7 @@
     },
     {
       "accent": "#332E2A",
+      "category": "旧的内容",
       "color": "#5A534D",
       "decor": "brick",
       "effects": [],
@@ -332,6 +357,7 @@
       "art": [
         "res://icons/Tiles/swamp_swamp/0.png"
       ],
+      "category": "草原",
       "color": "#4E5E3E",
       "decor": "swamp",
       "effects": [],
@@ -354,6 +380,7 @@
     },
     {
       "accent": "#6E6230",
+      "category": "旧的内容",
       "color": "#B5A34E",
       "decor": "farm",
       "effects": [],
@@ -376,6 +403,7 @@
       "art": [
         "res://icons/Tiles/tundra_tundra/0.png"
       ],
+      "category": "雪地",
       "color": "#AEBFBC",
       "decor": "tundra",
       "effects": [],
@@ -399,6 +427,7 @@
     },
     {
       "accent": "#E3DAB4",
+      "category": "旧的内容",
       "color": "#6E9EC2",
       "decor": "coast",
       "effects": [],
@@ -421,6 +450,7 @@
     },
     {
       "accent": "#4E3A22",
+      "category": "旧的内容",
       "color": "#8A6A42",
       "decor": "plank",
       "effects": [],
@@ -437,6 +467,2106 @@
       ],
       "terrain": "bridge",
       "variant": "bridge"
+    },
+    {
+      "accent": "#6a5128",
+      "art": [
+        "res://icons/Tiles/fh/academy_classical_era.png"
+      ],
+      "category": "放置物",
+      "color": "#8d6c36",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_academy_classical_era",
+      "label": "学院-经典",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "academy_classical_era"
+    },
+    {
+      "accent": "#497139",
+      "art": [
+        "res://icons/Tiles/fh/ancient_ruins_jungle.png"
+      ],
+      "category": "放置物",
+      "color": "#61964c",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_ancient_ruins_jungle",
+      "label": "远古遗迹-丛林",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "ancient_ruins_jungle"
+    },
+    {
+      "accent": "#7c6f3d",
+      "art": [
+        "res://icons/Tiles/fh/ancient_ruins_sand.png"
+      ],
+      "category": "放置物",
+      "color": "#a59552",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_ancient_ruins_sand",
+      "label": "远古遗迹-沙漠",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "ancient_ruins_sand"
+    },
+    {
+      "accent": "#878888",
+      "art": [
+        "res://icons/Tiles/fh/ancient_ruins_snow.png"
+      ],
+      "category": "放置物",
+      "color": "#b5b5b5",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_ancient_ruins_snow",
+      "label": "远古遗迹-雪原",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "ancient_ruins_snow"
+    },
+    {
+      "accent": "#6f6044",
+      "art": [
+        "res://icons/Tiles/fh/ancient_ruins.png"
+      ],
+      "category": "放置物",
+      "color": "#95805b",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_ancient_ruins",
+      "label": "远古遗迹",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "ancient_ruins"
+    },
+    {
+      "accent": "#55745d",
+      "art": [
+        "res://icons/Tiles/fh/ancient_ruins2.png"
+      ],
+      "category": "放置物",
+      "color": "#729b7c",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_ancient_ruins2",
+      "label": "远古遗迹2",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "ancient_ruins2"
+    },
+    {
+      "accent": "#6ba095",
+      "art": [
+        "res://icons/Tiles/fh/atoll.png"
+      ],
+      "category": "放置物",
+      "color": "#8fd5c7",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_atoll",
+      "label": "环礁",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "atoll"
+    },
+    {
+      "accent": "#928275",
+      "art": [
+        "res://icons/Tiles/fh/barbarian_encampment_snow.png"
+      ],
+      "category": "放置物",
+      "color": "#c3ae9c",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_barbarian_encampment_snow",
+      "label": "野蛮人营地-雪原",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "barbarian_encampment_snow"
+    },
+    {
+      "accent": "#7b3600",
+      "art": [
+        "res://icons/Tiles/fh/barbarian_encampment.png"
+      ],
+      "category": "放置物",
+      "color": "#a54800",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_barbarian_encampment",
+      "label": "野蛮人营地",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "barbarian_encampment"
+    },
+    {
+      "accent": "#af790d",
+      "art": [
+        "res://icons/Tiles/fh/barringer_crater.png"
+      ],
+      "category": "怪的东西",
+      "color": "#e9a112",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_barringer_crater",
+      "label": "陨石坑",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "barringer_crater"
+    },
+    {
+      "accent": "#6f6f6f",
+      "art": [
+        "res://icons/Tiles/fh/basalt.png"
+      ],
+      "category": "放置物",
+      "color": "#959595",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_basalt",
+      "label": "玄武岩",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "basalt"
+    },
+    {
+      "accent": "#7c6b57",
+      "art": [
+        "res://icons/Tiles/fh/basaltquarry.png"
+      ],
+      "category": "放置物",
+      "color": "#a68e75",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_basaltquarry",
+      "label": "玄武岩矿场",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "basaltquarry"
+    },
+    {
+      "accent": "#4d310b",
+      "art": [
+        "res://icons/Tiles/fh/bison_camp.png"
+      ],
+      "category": "放置物",
+      "color": "#67410f",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_bison_camp",
+      "label": "野牛+营地",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "bison_camp"
+    },
+    {
+      "accent": "#3a2112",
+      "art": [
+        "res://icons/Tiles/fh/bison.png"
+      ],
+      "category": "放置物",
+      "color": "#4d2c18",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_bison",
+      "label": "野牛",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "bison"
+    },
+    {
+      "accent": "#3a354e",
+      "art": [
+        "res://icons/Tiles/fh/campus_medieval_era.png"
+      ],
+      "category": "放置物",
+      "color": "#4d4768",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_campus_medieval_era",
+      "label": "校园",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "campus_medieval_era"
+    },
+    {
+      "accent": "#5b9c88",
+      "art": [
+        "res://icons/Tiles/fh/canal.png"
+      ],
+      "category": "怪的东西",
+      "color": "#7ad0b5",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_canal",
+      "label": "Canal",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "canal"
+    },
+    {
+      "accent": "#814e04",
+      "art": [
+        "res://icons/Tiles/fh/cattle_pasture.png"
+      ],
+      "category": "放置物",
+      "color": "#ac6905",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_cattle_pasture",
+      "label": "牛群和牧场",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "cattle_pasture"
+    },
+    {
+      "accent": "#674300",
+      "art": [
+        "res://icons/Tiles/fh/cattle.png"
+      ],
+      "category": "放置物",
+      "color": "#895900",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_cattle",
+      "label": "牛群",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "cattle"
+    },
+    {
+      "accent": "#8b8276",
+      "art": [
+        "res://icons/Tiles/fh/citadel_snow.png"
+      ],
+      "category": "放置物",
+      "color": "#b9ad9e",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_citadel_snow",
+      "label": "Citadel-Snow",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "citadel_snow"
+    },
+    {
+      "accent": "#815b2f",
+      "art": [
+        "res://icons/Tiles/fh/citadel.png"
+      ],
+      "category": "放置物",
+      "color": "#ac7a3e",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_citadel",
+      "label": "Citadel",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "citadel"
+    },
+    {
+      "accent": "#695421",
+      "art": [
+        "res://icons/Tiles/fh/citrus_plantation.png"
+      ],
+      "category": "放置物",
+      "color": "#8c6f2c",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_citrus_plantation",
+      "label": "柑橘种植园",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "citrus_plantation"
+    },
+    {
+      "accent": "#4c550b",
+      "art": [
+        "res://icons/Tiles/fh/citrus.png"
+      ],
+      "category": "放置物",
+      "color": "#66720e",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_citrus",
+      "label": "柑橘",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "citrus"
+    },
+    {
+      "accent": "#523d15",
+      "art": [
+        "res://icons/Tiles/fh/city_center_classical_era.png"
+      ],
+      "category": "放置物",
+      "color": "#6d511c",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_city_center_classical_era",
+      "label": "City center-Classical era",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "city_center_classical_era"
+    },
+    {
+      "accent": "#514a6d",
+      "art": [
+        "res://icons/Tiles/fh/city_center_medieval_era.png"
+      ],
+      "category": "放置物",
+      "color": "#6c6391",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_city_center_medieval_era",
+      "label": "City center-Medieval era",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "city_center_medieval_era"
+    },
+    {
+      "accent": "#5e6635",
+      "art": [
+        "res://icons/Tiles/fh/city_center.png"
+      ],
+      "category": "草原",
+      "color": "#7d8747",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_city_center",
+      "label": "City center",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "city_center"
+    },
+    {
+      "accent": "#4c4c4c",
+      "art": [
+        "res://icons/Tiles/fh/city_ruins.png"
+      ],
+      "category": "放置物",
+      "color": "#656565",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_city_ruins",
+      "label": "City ruins",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "city_ruins"
+    },
+    {
+      "accent": "#928631",
+      "art": [
+        "res://icons/Tiles/fh/city_ancient_era_middle_eastern.png"
+      ],
+      "category": "放置物",
+      "color": "#c3b342",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_city_ancient_era_middle_eastern",
+      "label": "City-Ancient_era_Middle_Eastern",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "city_ancient_era_middle_eastern"
+    },
+    {
+      "accent": "#4f4531",
+      "art": [
+        "res://icons/Tiles/fh/city_medieval_era_asian.png"
+      ],
+      "category": "放置物",
+      "color": "#6a5c41",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_city_medieval_era_asian",
+      "label": "City-Medieval_era_Asian",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "city_medieval_era_asian"
+    },
+    {
+      "accent": "#8b6f45",
+      "art": [
+        "res://icons/Tiles/fh/city_medieval_era_middle_eastern.png"
+      ],
+      "category": "放置物",
+      "color": "#b9945c",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_city_medieval_era_middle_eastern",
+      "label": "City-Medieval_era_Middle_Eastern",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "city_medieval_era_middle_eastern"
+    },
+    {
+      "accent": "#3e3e3e",
+      "art": [
+        "res://icons/Tiles/fh/coal.png"
+      ],
+      "category": "放置物",
+      "color": "#525252",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_coal",
+      "label": "Coal",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "coal"
+    },
+    {
+      "accent": "#5c5449",
+      "art": [
+        "res://icons/Tiles/fh/copper.png"
+      ],
+      "category": "放置物",
+      "color": "#7b7162",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_copper",
+      "label": "铜矿",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "copper"
+    },
+    {
+      "accent": "#3d3228",
+      "art": [
+        "res://icons/Tiles/fh/deer_1.png"
+      ],
+      "category": "放置物",
+      "color": "#524236",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_deer_1",
+      "label": "鹿",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "deer_1"
+    },
+    {
+      "accent": "#643e09",
+      "art": [
+        "res://icons/Tiles/fh/deer_camp.png"
+      ],
+      "category": "放置物",
+      "color": "#86530c",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_deer_camp",
+      "label": "鹿群+营地",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "deer_camp"
+    },
+    {
+      "accent": "#6a2a00",
+      "art": [
+        "res://icons/Tiles/fh/deer.png"
+      ],
+      "category": "放置物",
+      "color": "#8e3800",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_deer",
+      "label": "鹿群",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "deer"
+    },
+    {
+      "accent": "#ab7308",
+      "art": [
+        "res://icons/Tiles/fh/desert_farm.png"
+      ],
+      "category": "沙漠",
+      "color": "#e4990b",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_desert_farm",
+      "label": "沙漠农场",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "desert_farm"
+    },
+    {
+      "accent": "#937c0e",
+      "art": [
+        "res://icons/Tiles/fh/desert_flood_plains_farm.png"
+      ],
+      "category": "沙漠",
+      "color": "#c4a513",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_desert_flood_plains_farm",
+      "label": "沙漠农场+冲积平原",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "desert_flood_plains_farm"
+    },
+    {
+      "accent": "#61481b",
+      "art": [
+        "res://icons/Tiles/fh/encampment.png"
+      ],
+      "category": "放置物",
+      "color": "#826024",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_encampment",
+      "label": "Encampment",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "encampment"
+    },
+    {
+      "accent": "#5a4127",
+      "art": [
+        "res://icons/Tiles/fh/entertainment_complex.png"
+      ],
+      "category": "放置物",
+      "color": "#785735",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_entertainment_complex",
+      "label": "Entertainment Complex",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "entertainment_complex"
+    },
+    {
+      "accent": "#806d27",
+      "art": [
+        "res://icons/Tiles/fh/exotic_fruits.png"
+      ],
+      "category": "放置物",
+      "color": "#ab9235",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_exotic_fruits",
+      "label": "Exotic Fruits",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "exotic_fruits"
+    },
+    {
+      "accent": "#856e11",
+      "art": [
+        "res://icons/Tiles/fh/fallout.png"
+      ],
+      "category": "放置物",
+      "color": "#b29316",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_fallout",
+      "label": "Fallout",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "fallout"
+    },
+    {
+      "accent": "#0f698a",
+      "art": [
+        "res://icons/Tiles/fh/fish.png"
+      ],
+      "category": "放置物",
+      "color": "#148cb8",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_fish",
+      "label": "Fish",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "fish"
+    },
+    {
+      "accent": "#906a25",
+      "art": [
+        "res://icons/Tiles/fh/fishing_boats.png"
+      ],
+      "category": "放置物",
+      "color": "#c08e32",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_fishing_boats",
+      "label": "Fishing Boats",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "fishing_boats"
+    },
+    {
+      "accent": "#49871a",
+      "art": [
+        "res://icons/Tiles/fh/flood_plains.png"
+      ],
+      "category": "放置物",
+      "color": "#61b422",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_flood_plains",
+      "label": "Flood plains",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "flood_plains"
+    },
+    {
+      "accent": "#4fa677",
+      "art": [
+        "res://icons/Tiles/fh/floodplains.png"
+      ],
+      "category": "放置物",
+      "color": "#69de9f",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_floodplains",
+      "label": "FloodPlains",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "floodplains"
+    },
+    {
+      "accent": "#165e34",
+      "art": [
+        "res://icons/Tiles/fh/forest.png"
+      ],
+      "category": "放置物",
+      "color": "#1e7d46",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_forest",
+      "label": "Forest",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "forest"
+    },
+    {
+      "accent": "#2e7535",
+      "art": [
+        "res://icons/Tiles/fh/fountain_of_youth.png"
+      ],
+      "category": "草原",
+      "color": "#3e9b46",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_fountain_of_youth",
+      "label": "Fountain of Youth",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "fountain_of_youth"
+    },
+    {
+      "accent": "#796a71",
+      "art": [
+        "res://icons/Tiles/fh/gems.png"
+      ],
+      "category": "放置物",
+      "color": "#a18e97",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_gems",
+      "label": "Gems",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "gems"
+    },
+    {
+      "accent": "#8c7c44",
+      "art": [
+        "res://icons/Tiles/fh/gold_ore.png"
+      ],
+      "category": "放置物",
+      "color": "#baa65b",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_gold_ore",
+      "label": "Gold Ore",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "gold_ore"
+    },
+    {
+      "accent": "#6e4c07",
+      "art": [
+        "res://icons/Tiles/fh/grand_mesa.png"
+      ],
+      "category": "沙漠",
+      "color": "#936609",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_grand_mesa",
+      "label": "Grand Mesa",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "grand_mesa"
+    },
+    {
+      "accent": "#4f8318",
+      "art": [
+        "res://icons/Tiles/fh/grassland_farm.png"
+      ],
+      "category": "草原",
+      "color": "#6aae20",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_grassland_farm",
+      "label": "Grassland+Farm",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "grassland_farm"
+    },
+    {
+      "accent": "#3e6e17",
+      "art": [
+        "res://icons/Tiles/fh/grassland_forest_camp.png"
+      ],
+      "category": "草原",
+      "color": "#53921f",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_grassland_forest_camp",
+      "label": "Grassland+Forest+Camp",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "grassland_forest_camp"
+    },
+    {
+      "accent": "#436816",
+      "art": [
+        "res://icons/Tiles/fh/grassland_forest_deer_camp.png"
+      ],
+      "category": "草原",
+      "color": "#598b1d",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_grassland_forest_deer_camp",
+      "label": "Grassland+Forest+Deer+Camp",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "grassland_forest_deer_camp"
+    },
+    {
+      "accent": "#446916",
+      "art": [
+        "res://icons/Tiles/fh/grassland_forest_furs_camp.png"
+      ],
+      "category": "草原",
+      "color": "#5b8c1d",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_grassland_forest_furs_camp",
+      "label": "Grassland+Forest+Furs+Camp",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "grassland_forest_furs_camp"
+    },
+    {
+      "accent": "#466918",
+      "art": [
+        "res://icons/Tiles/fh/grassland_forest_lumber_mill.png"
+      ],
+      "category": "草原",
+      "color": "#5d8c20",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_grassland_forest_lumber_mill",
+      "label": "Grassland+Forest+Lumber mill",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "grassland_forest_lumber_mill"
+    },
+    {
+      "accent": "#47691a",
+      "art": [
+        "res://icons/Tiles/fh/grassland_forest_truffles_camp.png"
+      ],
+      "category": "草原",
+      "color": "#5e8c23",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_grassland_forest_truffles_camp",
+      "label": "Grassland+Forest+Truffles+Camp",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "grassland_forest_truffles_camp"
+    },
+    {
+      "accent": "#537c32",
+      "art": [
+        "res://icons/Tiles/fh/grassland_hill_farm.png"
+      ],
+      "category": "草原",
+      "color": "#6fa542",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_grassland_hill_farm",
+      "label": "Grassland+Hill+Farm",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "grassland_hill_farm"
+    },
+    {
+      "accent": "#416f2b",
+      "art": [
+        "res://icons/Tiles/fh/grassland_hill_forest_camp.png"
+      ],
+      "category": "草原",
+      "color": "#56933a",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_grassland_hill_forest_camp",
+      "label": "Grassland+Hill+Forest+Camp",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "grassland_hill_forest_camp"
+    },
+    {
+      "accent": "#89825b",
+      "art": [
+        "res://icons/Tiles/fh/harmonix_crystals.png"
+      ],
+      "category": "放置物",
+      "color": "#b7ad79",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_harmonix_crystals",
+      "label": "Harmonix Crystals",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "harmonix_crystals"
+    },
+    {
+      "accent": "#806142",
+      "art": [
+        "res://icons/Tiles/fh/hexanite.png"
+      ],
+      "category": "放置物",
+      "color": "#ab8158",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_hexanite",
+      "label": "Hexanite",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "hexanite"
+    },
+    {
+      "accent": "#697771",
+      "art": [
+        "res://icons/Tiles/fh/hill.png"
+      ],
+      "category": "放置物",
+      "color": "#8c9f96",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_hill",
+      "label": "Hill",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "hill"
+    },
+    {
+      "accent": "#436240",
+      "art": [
+        "res://icons/Tiles/fh/hillforest_lumber_mill.png"
+      ],
+      "category": "放置物",
+      "color": "#5a8255",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_hillforest_lumber_mill",
+      "label": "HillForest+Lumber mill",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "hillforest_lumber_mill"
+    },
+    {
+      "accent": "#817865",
+      "art": [
+        "res://icons/Tiles/fh/hillmarblequarry.png"
+      ],
+      "category": "放置物",
+      "color": "#aca186",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_hillmarblequarry",
+      "label": "HillMarbleQuarry",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "hillmarblequarry"
+    },
+    {
+      "accent": "#755e41",
+      "art": [
+        "res://icons/Tiles/fh/hillmine.png"
+      ],
+      "category": "放置物",
+      "color": "#9c7e56",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_hillmine",
+      "label": "HillMine",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "hillmine"
+    },
+    {
+      "accent": "#6d6456",
+      "art": [
+        "res://icons/Tiles/fh/hillstonequarry.png"
+      ],
+      "category": "放置物",
+      "color": "#928672",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_hillstonequarry",
+      "label": "HillStoneQuarry",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "hillstonequarry"
+    },
+    {
+      "accent": "#8c4a04",
+      "art": [
+        "res://icons/Tiles/fh/horses_pasture.png"
+      ],
+      "category": "放置物",
+      "color": "#ba6305",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_horses_pasture",
+      "label": "Horses+Pasture",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "horses_pasture"
+    },
+    {
+      "accent": "#702d00",
+      "art": [
+        "res://icons/Tiles/fh/horses.png"
+      ],
+      "category": "放置物",
+      "color": "#963c00",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_horses",
+      "label": "Horses",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "horses"
+    },
+    {
+      "accent": "#93adb8",
+      "art": [
+        "res://icons/Tiles/fh/ice.png"
+      ],
+      "category": "放置物",
+      "color": "#c4e6f5",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_ice",
+      "label": "Ice",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "ice"
+    },
+    {
+      "accent": "#6c5c59",
+      "art": [
+        "res://icons/Tiles/fh/iron.png"
+      ],
+      "category": "放置物",
+      "color": "#8f7b77",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_iron",
+      "label": "Iron",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "iron"
+    },
+    {
+      "accent": "#756256",
+      "art": [
+        "res://icons/Tiles/fh/jadonyx.png"
+      ],
+      "category": "放置物",
+      "color": "#9c8373",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_jadonyx",
+      "label": "Jadonyx",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "jadonyx"
+    },
+    {
+      "accent": "#164f01",
+      "art": [
+        "res://icons/Tiles/fh/jungle.png"
+      ],
+      "category": "放置物",
+      "color": "#1e6901",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_jungle",
+      "label": "Jungle",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "jungle"
+    },
+    {
+      "accent": "#3d4416",
+      "art": [
+        "res://icons/Tiles/fh/krakatoa.png"
+      ],
+      "category": "草原",
+      "color": "#515b1e",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_krakatoa",
+      "label": "Krakatoa",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "krakatoa"
+    },
+    {
+      "accent": "#009098",
+      "art": [
+        "res://icons/Tiles/fh/lakes.png"
+      ],
+      "category": "水",
+      "color": "#00c0cb",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_lakes",
+      "label": "Lakes",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "lakes"
+    },
+    {
+      "accent": "#abab9c",
+      "art": [
+        "res://icons/Tiles/fh/marble.png"
+      ],
+      "category": "放置物",
+      "color": "#e4e4d1",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_marble",
+      "label": "Marble",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "marble"
+    },
+    {
+      "accent": "#9e7354",
+      "art": [
+        "res://icons/Tiles/fh/megaxenoform_graveyard.png"
+      ],
+      "category": "怪的东西",
+      "color": "#d29a71",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_megaxenoform_graveyard",
+      "label": "Megaxenoform Graveyard",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "megaxenoform_graveyard"
+    },
+    {
+      "accent": "#653a1c",
+      "art": [
+        "res://icons/Tiles/fh/mine.png"
+      ],
+      "category": "放置物",
+      "color": "#874d25",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_mine",
+      "label": "Mine",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "mine"
+    },
+    {
+      "accent": "#3d7c25",
+      "art": [
+        "res://icons/Tiles/fh/oasis.png"
+      ],
+      "category": "放置物",
+      "color": "#51a532",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_oasis",
+      "label": "Oasis",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "oasis"
+    },
+    {
+      "accent": "#7e7e51",
+      "art": [
+        "res://icons/Tiles/fh/old_faithful.png"
+      ],
+      "category": "稀树草原",
+      "color": "#a9a86c",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_old_faithful",
+      "label": "Old Faithful",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "old_faithful"
+    },
+    {
+      "accent": "#7e714c",
+      "art": [
+        "res://icons/Tiles/fh/phostlite.png"
+      ],
+      "category": "放置物",
+      "color": "#a89766",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_phostlite",
+      "label": "Phostlite",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "phostlite"
+    },
+    {
+      "accent": "#7f8c45",
+      "art": [
+        "res://icons/Tiles/fh/plains_farm.png"
+      ],
+      "category": "稀树草原",
+      "color": "#a9ba5c",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_plains_farm",
+      "label": "Plains+Farm",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "plains_farm"
+    },
+    {
+      "accent": "#476b36",
+      "art": [
+        "res://icons/Tiles/fh/plains_forest_camp.png"
+      ],
+      "category": "稀树草原",
+      "color": "#5e8f49",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_plains_forest_camp",
+      "label": "Plains+Forest+Camp",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "plains_forest_camp"
+    },
+    {
+      "accent": "#536d38",
+      "art": [
+        "res://icons/Tiles/fh/plains_forest_lumber_mill.png"
+      ],
+      "category": "稀树草原",
+      "color": "#6f924b",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_plains_forest_lumber_mill",
+      "label": "Plains+Forest+Lumber mill",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "plains_forest_lumber_mill"
+    },
+    {
+      "accent": "#1f6036",
+      "art": [
+        "res://icons/Tiles/fh/plainsforest.png"
+      ],
+      "category": "放置物",
+      "color": "#298148",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_plainsforest",
+      "label": "PlainsForest",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "plainsforest"
+    },
+    {
+      "accent": "#475905",
+      "art": [
+        "res://icons/Tiles/fh/plainsjungle.png"
+      ],
+      "category": "放置物",
+      "color": "#5e7707",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_plainsjungle",
+      "label": "PlainsJungle",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "plainsjungle"
+    },
+    {
+      "accent": "#8f714f",
+      "art": [
+        "res://icons/Tiles/fh/quarry_marble.png"
+      ],
+      "category": "放置物",
+      "color": "#be9769",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_quarry_marble",
+      "label": "Quarry+Marble",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "quarry_marble"
+    },
+    {
+      "accent": "#76583d",
+      "art": [
+        "res://icons/Tiles/fh/quarry_stone.png"
+      ],
+      "category": "放置物",
+      "color": "#9d7651",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_quarry_stone",
+      "label": "Quarry+Stone",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "quarry_stone"
+    },
+    {
+      "accent": "#82563d",
+      "art": [
+        "res://icons/Tiles/fh/redstone.png"
+      ],
+      "category": "放置物",
+      "color": "#ae7251",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_redstone",
+      "label": "Redstone",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "redstone"
+    },
+    {
+      "accent": "#1786af",
+      "art": [
+        "res://icons/Tiles/fh/river_bottom.png"
+      ],
+      "category": "放置物",
+      "color": "#1fb3e9",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_river_bottom",
+      "label": "River-Bottom",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "river_bottom"
+    },
+    {
+      "accent": "#1786af",
+      "art": [
+        "res://icons/Tiles/fh/river_bottomleft.png"
+      ],
+      "category": "放置物",
+      "color": "#1fb3e9",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_river_bottomleft",
+      "label": "River-BottomLeft",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "river_bottomleft"
+    },
+    {
+      "accent": "#1786af",
+      "art": [
+        "res://icons/Tiles/fh/river_bottomright.png"
+      ],
+      "category": "放置物",
+      "color": "#1fb3e9",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_river_bottomright",
+      "label": "River-BottomRight",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "river_bottomright"
+    },
+    {
+      "accent": "#7a755d",
+      "art": [
+        "res://icons/Tiles/fh/salt.png"
+      ],
+      "category": "放置物",
+      "color": "#a29c7c",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_salt",
+      "label": "Salt",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "salt"
+    },
+    {
+      "accent": "#8a5918",
+      "art": [
+        "res://icons/Tiles/fh/sheep_pasture.png"
+      ],
+      "category": "放置物",
+      "color": "#b87720",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_sheep_pasture",
+      "label": "Sheep+Pasture",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "sheep_pasture"
+    },
+    {
+      "accent": "#838378",
+      "art": [
+        "res://icons/Tiles/fh/sheep.png"
+      ],
+      "category": "放置物",
+      "color": "#aeafa0",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_sheep",
+      "label": "Sheep",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "sheep"
+    },
+    {
+      "accent": "#777777",
+      "art": [
+        "res://icons/Tiles/fh/silver.png"
+      ],
+      "category": "放置物",
+      "color": "#9f9f9f",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_silver",
+      "label": "Silver",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "silver"
+    },
+    {
+      "accent": "#8f9b88",
+      "art": [
+        "res://icons/Tiles/fh/snow_farm.png"
+      ],
+      "category": "雪地",
+      "color": "#bfceb5",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_snow_farm",
+      "label": "Snow+Farm",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "snow_farm"
+    },
+    {
+      "accent": "#2f5e1a",
+      "art": [
+        "res://icons/Tiles/fh/sri_pada.png"
+      ],
+      "category": "草原",
+      "color": "#3e7e23",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_sri_pada",
+      "label": "Sri Pada",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "sri_pada"
+    },
+    {
+      "accent": "#6f6f6f",
+      "art": [
+        "res://icons/Tiles/fh/stone.png"
+      ],
+      "category": "放置物",
+      "color": "#959595",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_stone",
+      "label": "Stone",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "stone"
+    },
+    {
+      "accent": "#656a6f",
+      "art": [
+        "res://icons/Tiles/fh/titanium.png"
+      ],
+      "category": "放置物",
+      "color": "#878e94",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_titanium",
+      "label": "Titanium",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "titanium"
+    },
+    {
+      "accent": "#3c6043",
+      "art": [
+        "res://icons/Tiles/fh/tree_of_worlds.png"
+      ],
+      "category": "放置物",
+      "color": "#508059",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_tree_of_worlds",
+      "label": "Tree of Worlds",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "tree_of_worlds"
+    },
+    {
+      "accent": "#7d8f67",
+      "art": [
+        "res://icons/Tiles/fh/tundra_farm.png"
+      ],
+      "category": "雪地",
+      "color": "#a7bf89",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_tundra_farm",
+      "label": "Tundra+Farm",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "tundra_farm"
+    },
+    {
+      "accent": "#697f66",
+      "art": [
+        "res://icons/Tiles/fh/tundra_forest_camp_furs.png"
+      ],
+      "category": "雪地",
+      "color": "#8caa88",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_tundra_forest_camp_furs",
+      "label": "Tundra+Forest+Camp+Furs",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "tundra_forest_camp_furs"
+    },
+    {
+      "accent": "#658470",
+      "art": [
+        "res://icons/Tiles/fh/tundra_forest_camp.png"
+      ],
+      "category": "雪地",
+      "color": "#87b095",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_tundra_forest_camp",
+      "label": "Tundra+Forest+Camp",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "tundra_forest_camp"
+    },
+    {
+      "accent": "#677d65",
+      "art": [
+        "res://icons/Tiles/fh/tundra_forest_deer_camp.png"
+      ],
+      "category": "雪地",
+      "color": "#89a786",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_tundra_forest_deer_camp",
+      "label": "Tundra+Forest+Deer+Camp",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "tundra_forest_deer_camp"
+    },
+    {
+      "accent": "#3f785a",
+      "art": [
+        "res://icons/Tiles/fh/tundraforest.png"
+      ],
+      "category": "放置物",
+      "color": "#54a178",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_tundraforest",
+      "label": "TundraForest",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "tundraforest"
+    },
+    {
+      "accent": "#76867f",
+      "art": [
+        "res://icons/Tiles/fh/ulframite.png"
+      ],
+      "category": "放置物",
+      "color": "#9db2a9",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_ulframite",
+      "label": "Ulframite",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "ulframite"
+    },
+    {
+      "accent": "#496a40",
+      "art": [
+        "res://icons/Tiles/fh/uranium.png"
+      ],
+      "category": "放置物",
+      "color": "#618d55",
+      "decor": "none",
+      "effects": [],
+      "id": "fh_uranium",
+      "label": "Uranium",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "fh",
+      "variant": "uranium"
     }
   ]
 }

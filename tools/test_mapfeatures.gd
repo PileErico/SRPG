@@ -183,7 +183,7 @@ func _initialize() -> void:
 	var norm := MapIO.normalize(d)
 	ck((norm["rivers"] as Array).size() == 1 and (norm["roads"] as Array).size() == 1 and (norm["locations"] as Array).size() == 2, "编辑器存盘往返（试玩直传同形）")
 	ck(str(norm.get("map_type", "")) == "overworld", "map_type 随存")
-	# scope 笔刷过滤：battle 含 road 不含 swamp；overworld 反之
+	# 笔刷全通用（SCOPE_FILTER_ON=false）：不分大/小地图，road 和 swamp 两种地图都出现（scope 机制仍在，见上 in_scope 断言，只是编辑器不再据此过滤）
 	ed.map_type = "battle"
 	var vis_b := ed._visible_brush_indices()
 	ed.map_type = "overworld"
@@ -193,8 +193,8 @@ func _initialize() -> void:
 			if str(ed.PALETTE[i].get("id", "")) == id:
 				return true
 		return false
-	ck(has.call(vis_b, "road") and not has.call(vis_b, "swamp"), "battle 笔刷：含 road 不含 swamp")
-	ck(has.call(vis_o, "swamp") and not has.call(vis_o, "road"), "overworld 笔刷：含 swamp 不含 road")
+	ck(has.call(vis_b, "road") and has.call(vis_b, "swamp"), "笔刷全通用：battle 也含 swamp")
+	ck(has.call(vis_o, "swamp") and has.call(vis_o, "road"), "笔刷全通用：overworld 也含 road")
 	ck(has.call(vis_b, "grassland") and has.call(vis_o, "grassland"), "both 地形两边都在")
 	ed.free()
 

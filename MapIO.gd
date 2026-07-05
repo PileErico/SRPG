@@ -146,6 +146,10 @@ static func _normalize_tiles(raw, w: int, h: int) -> Array:
 				var src = raw[row][col]
 				if typeof(src) == TYPE_DICTIONARY and src.has("terrain") and src.has("variant"):
 					t = {"terrain": String(src["terrain"]), "variant": String(src["variant"])}
+					# 可选放置物层：格上叠一个 {terrain,variant}（渲染在地形之上、单位之下）；缺/坏则无。
+					var _obj = src.get("object")
+					if typeof(_obj) == TYPE_DICTIONARY and _obj.has("terrain") and _obj.has("variant"):
+						t["object"] = {"terrain": String(_obj["terrain"]), "variant": String(_obj["variant"])}
 			line.append(t)
 		out.append(line)
 	return out
