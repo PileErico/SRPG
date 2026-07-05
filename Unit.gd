@@ -374,6 +374,11 @@ func _weapon_prefer(iuid: int) -> String:
 		return ""
 	return str(atk.get("prefer", ""))
 
+# 当前主手武器的 item 名（"比路兹的翼爪" 等）；无武器 → ""。日志/UI 用——区别于 attack.name（技能名，带括号）。
+func current_main_weapon_name() -> String:
+	var item = ItemInstances.view(int(equipment.get("main_hand", 0)))
+	return str(item.get("name", "")) if item != null else ""
+
 # 基础攻击 ＝ 恒读主手武器的 attack🔒（§6.2）：主手无武器/无 attack → 徒手 UNARMED（不退副手）。
 # 比路兹起降已把活跃爪换进主手，故此处天然正确、无需 airborne 分支。
 # 经合成视图取（深拷）——调用方拿到的 attack 不再是共享模板引用。

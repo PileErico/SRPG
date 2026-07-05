@@ -57,6 +57,7 @@ static func make_unit(proto: Dictionary, fac: String, col: int, row: int):
 	u.ai_group = str(proto.get("ai_group", ""))
 	u.recompute_derived()
 	u.init_vitals()
+	u._sync_hands_to_state()   # 维持不变式：主手＝当前地/空态偏好的武器（比路兹专属；覆盖直接带 flying tag 构造等绕过 set_airborne 的路径）；无 prefer 单位 no-op
 	return u
 
 # 设四维主属性（力量/灵巧/智力/体力）

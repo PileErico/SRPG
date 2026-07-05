@@ -1448,9 +1448,15 @@ func _do_toggle_fly(u) -> void:
 		return
 	u.ap -= 1
 	var going_up: bool = not u.is_airborne()
+	var before_mh := int(u.equipment.get("main_hand", 0))
 	u.set_airborne(going_up)   # 内含起降换手：活跃爪换进主手
-	var claw_name := str(u.basic_attack().get("name", "徒手"))   # 换手后主手武器名（不再硬编码爪名）
-	_push_log(["%s %s（→%s）" % [_cname(u), "起飞" if going_up else "降落", claw_name]])
+	# 日志两条（§6.3🔒）：①通用飞行态播报（任何会飞单位）；②仅在实际发生换手时追比路兹换爪 flavor。
+	var lines := ["%s %s" % [_cname(u), "切换为飞行状态" if going_up else "切换为地面状态"]]
+	if int(u.equipment.get("main_hand", 0)) != before_mh:
+		var claw: String = u.current_main_weapon_name().trim_prefix("比路兹的")   # 取 item 名去角色前缀（翼爪/足爪，无括号）
+		if claw != "":
+			lines.append("%s将使用她的%s作为主要攻击手段" % [_cname(u), claw])
+	_push_log(lines)
 	_clear_selection()
 	_refresh_info()
 	_animate_fly_toggle(u, going_up)
