@@ -28,6 +28,30 @@ func _initialize() -> void:
 	ck(TerrainDB.is_object({}) == false, "空 entry is_object=false")
 	ck(TerrainDB.is_object({"is_object": true}) == true, "标了 is_object=true")
 
+	# C) 放置物撤销粒度（回归）：多笔放置，撤销只回退最后一笔——
+	#    曾因 _copy_tiles 快照丢 object 字段 → 任一撤销把全图放置物集体抹掉。
+	var MapEditorScript := load("res://MapEditor.gd")
+	var ed = MapEditorScript.new()
+	ed._load_terrains()
+	ed.new_map(3, 3)
+	var obj_idx := -1
+	for i in ed.PALETTE.size():
+		if TerrainDB.is_object(ed.PALETTE[i]):
+			obj_idx = i
+			break
+	ck(obj_idx >= 0, "存在放置物笔刷")
+	ed.brush_index = obj_idx
+	ed.begin_stroke(); ed.paint_cell(0, 0); ed.end_stroke()   # 第一笔
+	ck(ed.tiles[0][0].has("object"), "第一笔放置物落格")
+	ed.begin_stroke(); ed.paint_cell(1, 1); ed.end_stroke()   # 第二笔
+	ck(ed.tiles[1][1].has("object"), "第二笔放置物落格")
+	ed.undo()                                                 # 只撤第二笔
+	ck(ed.tiles[0][0].has("object"), "撤销后第一笔仍在（不被集体抹掉）")
+	ck(not ed.tiles[1][1].has("object"), "撤销后第二笔已回退")
+	ed.redo()                                                 # 重做找回第二笔
+	ck(ed.tiles[1][1].has("object") and ed.tiles[0][0].has("object"), "重做找回第二笔、第一笔不受影响")
+	ed.free()
+
 	if _fail == 0:
 		print("=== 全 PASS ===")
 	else:

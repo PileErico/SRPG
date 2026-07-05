@@ -2850,7 +2850,11 @@ func _copy_tiles(src: Array) -> Array:
 	for row in src:
 		var line := []
 		for cell in row:
-			line.append({"terrain": cell.terrain, "variant": cell.variant})
+			var nc := {"terrain": cell.terrain, "variant": cell.variant}
+			var obj = cell.get("object")   # 放置物层随撤销快照一起拷——否则任一撤销会连同全图放置物一起抹掉
+			if typeof(obj) == TYPE_DICTIONARY:
+				nc["object"] = obj.duplicate(true)
+			line.append(nc)
 		out.append(line)
 	return out
 
