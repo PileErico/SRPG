@@ -59,14 +59,8 @@
       "damage_kind": "physical",
       "icon": "res://icons/Skills/WeaponSkills/Special_Belooz_Skill_1.png",
       "inflict": {
-        "chance": 30,
-        "dot_pct_max_hp": 5,
-        "duration": 2,
-        "kind": "debuff",
-        "name": "流血·翼爪",
-        "tags": [
-          "bleeding"
-        ]
+        "effect": "bleeding",
+        "chance": 30
       },
       "name": "撕裂（比路兹）",
       "prefer": "ground",

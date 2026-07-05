@@ -518,20 +518,31 @@ func _resolve_compute(attacker, target, skill) -> Dictionary:
 	r["inflict"] = _try_inflict_state(target, skill)
 	return r
 
-# 命中后尝试施加异常（流血等）：概率 × (1−异常抵抗)；成功则挂进 target.effects（同名刷新时长）。
+# 命中后尝试施加异常（流血等）：概率 × (1−异常抵抗)；成功则挂进 target.effects。
+# inflict 引用形态🔒（§2.2）：`{effect:"<id>", chance:N}`——effect id 查 EffectDB、chance 缺省 100。
+# 兼容旧内联形态（name+mods，无 effect 键，chance 缺省 0）——走匿名路径，防旧数据/测试断裂。
 # 返回掷骰事件 {name, base_ch, resist, ch, roll, applied}；skill 无 inflict ＝ 空 {}。
 func _try_inflict_state(target, skill) -> Dictionary:
 	var inf = skill.get("inflict", null)
 	if typeof(inf) != TYPE_DICTIONARY:
 		return {}
-	var base_ch := float(inf.get("chance", 0))
+	var eid := str(inf.get("effect", ""))
+	var base_ch := float(inf.get("chance", 100.0 if eid != "" else 0.0))
 	var resist := float(target.effective_stat_f("res_status"))
 	var ch := base_ch * (1.0 - resist / 100.0)
 	var iroll := randf() * 100.0
 	var applied := iroll < ch
-	if applied:
-		_add_effect(target, inf)
-	return {"name": str(inf.get("name", "")), "base_ch": base_ch, "resist": resist, "ch": ch, "roll": iroll, "applied": applied}
+	var nm := ""
+	if eid != "":
+		var def = EffectDB.get_effect(eid)
+		nm = str(def.get("name", eid)) if def != null else eid
+		if applied:
+			_add_effect(target, {"id": eid})   # id 路径：定义查 EffectDB
+	else:
+		nm = str(inf.get("name", ""))          # 旧内联形态
+		if applied:
+			_add_effect(target, inf)
+	return {"name": nm, "base_ch": base_ch, "resist": resist, "ch": ch, "roll": iroll, "applied": applied}
 
 # ============ 效果 / buff↔modifier 桥 ============
 
