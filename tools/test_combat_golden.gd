@@ -99,6 +99,13 @@ func _initialize() -> void:
 	var r8 := hit(s, a0, mk({}), {"coeff": 1.0, "bonus": {"stats": ["STR", "DEX"], "mult": 0.5}})
 	ck(is_equal_approx(float(r8["bonus"]), 10.0) and int(r8["hp_loss"]) == 30, "补正+10：out=30 hp_loss=30")
 
+	# 9) 伤害类型正字（element→damage_kind §7.2）：damage_kind:"fire" 必须取火抗 res_fire、非物抗 res_phys。
+	#    res_fire=50、res_phys=0：正字前误读 element→缺省 physical→取 res_phys=0→hp_loss=20（回归）；
+	#    正字后读 damage_kind→fire→取 res_fire=50→hp_loss=10。此条即 fire 抗性键取对与否的判决点。
+	var rf := hit(s, a0, mk({"res_fire": 50, "res_phys": 0}), {"coeff": 1.0, "damage_kind": "fire"})
+	ck(str(rf["damage_kind"]) == "fire", "结果携带 damage_kind=fire")
+	ck(int(rf["hp_loss"]) == 10, "火伤取火抗50 → hp_loss=10（正字：不误取物抗）")
+
 	if _fail == 0:
 		print("=== 全部断言 PASS ===")
 	else:

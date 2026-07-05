@@ -469,15 +469,15 @@ func _resolve_compute(attacker, target, skill) -> Dictionary:
 	var deff: float = float(target.effective_stat_f("def_eff"))
 	var def_factor := maxf(0.0, 2.0 - deff / 100.0) * _terrain_eff_factor(target, "def_eff", false)   # ×守方地块防御效能（减免向，折进减伤链）
 	var g := maxf(0.0, 1.0 - bp / 100.0) * def_factor
-	# 分量：普攻单分量(先进甲)；穿甲 armor_pen 拆 人/甲 两分量。element 默认物理。
-	var elem := str(skill.get("element", "physical"))
+	# 分量：普攻单分量(先进甲)；穿甲 armor_pen 拆 人/甲 两分量。damage_kind 默认物理（element 已废弃 §7.2）。
+	var dkind := str(skill.get("damage_kind", "physical"))
 	var pen := clampf(float(skill.get("armor_pen", 0.0)), 0.0, 1.0)
 	var components := []
 	if pen > 0.0:
-		components.append({"lane": "human", "element": elem, "ratio": pen})
-		components.append({"lane": "armor_first", "element": elem, "ratio": 1.0 - pen})
+		components.append({"lane": "human", "damage_kind": dkind, "ratio": pen})
+		components.append({"lane": "armor_first", "damage_kind": dkind, "ratio": 1.0 - pen})
 	else:
-		components.append({"lane": "armor_first", "element": elem, "ratio": 1.0})
+		components.append({"lane": "armor_first", "damage_kind": dkind, "ratio": 1.0})
 	# 结算落血（分量减伤链在 CombatResolver：逐分量 甲抗/人抗/固减 + 破甲溢出保留元素）
 	var dres := CombatResolver.resolve(target, out, g, components)
 	var hp_loss := int(round(float(dres["hp_loss"])))
@@ -499,10 +499,10 @@ func _resolve_compute(attacker, target, skill) -> Dictionary:
 	r["br"] = br
 	r["bp"] = bp
 	r["def_factor"] = def_factor
-	r["elem"] = elem
+	r["damage_kind"] = dkind
 	r["pen"] = pen
-	r["res_pct"] = float(target.effective_stat_f("res_" + CombatResolver.res_suffix(elem)))
-	r["armor_res_pct"] = float(target.effective_stat_f("armor_res_" + CombatResolver.res_suffix(elem)))
+	r["res_pct"] = float(target.effective_stat_f("res_" + CombatResolver.res_suffix(dkind)))
+	r["armor_res_pct"] = float(target.effective_stat_f("armor_res_" + CombatResolver.res_suffix(dkind)))
 	r["had_armor"] = int(target.stats.get("armor", 0)) > 0 or armor_loss > 0   # 展示口径：结算时有甲（含本次被打光）
 	r["hp_loss"] = hp_loss
 	r["armor_loss"] = armor_loss
