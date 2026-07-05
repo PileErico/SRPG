@@ -60,6 +60,13 @@ func _initialize() -> void:
 	u.set_airborne(false)
 	ck(int(u.equipment.get("main_hand", 0)) == mh0, "重复降落幂等（主手不误换）")
 
+	# 恒读主手核心禁止行为：主手空 + 副手确有武器 → 仍徒手（绝不退副手）。
+	# 用 belooz 清空主手、保留副手爪 → 若误加 off_hand 兜底，此断言会 FAIL（裸单位版测不出，见 review）。
+	var u2 = UnitFactory.make_unit(belooz, "player", 0, 0)
+	ck(int(u2.equipment.get("off_hand", 0)) != 0, "构造：副手确有武器（爪）")
+	u2.equipment["main_hand"] = 0
+	ck(str(u2.basic_attack().get("name", "")) == "徒手", "主手空+副手有武器 → 徒手（不退副手·恒读主手🔒）")
+
 	if _fail == 0:
 		print("=== 全部断言 PASS ===")
 	else:

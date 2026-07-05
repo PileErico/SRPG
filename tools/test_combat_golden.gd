@@ -104,7 +104,23 @@ func _initialize() -> void:
 	#    正字后读 damage_kind→fire→取 res_fire=50→hp_loss=10。此条即 fire 抗性键取对与否的判决点。
 	var rf := hit(s, a0, mk({"res_fire": 50, "res_phys": 0}), {"coeff": 1.0, "damage_kind": "fire"})
 	ck(str(rf["damage_kind"]) == "fire", "结果携带 damage_kind=fire")
-	ck(int(rf["hp_loss"]) == 10, "火伤取火抗50 → hp_loss=10（正字：不误取物抗）")
+	ck(int(rf["hp_loss"]) == 10, "火伤取火抗50 → hp_loss=10（正字：不误取物抗人道键）")
+
+	# 10) 规格招牌样例（docs/单位系统设计.md「减伤链」验算：out=50 打进 甲20+甲抗50%+人抗20%）——
+	#     到甲 50×0.5=25 → 破 20 甲、溢出 5×0.8=4 进人。锁「破甲溢出同时过甲抗+人抗」的双层减伤链
+	#     （case4/5 从不交叉甲抗与人抗，此条补上；后续 eff/护甲重构漏乘/调序会在此 FAIL）。
+	var t10 = mk({"HP": 100, "armor": 20, "armor_res_phys": 50, "res_phys": 20})
+	var r10 := hit(s, a0, t10, {"coeff": 2.5})   # atk20×2.5 → out=50
+	ck(is_equal_approx(float(r10["out"]), 50.0), "招牌样例 out=50")
+	ck(int(r10["armor_loss"]) == 20 and int(r10["hp_loss"]) == 4, "双层减伤：armor_loss=20 hp_loss=4")
+	ck(int(t10.stats["armor"]) == 0 and int(t10.stats["HP"]) == 96, "落甲/落血写回：armor=0 HP=96")
+
+	# 11) 甲道 damage_kind 正字：fire 伤害打进厚甲目标，甲道须取 armor_res_fire（非 armor_res_phys）。
+	#     armor_res_fire=50/armor_res_phys=0：正字对→到甲 20×0.5=10；若甲道误取物理键→20。守护甲道后缀映射。
+	var t11 = mk({"HP": 100, "armor": 100, "armor_res_fire": 50, "armor_res_phys": 0, "res_fire": 0})
+	var r11 := hit(s, a0, t11, {"coeff": 1.0, "damage_kind": "fire"})
+	ck(int(r11["armor_loss"]) == 10 and int(r11["hp_loss"]) == 0, "火伤取甲火抗50 → armor_loss=10（甲道正字）")
+	ck(int(t11.stats["armor"]) == 90, "落甲写回：armor=90")
 
 	if _fail == 0:
 		print("=== 全部断言 PASS ===")
