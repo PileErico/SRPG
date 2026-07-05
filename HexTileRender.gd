@@ -35,7 +35,8 @@ static var _widest_cache := {}  # tex RID id -> 赤道行(最宽像素行中点)
 
 # 画一个地块：程序烘焙的像素 hex 底(含已像素化的 decor) + 未像素化 decor 暂留矢量线稿。
 # center=格心；size=中心到顶点半径；seed=变体/扰动种子（0＝变体0，用于笔刷缩略图）；with_decor=false 时只画底。
-static func draw_tile(ci: CanvasItem, center: Vector2, size: float, color: Color, accent: Color, decor: String, seed: int = 0, with_decor: bool = true, art: Array = []) -> void:
+## anchor：固定锚行（art 像素行）——放置物（道路/河流等非六边形叠加）用它钉赤道，缺省 -1＝回落最宽行（六边形地块本身）。
+static func draw_tile(ci: CanvasItem, center: Vector2, size: float, color: Color, accent: Color, decor: String, seed: int = 0, with_decor: bool = true, art: Array = [], anchor: float = -1.0) -> void:
 	# 赤道对齐 + 等比 1.5×（见文件头「对齐规范」）：贴图最宽行钉在格心水平线、宽=2·size，竖向由 art 自带。
 	var dw := 2.0 * size
 	# 优先：手绘变体贴图（按 seed 确定性选一张）；自带 decor/边缘，不再叠程序 decor
@@ -43,7 +44,7 @@ static func draw_tile(ci: CanvasItem, center: Vector2, size: float, color: Color
 	if not art.is_empty():
 		var htex := TextureCache.get_tex_file(pick_art(art, seed))
 		if htex != null:
-			_draw_equator(ci, htex, center, dw)
+			_draw_equator(ci, htex, center, dw, anchor)
 			return
 	# 兜底：程序烘焙像素底（顶光/轻噪/像素 decor/像素边缘都已烘进纹理）
 	var tex := _tile_tex(color, accent, decor, absi(seed) % TILE_VARIANTS)
@@ -53,11 +54,14 @@ static func draw_tile(ci: CanvasItem, center: Vector2, size: float, color: Color
 
 # 赤道对齐画贴图：按目标宽 dw 等比缩放，令贴图「最宽行(赤道)」落在格心 center.y 上。
 # 竖向探出/收缩全由 art 像素相对赤道的位置决定（山峰在赤道上方、土坎在下方），不做额外锚点。
-static func _draw_equator(ci: CanvasItem, tex: Texture2D, center: Vector2, dw: float) -> void:
+static func _draw_equator(ci: CanvasItem, tex: Texture2D, center: Vector2, dw: float, anchor: float = -1.0) -> void:
 	var tw := float(maxi(1, tex.get_width()))
 	var scale := dw / tw
 	var dh := float(tex.get_height()) * scale
-	var top := center.y - _widest_row(tex) * scale
+	# 放置物（道路/河流等非六边形叠加）的「最宽行」在与六边形边接触处、不在赤道，按 _widest_row 会上下乱窜；
+	# 给定 anchor(art 像素行) 则钉该行到格心 → 末端准落各边（与同格底地块共用赤道，见文件头对齐规范）。
+	var row := anchor if anchor >= 0.0 else _widest_row(tex)
+	var top := center.y - row * scale
 	ci.draw_texture_rect(tex, Rect2(center.x - dw * 0.5, top, dw, dh), false)
 
 # 取贴图「赤道行」＝不透明像素最多的行里【最高(最靠上)的那一行】。

@@ -303,8 +303,10 @@ func _paint_chunk(ci: CanvasItem, cx: int, cy: int) -> void:
 		if typeof(obj) != TYPE_DICTIONARY:
 			continue
 		var oseed: int = _c.x * 73856093 ^ _c.y * 19349663
-		var oart: Array = TerrainDB.art_of(TerrainDB.entry_for(obj))
-		HexTileRender.draw_tile(ci, hex_center(_c.x, _c.y), HEX_SIZE, TerrainDB.color_of(obj), TerrainDB.accent_of(obj), TerrainDB.decor_of(obj), oseed, true, oart)
+		var oentry = TerrainDB.entry_for(obj)
+		var oart: Array = TerrainDB.art_of(oentry)
+		var oanchor: float = TerrainDB.art_anchor_of(oentry)   # 道路/河流等叠加物按固定锚行钉赤道（末端落边）
+		HexTileRender.draw_tile(ci, hex_center(_c.x, _c.y), HEX_SIZE, TerrainDB.color_of(obj), TerrainDB.accent_of(obj), TerrainDB.decor_of(obj), oseed, true, oart, oanchor)
 
 # 单格的地形过渡边（§4.4）：向「更靠后」邻格（下方/同行右侧）的**不同底色**公共边描一道「同色系更深」软线，
 # 让地形分界比同地形内边更清晰、柔化平涂拼接（极简：只加深、不渐变贴图）。去重使每条内边恰好画一次

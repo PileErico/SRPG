@@ -25,4 +25,5 @@ func _draw() -> void:
 		return
 	# seed=0：笔刷缩略图不做坐标扰动（要规整、可代表该地形），与地图格的「同一份绘制」只差扰动种子
 	var art: Array = e.get("art", [])   # 有手绘变体则笔刷也显手绘（art[0] 代表版）
-	HexTileRender.draw_tile(self, size * 0.5, RADIUS, Color.html(e.color), Color.html(e.accent), str(e.get("decor", "none")), 0, true, art)
+	var anchor: float = TerrainDB.art_anchor_of(e)   # 放置物（道路/河流）固定锚行，笔刷缩略图与地图格一致
+	HexTileRender.draw_tile(self, size * 0.5, RADIUS, Color.html(e.color), Color.html(e.accent), str(e.get("decor", "none")), 0, true, art, anchor)

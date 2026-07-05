@@ -958,7 +958,7 @@
       "decor": "none",
       "effects": [],
       "id": "fh_city_center",
-      "label": "City center",
+      "label": "城市据点（一级）",
       "move": {
         "cost": 1.0,
         "passable_by": "all"
@@ -2567,6 +2567,468 @@
       "tags": [],
       "terrain": "fh",
       "variant": "uranium"
+    },
+    {
+      "accent": "#6e5f45",
+      "art": [
+        "res://icons/Tiles/randr/road_0.png"
+      ],
+      "art_anchor": 31.0,
+      "color": "#8a8478",
+      "decor": "none",
+      "effects": [],
+      "id": "rr_road_0",
+      "is_object": true,
+      "label": "道路0",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "randr",
+      "variant": "road_0"
+    },
+    {
+      "accent": "#6e5f45",
+      "art": [
+        "res://icons/Tiles/randr/road_1.png"
+      ],
+      "art_anchor": 31.0,
+      "color": "#8a8478",
+      "decor": "none",
+      "effects": [],
+      "id": "rr_road_1",
+      "is_object": true,
+      "label": "道路1",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "randr",
+      "variant": "road_1"
+    },
+    {
+      "accent": "#6e5f45",
+      "art": [
+        "res://icons/Tiles/randr/road_2.png"
+      ],
+      "art_anchor": 31.0,
+      "color": "#8a8478",
+      "decor": "none",
+      "effects": [],
+      "id": "rr_road_2",
+      "is_object": true,
+      "label": "道路2",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "randr",
+      "variant": "road_2"
+    },
+    {
+      "accent": "#6e5f45",
+      "art": [
+        "res://icons/Tiles/randr/road_3.png"
+      ],
+      "art_anchor": 31.0,
+      "color": "#8a8478",
+      "decor": "none",
+      "effects": [],
+      "id": "rr_road_3",
+      "is_object": true,
+      "label": "道路3",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "randr",
+      "variant": "road_3"
+    },
+    {
+      "accent": "#6e5f45",
+      "art": [
+        "res://icons/Tiles/randr/road_4.png"
+      ],
+      "art_anchor": 31.0,
+      "color": "#8a8478",
+      "decor": "none",
+      "effects": [],
+      "id": "rr_road_4",
+      "is_object": true,
+      "label": "道路4",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "randr",
+      "variant": "road_4"
+    },
+    {
+      "accent": "#6e5f45",
+      "art": [
+        "res://icons/Tiles/randr/road_5.png"
+      ],
+      "art_anchor": 31.0,
+      "color": "#8a8478",
+      "decor": "none",
+      "effects": [],
+      "id": "rr_road_5",
+      "is_object": true,
+      "label": "道路5",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "randr",
+      "variant": "road_5"
+    },
+    {
+      "accent": "#6e5f45",
+      "art": [
+        "res://icons/Tiles/randr/road_6.png"
+      ],
+      "art_anchor": 31.0,
+      "color": "#8a8478",
+      "decor": "none",
+      "effects": [],
+      "id": "rr_road_6",
+      "is_object": true,
+      "label": "道路6",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "randr",
+      "variant": "road_6"
+    },
+    {
+      "accent": "#6e5f45",
+      "art": [
+        "res://icons/Tiles/randr/road_7.png"
+      ],
+      "art_anchor": 31.0,
+      "color": "#8a8478",
+      "decor": "none",
+      "effects": [],
+      "id": "rr_road_7",
+      "is_object": true,
+      "label": "道路7",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "randr",
+      "variant": "road_7"
+    },
+    {
+      "accent": "#6e5f45",
+      "art": [
+        "res://icons/Tiles/randr/road_8.png"
+      ],
+      "art_anchor": 31.0,
+      "color": "#8a8478",
+      "decor": "none",
+      "effects": [],
+      "id": "rr_road_8",
+      "is_object": true,
+      "label": "道路8",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "randr",
+      "variant": "road_8"
+    },
+    {
+      "accent": "#6e5f45",
+      "art": [
+        "res://icons/Tiles/randr/road_9.png"
+      ],
+      "art_anchor": 31.0,
+      "color": "#8a8478",
+      "decor": "none",
+      "effects": [],
+      "id": "rr_road_9",
+      "is_object": true,
+      "label": "道路9",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "randr",
+      "variant": "road_9"
+    },
+    {
+      "accent": "#6e5f45",
+      "art": [
+        "res://icons/Tiles/randr/road_10.png"
+      ],
+      "art_anchor": 31.0,
+      "color": "#8a8478",
+      "decor": "none",
+      "effects": [],
+      "id": "rr_road_10",
+      "is_object": true,
+      "label": "道路10",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "randr",
+      "variant": "road_10"
+    },
+    {
+      "accent": "#2f6d8f",
+      "art": [
+        "res://icons/Tiles/randr/river_0.png"
+      ],
+      "art_anchor": 31.0,
+      "color": "#3a6ea5",
+      "decor": "none",
+      "effects": [],
+      "id": "rr_river_0",
+      "is_object": true,
+      "label": "河流0",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "randr",
+      "variant": "river_0"
+    },
+    {
+      "accent": "#2f6d8f",
+      "art": [
+        "res://icons/Tiles/randr/river_1.png"
+      ],
+      "art_anchor": 31.0,
+      "color": "#3a6ea5",
+      "decor": "none",
+      "effects": [],
+      "id": "rr_river_1",
+      "is_object": true,
+      "label": "河流1",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "randr",
+      "variant": "river_1"
+    },
+    {
+      "accent": "#2f6d8f",
+      "art": [
+        "res://icons/Tiles/randr/river_2.png"
+      ],
+      "art_anchor": 31.0,
+      "color": "#3a6ea5",
+      "decor": "none",
+      "effects": [],
+      "id": "rr_river_2",
+      "is_object": true,
+      "label": "河流2",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "randr",
+      "variant": "river_2"
+    },
+    {
+      "accent": "#2f6d8f",
+      "art": [
+        "res://icons/Tiles/randr/river_3.png"
+      ],
+      "art_anchor": 31.0,
+      "color": "#3a6ea5",
+      "decor": "none",
+      "effects": [],
+      "id": "rr_river_3",
+      "is_object": true,
+      "label": "河流3",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "randr",
+      "variant": "river_3"
+    },
+    {
+      "accent": "#2f6d8f",
+      "art": [
+        "res://icons/Tiles/randr/river_4.png"
+      ],
+      "art_anchor": 31.0,
+      "color": "#3a6ea5",
+      "decor": "none",
+      "effects": [],
+      "id": "rr_river_4",
+      "is_object": true,
+      "label": "河流4",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "randr",
+      "variant": "river_4"
+    },
+    {
+      "accent": "#2f6d8f",
+      "art": [
+        "res://icons/Tiles/randr/river_5.png"
+      ],
+      "art_anchor": 31.0,
+      "color": "#3a6ea5",
+      "decor": "none",
+      "effects": [],
+      "id": "rr_river_5",
+      "is_object": true,
+      "label": "河流5",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "randr",
+      "variant": "river_5"
+    },
+    {
+      "accent": "#2f6d8f",
+      "art": [
+        "res://icons/Tiles/randr/river_6.png"
+      ],
+      "art_anchor": 31.0,
+      "color": "#3a6ea5",
+      "decor": "none",
+      "effects": [],
+      "id": "rr_river_6",
+      "is_object": true,
+      "label": "河流6",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "randr",
+      "variant": "river_6"
+    },
+    {
+      "accent": "#2f6d8f",
+      "art": [
+        "res://icons/Tiles/randr/river_7.png"
+      ],
+      "art_anchor": 31.0,
+      "color": "#3a6ea5",
+      "decor": "none",
+      "effects": [],
+      "id": "rr_river_7",
+      "is_object": true,
+      "label": "河流7",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "randr",
+      "variant": "river_7"
+    },
+    {
+      "accent": "#2f6d8f",
+      "art": [
+        "res://icons/Tiles/randr/river_8.png"
+      ],
+      "art_anchor": 31.0,
+      "color": "#3a6ea5",
+      "decor": "none",
+      "effects": [],
+      "id": "rr_river_8",
+      "is_object": true,
+      "label": "河流8",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "randr",
+      "variant": "river_8"
+    },
+    {
+      "accent": "#2f6d8f",
+      "art": [
+        "res://icons/Tiles/randr/river_9.png"
+      ],
+      "art_anchor": 31.0,
+      "color": "#3a6ea5",
+      "decor": "none",
+      "effects": [],
+      "id": "rr_river_9",
+      "is_object": true,
+      "label": "河流9",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "randr",
+      "variant": "river_9"
+    },
+    {
+      "accent": "#2f6d8f",
+      "art": [
+        "res://icons/Tiles/randr/river_10.png"
+      ],
+      "art_anchor": 31.0,
+      "color": "#3a6ea5",
+      "decor": "none",
+      "effects": [],
+      "id": "rr_river_10",
+      "is_object": true,
+      "label": "河流10",
+      "move": {
+        "cost": 1.0,
+        "passable_by": "all"
+      },
+      "scope": "both",
+      "tags": [],
+      "terrain": "randr",
+      "variant": "river_10"
     }
   ]
 }

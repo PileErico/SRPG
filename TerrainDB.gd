@@ -77,6 +77,12 @@ static func art_of(entry) -> Array:
 	var a = entry.get("art", [])
 	return a if typeof(a) == TYPE_ARRAY else []
 
+# 放置物叠加瓦片（道路/河流）的固定锚行（art 像素行→钉格心）；无则 -1＝回落最宽行（六边形地块本身）。
+static func art_anchor_of(entry) -> float:
+	if typeof(entry) != TYPE_DICTIONARY:
+		return -1.0
+	return float(entry.get("art_anchor", -1.0))
+
 static func label_of(tile) -> String:
 	var e = entry_for(tile)
 	return str(e.label) if e != null else "未知"
