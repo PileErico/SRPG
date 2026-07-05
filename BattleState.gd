@@ -10,6 +10,7 @@ const CombatResolver := preload("res://CombatResolver.gd")
 const HexGrid := preload("res://HexGrid.gd")
 const TerrainDB := preload("res://TerrainDB.gd")
 const WorldState := preload("res://WorldState.gd")
+const EffectDB := preload("res://EffectDB.gd")
 
 const DEFAULT_TERRAIN := "plain"
 const DEFAULT_VARIANT := "grassland"
@@ -534,9 +535,18 @@ func _try_inflict_state(target, skill) -> Dictionary:
 
 # ============ 效果 / buff↔modifier 桥 ============
 
-# 给单位挂一个效果（同名则刷新时长/数值、不叠层）。
-# **buff↔modifier 桥 🔒**：若 inf 带 mods（[{stat,op,value}]），同时往 target.modifiers 挂（source="buff:名"）。
+# 给单位挂一个效果。**分派🔒（§2.2）**：入参带非空 id → EffectDB id 路径（同 id 刷新 / stackable 叠层）；
+# 无 id 但有 name（+可选 mods）→ 匿名内联旧路径（死门/重伤/内联 inflict/旧测试，行为原样不动）。
+# **buff↔modifier 桥 🔒**：带 mods 时同时往 target.modifiers 挂（source="buff:<id|name>"）。
 func _add_effect(target, inf: Dictionary) -> void:
+	var eid := str(inf.get("id", ""))
+	if eid != "":
+		_add_effect_by_id(target, inf, eid)
+	else:
+		_add_effect_anonymous(target, inf)
+
+# 匿名内联路径（旧行为逐字保留）：同 name 刷新时长/DoT、不叠层；source="buff:<name>"。
+func _add_effect_anonymous(target, inf: Dictionary) -> void:
 	var nm := str(inf.get("name", ""))
 	var source := "buff:" + nm
 	_remove_mods_by_source(target, source)   # 刷新：先摘旧的同名修正，按最新重挂
@@ -557,16 +567,71 @@ func _add_effect(target, inf: Dictionary) -> void:
 			"tags": inf.get("tags", []),   # 效果 tag（如 bleeding）：供「按 tag 驱散/清除」用
 			"source": source,              # 与其挂的修正共用，便于到期/清除时按 source 摘
 		})
+	_hang_effect_mods(target, inf.get("mods", []), source, str(inf.get("kind", "debuff")))
+
+# EffectDB id 路径（§2.2）：查定义 → 同 id 刷新时长 / stackable 叠层（≤max_stacks）；source="buff:<id>"。
+# 入参 inf 只需带 id（+可选运行时覆盖）；定义本体（duration/dot/mods…）从 EffectDB 取。
+func _add_effect_by_id(target, inf: Dictionary, eid: String) -> void:
+	var def = EffectDB.get_effect(eid)
+	if def == null:
+		push_warning("_add_effect: 未知效果 id=%s（EffectDB 无此条目，跳过）" % eid)
+		return
+	var source := "buff:" + eid
+	_remove_mods_by_source(target, source)   # 刷新/叠层：先摘旧修正、按最新（含叠层后应有的 mods）重挂
+	var dur := _eval_effect_duration(def)
+	var stackable := bool(def.get("stackable", false))
+	var max_stacks := int(def.get("max_stacks", 0))
+	var existing = null
+	for e in target.effects:
+		if str(e.get("id", "")) == eid:
+			existing = e
+			break
+	if existing != null:
+		existing["duration"] = dur   # 同 id：刷新时长
+		if stackable:
+			var ns := int(existing.get("stacks", 1)) + 1
+			if max_stacks > 0:
+				ns = mini(ns, max_stacks)
+			existing["stacks"] = ns
+	else:
+		var e := {
+			"id": eid,
+			"name": str(def.get("name", eid)),
+			"kind": str(def.get("kind", "debuff")),
+			"permanent": bool(def.get("permanent", false)),
+			"duration": dur,
+			"dot_pct_max_hp": float(def.get("dot_pct_max_hp", 0)),
+			"hot_flat": float(def.get("hot_flat", 0)),          # >0 每回合末回固定血（HoT）
+			"tags": def.get("tags", []),
+			"expire_timing": str(def.get("expire_timing", "turn_end")),
+			"on_expire_apply": str(def.get("on_expire_apply", "")),   # 到期连锁施加另一效果 id（两段式，§决策20）
+			"source": source,
+		}
+		if stackable:
+			e["stacks"] = 1
+		target.effects.append(e)
+	_hang_effect_mods(target, def.get("mods", []), source, str(def.get("kind", "debuff")))
+
+# buff↔modifier 桥：把效果的 mods 挂进 target.modifiers（同 source）；触及四维则重算派生。
+func _hang_effect_mods(target, mods, source: String, nature: String) -> void:
 	var touched_four := false
-	for m in inf.get("mods", []):
+	for m in mods:
 		if typeof(m) != TYPE_DICTIONARY:
 			continue
 		var st := str(m.get("stat", ""))
-		target.modifiers.append({"stat": st, "op": str(m.get("op", "flat")), "value": float(m.get("value", 0)), "source": source, "nature": str(inf.get("kind", "debuff"))})
+		target.modifiers.append({"stat": st, "op": str(m.get("op", "flat")), "value": float(m.get("value", 0)), "source": source, "nature": nature})
 		if st in ["STR", "DEX", "INT", "STA"]:
 			touched_four = true
 	if touched_four:
 		target.recompute_derived()   # 改了四维 → 重算派生（让减速等传导到派生属性）
+
+# 效果时长求值：兼容旧匿名内联的裸标量 与 EffectDB 的 {base,per_stat} 对象（§2.2 双形前置）。
+# v1：对象形只读 base（per_stat 公式求值留阶段2 与 resolve_num 一起；fixed 模型见 §2.8）。整数语义 floor。
+func _eval_effect_duration(inf) -> int:
+	var d = inf.get("duration", 1)
+	if typeof(d) == TYPE_DICTIONARY:
+		return int(floor(float(d.get("base", 0))))
+	return int(d)
 
 # 按 source 摘掉单位的修正（buff 到期/被清除时）。若摘掉的含四维修正 → 重算派生。
 func _remove_mods_by_source(u, source: String) -> void:
@@ -613,13 +678,24 @@ func _apply_turn_end_effects(u) -> Array:
 	if u == null or not ("effects" in u) or u.effects.is_empty():
 		return events
 	var keep := []
+	var chains := []   # 到期连锁施加的第二段效果 id（决策20 两段式；循环内先收集、u.effects 重置后再施加，防被 keep 覆盖）
 	for e in u.effects:
+		# DoT：每回合末按 HP_max 百分比扣血（无视护甲）
 		var pct := float(e.get("dot_pct_max_hp", 0))
 		if pct > 0.0:
 			var d := int(round(float(u.effective_stat("HP_max")) * pct / 100.0))
 			if d > 0:
 				u.stats["HP"] = int(u.stats.get("HP", 0)) - d
 				events.append({"type": "dot", "name": str(e.get("name", "流血")), "dmg": d, "pct": pct})
+		# HoT：每回合末回固定血（钳 HP_max、不溢出）
+		var hot := float(e.get("hot_flat", 0))
+		if hot > 0.0:
+			var hpmax := int(u.effective_stat("HP_max"))
+			var cur := int(u.stats.get("HP", 0))
+			var newhp := mini(hpmax, cur + int(round(hot)))
+			if newhp > cur:
+				u.stats["HP"] = newhp
+				events.append({"type": "hot", "name": str(e.get("name", "回血")), "heal": newhp - cur})
 		if e.get("permanent", false):
 			keep.append(e)
 		else:
@@ -630,7 +706,13 @@ func _apply_turn_end_effects(u) -> Array:
 			else:
 				_remove_mods_by_source(u, str(e.get("source", "buff:" + str(e.get("name", "")))))   # 到期：连带摘掉其挂的修正
 				events.append({"type": "expired", "name": str(e.get("name", ""))})
+				var chain := str(e.get("on_expire_apply", ""))
+				if chain != "":
+					chains.append(chain)
 	u.effects = keep
+	for cid in chains:   # 两段式：第一段到期 → 就地施加第二段（EffectDB id 路径）
+		_add_effect(u, {"id": cid})
+		events.append({"type": "chain", "id": cid})
 	return events
 
 # ============ 死门 + 收尸（需求 §1.11 🔒；日志/编排在宿主）============
