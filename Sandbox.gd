@@ -1448,8 +1448,9 @@ func _do_toggle_fly(u) -> void:
 		return
 	u.ap -= 1
 	var going_up: bool = not u.is_airborne()
-	u.set_airborne(going_up)
-	_push_log(["%s %s" % [_cname(u), "起飞（→足爪·抓取）" if going_up else "降落（→翼爪·撕裂）"]])
+	u.set_airborne(going_up)   # 内含起降换手：活跃爪换进主手
+	var claw_name := str(u.basic_attack().get("name", "徒手"))   # 换手后主手武器名（不再硬编码爪名）
+	_push_log(["%s %s（→%s）" % [_cname(u), "起飞" if going_up else "降落", claw_name]])
 	_clear_selection()
 	_refresh_info()
 	_animate_fly_toggle(u, going_up)

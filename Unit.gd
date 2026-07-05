@@ -330,7 +330,7 @@ const UNARMED_ATTACK := {
 	"damage_kind": "physical", "tags": [], "aoe": null,
 }
 
-# 飞行状态：带 flying tag = 在空中。比路兹起飞后用副手（足爪/抓取），落地用主手（翼爪/撕裂）。
+# 飞行状态：带 flying tag = 在空中。比路兹起飞后主手换足爪（抓取）、落地换翼爪（撕裂）——见 set_airborne 换手。
 func is_airborne() -> bool:
 	return tags.has("flying")
 
@@ -338,7 +338,7 @@ func is_airborne() -> bool:
 func can_fly() -> bool:
 	return tags.has("harpy")
 
-# 切换地/空：互斥 ground/flying tag（flying tag 已驱动地形成本/可进深水/森林掩蔽豁免）。
+# 切换地/空：互斥 ground/flying tag（flying tag 已驱动地形成本/可进深水/森林掩蔽豁免）+ 比路兹式起降换手。
 func set_airborne(v: bool) -> void:
 	if v:
 		tags.erase("ground")
@@ -348,15 +348,39 @@ func set_airborne(v: bool) -> void:
 		tags.erase("flying")
 		if not tags.has("ground"):
 			tags.append("ground")
+	_sync_hands_to_state()
 
-# 基础攻击：空中优先副手（足爪/抓取）、地面优先主手（翼爪/撕裂）；该手无武器则退另一手 / 徒手。
+# 比路兹式「起降换手」🔒（§6.3）：让当前地/空状态偏好的那把武器住主手——普攻恒读主手，故起降即自动切爪、
+# 且活跃爪始终在主手不吃副手惩罚。数据驱动：仅当主手武器 attack.prefer 与当前状态不符、且副手武器偏好当前状态
+# 时对调 equipment 两 uid（不走 equip/unequip：innate 爪装卸会早退/泄漏烘焙修正）。无 prefer 的角色永不触发。
+func _sync_hands_to_state() -> void:
+	var state := "air" if is_airborne() else "ground"
+	var mh_pref := _weapon_prefer(int(equipment.get("main_hand", 0)))
+	if mh_pref == state:
+		return   # 主手已偏好当前状态，无需换
+	var oh_pref := _weapon_prefer(int(equipment.get("off_hand", 0)))
+	if oh_pref == state and mh_pref != "":   # 需要一对 prefer 才置换（单侧无 prefer 不动）
+		var tmp = equipment.get("main_hand", 0)
+		equipment["main_hand"] = equipment.get("off_hand", 0)
+		equipment["off_hand"] = tmp
+
+# 读某槽武器的 attack.prefer（"ground"/"air"）；无武器/无 attack/无 prefer → 空串。
+func _weapon_prefer(iuid: int) -> String:
+	var item = ItemInstances.view(iuid)
+	if item == null:
+		return ""
+	var atk = item.get("attack", null)
+	if typeof(atk) != TYPE_DICTIONARY:
+		return ""
+	return str(atk.get("prefer", ""))
+
+# 基础攻击 ＝ 恒读主手武器的 attack🔒（§6.2）：主手无武器/无 attack → 徒手 UNARMED（不退副手）。
+# 比路兹起降已把活跃爪换进主手，故此处天然正确、无需 airborne 分支。
 # 经合成视图取（深拷）——调用方拿到的 attack 不再是共享模板引用。
 func basic_attack() -> Dictionary:
-	var primary := "off_hand" if is_airborne() else "main_hand"
-	for slot in [primary, "main_hand", "off_hand"]:
-		var item = ItemInstances.view(int(equipment.get(slot, 0)))
-		if item != null and item.has("attack"):
-			return item["attack"]
+	var item = ItemInstances.view(int(equipment.get("main_hand", 0)))
+	if item != null and item.has("attack"):
+		return item["attack"]
 	return UNARMED_ATTACK
 
 # 挂装备修正：每条 mod 唯一 source（"equip:<实例iuid>:<序号>"）——同件装备的模板 mod 与词条 mod
