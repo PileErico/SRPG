@@ -390,6 +390,4 @@ func _lblw(t: String, w: int) -> Label:
 	return l
 
 func _label_for(key: String) -> String:
-	if FOUR_CN.has(key):
-		return str(FOUR_CN[key])
 	return StatMeta.label(key)

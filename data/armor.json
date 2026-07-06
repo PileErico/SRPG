@@ -30,14 +30,9 @@
         "value": 200
       },
       {
-        "op": "pct",
+        "op": "flat",
         "stat": "res_phys",
         "value": 25
-      },
-      {
-        "op": "pct",
-        "stat": "res_fire",
-        "value": -25
       }
     ],
     "name": "狼人的身体",

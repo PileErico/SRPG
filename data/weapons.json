@@ -28,7 +28,7 @@
       },
       {
         "op": "flat",
-        "stat": "res_ice",
+        "stat": "res_nature",
         "value": 10
       }
     ],
@@ -48,13 +48,6 @@
   {
     "attack": {
       "ap_cost": 1,
-      "bonus": {
-        "mult": 0.5,
-        "stats": [
-          "STR",
-          "DEX"
-        ]
-      },
       "coeff": 1,
       "damage_kind": "physical",
       "icon": "res://icons/Skills/WeaponSkills/Special_Belooz_Skill_1.png",
@@ -74,7 +67,13 @@
     "icon": "res://icons/Items/Weapons/Special_Belooz_1.png",
     "id": "claw_wing",
     "innate": true,
-    "mods": [],
+    "mods": [
+      {
+        "op": "flat",
+        "stat": "atk",
+        "value": 9.5
+      }
+    ],
     "name": "比路兹的翼爪",
     "requires": [
       "char_belooz"
@@ -92,13 +91,6 @@
     "attack": {
       "ap_cost": 1,
       "armor_pen": 0.3,
-      "bonus": {
-        "mult": 0.5,
-        "stats": [
-          "STR",
-          "DEX"
-        ]
-      },
       "coeff": 1,
       "damage_kind": "physical",
       "icon": "res://icons/Skills/WeaponSkills/Special_Belooz_Skill_2.png",
@@ -114,7 +106,13 @@
     "icon": "res://icons/Items/Weapons/Special_Belooz_2.png",
     "id": "claw_foot",
     "innate": true,
-    "mods": [],
+    "mods": [
+      {
+        "op": "flat",
+        "stat": "atk",
+        "value": 9.5
+      }
+    ],
     "name": "比路兹的足爪",
     "requires": [
       "char_belooz"

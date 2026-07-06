@@ -13,8 +13,6 @@
     "name": "蜥蜴人",
     "tags": [],
     "stats": {
-      "HP_max": 24, "atk": 3, "acc": 34, "eva": 4,
-      "crit_rate": 2, "crit_dmg": 160, "block_rate": 1.2, "block_power": 1.2,
       "AP_max": 2, "move": 6, "speed": 5, "sight": 5,
       "res_phys": 0, "res_nature": 0, "will_fort": 0, "body_fort": 5
     }
@@ -23,8 +21,8 @@
     "name": "鸟妖",
     "tags": ["harpy"],
     "stats": {
-      "HP_max": 12, "atk": 2.5, "acc": 36, "eva": 6,
-      "crit_rate": 3, "crit_dmg": 161, "block_rate": 1.1, "block_power": 1,
+      "HP_max": 15, "atk": 2, "acc": 35, "eva": 5,
+      "crit_rate": 2.5, "crit_dmg": 159, "block_rate": 0.9, "block_power": 0.8,
       "AP_max": 2, "move": 6, "speed": 5, "sight": 5,
       "res_phys": 0, "res_nature": 0, "will_fort": 0, "body_fort": 0
     }

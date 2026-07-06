@@ -1079,11 +1079,16 @@
         "equip": [
           "spear_dragon_calamity"
         ],
-        "four": {
-          "DEX": 6.0,
-          "INT": 4.0,
-          "STA": 8.0,
-          "STR": 8.0
+        "race": "human",
+        "stats": {
+          "HP_max": 24,
+          "atk": 4,
+          "acc": 36,
+          "eva": 6,
+          "block_rate": 1.4,
+          "block_power": 1.6,
+          "crit_rate": 3,
+          "crit_dmg": 164
         },
         "icon": "res://icons/Unit_Icons/Player_Special_Veiken.png",
         "id": "veiken",

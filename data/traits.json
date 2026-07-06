@@ -4,9 +4,15 @@
     "name": "天性武者",
     "rarity": "special",
     "mods": [
-      {"stat": "STR", "op": "flat", "value": 5},
-      {"stat": "DEX", "op": "flat", "value": 5},
-      {"stat": "STA", "op": "flat", "value": 5}
+      {"stat": "HP_max", "op": "flat", "value": 15},
+      {"stat": "atk", "op": "flat", "value": 2.5},
+      {"stat": "acc", "op": "flat", "value": 5},
+      {"stat": "eva", "op": "flat", "value": 5},
+      {"stat": "block_rate", "op": "flat", "value": 1},
+      {"stat": "block_power", "op": "flat", "value": 1},
+      {"stat": "crit_rate", "op": "flat", "value": 2.5},
+      {"stat": "crit_dmg", "op": "flat", "value": 10},
+      {"stat": "body_fort", "op": "flat", "value": 5}
     ],
     "desc": "比路兹身为鸟人更加擅长也只愿意使用自己的天生武器进行战斗。她因此无法正常装备任何武器。",
     "no_weapon": true
