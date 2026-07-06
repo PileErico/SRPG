@@ -210,8 +210,8 @@ static func unit_to_battle_snapshot(u) -> Dictionary:
 		"ai_threat": u.ai_threat, "ai_region": u.ai_region, "ai_group": u.ai_group, "ai_aggroed": u.ai_aggroed,
 	}
 
-# 快照 → Unit：new 后**全量覆写**（不跑 make_unit / recompute_derived / init_vitals——
-# stats 整份原样回写即自洽：同输入同输出，且避免「buff 改四维时 recompute 基线错位」）。
+# 快照 → Unit：new 后**全量覆写**（不跑 make_unit / init_vitals——
+# stats 整份原样回写即自洽：同输入同输出，避免任何「重算基线错位」）。
 # 数值经 JSON 往返变 float，语义为 int 的字段一律 int() 钳制。
 static func unit_from_battle_snapshot(d: Dictionary):
 	var u = Unit.new()

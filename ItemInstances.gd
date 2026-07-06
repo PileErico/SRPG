@@ -15,6 +15,7 @@ extends RefCounted
 ## 用法：const ItemInstances := preload("res://ItemInstances.gd") → create/view/add_affix…
 
 const ItemDB := preload("res://ItemDB.gd")
+const StatMeta := preload("res://StatMeta.gd")
 
 static var _transient := {}   # current==null 域的临时实例库（uid->inst；不落盘）
 static var _ws_script = null  # WorldState 惰性引用（避免 ItemInstances→WorldState→UnitFactory→Unit→ItemInstances 的 preload 环）
@@ -62,10 +63,31 @@ static func destroy(iuid: int) -> void:
 	_store().erase(iuid)
 
 # 给实例加一条词条（词条＝修正对象组：{name, mods:[{stat,op,value}], nature?}）。生成 roll/铁匠 UI 后续接。
+# 🔒 运行时护栏（属性与成长系统.md §5）：data lint 只扫模板文件，实例词条走这里——
+# 未知 stat 键（旧键如 res_fire 永不被消费＝静默无效）或物品禁键（强韧）→ 整条拒收+告警。
 static func add_affix(iuid: int, affix: Dictionary) -> void:
 	var inst = _store().get(iuid)
-	if inst != null and typeof(affix) == TYPE_DICTIONARY:
+	if inst == null or typeof(affix) != TYPE_DICTIONARY:
+		return
+	if _affix_valid(affix, "add_affix"):
 		inst["affixes"].append(affix.duplicate(true))
+
+# 词条 mods 校验（与 lint 规则4 共用 StatMeta 单一源）；ctx 标注调用路径供告警定位。
+static func _affix_valid(affix: Dictionary, ctx: String) -> bool:
+	var mods = affix.get("mods", [])
+	if typeof(mods) != TYPE_ARRAY:
+		return false
+	for m in mods:
+		if typeof(m) != TYPE_DICTIONARY:
+			continue
+		var key := str(m.get("stat", ""))
+		if StatMeta.ITEM_FORBIDDEN_STATS.has(key):
+			push_warning("ItemInstances.%s: 词条「%s」含物品禁键 %s（🔒 强韧不入物品），整条拒收" % [ctx, str(affix.get("name", "")), key])
+			return false
+		if not StatMeta.is_valid_mod_stat(key):
+			push_warning("ItemInstances.%s: 词条「%s」含未知 stat 键 %s（不在 StatMeta 白名单，修正管线不会消费它），整条拒收" % [ctx, str(affix.get("name", "")), key])
+			return false
+	return true
 
 # 从临时库取走一个实例（收编迁移用：WorldState.add_to_roster 把沙盒装备迁进档内库）。无则 null。
 static func take_transient(iuid: int):
@@ -97,7 +119,7 @@ static func view(iuid: int):
 		for m in affix.get("mods", []):
 			if typeof(m) == TYPE_DICTIONARY:
 				var mod: Dictionary = m.duplicate(true)
-				mod["affix"] = str(affix.get("name", ""))   # 标记来自哪条词条（tooltip 用）
+				mod["affix"] = str(affix.get("name", ""))   # 标记来自哪条词条（ItemTooltip.mod_line 行尾注〔词条名〕）
 				mods.append(mod)
 	v["mods"] = mods
 	v["affixes"] = (inst.get("affixes", []) as Array).duplicate(true)
@@ -122,11 +144,21 @@ static func parse_json(arr) -> Dictionary:
 		out[iuid] = {
 			"uid": iuid,
 			"tpl_id": str(e.get("tpl_id", "")),
-			"affixes": (e.get("affixes", []) as Array).duplicate(true) if typeof(e.get("affixes", [])) == TYPE_ARRAY else [],
+			"affixes": _sanitize_affixes(e.get("affixes", [])),
 			"durability": int(e.get("durability", -1)),
 			"condition": str(e.get("condition", "")),
 			"enhance_count": int(e.get("enhance_count", 0)),
 		}
+	return out
+
+# 读档词条自愈：手编档/旧档可夹带违规词条（禁键/旧 stat 键），读入时逐条过滤——lint 挡模板、这里挡实例。
+static func _sanitize_affixes(arr) -> Array:
+	var out := []
+	if typeof(arr) != TYPE_ARRAY:
+		return out
+	for a in arr:
+		if typeof(a) == TYPE_DICTIONARY and _affix_valid(a, "parse_json"):
+			out.append((a as Dictionary).duplicate(true))
 	return out
 
 # 清空**当前生效**的库（测试/退出临时模式用）。

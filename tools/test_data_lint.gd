@@ -12,6 +12,8 @@ extends SceneTree
 ## 运行：..._console.exe --headless --path "D:/1战棋" -s res://tools/test_data_lint.gd（退出码 0=PASS）
 
 const EffectDB := preload("res://EffectDB.gd")
+const StatMeta := preload("res://StatMeta.gd")
+const CombatResolver := preload("res://CombatResolver.gd")
 
 var _fail := 0
 func ck(cond: bool, msg: String) -> void:
@@ -132,22 +134,23 @@ func _initialize() -> void:
 			ck(EffectDB.get_effect(rid) != null, "%s 引用的效果 id 存在：%s" % [path.get_file(), rid])
 
 	# 4) 强韧不入物品（🔒 §5：防具/词条只有抗性、永不提供强韧；特性/种族不受此限）
+	#    禁键清单从 StatMeta.ITEM_FORBIDDEN_STATS 单一源取（运行时护栏 ItemInstances._affix_valid 同源）。
 	for path in ["res://data/weapons.json", "res://data/armor.json", "res://data/accessories.json"]:
 		var data = _read_json(path)
 		if data == null:
 			continue
 		var fort_hits := []
-		for key in ["will_fort", "body_fort"]:
-			_find_stat_refs(data, key, path.get_file(), fort_hits)
+		for key in StatMeta.ITEM_FORBIDDEN_STATS:
+			_find_stat_refs(data, str(key), path.get_file(), fort_hits)
 		ck(fort_hits.is_empty(), "物品数据无强韧 mod（命中：%s）" % ", ".join(fort_hits))
 
-	# 5) damage_kind 白名单（=CombatResolver.RES_SUFFIX 键集；未知种别=抗性旁路陷阱）
+	# 5) damage_kind 白名单（直接取 CombatResolver.RES_SUFFIX 键集单一源；未知种别=抗性旁路陷阱）
 	for path in files:
 		var data = _read_json(path)
 		if data == null:
 			continue
 		var bad_kinds := []
-		_collect_bad_values(data, "damage_kind", ["physical", "fire", "ice", "thunder", "holy"], bad_kinds)
+		_collect_bad_values(data, "damage_kind", CombatResolver.RES_SUFFIX.keys(), bad_kinds)
 		ck(bad_kinds.is_empty(), "%s damage_kind 全在白名单（越界：%s）" % [path.get_file(), ", ".join(bad_kinds)])
 
 	if _fail == 0:

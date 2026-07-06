@@ -153,20 +153,23 @@ static func _tags(parent: Node, tags) -> void:
 		flow.add_child(tag_chip(TagDB.cn(str(t))))
 	parent.add_child(flow)
 
-# 一条修正数值行（绿=加/红=减；抗性/效能/率类即便 flat 也带 % —— StatMeta.is_pct 语义）
+# 一条修正数值行（绿=加/红=减；抗性/效能/率类即便 flat 也带 % —— StatMeta.is_pct 语义）。
+# 词条来源 mod（ItemInstances.view 并入时打 affix 标记）行尾注〔词条名〕——白板与带词条件在 tooltip 可分辨。
 static func mod_line(m: Dictionary, font_px := 13) -> Label:
 	var l := Label.new()
 	l.add_theme_font_size_override("font_size", font_px)
 	var key := str(m.get("stat", ""))
+	var afx := str(m.get("affix", ""))
+	var afx_sfx := ("〔%s〕" % afx) if afx != "" else ""
 	if key == "vision_state":   # 非数值状态旗：直接显状态名（如「黑夜视觉」，蓝），不加前缀、不走 ±数值/百分比
 		var vv := str(m.get("value", ""))
-		l.text = str(VISION_STATE_CN.get(vv, vv))
+		l.text = str(VISION_STATE_CN.get(vv, vv)) + afx_sfx
 		l.add_theme_color_override("font_color", Color("#7FB0E0"))
 		return l
 	var val := float(m.get("value", 0))
 	var sfx := "%" if (str(m.get("op", "flat")) == "pct" or StatMeta.is_pct(key)) else ""
 	var sgn := "+" if val >= 0.0 else ""
-	l.text = "%s %s%s%s" % [StatMeta.label(key), sgn, _num(val), sfx]
+	l.text = "%s %s%s%s%s" % [StatMeta.label(key), sgn, _num(val), sfx, afx_sfx]
 	l.add_theme_color_override("font_color", MOD_GREEN if val >= 0.0 else MOD_RED)
 	return l
 

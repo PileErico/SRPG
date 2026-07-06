@@ -39,9 +39,20 @@ const EDITOR_STATS := ["HP_max", "atk", "acc", "eva",
 	"atk_eff", "def_eff",
 	"res_phys", "res_nature", "will_fort", "body_fort"]
 
+# 非数值「状态旗」mod 键白名单（不在 LABELS、但属合法修正对象 stat）
+const FLAG_MOD_STATS := ["vision_state"]
+
+# 物品/词条永不可携带的 stat 🔒（属性与成长系统.md §5：强韧来源＝种族+perk，防具/词条只有抗性）。
+# data lint 规则4 与 ItemInstances 运行时护栏共用此清单（stat 键清单从单一源取、严禁各处硬编码）。
+const ITEM_FORBIDDEN_STATS := ["will_fort", "body_fort"]
+
 # 中文标签（缺则回退键本身）
 static func label(key: String) -> String:
 	return str(LABELS.get(key, key))
+
+# 修正对象 stat 键是否合法（∈LABELS 或状态旗白名单）——词条/运行时 mod 入库前校验用
+static func is_valid_mod_stat(key: String) -> bool:
+	return LABELS.has(key) or key in FLAG_MOD_STATS
 
 # 该 stat 是否百分比语义（显示加 %）——抗性/甲抗/强韧/效能/率类即便 op=flat 也按 % 读
 # （强韧=豁免率，百分比语义；键约定「甲抗均为百分比」🔒）

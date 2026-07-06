@@ -327,7 +327,7 @@ func load_from_memory(map_dict: Dictionary) -> void:
 
 # 落子地图预置单位（_map_units → units）：关卡设计者在编辑器/部署里摆好、存进地图的敌 / 中立 / 固定单位。
 # 每条 = {proto, col, row, faction}；直接进 units（不过部署区限制——这是关卡数据，非玩家临时布置）。
-# 出生点越界则钳进界内。make_unit 已收尾 recompute_derived + init_vitals。
+# 出生点越界则钳进界内。make_unit 已收尾 init_vitals。
 func _spawn_map_units() -> void:
 	_state._spawn_map_units()
 
@@ -1233,7 +1233,7 @@ func _ai_nearest_hostile(unit):
 func _handle_deaths() -> void:
 	var res := _state._handle_deaths_state()
 	for u in res["entered_door"]:
-		_log_line("[b][color=#C86BD5]%s 踏入死门！[/color][/b]（占格可被攻击；每回合 1d20+体力 检定 ±1、被命中 −1；−3 倒下 / +3 爬回）" % _cname(u))
+		_log_line("[b][color=#C86BD5]%s 踏入死门！[/color][/b]（占格可被攻击；每回合 1d20+求生 检定 ±1、被命中 −1；−3 倒下 / +3 爬回）" % _cname(u))
 	var dead: Array = res["dead"]
 	if dead.is_empty():
 		return

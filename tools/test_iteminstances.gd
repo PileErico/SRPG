@@ -56,6 +56,12 @@ func _initialize() -> void:
 	ck(u2.equip_instance(uid2), "equip_instance 成功")
 	ck(absf(u2.effective_stat_f("atk") - (b2 + 8.0)) < 0.001, "模板+5 与词条+3 都生效（=+8，去重雷已排）；实得 +%.1f" % (u2.effective_stat_f("atk") - b2))
 
+	# 4b) 运行时词条护栏（🔒 §5 强韧不入物品；lint 只扫模板，add_affix 是旁路）：
+	#     强韧禁键 / 旧 stat 键（管线不消费＝静默无效）→ 整条拒收（下两行预期各打一条 WARNING）
+	ItemInstances.add_affix(uid2, {"name": "违规·强韧", "mods": [{"stat": "will_fort", "op": "flat", "value": 10}]})
+	ItemInstances.add_affix(uid2, {"name": "违规·旧键", "mods": [{"stat": "res_fire", "op": "flat", "value": 25}]})
+	ck((ItemInstances.view(uid2)["affixes"] as Array).size() == 1, "违规词条（强韧/未知键）被 add_affix 拒收")
+
 	# 5) unequip：修正按前缀全摘、槽清空、实例不销毁
 	u2.unequip("main_hand")
 	ck(u2.equipment.is_empty(), "unequip 清槽")
