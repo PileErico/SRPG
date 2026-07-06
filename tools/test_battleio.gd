@@ -141,6 +141,19 @@ func _initialize() -> void:
 	ck(src.exp != exp_before or src.level > 1, "经验已入账")
 	ck(int(ws.kill_stats.get("bandit", 0)) == 2, "kill_stats 按敌方原型累计（情报输入源）")
 	ck(not ws.kill_stats.has("militia"), "我方阵亡不进 kill_stats")
+	# 4.5) 技艺熟练度经 BattleResult 回流（🔒 §2.4 唯一回流点；对抗 review major 修复）：
+	#      涨值/进阶发生在战斗副本上 → apply_result 回写原件 xp + 按新阶段重挂 prof: 补正
+	src.learn_prof("wp_sword")
+	src.slot_prof("wp_sword", true)
+	src.prof_xp["wp_sword"] = 90
+	BattleIO.apply_result(ws, {"win": true, "units": [{"uid": src.uid, "hp": 5,
+		"prof_xp": {"wp_sword": 350}, "prof_known": ["wp_sword"], "prof_slots": ["wp_sword"]}], "kills": []})
+	ck(int(src.prof_xp.get("wp_sword", 0)) == 350, "战后熟练度回写 roster 原件（90→350）")
+	var prof_mod_ok := false
+	for m in src.modifiers:
+		if str(m.get("source", "")) == "prof:wp_sword" and str(m.get("stat", "")) == "acc" and float(m.get("value", 0)) == 3.0:
+			prof_mod_ok = true
+	ck(prof_mod_ok, "副本进阶（老练）回流后原件按新阶段重挂补正 acc+3")
 	# 真死：移出 roster
 	var before_n: int = ws.roster.size()
 	BattleIO.apply_result(ws, {"win": false, "units": [{"uid": src.uid, "dead": true}], "kills": []})

@@ -54,6 +54,10 @@ static func collect_result(roster: Array, kills: Array, win: bool, context: Dict
 			"dead": u.tags.has("dead"),         # 铁人死门 −3：真死
 			"injured": u.tags.has("injured"),   # 死门 −3 重伤离场 / +3 爬回：战后休整
 			"exp": int(exp_by_uid.get(u.uid, 0)) + EXP_PARTICIPATION,
+			# 技艺熟练度（🔒 属性与成长系统.md §2.4）：战斗涨值发生在副本上——随结果带回、apply_result 回写原件
+			"prof_xp": u.prof_xp.duplicate(),
+			"prof_known": u.prof_known.duplicate(),
+			"prof_slots": u.prof_slots.duplicate(),
 		})
 	var kills_out := []
 	for k in kills:
@@ -76,9 +80,20 @@ static func apply_result(ws, result: Dictionary) -> void:
 		if bool(e.get("injured", false)):
 			u.injured_until = ws.clock_hours + INJURY_HOURS
 			u.tags.erase("injured")   # 战斗标记转持久字段后清掉（tag 只活战斗内）
-		var lv := int(u.gain_exp(int(e.get("exp", 0))))
-		if lv > 0:
-			pass   # 升级细节（属性/技能点分配 UI）后置；点数已在 gain_exp 里入账
+		u.gain_exp(int(e.get("exp", 0)))   # 🔒 属性重做：等级零数值——升级只推技艺槽/树层解锁节拍，无点数入账
+		# 技艺熟练度回流（🔒 §2.4 唯一回流点；无 prof 字段的旧结果安全跳过）：
+		# 涨值/进阶发生在战斗副本上 → 回写 xp 后按新阶段重挂原件的 prof: 补正
+		if typeof(e.get("prof_xp", null)) == TYPE_DICTIONARY:
+			for pid in e["prof_xp"]:
+				u.prof_xp[str(pid)] = int(e["prof_xp"][pid])
+			for pid in e.get("prof_known", []):
+				if not u.prof_known.has(str(pid)):
+					u.prof_known.append(str(pid))
+			for pid in e.get("prof_slots", []):
+				if not u.prof_slots.has(str(pid)):
+					u.slot_prof(str(pid), true)
+			for pid in u.prof_slots:
+				u._apply_prof_mods(str(pid))
 	# 击杀统计累计（按敌方原型；情报系统「战后按击杀解锁」的输入源，见 docs/情报与烹饪系统.md）
 	for k in result.get("kills", []):
 		var pid := str(k.get("proto_id", ""))

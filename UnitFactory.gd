@@ -100,10 +100,16 @@ static func unit_to_proto(u) -> Dictionary:
 		profs["slots"] = u.prof_slots.duplicate()
 	if not u.prof_xp.is_empty():
 		profs["xp"] = u.prof_xp.duplicate()
-	# 白名单单一源＝StatMeta.SERIALIZABLE_BASE_STATS；只写 stats 里实际存在的键（缺省键不写、旧档零影响）
+	# 白名单单一源＝StatMeta.SERIALIZABLE_BASE_STATS；**只写与「引擎基线+种族底值」的差异**
+	# （🔒 属性重做 §3：原型 stats 只写差异——调 races.json 平衡能传导既有原型，不被全量快照冻结；对抗 review 修复）
+	var ref: Dictionary = Unit.new().stats.duplicate()
+	var rst = RaceDB.get_race(u.race_id).get("stats", {})
+	if typeof(rst) == TYPE_DICTIONARY:
+		for k in rst:
+			ref[k] = rst[k]
 	var stat_ov := {}
 	for k in StatMeta.SERIALIZABLE_BASE_STATS:
-		if u.stats.has(k):
+		if u.stats.has(k) and (not ref.has(k) or float(u.stats[k]) != float(ref[k])):
 			stat_ov[k] = u.stats[k]
 	var proto := {
 		"name": u.unit_name,

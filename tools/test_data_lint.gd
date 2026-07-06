@@ -6,6 +6,9 @@ extends SceneTree
 ##     stackable 为 bool / dot_pct_max_hp、hot_flat 数值。
 ##  3) 效果引用完整性：weapons/skills 里 inflict/apply 的 {effect:<id>} 引用必须在 EffectDB 存在
 ##     （当前无引用形态即空过；阶段1.2b bleed 迁引用后此项开始守护悬空 id）。
+##  4) 强韧不入物品（🔒 属性与成长系统.md §5）：weapons/armor/accessories 的 mods 出现 will_fort/body_fort 即 FAIL。
+##  5) damage_kind 白名单：data/ 任意处的 damage_kind 值必须 ∈ {physical,fire,ice,thunder,holy}
+##     （未知种别在 CombatResolver 会告警回退物理轨；数据侧在此挡住）。
 ## 运行：..._console.exe --headless --path "D:/1战棋" -s res://tools/test_data_lint.gd（退出码 0=PASS）
 
 const EffectDB := preload("res://EffectDB.gd")
@@ -53,6 +56,30 @@ func _find_key(v, key: String, path: String, hits: Array) -> void:
 		TYPE_ARRAY:
 			for i in (v as Array).size():
 				_find_key(v[i], key, path + "[" + str(i) + "]", hits)
+
+# 递归找 mods 条目 {stat: <key>}（形状=修正对象），命中处 append 进 hits
+func _find_stat_refs(v, key: String, path: String, hits: Array) -> void:
+	match typeof(v):
+		TYPE_DICTIONARY:
+			if str(v.get("stat", "")) == key:
+				hits.append(path + ":" + key)
+			for k in v:
+				_find_stat_refs(v[k], key, path, hits)
+		TYPE_ARRAY:
+			for e in v:
+				_find_stat_refs(e, key, path, hits)
+
+# 递归收集某 key 的「白名单外取值」
+func _collect_bad_values(v, key: String, allow: Array, bad: Array) -> void:
+	match typeof(v):
+		TYPE_DICTIONARY:
+			for k in v:
+				if str(k) == key and typeof(v[k]) == TYPE_STRING and not allow.has(str(v[k])):
+					bad.append(str(v[k]))
+				_collect_bad_values(v[k], key, allow, bad)
+		TYPE_ARRAY:
+			for e in v:
+				_collect_bad_values(e, key, allow, bad)
 
 # 递归收集所有「inflict / apply_effect 引用的 effect id」：dict 里 key=="effect" 的字符串值
 func _collect_effect_refs(v, refs: Array) -> void:
@@ -103,6 +130,25 @@ func _initialize() -> void:
 		_collect_effect_refs(data, refs)
 		for rid in refs:
 			ck(EffectDB.get_effect(rid) != null, "%s 引用的效果 id 存在：%s" % [path.get_file(), rid])
+
+	# 4) 强韧不入物品（🔒 §5：防具/词条只有抗性、永不提供强韧；特性/种族不受此限）
+	for path in ["res://data/weapons.json", "res://data/armor.json", "res://data/accessories.json"]:
+		var data = _read_json(path)
+		if data == null:
+			continue
+		var fort_hits := []
+		for key in ["will_fort", "body_fort"]:
+			_find_stat_refs(data, key, path.get_file(), fort_hits)
+		ck(fort_hits.is_empty(), "物品数据无强韧 mod（命中：%s）" % ", ".join(fort_hits))
+
+	# 5) damage_kind 白名单（=CombatResolver.RES_SUFFIX 键集；未知种别=抗性旁路陷阱）
+	for path in files:
+		var data = _read_json(path)
+		if data == null:
+			continue
+		var bad_kinds := []
+		_collect_bad_values(data, "damage_kind", ["physical", "fire", "ice", "thunder", "holy"], bad_kinds)
+		ck(bad_kinds.is_empty(), "%s damage_kind 全在白名单（越界：%s）" % [path.get_file(), ", ".join(bad_kinds)])
 
 	if _fail == 0:
 		print("=== 数据 lint 全 PASS ===")

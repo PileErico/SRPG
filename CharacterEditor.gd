@@ -18,6 +18,7 @@ const TextureCache := preload("res://TextureCache.gd")        # 棋子图标缩�
 const EditorTheme := preload("res://EditorTheme.gd")
 const EditorUI := preload("res://EditorUI.gd")
 const RaceDB := preload("res://RaceDB.gd")                    # 种族底值（种族下拉同时驱动 race_id+底值，🔒 属性重做 §3）
+const Unit := preload("res://Unit.gd")                        # 换种族先重置引擎基线（防旧种族键残留）
 
 const FACTIONS := ["player", "ally", "enemy", "neutral"]
 const MANAGED_CATS := ["faction", "race", "biotype", "camp"]   # 有专属下拉（阵营/种族/生物类型/派系）→ 从「其他标签」排除
@@ -26,7 +27,7 @@ const RUNTIME_TAGS := ["flying", "deaths_door", "injured", "dead"]   # 运行时
 # 描述物品/技能/地块，永不属于单位（仿 ItemEditor.NON_ITEM_CATS）→ 自由标签选择器全排除，只留 unit 能用的
 const NON_UNIT_CATS := ["terrain", "rarity", "wtype", "wcat_melee", "wcat_ranged",
 	"wcat_catalyst", "wcat_shield", "handedness", "gear_type", "armor_weight",
-	"weapon_attr", "skill_type", "target", "damage", "effect"]
+	"weapon_attr", "skill_type", "target", "damage", "effect", "effect_dim"]
 const PORTRAIT_DIR := "res://icons/Characters"
 const ICON_DIR := "res://icons/Unit_Icons"
 
@@ -507,14 +508,18 @@ func _on_faction_changed() -> void:
 func _on_race_changed() -> void:
 	_sync_tags()
 	# 种族 tag 同时驱动种族底值 🔒（属性与成长系统.md §3）：tag id 与 races.json id 同词表。
-	# 选中已建档种族 → 写 race_id + 底值直落面板并注满；未建档种族 → 仅记 tag、面板保持。
+	# 换族＝先重置引擎基线、再叠新种族底值——防旧种族的键在新种族未定义时残留（对抗 review 发现）；
+	# 未建档种族 → 仅记 tag、面板回引擎基线（race_id 清空）。
 	if _unit != null:
 		var race := str(_f_race.get_selected_metadata())
+		var fresh = Unit.new()
+		for k in fresh.stats:
+			_unit.stats[k] = fresh.stats[k]
+		_unit.race_id = ""
 		if not RaceDB.get_race(race).is_empty():
-			_unit.race_id = race
-			RaceDB.apply_to(_unit, race)
-			_unit.init_vitals()
-			_rebuild_panel()
+			RaceDB.apply_to(_unit, race)   # 内部写 race_id
+		_unit.init_vitals()
+		_rebuild_panel()
 
 func _on_biotype_changed() -> void:
 	_sync_tags()

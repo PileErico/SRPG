@@ -569,10 +569,12 @@ func _apply_prof_mods(id: String) -> void:
 		modifiers.append(mod)
 
 # 当前主手武器的 tags + attack tags（徒手=UNARMED 的 tags）——技艺喂养的行为匹配输入。
+# 判据与 basic_attack 完全一致（item.has("attack")）：主手物品无 attack 块＝实际打徒手 → 喂体术、
+# 不喂物品 tags（对抗 review 发现：两处判据不一致会喂错域）。
 func current_attack_tags() -> Array:
 	var out := []
 	var item = ItemInstances.view(int(equipment.get("main_hand", 0)))
-	if item != null:
+	if item != null and item.has("attack"):
 		for t in item.get("tags", []):
 			out.append(str(t))
 		var atk = item.get("attack", null)

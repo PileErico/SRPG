@@ -47,6 +47,11 @@ static func _res_factor(target, prefix: String, damage_kind: String) -> float:
 static func _flat(target, key: String) -> float:
 	return float(target.effective_stat_f(key))
 
-# damage_kind → 抗性键后缀（physical→phys，其余同名）。供本类与 Sandbox 日志共用。
+# damage_kind → 抗性键后缀。供本类与 Sandbox 日志共用。
+# 未知种别响亮告警 + 回退物理轨（原「同名后缀」会静默读缺省 0 键 → 双轨抗性全旁路，对抗 review 发现）；
+# 种别白名单同时由 test_data_lint 在数据侧机械执法。
 static func res_suffix(damage_kind: String) -> String:
-	return str(RES_SUFFIX.get(damage_kind, damage_kind))
+	if not RES_SUFFIX.has(damage_kind):
+		push_warning("CombatResolver：未知 damage_kind=%s——回退按物理取抗（白名单=%s）" % [damage_kind, str(RES_SUFFIX.keys())])
+		return "phys"
+	return str(RES_SUFFIX[damage_kind])
