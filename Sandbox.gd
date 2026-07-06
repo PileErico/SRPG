@@ -26,6 +26,7 @@ const WorldState := preload("res://WorldState.gd")   # 战役档静态引用（�
 const WorldClock := preload("res://WorldClock.gd")   # 世界时钟：小时→日夜映射（战斗不耗世界时间 🔒，战中日夜冻结）
 const EventEngine := preload("res://EventEngine.gd") # when/do 事件引擎：触发器评估/执行迁入（本类只做宿主原语 event_*）
 const Checks := preload("res://Checks.gd")           # d20 检定原语（死门每回合检定用）
+const ProfDB := preload("res://ProfDB.gd")           # 技艺注册表（进阶播报取名/阶段名）
 const BattleIO := preload("res://BattleIO.gd")       # 战斗进出契约：战役模式快照进/结果出（M5）
 const SaveIO := preload("res://SaveIO.gd")           # 战役战斗结算后自动存档
 const DialogueUI := preload("res://DialogueUI.gd")   # 通用对话模块：战场内触发（do: dialogue，M8）
@@ -1917,6 +1918,7 @@ func _resolve_one(attacker, target, skill, show_target := false) -> Dictionary:
 	if not r["hit"]:
 		_spawn_hit_feedback(target, false, false, false, 0, 0)   # 飘字：未命中/闪避（看目标阵营）
 		_push_log(lines)
+		_log_prof_ups(_state.grant_combat_prof(attacker, target, r))   # 挥空也算练习（🔒 §2.4）
 		return {"hit": false, "blocked": false}
 	lines.append("暴击率%s%%" % _numf(r["cr"]))
 	lines.append("→ %s" % _oc(r["crit"], "暴击", "未暴击"))
@@ -1955,7 +1957,14 @@ func _resolve_one(attacker, target, skill, show_target := false) -> Dictionary:
 			seg += " → %s" % _oc(bool(inf["applied"]), "施加", "未中")
 		lines.append(seg)
 	_push_log(lines)
+	_log_prof_ups(_state.grant_combat_prof(attacker, target, r))
 	return {"hit": true, "blocked": r["blocked"]}
+
+# 技艺进阶播报（只报进阶；涨值本身静默防刷屏）
+func _log_prof_ups(events: Array) -> void:
+	for ev in events:
+		_log_line("[color=#EBBC04]%s 的「%s」晋升【%s】[/color]" % [
+			_cname(ev["unit"]), ProfDB.prof_name(str(ev["prof"])), ProfDB.stage_name(int(ev["stage"]))])
 
 # 清空单位的效果 + 所有 buff 来源的临时修正（重开/退战/换图用）；装备/特性等常驻修正保留。
 func _clear_effects_and_buffs(u) -> void:

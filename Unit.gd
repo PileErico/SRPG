@@ -10,6 +10,7 @@ const ItemInstances := preload("res://ItemInstances.gd")     # 物品实例门�
 const StatMeta := preload("res://StatMeta.gd")               # stat 元数据单一源（派生键/序列化白名单）
 const TraitDB := preload("res://TraitDB.gd")                 # 特性注册表（特性查表）
 const SkillDB := preload("res://SkillDB.gd")                 # 技能注册表（技能查表）
+const ProfDB := preload("res://ProfDB.gd")                   # 技艺（熟练度域）注册表（🔒 属性与成长系统.md §2）
 const EquipSlots := preload("res://EquipSlots.gd")          # 槽位 / 槽位资格（tag 驱动装备资格）
 
 var unit_name := "新兵"
@@ -100,6 +101,13 @@ var equipment := {}
 # —— 已学技能：skill_id -> {level:int(1..max), cd:int(剩余冷却,按本单位 turn), uses:int(本战剩余次数)} ——
 # 学过 = 键存在；等级 / 冷却 / 本战次数 都存这。技能定义（数值/门槛/效果）查 SkillDB，不在此重复。
 var skills := {}
+
+# —— 技艺（熟练度域）🔒 docs/属性与成长系统.md §2 ——
+# 三态：未学（prof_known 无）→ 已学（可装载，生疏起步）→ 阶段成长。熟练度永不丢失（卸下=冻结）。
+# 装载=总开关：装载中＝阶段补正（prof:<id> 修正）+perk 生效+可涨；定义查 ProfDB，不在此重复。
+var prof_xp := {}       # 域id -> 累计熟练度（int；卸下冻结不清零）
+var prof_known := []    # 已学域 id（师承/自悟解锁「已学」；未学不可装载）
+var prof_slots := []    # 已装载域 id（≤ prof_slot_capacity()；非战斗可随时换）
 
 # —— 敌方 AI 警觉 / 仇恨（友方单位忽略这些字段；三种触发任一满足即激活，可组合）——
 # ai_threat：①视野感知——敌人进入它的「视野(sight) 且有视线(LOS)」就警觉（默认开）。见 docs/感知系统.md。
@@ -295,9 +303,10 @@ func remap_equip_uid(old_uid: int, new_uid: int) -> void:
 			m["source"] = newp + src.substr(oldp.length())
 
 # 无武器时的基础攻击（徒手）；装了武器则用其 attack skill（兑现“换武器=换攻击”）。
+# unarmed tag：喂养「体术」技艺（ProfDB match_tags）。
 const UNARMED_ATTACK := {
 	"name": "徒手", "coeff": 1.0, "range": 1, "ap_cost": 1,
-	"damage_kind": "physical", "tags": [], "aoe": null,
+	"damage_kind": "physical", "tags": ["unarmed"], "aoe": null,
 }
 
 # 飞行状态：带 flying tag = 在空中。比路兹起飞后主手换足爪（抓取）、落地换翼爪（撕裂）——见 set_airborne 换手。
@@ -449,7 +458,7 @@ func consume_skill(id: String, cd: int) -> void:
 	skills[id]["cd"] = maxi(0, cd)
 	skills[id]["uses"] = maxi(0, int(skills[id].get("uses", 0)) - 1)
 
-# 战斗开始：所有已学技能冷却清零、本战次数按当前智力重置
+# 战斗开始：所有已学技能冷却清零、本战次数重置
 func reset_skill_charges() -> void:
 	for id in skills:
 		var def = SkillDB.get_skill(id)
@@ -457,6 +466,124 @@ func reset_skill_charges() -> void:
 			continue
 		skills[id]["cd"] = 0
 		skills[id]["uses"] = skill_uses_max(def)
+
+# ============ 技艺（熟练度域）🔒 属性与成长系统.md §2 ============
+
+# 技艺槽容量：等级 1/5/9/13/17 各解锁 1 格（共 5，暂定可调 🔒 §1）。等级唯一的解锁节拍职责之一。
+func prof_slot_capacity() -> int:
+	var c := 1
+	for lv in [5, 9, 13, 17]:
+		if level >= int(lv):
+			c += 1
+	return c
+
+# 当前阶段（1..5 生疏..大师）；未接触过的域=1（生疏）
+func prof_stage(id: String) -> int:
+	return ProfDB.stage_of(int(prof_xp.get(id, 0)))
+
+# 一次性学习资格 🔒（§2.1）：requires.all 全部域达 REQ_STAGE（老练）+ any 至少一个达标。
+# 资格看 prof_xp（熟练度保留，与是否装载无关）——学会后前置可整个卸下。
+func prof_requires_met(id: String) -> bool:
+	var req = ProfDB.get_prof(id).get("requires", {})
+	if typeof(req) != TYPE_DICTIONARY or req.is_empty():
+		return true
+	for rid in req.get("all", []):
+		if prof_stage(str(rid)) < ProfDB.REQ_STAGE:
+			return false
+	var any = req.get("any", [])
+	if typeof(any) == TYPE_ARRAY and not any.is_empty():
+		for rid in any:
+			if prof_stage(str(rid)) >= ProfDB.REQ_STAGE:
+				return true
+		return false
+	return true
+
+# 该域对本单位是否可见：派生域（derived/exotic）在前置达标前隐藏（🔒 §2.1 阶段浮现）；其余恒可见。
+func prof_visible(id: String) -> bool:
+	var def := ProfDB.get_prof(id)
+	if bool(def.get("derived", false)) or bool(def.get("exotic", false)):
+		return prof_requires_met(id) or prof_known.has(id)
+	return true
+
+# 学会一个技艺（进入「已学」态；派生=自悟在资格达标时调、基础=师承由学习渠道调——渠道后置，
+# 本函数只做状态落账+资格校验）。返回是否成功。
+func learn_prof(id: String) -> bool:
+	if prof_known.has(id) or ProfDB.get_prof(id).is_empty():
+		return false
+	if not prof_requires_met(id):
+		return false
+	prof_known.append(id)
+	return true
+
+# 装载技艺（占一格；force=烘焙路径跳过容量校验——敌方预设不走玩家槽位系统 🔒 §6）。
+# 装载=总开关：挂上当前阶段的数值补正（source="prof:<id>"）。
+func slot_prof(id: String, force := false) -> bool:
+	if prof_slots.has(id) or not prof_known.has(id):
+		return false
+	if not force and prof_slots.size() >= prof_slot_capacity():
+		return false
+	prof_slots.append(id)
+	_apply_prof_mods(id)
+	return true
+
+# 卸载技艺：摘掉全部相关收益（阶段补正+将来 perk），熟练度冻结保留。
+func unslot_prof(id: String) -> void:
+	if not prof_slots.has(id):
+		return
+	prof_slots.erase(id)
+	remove_modifiers_by_source("prof:" + id)
+
+# 熟练度获取（🔒 §2.4：仅装载中的技艺可涨；行为权重与威胁缩放由调用方算好传入）。
+# 返回新阶段（发生进阶时；未进阶=0）——进阶时重挂阶段补正。
+func gain_prof(id: String, amount: int) -> int:
+	if amount <= 0 or not prof_slots.has(id):
+		return 0
+	var old_stage := prof_stage(id)
+	prof_xp[id] = int(prof_xp.get(id, 0)) + amount
+	var new_stage := prof_stage(id)
+	if new_stage > old_stage:
+		_apply_prof_mods(id)   # 进阶：按新阶段重挂补正
+		return new_stage
+	return 0
+
+# 挂/重挂某域当前阶段的数值补正：取 stage_mods 里 stage ≤ 当前阶段的**最高一档**（各档=该阶段的完整值，不叠加）。
+func _apply_prof_mods(id: String) -> void:
+	var source := "prof:" + id
+	remove_modifiers_by_source(source)
+	var def := ProfDB.get_prof(id)
+	var stage := prof_stage(id)
+	var best = null
+	for sm in def.get("stage_mods", []):
+		if typeof(sm) == TYPE_DICTIONARY and int(sm.get("stage", 0)) <= stage:
+			if best == null or int(sm.get("stage", 0)) > int(best.get("stage", 0)):
+				best = sm
+	if best == null:
+		return
+	var label := "技艺·%s（%s）" % [str(def.get("name", id)), ProfDB.stage_name(stage)]
+	for m in best.get("mods", []):
+		if typeof(m) != TYPE_DICTIONARY:
+			continue
+		var mod: Dictionary = m.duplicate()
+		mod["source"] = source
+		mod["source_label"] = label
+		modifiers.append(mod)
+
+# 当前主手武器的 tags + attack tags（徒手=UNARMED 的 tags）——技艺喂养的行为匹配输入。
+func current_attack_tags() -> Array:
+	var out := []
+	var item = ItemInstances.view(int(equipment.get("main_hand", 0)))
+	if item != null:
+		for t in item.get("tags", []):
+			out.append(str(t))
+		var atk = item.get("attack", null)
+		if typeof(atk) == TYPE_DICTIONARY:
+			for t in atk.get("tags", []):
+				if not out.has(str(t)):
+					out.append(str(t))
+	else:
+		for t in UNARMED_ATTACK.get("tags", []):
+			out.append(str(t))
+	return out
 
 func _init(p_name := "新兵", p_faction := "player", p_col := 0, p_row := 0) -> void:
 	unit_name = p_name

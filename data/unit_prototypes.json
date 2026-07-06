@@ -13,6 +13,11 @@
     "level": 5,
     "name": "比路兹",
     "portrait": "res://icons/Characters/Plyer_Special_Belooz.png",
+    "profs": {
+      "known": ["style_unarmed"],
+      "slots": ["style_unarmed"],
+      "xp": {"style_unarmed": 300}
+    },
     "race": "harpy",
     "skills": {},
     "tags": [
@@ -31,6 +36,11 @@
     "id": "veiken",
     "name": "维肯",
     "portrait": "res://icons/Characters/Plyer_Special_Veiken.png",
+    "profs": {
+      "known": ["wp_spear", "style_two_handed"],
+      "slots": ["wp_spear"],
+      "xp": {"wp_spear": 300, "style_two_handed": 150}
+    },
     "race": "human",
     "stats": {
       "HP_max": 24,

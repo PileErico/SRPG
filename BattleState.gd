@@ -11,6 +11,7 @@ const HexGrid := preload("res://HexGrid.gd")
 const TerrainDB := preload("res://TerrainDB.gd")
 const WorldState := preload("res://WorldState.gd")
 const EffectDB := preload("res://EffectDB.gd")
+const ProfDB := preload("res://ProfDB.gd")   # 技艺（熟练度域）注册表——战斗涨值挂钩用（🔒 属性与成长系统.md §2.4）
 
 const DEFAULT_TERRAIN := "plain"
 const DEFAULT_VARIANT := "grassland"
@@ -767,6 +768,40 @@ func _apply_expire_chains(u, chains: Array, events: Array) -> void:
 	for cid in chains:
 		_add_effect(u, {"id": cid})
 		events.append({"type": "chain", "id": cid})
+
+# ============ 技艺熟练度获取（🔒 属性与成长系统.md §2.4；日志在宿主）============
+
+# 行为基础值 🔒 权重序：攻击＞格挡＞挨打；具体数值=🟡占位（数值层后调）。
+const PROF_GAIN_ATTACK := 10
+const PROF_GAIN_BLOCK := 6
+const PROF_GAIN_HIT_TAKEN := 2
+
+# 一次攻击结算后的熟练度发放：
+#   攻击者——按主手武器/攻击 tags 喂养**全部匹配的已装载技艺**（🔒 一次行为同喂；挥空也算练习）；
+#   目标——格挡→盾、着甲挨打→防具（须装载对应技艺；防具另须 body 槽有甲）。
+# 威胁缩放 🟡（强敌快涨/弱敌趋停）：按双方等级差的线性因子占位。
+# 返回进阶事件 [{unit, prof, stage}]（只报进阶；涨值本身静默防刷屏）。
+func grant_combat_prof(attacker, target, r: Dictionary) -> Array:
+	var events := []
+	var af := clampf(1.0 + 0.2 * float(int(target.level) - int(attacker.level)), 0.1, 2.0)
+	var atags: Array = attacker.current_attack_tags()
+	for pid in attacker.prof_slots:
+		if ProfDB.matches_tags(str(pid), atags):
+			var ns: int = attacker.gain_prof(str(pid), int(round(PROF_GAIN_ATTACK * af)))
+			if ns > 0:
+				events.append({"unit": attacker, "prof": str(pid), "stage": ns})
+	if bool(r.get("hit", false)):
+		var tf := clampf(1.0 + 0.2 * float(int(attacker.level) - int(target.level)), 0.1, 2.0)
+		if bool(r.get("blocked", false)) and target.prof_slots.has("style_shield"):
+			var ns2: int = target.gain_prof("style_shield", int(round(PROF_GAIN_BLOCK * tf)))
+			if ns2 > 0:
+				events.append({"unit": target, "prof": "style_shield", "stage": ns2})
+		if int(r.get("hp_loss", 0)) + int(r.get("armor_loss", 0)) > 0 \
+				and target.prof_slots.has("style_armor") and target.equipment.has("body"):
+			var ns3: int = target.gain_prof("style_armor", int(round(PROF_GAIN_HIT_TAKEN * tf)))
+			if ns3 > 0:
+				events.append({"unit": target, "prof": "style_armor", "stage": ns3})
+	return events
 
 # ============ 死门 + 收尸（需求 §1.11 🔒；日志/编排在宿主）============
 

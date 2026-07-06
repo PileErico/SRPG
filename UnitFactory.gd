@@ -50,6 +50,18 @@ static func make_unit(proto: Dictionary, fac: String, col: int, row: int):
 	else:
 		for sk in sk_src:
 			u.learn_skill(str(sk))
+	# 技艺（可选 profs 块）：{known:[...], slots:[...], xp:{id:int}}——出身自带/敌方烘焙预设（🔒 §6 烘焙不走槽位校验）
+	var pf = proto.get("profs", {})
+	if typeof(pf) == TYPE_DICTIONARY and not pf.is_empty():
+		var pxp = pf.get("xp", {})
+		if typeof(pxp) == TYPE_DICTIONARY:
+			for pid in pxp:
+				u.prof_xp[str(pid)] = int(pxp[pid])
+		for pid in pf.get("known", []):
+			if not u.prof_known.has(str(pid)):
+				u.prof_known.append(str(pid))
+		for pid in pf.get("slots", []):
+			u.slot_prof(str(pid), true)
 	# 敌方 AI 字段（玩家/友方忽略）
 	u.ai_threat = bool(proto.get("ai_threat", true))
 	u.ai_region = str(proto.get("ai_region", ""))
@@ -80,6 +92,14 @@ static func unit_to_proto(u) -> Dictionary:
 	var skill_lv := {}
 	for sid in u.skills:
 		skill_lv[sid] = u.skill_level(sid)
+	# 技艺（有内容才写，旧档零影响）
+	var profs := {}
+	if not u.prof_known.is_empty():
+		profs["known"] = u.prof_known.duplicate()
+	if not u.prof_slots.is_empty():
+		profs["slots"] = u.prof_slots.duplicate()
+	if not u.prof_xp.is_empty():
+		profs["xp"] = u.prof_xp.duplicate()
 	# 白名单单一源＝StatMeta.SERIALIZABLE_BASE_STATS；只写 stats 里实际存在的键（缺省键不写、旧档零影响）
 	var stat_ov := {}
 	for k in StatMeta.SERIALIZABLE_BASE_STATS:
@@ -102,6 +122,8 @@ static func unit_to_proto(u) -> Dictionary:
 		"stats": stat_ov,
 		"_preset": true,
 	}
+	if not profs.is_empty():
+		proto["profs"] = profs
 	# 敌方 AI 警觉字段：仅对 enemy/neutral 写出（player/ally 忽略这些字段——不写省噪音）。
 	# make_unit 读回时按缺省兜底（ai_threat 默认 true）；补上后 proto/preset 往返不再丢 AI 配置。
 	if u.faction in ["enemy", "neutral"]:
@@ -172,6 +194,7 @@ static func unit_to_battle_snapshot(u) -> Dictionary:
 		"col": u.col, "row": u.row,
 		"tags": u.tags.duplicate(),
 		"stats": u.stats.duplicate(),
+		"prof_xp": u.prof_xp.duplicate(), "prof_known": u.prof_known.duplicate(), "prof_slots": u.prof_slots.duplicate(),
 		"ap": u.ap, "move_points": u.move_points,
 		"door_gauge": u.door_gauge, "door_checks": u.door_checks,
 		"effects": u.effects.duplicate(true),
@@ -209,6 +232,20 @@ static func unit_from_battle_snapshot(d: Dictionary):
 		for k in src:
 			stats[str(k)] = src[k]
 	u.stats = stats
+	var pxp := {}
+	var pxs = d.get("prof_xp", {})
+	if typeof(pxs) == TYPE_DICTIONARY:
+		for k in pxs:
+			pxp[str(k)] = int(pxs[k])
+	u.prof_xp = pxp
+	var pkn := []
+	for t in d.get("prof_known", []):
+		pkn.append(str(t))
+	u.prof_known = pkn
+	var psl := []
+	for t in d.get("prof_slots", []):
+		psl.append(str(t))
+	u.prof_slots = psl   # 阶段补正随 modifiers 整份快照走（prof: source），不重挂——与 trait/equip 同律
 	u.ap = int(d.get("ap", 0))
 	u.move_points = int(d.get("move_points", 0))
 	u.door_gauge = int(d.get("door_gauge", 0))
