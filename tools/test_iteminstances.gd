@@ -96,7 +96,7 @@ func _initialize() -> void:
 	ItemInstances.clear()   # 清临时域：档内与临时是两个独立 uid 域、数值可重合，先清避免同号干扰断言
 	var ws = WorldState.new()
 	WorldState.current = ws
-	var u6 = UnitFactory.make_unit({"name": "队长", "four": {"STR": 8, "DEX": 6, "INT": 4, "STA": 7}}, "player", -1, -1)
+	var u6 = UnitFactory.make_unit({"name": "队长", "race": "human"}, "player", -1, -1)
 	ws.add_to_roster(u6)
 	var sword := ItemInstances.create("long_sword")
 	ItemInstances.add_affix(sword, {"name": "锋利", "mods": [{"stat": "atk", "op": "flat", "value": 3}]})

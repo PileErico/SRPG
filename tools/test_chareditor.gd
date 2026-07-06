@@ -57,13 +57,13 @@ func _initialize() -> void:
 	# 2) 原型库 upsert / get / 计数
 	var n0: int = UnitFactory.all_prototypes().size()
 	var tmp := {"id": TMP_ID, "name": "临时兵", "default_faction": "enemy",
-		"tags": ["human"], "four": {"STR": 6, "DEX": 5, "INT": 5, "STA": 7}, "level": 3}
+		"tags": ["human"], "race": "human", "stats": {"HP_max": 21}, "level": 3}
 	ck(UnitFactory.save_prototype(tmp), "save_prototype 成功")
 	ck(UnitFactory.all_prototypes().size() == n0 + 1, "原型数 +1")
 	var got := UnitFactory.get_prototype(TMP_ID)
 	ck(not got.is_empty(), "get_prototype 找到")
 	ck(str(got.get("name", "")) == "临时兵", "get 回名字")
-	ck(int(got.get("four", {}).get("STA", 0)) == 7, "get 回四维 STA=7")
+	ck(int(got.get("stats", {}).get("HP_max", 0)) == 21, "get 回面板覆盖 HP_max=21（🔒 属性重做：four→race+stats）")
 
 	# 3) 覆盖同 id（upsert 不新增）
 	tmp["name"] = "临时兵改"
@@ -84,6 +84,20 @@ func _initialize() -> void:
 	ck(UnitFactory.all_prototypes().size() == n0, "删除后数回原")
 	ck(not UnitFactory.delete_prototype("nope_no_such"), "删不存在返回 false")
 	ck(not UnitFactory.save_prototype({"name": "无id"}), "无 id 保存拒绝")
+
+	# 5.5) 外观组数据往返（save_prototype 整字典透传 appearances/default_appearance；TMP_ID 此时已空）
+	var ap_proto := {"id": TMP_ID, "name": "外观兵", "default_faction": "enemy", "tags": ["human"],
+		"portrait": "res://p_base.png", "icon": "res://i_base.png", "default_appearance": "base",
+		"appearances": [
+			{"id": "base", "name": "常态", "portrait": "res://p_base.png", "icon": "res://i_base.png"},
+			{"id": "wolf", "name": "狼形", "portrait": "res://p_wolf.png", "icon": "res://i_wolf.png"}]}
+	ck(UnitFactory.save_prototype(ap_proto), "含 appearances 的原型存盘")
+	var ap_got := UnitFactory.get_prototype(TMP_ID)
+	ck((ap_got.get("appearances", []) as Array).size() == 2, "读回 appearances=2 套")
+	ck(str((ap_got["appearances"][1] as Dictionary).get("id", "")) == "wolf", "读回第二套 id=wolf")
+	ck(str((ap_got["appearances"][1] as Dictionary).get("portrait", "")) == "res://p_wolf.png", "读回第二套 portrait 保真")
+	ck(str(ap_got.get("default_appearance", "")) == "base", "读回 default_appearance=base")
+	ck(UnitFactory.delete_prototype(TMP_ID), "清理外观兵")
 
 	# 6) 还原原文（保证零 diff），并校验确实还原
 	_write_text(orig)
@@ -134,9 +148,11 @@ func _test_scene() -> void:
 	var nb = ed._collect_proto()
 	ck(str(nb.get("default_faction", "")) == "enemy", "新建默认阵营 enemy")
 
-	# 卡内改四维（走面板 _on_edit_dim）→ 派生即时重算（力量→攻击）
-	ed._panel._on_edit_dim(20.0, "STR")
-	ck(ed._unit.effective_stat_f("atk") == 10.0, "卡内 STR20 → atk=10（派生重算）")
+	# 种族下拉 → race_id + 种族底值直落面板（🔒 属性重做 §3；原四维编辑已删）
+	ed._select_meta(ed._f_race, "lizardmen")
+	ed._on_race_changed()
+	ck(ed._unit.race_id == "lizardmen", "选种族 → race_id 写入")
+	ck(ed._unit.effective_stat_f("body_fort") == 5.0, "种族底值直落（蜥蜴人肉体强韧5）")
 
 	# 精英 elite tag：勾选 → 同步 → 入 proto
 	ed._f_elite.button_pressed = true
@@ -201,6 +217,30 @@ func _test_scene() -> void:
 
 	# AI 默认仍入 proto（关卡编辑器接管 AI；角色编辑器不再编辑，proto 带默认供落子）
 	ck(ed._collect_proto().has("ai_threat"), "敌方 proto 仍带默认 ai_threat（关卡编辑器覆盖）")
+
+	# 外观组（编辑器逻辑，不写盘）：单套=旧格式（不写 appearances 键，零噪音）
+	ck(ed._appearances.size() == 1, "载入=单套外观(base)")
+	ck(not ed._collect_proto().has("appearances"), "单套不写 appearances 键（保持旧格式）")
+	# 加第二套 → 选图写回该套 → 设默认 → collect 应含 2 套 + 顶层镜像默认外观
+	ed._add_appearance()
+	ck(ed._appearances.size() == 2, "添加后=2 套外观")
+	var appid: String = str(ed._editing_appear)
+	ed._file_target = "portrait"
+	ed._on_file_picked("res://icons/Characters/__wolf.png")
+	ed._on_icon_text("res://icons/Unit_Icons/__wolf.png")
+	ck(str(ed._appear_get(appid)["portrait"]) == "res://icons/Characters/__wolf.png", "选立绘写回当前外观")
+	ck(str(ed._appear_get(appid)["icon"]) == "res://icons/Unit_Icons/__wolf.png", "选棋子写回当前外观")
+	ed._set_default_appearance()
+	var apc: Dictionary = ed._collect_proto()
+	ck((apc.get("appearances", []) as Array).size() == 2, "collect 写 2 套 appearances")
+	ck(str(apc.get("default_appearance", "")) == appid, "collect 写 default_appearance=当前")
+	ck(str(apc.get("portrait", "")) == "res://icons/Characters/__wolf.png", "顶层 portrait 镜像默认外观")
+	ck(str(apc.get("icon", "")) == "res://icons/Unit_Icons/__wolf.png", "顶层 icon 镜像默认外观")
+	# 切回另一套 → 卡/棋子跟随（编辑对象切换，默认不变）
+	var other_id := str(ed._appearances[0]["id"])
+	ed._select_appearance(other_id)
+	ck(ed._editing_appear == other_id, "切换编辑对象")
+	ck(ed._default_appear == appid, "默认外观不随编辑对象切换")
 
 	# 槽位定向装备（数据里若有该单位可装的 off_hand 物品，装进副手）
 	var slot_note := "(无可装物品，跳过)"

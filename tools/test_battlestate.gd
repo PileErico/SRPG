@@ -51,7 +51,7 @@ func _initialize() -> void:
 
 	# —— 2) 规则运转：效果桥 / 回合序 / 死门 / 视野 ——
 	s._add_effect(pa, {"name": "测试减速", "kind": "debuff", "duration": 2,
-		"mods": [{"stat": "speed", "op": "flat", "value": -2}, {"stat": "STR", "op": "flat", "value": -1}]})
+		"mods": [{"stat": "speed", "op": "flat", "value": -2}, {"stat": "eva", "op": "flat", "value": -1}]})
 	var has_mod := false
 	for m in pa.modifiers:
 		if str(m.get("source", "")) == "buff:测试减速":

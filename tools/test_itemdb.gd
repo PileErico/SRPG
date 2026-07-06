@@ -78,7 +78,7 @@ func _initialize() -> void:
 	ck(not ItemDB.save_item({"id": "fail_t", "slot": "main_hand", "tags": []}), "写盘失败 → false")
 
 	# 8) StatMeta.is_pct（原 UnitStatusPanel._is_pct_stat 迁入）
-	ck(StatMeta.is_pct("res_fire") and StatMeta.is_pct("armor_res_phys") and StatMeta.is_pct("atk_eff") and StatMeta.is_pct("crit_rate") and StatMeta.is_pct("block_power") and StatMeta.is_pct("crit_dmg"), "百分比语义真集（含甲抗）")
+	ck(StatMeta.is_pct("res_nature") and StatMeta.is_pct("armor_res_phys") and StatMeta.is_pct("atk_eff") and StatMeta.is_pct("crit_rate") and StatMeta.is_pct("block_power") and StatMeta.is_pct("crit_dmg") and StatMeta.is_pct("will_fort"), "百分比语义真集（含甲抗/强韧）")
 	ck(not StatMeta.is_pct("atk") and not StatMeta.is_pct("move") and not StatMeta.is_pct("armor_max") and not StatMeta.is_pct("dr_flat_armor"), "百分比语义假集（固减非%）")
 
 	# 收尾：还原真路径 + 清临时文件

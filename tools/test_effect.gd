@@ -20,7 +20,7 @@ func mk():
 	u.modifiers = []
 	u.equipment = {}
 	u.effects = []
-	u.stats = {"HP": 100, "HP_max": 100, "speed": 5, "eva": 10, "STR": 5, "DEX": 5, "INT": 5, "STA": 5}
+	u.stats = {"HP": 100, "HP_max": 100, "speed": 5, "eva": 10}   # 🔒 属性重做：四维已删
 	return u
 
 func _fx_of(u, eid: String) -> Variant:

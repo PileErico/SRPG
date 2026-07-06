@@ -23,23 +23,22 @@ func _initialize() -> void:
 	var protos := UnitFactory.all_prototypes()
 	ck(not protos.is_empty(), "有内置原型可用")
 
-	# 1) Checks：结构 + 恒过/恒败边界（1d20 无法定桩，用极端 DC）
+	# 1) Checks：结构 + 恒过/恒败边界（1d20 无法定桩，用极端 DC；🔒 属性重做：死门检定改 check_flat 求生）
 	WorldState.current = null
 	var cu = UnitFactory.make_unit(protos[0], "player", -1, -1)
-	var r: Dictionary = Checks.check(cu, "STA", 1)
+	var r: Dictionary = Checks.check(cu, "body_fort", 1)
 	ck(r.has("ok") and r.has("roll") and r.has("bonus") and r.has("total") and r.has("dc"), "check 返回结构齐")
 	ck(int(r["roll"]) >= 1 and int(r["roll"]) <= 20, "roll 在 1~20")
-	ck(bool(Checks.check(cu, "STA", -100)["ok"]), "DC=-100 恒过")
-	ck(not bool(Checks.check(cu, "STA", 1000)["ok"]), "DC=1000 恒败")
+	ck(bool(Checks.check_flat(5, -100)["ok"]), "check_flat DC=-100 恒过")
+	ck(not bool(Checks.check_flat(5, 1000)["ok"]), "check_flat DC=1000 恒败")
 
-	# 2) gain_exp：升级循环 + 点数发放（每级 +3 属性 +1 技能 🔒）
+	# 2) gain_exp：升级循环（🔒 属性重做：等级零数值——属性/技能点已废除，升级只推解锁节拍）
 	var gu = UnitFactory.make_unit(protos[0], "player", -1, -1)
 	gu.exp = 0
 	gu.exp_max = 100
 	var base_lv: int = gu.level
 	var ups: int = gu.gain_exp(250)   # 100→升1（exp_max→120）→120→升2（剩30）
 	ck(ups == 2 and gu.level == base_lv + 2, "250 exp 升 2 级（实得 %d 级）" % ups)
-	ck(gu.attr_points == 6 and gu.skill_points == 2, "点数发放 +6/+2（实得 %d/%d）" % [gu.attr_points, gu.skill_points])
 	ck(gu.exp == 30, "余量经验 30（实得 %d）" % gu.exp)
 
 	# 3) 死门（无 UI Sandbox 实例；WorldState.current=null＝非铁人路径）
@@ -146,18 +145,18 @@ func _initialize() -> void:
 	var before_n: int = ws.roster.size()
 	BattleIO.apply_result(ws, {"win": false, "units": [{"uid": src.uid, "dead": true}], "kills": []})
 	ck(ws.roster.size() == before_n - 1 and ws.roster_by_uid(src.uid) == null, "真死从 roster 移除")
-	# 5) kill_stats / 养成点 / injured_until 存档往返
+	# 5) kill_stats / injured_until / 技艺熟练度 存档往返（🔒 属性重做：养成点已废除，成长=技艺）
 	var survivor = ws.roster[0] if ws.roster.size() > 0 else null
 	if survivor != null:
-		survivor.attr_points = 6
-		survivor.skill_points = 2
 		survivor.injured_until = 99
+		survivor.prof_xp["wp_sword"] = 120   # 熟练度随 campaign（proto.profs）往返
 	ck(SaveIO.save_campaign(ws, SLOT), "save 成功")
 	var ld = SaveIO.load_campaign(SLOT)
 	ck(ld != null and int(ld.kill_stats.get("bandit", 0)) == 2, "kill_stats 往返")
 	if survivor != null and ld != null:
 		var lu = ld.roster_by_uid(survivor.uid)
-		ck(lu != null and lu.attr_points == 6 and lu.skill_points == 2 and lu.injured_until == 99, "养成点/injured_until 往返")
+		ck(lu != null and lu.injured_until == 99, "injured_until 往返")
+		ck(lu != null and int(lu.prof_xp.get("wp_sword", 0)) == 120, "技艺熟练度往返")
 		ck(lu.proto_id == survivor.proto_id, "proto_id 往返")
 	SaveIO.delete_slot(SLOT)
 

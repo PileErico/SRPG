@@ -73,7 +73,7 @@ func _initialize() -> void:
 			ck(r1.faction == "player", "u1 阵营（default_faction 往返）")
 			ck(int(r1.stats["HP"]) == hp_saved, "u1 战损 HP 保留（要 %d 实得 %d）——绕开 init_vitals 注满" % [hp_saved, int(r1.stats["HP"])])
 			ck(r1.level == u1.level and r1.exp == 42 and r1.exp_max == 120, "u1 level/exp/exp_max（含 exp_max 往返缺口修复）")
-			ck(int(r1.stats["STR"]) == int(u1.stats["STR"]) and int(r1.stats["STA"]) == int(u1.stats["STA"]), "u1 四维")
+			ck(int(r1.stats.get("HP_max", 0)) == int(u1.stats.get("HP_max", 0)) and int(r1.stats.get("acc", 0)) == int(u1.stats.get("acc", 0)), "u1 面板值往返（🔒 属性重做：四维已删）")
 			ck(r1.trait_id == u1.trait_id, "u1 特性")
 			for sid in u1.skills:
 				ck(r1.skill_level(sid) == u1.skill_level(sid), "u1 技能 %s 等级" % sid)

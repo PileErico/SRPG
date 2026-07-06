@@ -1,7 +1,7 @@
 extends SceneTree
-## bleed 迁引用端到端（阶段1A.2b）：claw_wing 内联 inflict 已迁成 {effect:"bleeding",chance:30}——
-## 验 _try_inflict_state 解析引用 → 从 EffectDB 取定义施加 → DoT 每回合末扣血、带 bleeding tag（可被 cleanse）。
-## 用真数据（真 EffectDB + 真 claw_wing）；res_status 压极低使 ch>100 → 确定必施加、无 RNG 依赖。
+## bleed 迁引用端到端（阶段1A.2b）+ 强韧豁免（🔒 属性与成长系统.md §5）：
+## 验 _try_inflict_state 解析引用 → EffectDB 取定义施加 → DoT/cleanse；强韧=施加时+每回合豁免掷、ignore_fort 穿透。
+## 确定化：施加用 chance=100 副本（数据侧 chance=30 单独验）；豁免用 body_fort=0/100 两极。
 ## 运行：..._console.exe --headless --path "D:/1战棋" -s res://tools/test_bleed_inflict.gd（退出码 0=PASS）
 
 const BattleState := preload("res://BattleState.gd")
@@ -19,7 +19,7 @@ func mk():
 	u.modifiers = []
 	u.equipment = {}
 	u.effects = []
-	u.stats = {"HP": 100, "HP_max": 100, "res_status": -300}   # res_status 极低 → ch = 30×(1+3)=120 >100 恒施加
+	u.stats = {"HP": 100, "HP_max": 100}   # body_fort 缺省 0 → 无豁免掷；施加确定性靠 chance=100 副本
 	return u
 
 func _bleed(u):
@@ -41,10 +41,12 @@ func _initialize() -> void:
 	ck(int(inf.get("chance", 0)) == 30, "inflict 保留 chance=30（rider 侧）")
 	ck(not inf.has("name") and not inf.has("dot_pct_max_hp"), "内联定义字段已迁走（inflict 只剩引用+chance）")
 
-	# 施加：解析引用 → 从 EffectDB 取定义挂上
+	# 施加：解析引用 → 从 EffectDB 取定义挂上（chance→100 副本确定化）
+	var atk100 = atk.duplicate(true)
+	atk100["inflict"] = {"effect": "bleeding", "chance": 100}
 	var t = mk()
-	var r = s._try_inflict_state(t, atk)
-	ck(bool(r.get("applied", false)), "res_status 极低 → 必施加")
+	var r = s._try_inflict_state(t, atk100)
+	ck(bool(r.get("applied", false)), "chance=100 + 强韧0 → 必施加")
 	ck(str(r.get("name", "")) == "流血", "事件名取自 EffectDB 定义=流血")
 	var e = _bleed(t)
 	ck(e != null, "target 挂上 bleeding 效果")
@@ -57,9 +59,36 @@ func _initialize() -> void:
 	s._apply_turn_end_effects(t)
 	ck(int(t.stats["HP"]) == 95, "DoT：HP 100→95（5%）")
 
-	# cleanse by tag 仍生效（battlefield_heal 清流血靠 tag）
+	# cleanse by tag 仍生效（清流血类技能靠 tag）
 	var removed := s._cleanse_effects_with_tag(t, "bleeding")
 	ck(removed == 1 and _bleed(t) == null, "按 bleeding tag 清除 → 移除 1 条、effect 消失")
+
+	# —— 强韧豁免 🔒（§5）：bleeding=肉体系（fort_body tag）——
+	# 施加瞬间豁免：肉体强韧 100 → 必挣脱、完全不受影响
+	var t2 = mk()
+	t2.stats["body_fort"] = 100
+	var r2 = s._try_inflict_state(t2, atk100)
+	ck(bool(r2.get("shrugged", false)) and not bool(r2.get("applied", false)), "肉体强韧100 → 施加瞬间豁免")
+	ck(_bleed(t2) == null, "豁免=完全不受影响")
+	# ignore_fort：无视强韧（施加豁免+每回合豁免一并跳过）
+	var atk_ig = atk.duplicate(true)
+	atk_ig["inflict"] = {"effect": "bleeding", "chance": 100, "ignore_fort": true}
+	var r3 = s._try_inflict_state(t2, atk_ig)
+	ck(bool(r3.get("applied", false)) and _bleed(t2) != null, "ignore_fort 穿透强韧施加")
+	var shrug := false
+	for ev in s._apply_turn_start_effects(t2):
+		if str(ev.get("type", "")) == "fort_shrug":
+			shrug = true
+	ck(not shrug and _bleed(t2) != null, "ignore_fort 效果不可挣脱（每回合豁免跳过）")
+	# 常规施加后的每回合豁免：肉体强韧 100 → 回合开始必挣脱（连带摘修正、事件上报）
+	var t3 = mk()
+	s._add_effect(t3, {"id": "bleeding"})
+	t3.stats["body_fort"] = 100
+	var shrug3 := false
+	for ev in s._apply_turn_start_effects(t3):
+		if str(ev.get("type", "")) == "fort_shrug":
+			shrug3 = true
+	ck(shrug3 and _bleed(t3) == null, "每回合豁免：肉体强韧100 → 回合开始挣脱")
 
 	if _fail == 0:
 		print("=== 全部断言 PASS ===")

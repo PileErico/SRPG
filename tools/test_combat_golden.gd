@@ -26,17 +26,17 @@ func mk(overrides: Dictionary):
 	var u = UnitC.new("测试", "player", 3, 3)   # 站草原（无效能层地块 grant → 地形因子=1.0）
 	u.modifiers = []
 	u.equipment = {}
+	# 🔒 属性重做（docs/属性与成长系统.md）：四维已删、抗性两轨（物理/自然）——本基线为重做后重推（旧基线作废=预期）。
 	var base := {
 		"HP": 100, "HP_max": 100, "armor": 0, "armor_max": 0,
 		"atk": 20, "acc": 200, "eva": 0,
 		"crit_rate": 0, "crit_dmg": 150,
 		"block_rate": 0, "block_power": 0,
 		"def_eff": 100, "atk_eff": 100,
-		"STR": 10, "DEX": 10, "INT": 5, "VIT": 5,
-		"res_phys": 0, "res_fire": 0, "res_ice": 0, "res_thunder": 0, "res_holy": 0,
-		"armor_res_phys": 0, "armor_res_fire": 0, "armor_res_ice": 0,
-		"armor_res_thunder": 0, "armor_res_holy": 0,
-		"dr_flat_human": 0, "dr_flat_armor": 0, "res_status": 0,
+		"res_phys": 0, "res_nature": 0,
+		"armor_res_phys": 0, "armor_res_nature": 0,
+		"dr_flat_human": 0, "dr_flat_armor": 0,
+		"will_fort": 0, "body_fort": 0,
 	}
 	for k in overrides:
 		base[k] = overrides[k]
@@ -95,16 +95,19 @@ func _initialize() -> void:
 	var r7 := hit(s, a0, mk({"block_rate": 100, "block_power": 50}), {"coeff": 1.0})
 	ck(r7["blocked"] and int(r7["hp_loss"]) == 10, "格挡性能50：全域减伤×0.5 → hp_loss=10")
 
-	# 8) 补正：bonus{[STR,DEX]×0.5}=(10+10)×0.5=10（flat、不吃效能）→ out=30
-	var r8 := hit(s, a0, mk({}), {"coeff": 1.0, "bonus": {"stats": ["STR", "DEX"], "mult": 0.5}})
+	# 8) 补正机制（通道保留、内容已迁走）：bonus{[atk]×0.5}=20×0.5=10（flat、不吃效能）→ out=30
+	#    🔒 属性重做：四维已删，爪类 STR/DEX 补正已折进武器 mods；此条只守 _skill_bonus 通道本身
+	var r8 := hit(s, a0, mk({}), {"coeff": 1.0, "bonus": {"stats": ["atk"], "mult": 0.5}})
 	ck(is_equal_approx(float(r8["bonus"]), 10.0) and int(r8["hp_loss"]) == 30, "补正+10：out=30 hp_loss=30")
 
-	# 9) 伤害类型正字（element→damage_kind §7.2）：damage_kind:"fire" 必须取火抗 res_fire、非物抗 res_phys。
-	#    res_fire=50、res_phys=0：正字前误读 element→缺省 physical→取 res_phys=0→hp_loss=20（回归）；
-	#    正字后读 damage_kind→fire→取 res_fire=50→hp_loss=10。此条即 fire 抗性键取对与否的判决点。
-	var rf := hit(s, a0, mk({"res_fire": 50, "res_phys": 0}), {"coeff": 1.0, "damage_kind": "fire"})
+	# 9) 伤害类型与抗性归轨（§7.2 正字 + 🔒 属性重做 §5 两轨）：damage_kind 保留细分（fire/holy…），
+	#    减伤统一归轨 nature——res_nature=50 对火伤减半、物抗不参与。此条即元素归轨的判决点。
+	var rf := hit(s, a0, mk({"res_nature": 50, "res_phys": 0}), {"coeff": 1.0, "damage_kind": "fire"})
 	ck(str(rf["damage_kind"]) == "fire", "结果携带 damage_kind=fire")
-	ck(int(rf["hp_loss"]) == 10, "火伤取火抗50 → hp_loss=10（正字：不误取物抗人道键）")
+	ck(int(rf["hp_loss"]) == 10, "火伤取自然抗50 → hp_loss=10（元素归轨 nature）")
+	#    神圣=自然伤害（🔒 §5）：holy 同轨取 res_nature
+	var rh := hit(s, a0, mk({"res_nature": 50}), {"coeff": 1.0, "damage_kind": "holy"})
+	ck(int(rh["hp_loss"]) == 10, "神圣伤同取自然抗 → hp_loss=10")
 
 	# 10) 规格招牌样例（docs/单位系统设计.md「减伤链」验算：out=50 打进 甲20+甲抗50%+人抗20%）——
 	#     到甲 50×0.5=25 → 破 20 甲、溢出 5×0.8=4 进人。锁「破甲溢出同时过甲抗+人抗」的双层减伤链
@@ -115,11 +118,11 @@ func _initialize() -> void:
 	ck(int(r10["armor_loss"]) == 20 and int(r10["hp_loss"]) == 4, "双层减伤：armor_loss=20 hp_loss=4")
 	ck(int(t10.stats["armor"]) == 0 and int(t10.stats["HP"]) == 96, "落甲/落血写回：armor=0 HP=96")
 
-	# 11) 甲道 damage_kind 正字：fire 伤害打进厚甲目标，甲道须取 armor_res_fire（非 armor_res_phys）。
-	#     armor_res_fire=50/armor_res_phys=0：正字对→到甲 20×0.5=10；若甲道误取物理键→20。守护甲道后缀映射。
-	var t11 = mk({"HP": 100, "armor": 100, "armor_res_fire": 50, "armor_res_phys": 0, "res_fire": 0})
+	# 11) 甲道归轨：fire 伤害打进厚甲目标，甲道须取 armor_res_nature（非 armor_res_phys）。
+	#     armor_res_nature=50/armor_res_phys=0：归轨对→到甲 20×0.5=10；误取物理键→20。守护甲道后缀映射。
+	var t11 = mk({"HP": 100, "armor": 100, "armor_res_nature": 50, "armor_res_phys": 0, "res_nature": 0})
 	var r11 := hit(s, a0, t11, {"coeff": 1.0, "damage_kind": "fire"})
-	ck(int(r11["armor_loss"]) == 10 and int(r11["hp_loss"]) == 0, "火伤取甲火抗50 → armor_loss=10（甲道正字）")
+	ck(int(r11["armor_loss"]) == 10 and int(r11["hp_loss"]) == 0, "火伤取甲自然抗50 → armor_loss=10（甲道归轨）")
 	ck(int(t11.stats["armor"]) == 90, "落甲写回：armor=90")
 
 	if _fail == 0:
