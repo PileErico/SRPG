@@ -49,6 +49,8 @@ var _win_pos := Vector2(-1, -1)        # 记住上次拖到的位置（x<0 = 未
 var host = null                        # 宿主（Sandbox）：翻页取同阵营单位 + 棋子高亮
 var _unit = null                       # 当前查看的单位
 var _current_tab := 0                  # 记住当前 Tab（翻页时保持）
+var _prof_subtab := 0                   # 技艺页 L2 横向 tab（技能类型：武器/战斗/其他；重建保持）
+var _prof_l3 := 0                       # 技艺页 L3 纵向 tab（当前类型下具体技能；重建保持）
 
 # —— 编辑器模式（角色编辑器嵌用；默认 false → 游戏内查看行为逐字节零改动）——
 # 打开＝设 editor_mode=true + 注入回调后 open(u)。可编辑：头像点选 / 姓名·等级 / 特性下拉 / 装备槽点选 / 背包。
@@ -914,90 +916,309 @@ func _build_trait_tooltip(t) -> Control:
 		v.add_child(d)
 	return panel
 
-# ============ 技艺页（熟练度域 🔒 属性与成长系统.md §2）============
-# 术语切割 🔒：本页＝技艺（熟练度域，剑术/盾/烹饪…）；「技能」各页＝技能编辑器条目。
-# 装载=总开关：装载中=阶段补正+（将来）perk 生效+熟练度可涨；卸下=冻结保留。学习渠道（师承/公会）后置。
+# ============ 技艺页 ============
+# ⚠️ 原「熟练度域」列表 UI 已清空重做；ProfDB / Unit.prof_* 字段 / data/proficiencies.json 未动。
+# 布局：① 顶部 5 个装备技能格（右侧竖向计量槽 + 下方「名-档位」）② 横线
+#       ③ 左侧纵向 3 tab（武器/战斗/其他技能）+ 竖线 + 右侧「已习得技能」列表（熟练度高→低、习得优先）。
+# ⚠️ 数据源（技能真值 / 熟练度字段）待定 → 现用占位数据（_PH_*）演示结构与配色。
 
-# 非战斗才可换装载（🔒 §2.2）；编辑器模式恒可。
-func _can_swap_prof() -> bool:
-	if editor_mode:
-		return true
-	if host == null or not ("phase" in host):
-		return true
-	return str(host.phase) != "battle"
+# 熟练度档位 🔒（用户规格 2026-07-06）：区间[lo,hi] + 颜色；计量槽显示「当前档位内进度」，色随档位。
+const PROF_TIERS := [
+	{"name": "生疏", "lo": 0,    "hi": 100,  "color": "#E0E0E0"},
+	{"name": "娴熟", "lo": 101,  "hi": 300,  "color": "#4FAE5A"},
+	{"name": "老练", "lo": 301,  "hi": 600,  "color": "#3A7BD5"},
+	{"name": "专家", "lo": 601,  "hi": 1000, "color": "#9B59B6"},
+	{"name": "大师", "lo": 1001, "hi": 1500, "color": "#EBBC04"},
+]
+const PROF_CELL_COUNT := 5                        # 装备技能格数
+const PROF_CELL_SIZE := Vector2(64, 64)           # 单格边长
+const PROF_GAUGE_W := 12                          # 竖向计量槽宽度
+const PROF_GAUGE_TRACK := Color(1, 1, 1, 0.10)    # 槽底（暗）
+const PROF_SKILL_TABS := ["武器技能", "战斗技能", "其他技能"]   # 左侧纵向子 tab
 
-func _build_prof_page(u) -> Control:
-	var sc := ScrollContainer.new()
-	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	var v := VBoxContainer.new()
-	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	v.add_theme_constant_override("separation", 6)
-	sc.add_child(v)
-	var head := Label.new()
-	head.text = "技艺槽 %d / %d（等级 1/5/9/13/17 各解锁一格）%s" % [
-		u.prof_slots.size(), u.prof_slot_capacity(), "" if _can_swap_prof() else "　——战斗中锁定"]
-	head.add_theme_color_override("font_color", Color("#EBBC04"))
-	v.add_child(head)
-	for p in [["风格", "style"], ["武器", "weapon"], ["生活", "life"]]:
-		_section(v, str(p[0]))
-		for pid in ProfDB.ids_by_page(str(p[1])):
-			if not u.prof_visible(str(pid)):
-				continue   # 派生/异种域：前置未达=隐藏（🔒 §2.1 阶段浮现）
-			v.add_child(_prof_row(u, str(pid)))
-	return sc
+# —— 占位数据（待接真实数据）——
+const _PH_EQUIPPED := [
+	{"name": "双手武器", "xp": 450},   # 老练·蓝
+	{"name": "单手武器", "xp": 60},    # 生疏·白
+	{"name": "远程",     "xp": 250},   # 娴熟·绿
+	{"name": "盾",       "xp": 820},   # 专家·紫
+	{"name": "体术",     "xp": 1300},  # 大师·金
+]
+# L3：每个技能类型下的具体技能（纵向 tab 列表）
+const _PH_SKILLS := {
+	"武器技能": ["剑", "匕首", "斧", "锤", "连枷", "矛", "弓", "弩", "戟"],
+	"战斗技能": ["格挡", "冲锋", "闪避", "重击", "防御姿态"],
+	"其他技能": ["烹饪", "医疗", "潜行", "追踪", "谈判"],
+}
+const _PH_LEARNED := {
+	"武器技能": [
+		{"name": "双手武器", "xp": 450, "known": true},
+		{"name": "单手武器", "xp": 60,  "known": true},
+		{"name": "剑",       "xp": 250, "known": true},
+		{"name": "斧",       "xp": 0,   "known": false},
+	],
+	"战斗技能": [
+		{"name": "格挡",     "xp": 820, "known": true},
+		{"name": "冲锋",     "xp": 120, "known": true},
+		{"name": "闪避",     "xp": 0,   "known": false},
+	],
+	"其他技能": [
+		{"name": "烹饪",     "xp": 1300, "known": true},
+		{"name": "医疗",     "xp": 300,  "known": true},
+		{"name": "潜行",     "xp": 0,    "known": false},
+	],
+}
 
-# 一行技艺：名（装载=绿/未学=灰）+ 阶段与进度 + 装载/卸载钮（未学无钮——学习渠道后置）。
-func _prof_row(u, pid: String) -> Control:
-	var def := ProfDB.get_prof(pid)
+# xp → 档位定义（Dictionary）
+func _prof_tier(xp: int) -> Dictionary:
+	var t: Dictionary = PROF_TIERS[0]
+	for e in PROF_TIERS:
+		if xp >= int(e["lo"]):
+			t = e
+	return t
+
+# xp → 当前档位内进度 0..1（gauge 填充高度）
+func _prof_tier_progress(xp: int) -> float:
+	var t := _prof_tier(xp)
+	return clampf(float(xp - int(t["lo"])) / float(maxi(1, int(t["hi"]) - int(t["lo"]))), 0.0, 1.0)
+
+func _build_prof_page(_u) -> Control:
+	var page := VBoxContainer.new()
+	page.add_theme_constant_override("separation", 10)
+
+	# ① 顶部：5 个装备技能格
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 14)
+	row.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	page.add_child(row)
+	for i in PROF_CELL_COUNT:
+		row.add_child(_prof_slot_unit(_PH_EQUIPPED[i] if i < _PH_EQUIPPED.size() else {}))
+
+	# ② 横线
+	page.add_child(HSeparator.new())
+
+	# ③ 三级 tab：L2 横向（技能类型）→ L3 左侧纵向（该类下具体技能）→ 主内容页；右侧窄列＝已习得。
+	var body := HBoxContainer.new()
+	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	body.add_theme_constant_override("separation", 10)
+	page.add_child(body)
+
+	# 左区：上＝L2 横向 tab 行；中＝横线；下＝[L3 纵向 tab | 竖线 | 主内容]
+	var left_area := VBoxContainer.new()
+	left_area.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	left_area.add_theme_constant_override("separation", 8)
+	body.add_child(left_area)
+	# L2 横向 tab 行——起始右移一截，避免与下方 L3 纵向 tab 同列混淆
+	var tabrow := HBoxContainer.new()
+	tabrow.add_theme_constant_override("separation", 6)
+	var l2_indent := Control.new()
+	l2_indent.custom_minimum_size = Vector2(92, 0)
+	tabrow.add_child(l2_indent)
+	left_area.add_child(tabrow)
+	# 横线：把 L2 与下方内容分开（下方内容直接关联 L3 纵向 tab，L3 又关联 L2）
+	left_area.add_child(HSeparator.new())
+
+	var inner := HBoxContainer.new()
+	inner.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	inner.add_theme_constant_override("separation", 8)
+	left_area.add_child(inner)
+	var l3col := VBoxContainer.new()          # L3：纵向具体技能 tab（随 L2 重建）
+	l3col.custom_minimum_size = Vector2(84, 0)
+	l3col.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	l3col.add_theme_constant_override("separation", 4)
+	inner.add_child(l3col)
+	inner.add_child(VSeparator.new())
+	var main := VBoxContainer.new()           # 选中技能的内容页（待定）
+	main.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	main.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	inner.add_child(main)
+
+	# L2 横向 tab：切类型 → 重建 L3 纵向 tab（重置到该类第一项）
+	var grp2 := ButtonGroup.new()
+	var l2btns := []
+	for i in PROF_SKILL_TABS.size():
+		var b := Button.new()
+		b.text = str(PROF_SKILL_TABS[i])
+		b.toggle_mode = true
+		b.button_group = grp2
+		b.custom_minimum_size = Vector2(0, 32)
+		var idx := i
+		b.pressed.connect(func():
+			_prof_subtab = idx
+			_prof_l3 = 0
+			_rebuild_prof_l3(l3col, main, str(PROF_SKILL_TABS[idx])))
+		l2btns.append(b)
+		tabrow.add_child(b)
+
+	body.add_child(VSeparator.new())
+
+	# 右：窄列——所有已习得技能（习得优先、熟练度高→低）
+	var right := VBoxContainer.new()
+	right.custom_minimum_size = Vector2(172, 0)
+	right.size_flags_horizontal = Control.SIZE_SHRINK_END
+	right.add_theme_constant_override("separation", 4)
+	body.add_child(right)
+	_section(right, "已习得")
+	var rsc := ScrollContainer.new()
+	rsc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	rsc.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	right.add_child(rsc)
+	var list := VBoxContainer.new()
+	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	list.add_theme_constant_override("separation", 3)
+	rsc.add_child(list)
+	_fill_learned_list(list)
+
+	# 初始：按记住的 L2 选中 → 建 L3（clamp 记住的 L3）
+	_prof_subtab = clampi(_prof_subtab, 0, PROF_SKILL_TABS.size() - 1)
+	l2btns[_prof_subtab].button_pressed = true   # 程序化选中不触发 pressed
+	_rebuild_prof_l3(l3col, main, str(PROF_SKILL_TABS[_prof_subtab]))
+	return page
+
+# 重建 L3 纵向 tab（当前技能类型下的具体技能），并显示选中技能的内容页。
+func _rebuild_prof_l3(l3col: VBoxContainer, main: VBoxContainer, type_name: String) -> void:
+	for c in l3col.get_children():
+		l3col.remove_child(c)
+		c.queue_free()
+	var skills: Array = _PH_SKILLS.get(type_name, [])
+	if skills.is_empty():
+		_fill_prof_main(main, "")
+		return
+	var grp := ButtonGroup.new()
+	var btns := []
+	for i in skills.size():
+		var b := Button.new()
+		b.text = str(skills[i])
+		b.toggle_mode = true
+		b.button_group = grp
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.custom_minimum_size = Vector2(0, 28)
+		var idx := i
+		b.pressed.connect(func():
+			_prof_l3 = idx
+			_fill_prof_main(main, str(skills[idx])))
+		btns.append(b)
+		l3col.add_child(b)
+	_prof_l3 = clampi(_prof_l3, 0, btns.size() - 1)
+	btns[_prof_l3].button_pressed = true
+	_fill_prof_main(main, str(skills[_prof_l3]))
+
+# 一个装备技能格：VBox[ HBox(格 + 竖向计量槽), 下方「名-档位」]。
+func _prof_slot_unit(d: Dictionary) -> Control:
+	var has := not d.is_empty()
+	var xp := int(d.get("xp", 0))
+	var tier := _prof_tier(xp)
+
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 3)
+	col.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+
+	var top := HBoxContainer.new()
+	top.add_theme_constant_override("separation", 5)
+	var cell := Panel.new()
+	cell.custom_minimum_size = PROF_CELL_SIZE
+	cell.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(1, 1, 1, 0.04)
+	sb.set_corner_radius_all(4)
+	sb.set_border_width_all(1)
+	sb.border_color = Color(1, 1, 1, 0.22)
+	cell.add_theme_stylebox_override("panel", sb)
+	top.add_child(cell)
+	var fill_col := Color(str(tier["color"])) if has else Color(1, 1, 1, 0.12)
+	top.add_child(_prof_gauge(_prof_tier_progress(xp) if has else 0.0, fill_col))
+	col.add_child(top)
+
+	col.add_child(_prof_cell_label(d))
+	return col
+
+# 格子下方「名-档位」：技能名常色，档位名随档位变色（居中，宽度对齐 格+槽）。
+func _prof_cell_label(d: Dictionary) -> Control:
 	var h := HBoxContainer.new()
-	h.add_theme_constant_override("separation", 8)
-	var known: bool = u.prof_known.has(pid)
-	var slotted: bool = u.prof_slots.has(pid)
-	var stage: int = u.prof_stage(pid)
-	var name_l := Label.new()
-	name_l.text = "%s%s" % [str(def.get("name", pid)), "（异种）" if def.get("exotic", false) else ""]
-	name_l.custom_minimum_size = Vector2(110, 0)
-	if slotted:
-		name_l.add_theme_color_override("font_color", STAT_GREEN)
-	elif not known:
-		name_l.add_theme_color_override("font_color", Color(1, 1, 1, 0.4))
-	h.add_child(name_l)
-	var st_l := Label.new()
-	if known:
-		var xp := int(u.prof_xp.get(pid, 0))
-		var prog := "" if stage >= 5 else "（%d/%d）" % [xp, int(ProfDB.STAGE_THRESHOLDS[stage])]
-		st_l.text = "%s%s" % [ProfDB.stage_name(stage), prog]
-	else:
-		st_l.text = "未学"
-		st_l.add_theme_color_override("font_color", Color(1, 1, 1, 0.4))
-	st_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	h.add_child(st_l)
-	if known and _can_swap_prof():
-		var btn := Button.new()
-		if slotted:
-			btn.text = "卸载"
-			btn.pressed.connect(func():
-				u.unslot_prof(pid)
-				_rebuild_prof_view(u))
-		else:
-			btn.text = "装载"
-			btn.disabled = u.prof_slots.size() >= u.prof_slot_capacity()
-			btn.pressed.connect(func():
-				if u.slot_prof(pid):
-					_rebuild_prof_view(u))
-		h.add_child(btn)
-	elif slotted:
-		var lock_l := Label.new()
-		lock_l.text = "已装载"
-		lock_l.add_theme_color_override("font_color", STAT_GREEN)
-		h.add_child(lock_l)
-	return _tip_host(h, str(def.get("desc", "")))
+	h.alignment = BoxContainer.ALIGNMENT_CENTER
+	h.custom_minimum_size = Vector2(PROF_CELL_SIZE.x + PROF_GAUGE_W + 5, 0)
+	if d.is_empty():
+		var e := Label.new()
+		e.text = "（空槽）"
+		e.add_theme_color_override("font_color", Color(1, 1, 1, 0.3))
+		e.add_theme_font_size_override("font_size", 11)
+		h.add_child(e)
+		return h
+	var tier := _prof_tier(int(d.get("xp", 0)))
+	var nm := Label.new()
+	nm.text = str(d.get("name", "")) + "-"
+	nm.add_theme_font_size_override("font_size", 11)
+	h.add_child(nm)
+	var tl := Label.new()
+	tl.text = str(tier["name"])
+	tl.add_theme_color_override("font_color", Color(str(tier["color"])))
+	tl.add_theme_font_size_override("font_size", 11)
+	h.add_child(tl)
+	return h
 
-# 装载/卸载后整卡重建（modifiers 已变 → 角色状态页同步刷新；_current_tab 保住停在技艺页）。
-func _rebuild_prof_view(u) -> void:
-	open(u)
-	if on_edit.is_valid():
-		on_edit.call()
+# 竖向计量槽：暗底 Panel + 填充 ColorRect（锚定底部，高度 = ratio × 满高 → 自底向上；色随档位）。
+func _prof_gauge(ratio: float, color: Color) -> Control:
+	var track := Panel.new()
+	track.custom_minimum_size = Vector2(PROF_GAUGE_W, PROF_CELL_SIZE.y)
+	track.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var tb := StyleBoxFlat.new()
+	tb.bg_color = PROF_GAUGE_TRACK
+	tb.set_corner_radius_all(3)
+	track.add_theme_stylebox_override("panel", tb)
+	var fill := ColorRect.new()
+	fill.color = color
+	fill.anchor_left = 0.0
+	fill.anchor_right = 1.0
+	fill.anchor_top = 1.0 - clampf(ratio, 0.0, 1.0)
+	fill.anchor_bottom = 1.0
+	fill.offset_left = 1
+	fill.offset_right = -1
+	fill.offset_bottom = -1
+	fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	track.add_child(fill)
+	return track
+
+# 右侧「已习得技能」窄列：合并所有类型、只列已习得，按熟练度高→低。
+func _fill_learned_list(list: VBoxContainer) -> void:
+	for c in list.get_children():
+		list.remove_child(c)
+		c.queue_free()
+	var arr := []
+	for cat in PROF_SKILL_TABS:
+		for d in (_PH_LEARNED.get(cat, []) as Array):
+			if bool(d.get("known", false)):     # 只列已习得
+				arr.append(d)
+	arr.sort_custom(func(a, b): return int(a.get("xp", 0)) > int(b.get("xp", 0)))   # 熟练度高→低
+	for d in arr:
+		list.add_child(_learned_row(d))
+
+# 一行：名（常色）+ 档位（含 xp 值，色随档位）——紧挨不拉远。
+func _learned_row(d: Dictionary) -> Control:
+	var xp := int(d.get("xp", 0))
+	var tier := _prof_tier(xp)
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 10)
+	var nm := Label.new()
+	nm.text = str(d.get("name", ""))
+	nm.add_theme_font_size_override("font_size", 12)
+	nm.custom_minimum_size = Vector2(60, 0)
+	h.add_child(nm)
+	var t := Label.new()
+	t.text = "%s（%d）" % [str(tier["name"]), xp]
+	t.add_theme_font_size_override("font_size", 12)
+	t.add_theme_color_override("font_color", Color(str(tier["color"])))
+	h.add_child(t)
+	return h
+
+# 主内容区（显示选中的 L3 具体技能）——技能页内容待定，先占位。
+func _fill_prof_main(main: VBoxContainer, skill_name: String) -> void:
+	for c in main.get_children():
+		main.remove_child(c)
+		c.queue_free()
+	var l := Label.new()
+	l.text = ("「%s」技能页 —— 内容待定" % skill_name) if skill_name != "" else "（无技能）"
+	l.add_theme_color_override("font_color", Color(1, 1, 1, 0.35))
+	main.add_child(l)
 
 # 右上：属性两列
 # 属性两列：值读 effective_stat；受修正变高=绿/变低=红；鼠标悬停看基础值 + 各来源加成。

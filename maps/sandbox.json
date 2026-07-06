@@ -20,24 +20,24 @@
     {
       "cells": [
         [
-          0.0,
-          13.0
+          0,
+          13
         ],
         [
-          1.0,
-          13.0
+          1,
+          13
         ],
         [
-          0.0,
-          14.0
+          0,
+          14
         ],
         [
-          1.0,
-          14.0
+          1,
+          14
         ],
         [
-          2.0,
-          14.0
+          2,
+          14
         ]
       ],
       "color": "#3a7ad5",
@@ -986,235 +986,7 @@
   "triggers": [],
   "units": [
     {
-      "col": 4,
-      "faction": "enemy",
-      "proto": {
-        "ai_group": "",
-        "ai_region": "",
-        "ai_threat": true,
-        "default_faction": "enemy",
-        "equip": [],
-        "exp": 0,
-        "exp_max": 100,
-        "race": "human",
-        "icon": "res://icons/Unit_Icons/Empire_Light_Infantry.png",
-        "id": "",
-        "level": 1,
-        "name": "帝国轻步兵",
-        "portrait": "res://icons/Characters/Empire_Light_Infantry.png",
-        "skills": {
-
-        },
-        "stats": {
-          "AP_max": 2.0,
-          "armor_max": 0.0,
-          "atk_eff": 100.0,
-          "def_eff": 100.0,
-          "move": 6.0,
-          "res_phys": 0.0,
-          "sight": 5.0,
-          "speed": 7.0
-        },
-        "tags": [
-          "ground",
-          "human"
-        ],
-        "trait": ""
-      },
-      "row": 9
-    },
-    {
-      "col": 7,
-      "faction": "enemy",
-      "proto": {
-        "ai_group": "",
-        "ai_region": "",
-        "ai_threat": true,
-        "default_faction": "enemy",
-        "equip": [],
-        "exp": 0,
-        "exp_max": 100,
-        "race": "human",
-        "icon": "res://icons/Unit_Icons/Empire_Light_Infantry.png",
-        "id": "",
-        "level": 1,
-        "name": "帝国轻步兵",
-        "portrait": "res://icons/Characters/Empire_Light_Infantry.png",
-        "skills": {
-
-        },
-        "stats": {
-          "AP_max": 2.0,
-          "armor_max": 0.0,
-          "atk_eff": 100.0,
-          "def_eff": 100.0,
-          "move": 6.0,
-          "res_phys": 0.0,
-          "sight": 5.0,
-          "speed": 7.0
-        },
-        "tags": [
-          "ground",
-          "human"
-        ],
-        "trait": ""
-      },
-      "row": 11
-    },
-    {
-      "col": 10,
-      "faction": "enemy",
-      "proto": {
-        "ai_group": "",
-        "ai_region": "",
-        "ai_threat": true,
-        "default_faction": "enemy",
-        "equip": [],
-        "exp": 0,
-        "exp_max": 100,
-        "race": "human",
-        "icon": "res://icons/Unit_Icons/Empire_Light_Infantry.png",
-        "id": "",
-        "level": 1,
-        "name": "帝国轻步兵",
-        "portrait": "res://icons/Characters/Empire_Light_Infantry.png",
-        "skills": {
-
-        },
-        "stats": {
-          "AP_max": 2.0,
-          "armor_max": 0.0,
-          "atk_eff": 100.0,
-          "def_eff": 100.0,
-          "move": 6.0,
-          "res_phys": 0.0,
-          "sight": 5.0,
-          "speed": 7.0
-        },
-        "tags": [
-          "ground",
-          "human"
-        ],
-        "trait": ""
-      },
-      "row": 9
-    },
-    {
-      "col": 6,
-      "faction": "enemy",
-      "proto": {
-        "ai_group": "",
-        "ai_region": "",
-        "ai_threat": true,
-        "default_faction": "enemy",
-        "equip": [],
-        "exp": 0,
-        "exp_max": 100,
-        "race": "human",
-        "icon": "res://icons/Unit_Icons/Empire_Light_Infantry.png",
-        "id": "",
-        "level": 1,
-        "name": "帝国轻步兵",
-        "portrait": "res://icons/Characters/Empire_Light_Infantry.png",
-        "skills": {
-
-        },
-        "stats": {
-          "AP_max": 2.0,
-          "armor_max": 0.0,
-          "atk_eff": 100.0,
-          "def_eff": 100.0,
-          "move": 6.0,
-          "res_phys": 0.0,
-          "sight": 5.0,
-          "speed": 7.0
-        },
-        "tags": [
-          "ground",
-          "human"
-        ],
-        "trait": ""
-      },
-      "row": 5
-    },
-    {
-      "col": 3,
-      "faction": "enemy",
-      "proto": {
-        "ai_group": "",
-        "ai_region": "",
-        "ai_threat": true,
-        "default_faction": "enemy",
-        "equip": [],
-        "exp": 0,
-        "exp_max": 100,
-        "race": "human",
-        "icon": "res://icons/Unit_Icons/Empire_Light_Infantry.png",
-        "id": "",
-        "level": 1,
-        "name": "帝国轻步兵",
-        "portrait": "res://icons/Characters/Empire_Light_Infantry.png",
-        "skills": {
-
-        },
-        "stats": {
-          "AP_max": 2.0,
-          "armor_max": 0.0,
-          "atk_eff": 100.0,
-          "def_eff": 100.0,
-          "move": 6.0,
-          "res_phys": 0.0,
-          "sight": 5.0,
-          "speed": 7.0
-        },
-        "tags": [
-          "ground",
-          "human"
-        ],
-        "trait": ""
-      },
-      "row": 1
-    },
-    {
-      "col": 1,
-      "faction": "enemy",
-      "proto": {
-        "ai_group": "",
-        "ai_region": "",
-        "ai_threat": true,
-        "default_faction": "enemy",
-        "equip": [],
-        "exp": 0,
-        "exp_max": 100,
-        "race": "human",
-        "icon": "res://icons/Unit_Icons/Empire_Light_Infantry.png",
-        "id": "",
-        "level": 1,
-        "name": "帝国轻步兵",
-        "portrait": "res://icons/Characters/Empire_Light_Infantry.png",
-        "skills": {
-
-        },
-        "stats": {
-          "AP_max": 2.0,
-          "armor_max": 0.0,
-          "atk_eff": 100.0,
-          "def_eff": 100.0,
-          "move": 6.0,
-          "res_phys": 0.0,
-          "sight": 5.0,
-          "speed": 7.0
-        },
-        "tags": [
-          "ground",
-          "human"
-        ],
-        "trait": ""
-      },
-      "row": 4
-    },
-    {
-      "col": 1,
+      "col": 1.0,
       "faction": "player",
       "proto": {
         "ai_group": "",
@@ -1225,34 +997,34 @@
           "spear_dragon_calamity",
           "breast_plate"
         ],
-        "exp": 0,
-        "exp_max": 100,
-        "race": "human",
+        "exp": 0.0,
+        "exp_max": 100.0,
         "icon": "res://icons/Unit_Icons/Player_Special_Veiken.png",
         "id": "",
-        "level": 1,
+        "level": 1.0,
         "name": "维肯",
         "portrait": "res://icons/Characters/Plyer_Special_Veiken.png",
+        "race": "human",
         "skills": {
 
         },
         "stats": {
           "AP_max": 2.0,
+          "HP_max": 24.0,
+          "acc": 36.0,
           "armor_max": 0.0,
+          "atk": 4.0,
           "atk_eff": 100.0,
+          "block_power": 1.6,
+          "block_rate": 1.4,
+          "crit_dmg": 164.0,
+          "crit_rate": 3.0,
           "def_eff": 100.0,
+          "eva": 6.0,
           "move": 6.0,
           "res_phys": 0.0,
           "sight": 5.0,
-          "speed": 5.0,
-          "HP_max": 24,
-          "atk": 4,
-          "acc": 36,
-          "eva": 6,
-          "block_rate": 1.4,
-          "block_power": 1.6,
-          "crit_rate": 3,
-          "crit_dmg": 164
+          "speed": 5.0
         },
         "tags": [
           "ground",
@@ -1261,7 +1033,7 @@
         ],
         "trait": "dragonslayer"
       },
-      "row": 13
+      "row": 13.0
     }
   ],
   "width": 15
