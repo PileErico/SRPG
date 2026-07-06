@@ -18,9 +18,7 @@ func ck(cond: bool, msg: String) -> void:
 		push_error("[FAIL] " + msg)
 
 func _fresh_unit(nm: String) -> Object:
-	var u = Unit.new(nm, "player", -1, -1)
-	u.recompute_derived()
-	return u
+	return Unit.new(nm, "player", -1, -1)
 
 func _initialize() -> void:
 	print("=== ItemInstances/装备实例化 测试开始 ===")

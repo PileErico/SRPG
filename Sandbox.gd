@@ -477,11 +477,10 @@ func begin_game() -> void:
 func make_unit(proto: Dictionary, fac: String, col: int, row: int):
 	return UnitFactory.make_unit(proto, fac, col, row)
 
-# 编辑单位后收尾：重算四维派生 + 注满生命/护甲（编辑器改四维/特性/装备后调）
+# 编辑单位后收尾：注满生命/护甲（编辑器改属性/特性/装备后调）
 func _commit_unit(u) -> void:
 	if u == null:
 		return
-	u.recompute_derived()
 	u.init_vitals()
 	if _roster_bar != null:
 		_roster_bar.refresh()
@@ -1256,13 +1255,15 @@ func _handle_deaths() -> void:
 
 # ============ 死门（需求 §1.11 🔒；模型在 BattleState，检定/日志留宿主）============
 
-# 死门每回合检定（该单位 turn 自动执行）：1d20+体力 vs 难度（首回合 15、之后每回合 +5）。过 +1 / 不过 −1。
+# 死门每回合检定（该单位 turn 自动执行）：1d20+求生 vs 难度（首回合 15、之后每回合 +5）。过 +1 / 不过 −1。
+# 求生＝底值 5＋肉体强韧/5（🔒 属性重做：原读体力 STA；底值 5 保住旧默认基线，强韧训练可改善）。
 func _door_turn_check(u) -> void:
 	var dc: int = 15 + 5 * u.door_checks
 	u.door_checks += 1
-	var r: Dictionary = Checks.check(u, "STA", dc)
+	var bonus: int = 5 + int(floor(u.effective_stat_f("body_fort") / 5.0))
+	var r: Dictionary = Checks.check_flat(bonus, dc)
 	u.door_gauge += 1 if bool(r["ok"]) else -1
-	_log_line("%s 死门检定：1d20(%d)+体力(%d)=%d vs %d → %s（条 %+d）" % [
+	_log_line("%s 死门检定：1d20(%d)+求生(%d)=%d vs %d → %s（条 %+d）" % [
 		_cname(u), int(r["roll"]), int(r["bonus"]), int(r["total"]), dc,
 		_oc(bool(r["ok"]), "挺住", "恶化"), u.door_gauge])
 	_door_settle(u)

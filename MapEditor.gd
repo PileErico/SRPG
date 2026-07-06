@@ -1713,12 +1713,11 @@ func _unit_edit_before_change() -> void:
 		_unit_edit_snap_pushed = true
 
 # —— DeployPanel 的宿主回调（editor_mode 下需要的最小契约）——
-# 改四维/属性/特性/装备 → 重算派生 + 序列化回 map_units
+# 改属性/特性/装备 → 注满 + 序列化回 map_units
 func _commit_unit(u) -> void:
 	if u == null:
 		return
 	_unit_edit_before_change()
-	u.recompute_derived()
 	u.init_vitals()
 	_serialize_editing_unit()
 	if canvas: canvas.refresh_static()

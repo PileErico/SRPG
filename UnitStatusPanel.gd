@@ -662,9 +662,6 @@ func _build_info(info: VBoxContainer, u) -> void:
 			ph.custom_minimum_size = Vector2(132, 150)
 			ph.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 			top.add_child(ph)
-	top.add_child(VSeparator.new())
-	_build_four_dims(top, u)          # 四维：头像右边、上下居中（编辑器＝可填 spinbox）
-
 	info.add_child(HSeparator.new())
 
 	# ② 身份：姓名 / 特性 / 等级（整行铺开；编辑器＝可编辑）
@@ -689,7 +686,7 @@ func _emit_edit() -> void:
 	if on_edit.is_valid():
 		on_edit.call()
 
-# 右列派生属性就地刷新（四维/特性改后调；不整卡重建 → 保住左侧 spinbox 焦点）
+# 右列属性就地刷新（特性/装备改后调；不整卡重建 → 保住左侧编辑件焦点）
 func _refresh_stats_col(u) -> void:
 	if _stats_col == null or not is_instance_valid(_stats_col):
 		return
@@ -705,13 +702,6 @@ func _on_edit_name(t: String) -> void:
 func _on_edit_level(v: float) -> void:
 	if _unit == null: return
 	_unit.level = int(v)
-	_emit_edit()
-
-func _on_edit_dim(v: float, key: String) -> void:
-	if _unit == null: return
-	_unit.stats[key] = int(v)
-	_unit.recompute_derived()   # 四维改 → 重算派生 → 右列即时反映
-	_refresh_stats_col(_unit)
 	_emit_edit()
 
 func _on_edit_trait(idx: int) -> void:
@@ -847,60 +837,6 @@ func _exp_bar(u) -> Control:
 	mc.add_child(lbl)
 	bar.add_child(mc)
 	return _tip_host(bar, tip)   # 纯黑 tooltip 宿主
-
-# 头像下「右栏」四维主属性：力量/灵巧/智力/体力（无配色、上下居中、与身份以竖线分隔）。
-# 数值读 effective_stat（受修正变高绿/变低红，与战斗属性两列同逻辑），将来供技能系统取用。
-const FOUR_DIMS := [
-	{"key": "STR", "cn": "力量"},
-	{"key": "DEX", "cn": "灵巧"},
-	{"key": "INT", "cn": "智力"},
-	{"key": "STA", "cn": "体力"},
-]
-
-func _build_four_dims(parent: Node, u) -> void:
-	var v := VBoxContainer.new()
-	v.size_flags_vertical = Control.SIZE_SHRINK_CENTER   # 上下居中
-	v.add_theme_constant_override("separation", 4)
-	for d in FOUR_DIMS:
-		v.add_child(_dim_row(u, d))
-	parent.add_child(v)
-
-# 一条四维：键名 + 着色数值（受修正变高绿/变低红）；整行悬停出基础值+来源 tooltip。
-# 编辑器模式：数值换成可填 SpinBox（改基础值 → 重算派生 → 右列即时刷新）。
-func _dim_row(u, d: Dictionary) -> Control:
-	var key := str(d["key"])
-	if editor_mode:
-		var row := HBoxContainer.new()
-		row.add_theme_constant_override("separation", 4)
-		var kl := Label.new()
-		kl.text = "%s：" % str(d["cn"])
-		row.add_child(kl)
-		var sp := SpinBox.new()
-		sp.min_value = 1
-		sp.max_value = 99
-		sp.step = 1
-		sp.value = float(u.stats.get(key, 5))
-		sp.custom_minimum_size = Vector2(72, 0)
-		sp.value_changed.connect(_on_edit_dim.bind(key))
-		row.add_child(sp)
-		return row
-	var base := float(u.stats.get(key, 0))
-	var eff := float(u.effective_stat_f(key))
-	var h := HBoxContainer.new()
-	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	h.add_theme_constant_override("separation", 0)
-	var k := Label.new()
-	k.text = "%s：" % str(d["cn"])
-	k.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	h.add_child(k)
-	var val := Label.new()
-	val.text = _fmt(eff)
-	val.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var dc = _diff_color(eff, base)
-	if dc != null:
-		val.add_theme_color_override("font_color", dc)
-	h.add_child(val)
-	return _tip_host(h, _stat_tooltip(u, str(d["cn"]), key, false))
 
 # 特性行：「特性：名」——名按稀有度上色（无特性=灰「无」）；有特性则悬停出富 tooltip（加成+性质描述）。
 # 用 ItemSlot 当 tooltip 宿主（去掉边框），复用其 _make_custom_tooltip → tooltip_builder 机制。

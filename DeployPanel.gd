@@ -1,5 +1,5 @@
 extends VBoxContainer
-## 右侧「单位编辑器」（布置阶段）：编辑底部栏选中的那个单位（等级/经验/四维/属性/特性/技能/物品/阵营）。
+## 右侧「单位编辑器」（布置阶段）：编辑底部栏选中的那个单位（等级/经验/属性/特性/技能/物品/阵营）。
 ## + 把当前单位「保存为预设」（存其配置，与场上位置无关，下次从底部栏「＋」可再取）。
 ## + 「开始游戏」交给宿主开跑回合。host = Sandbox 实例。单位的增删/布置在底部 RosterBar。
 ## 战斗阶段 set_battle_mode(true) → 整个面板隐藏（编辑停用；只读查看走角色状态页）。
@@ -12,11 +12,7 @@ const StatMeta := preload("res://StatMeta.gd")   # stat→中文（不再依赖 
 const TagDB := preload("res://TagDB.gd")          # faction→中文走单一源
 
 const FACTIONS := ["player", "ally", "enemy", "neutral"]   # 顺序=下拉顺序；中文走 TagDB.cn
-const FOUR_KEYS := ["STR", "DEX", "INT", "STA"]
-const FOUR_CN := {"STR": "力量", "DEX": "灵巧", "INT": "智力", "STA": "体力"}
-const EDIT_STATS := StatMeta.EDITOR_STATS   # 单一源（含 sight——原漏编：可存档却不可编辑）
-const RO_STATS := ["HP_max", "atk", "mag", "acc", "eva", "crit_rate", "crit_dmg",
-	"block_rate", "block_power", "res_status"]
+const EDIT_STATS := StatMeta.EDITOR_STATS   # 单一源（🔒 属性重做：原派生键已降级为基础 stat、全部可编辑）
 
 var host
 var _sel = null
@@ -171,20 +167,13 @@ func _rebuild_editor() -> void:
 	_editor_box.add_child(_int_row("经验", _sel.exp, 0, 999999, "exp"))
 	_editor_box.add_child(_int_row("经验上限", _sel.exp_max, 1, 999999, "exp_max"))
 
-	# 四维
-	_editor_box.add_child(_section("四维（改后重算派生）"))
-	for k in FOUR_KEYS:
-		_editor_box.add_child(_stat_row(k))
-
 	# 可改属性
 	_editor_box.add_child(_section("属性（可改）"))
 	for k in EDIT_STATS:
 		_editor_box.add_child(_stat_row(k))
 
-	# 只读派生
-	_editor_box.add_child(_section("派生 / 当前（只读）"))
-	for k in RO_STATS:
-		_editor_box.add_child(_ro_row(k))
+	# 当前（只读）
+	_editor_box.add_child(_section("当前（只读）"))
 	_editor_box.add_child(_ro_row("HP"))
 
 	# 特性

@@ -623,18 +623,12 @@ func _add_effect_by_id(target, inf: Dictionary, eid: String) -> void:
 		target.effects.append(e)
 	_hang_effect_mods(target, def.get("mods", []), source, str(def.get("kind", "debuff")))
 
-# buff↔modifier 桥：把效果的 mods 挂进 target.modifiers（同 source）；触及四维则重算派生。
+# buff↔modifier 桥：把效果的 mods 挂进 target.modifiers（同 source）。
 func _hang_effect_mods(target, mods, source: String, nature: String) -> void:
-	var touched_four := false
 	for m in mods:
 		if typeof(m) != TYPE_DICTIONARY:
 			continue
-		var st := str(m.get("stat", ""))
-		target.modifiers.append({"stat": st, "op": str(m.get("op", "flat")), "value": float(m.get("value", 0)), "source": source, "nature": nature})
-		if st in ["STR", "DEX", "INT", "STA"]:
-			touched_four = true
-	if touched_four:
-		target.recompute_derived()   # 改了四维 → 重算派生（让减速等传导到派生属性）
+		target.modifiers.append({"stat": str(m.get("stat", "")), "op": str(m.get("op", "flat")), "value": float(m.get("value", 0)), "source": source, "nature": nature})
 
 # 效果时长求值：兼容旧匿名内联的裸标量 与 EffectDB 的 {base,per_stat} 对象（§2.2 双形前置）。
 # v1：对象形只读 base（per_stat 公式求值留阶段2 与 resolve_num 一起；fixed 模型见 §2.8）。整数语义 floor。
@@ -644,28 +638,17 @@ func _eval_effect_duration(inf) -> int:
 		return int(floor(float(d.get("base", 0))))
 	return int(d)
 
-# 按 source 摘掉单位的修正（buff 到期/被清除时）。若摘掉的含四维修正 → 重算派生。
+# 按 source 摘掉单位的修正（buff 到期/被清除时）。
 func _remove_mods_by_source(u, source: String) -> void:
 	if u == null or typeof(u.modifiers) != TYPE_ARRAY:
 		return
-	var had_four := false
-	var kept := []
-	for m in u.modifiers:
-		if str(m.get("source", "")) == source:
-			if str(m.get("stat", "")) in ["STR", "DEX", "INT", "STA"]:
-				had_four = true
-			continue
-		kept.append(m)
-	u.modifiers = kept
-	if had_four:
-		u.recompute_derived()
+	u.modifiers = u.modifiers.filter(func(m): return str(m.get("source", "")) != source)
 
 # 清空单位的效果 + 所有 buff 来源的临时修正（重开/退战/换图用）；装备/特性等常驻修正保留。
 func _clear_effects_and_buffs(u) -> void:
 	u.effects = []
 	if typeof(u.modifiers) == TYPE_ARRAY:
 		u.modifiers = u.modifiers.filter(func(m): return not str(m.get("source", "")).begins_with("buff:"))
-	u.recompute_derived()
 
 # 移除单位身上所有带某 tag 的效果 + 连带摘掉它们挂的修正；返回移除条数。
 func _cleanse_effects_with_tag(u, tag: String) -> int:
@@ -789,7 +772,6 @@ func _door_settle_state(u) -> String:
 func _door_clear(u) -> void:
 	u.tags.erase("deaths_door")
 	_cleanse_effects_with_tag(u, "deaths_door")
-	u.recompute_derived()
 
 # 收尸：死门资格者转入死门、门条 −3/无资格者移出战斗（含击杀账、出手序列剔除、active 下标推进/进新 round）。
 # 返回 {dead, entered_door, active_died, new_round}；日志/选中清理/天气·胜负·下一 turn 编排留宿主。

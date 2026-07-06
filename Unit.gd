@@ -2,7 +2,8 @@ extends RefCounted
 ## 单位数据（sandbox 起步版）。
 ## 身份字段固定；战斗属性放在 stats 字典里，方便“慢慢添加”——
 ## 每加一条属性，侧栏（与将来的 token）自动反映。
-## 属性口径见 docs/单位系统设计.md「第一层属性」：默认值可为 0（面板 + 修正）。
+## 属性口径 🔒 docs/属性与成长系统.md：四维已删——基础值=种族底值（RaceDB 写入，缺省=人类基线），
+## 装备/熟练度/perk 经修正管线叠加；等级零数值。
 
 const STANCE_TAGS := ["player", "ally", "enemy", "neutral"]   # 阵营立场 tag
 const ItemInstances := preload("res://ItemInstances.gd")     # 物品实例门面（每件装备独立实例；消费合成视图）
@@ -36,13 +37,12 @@ var faction: String:
 # —— 身份 / 养成（非战斗数值，显示在角色状态页左区）——
 var uid := 0                 # 存档域唯一 id 🔒（WorldState.mint_uid 分配，unit/item 共用计数器；0=未分配＝临时对象，如沙盒测试单位）
 var proto_id := ""           # 来源原型 id（图鉴编号/击杀统计按它归类；空=手捏单位）
+var race_id := ""            # 种族 id（data/races.json；RaceDB.apply_to 写入种族底值时一并记下。空=引擎默认基线）
 # 派系归属＝ tag（`camp_<factions.json id>`，见 data/tags.json cat "camp"）——走 tags 统一判断，不设专门字段。
 # 区别于 faction(阵营立场 player/ally/enemy/neutral，关卡决定)：camp 是单位内在派系（帝国/流寇…），影响声望/敌对(FactionDB)。
 var level := 1               # 等级
 var exp := 0                 # 当前经验
 var exp_max := 100           # 升级所需经验
-var attr_points := 0         # 未分配属性点（升级 +3 🔒 §1.9；分配 UI 后置）
-var skill_points := 0        # 未分配技能点（升级 +1 🔒 §1.9；消费待技能树轮）
 var injured_until := 0       # 重伤休整到期时刻（clock_hours；0/过期=健康。战后 BattleIO 写；时长细则待 §2.3）
 
 # —— 死门（战斗运行时态，不入档；规格见需求 §1.11 🔒）——
@@ -56,34 +56,29 @@ var icon := ""               # 棋子图标路径（res://...，叠在圆形 tok
 # 第一层属性面板（详见 docs/单位系统设计.md「第一层属性」）。
 # 这些是“基础值/上限”，默认值可为 0（面板 + 修正）；当前 turn 的剩余量是运行时状态，见下。
 var stats := {
-	# 四维主属性（支撑技能系统：力量 STR / 灵巧 DEX / 智力 INT / 体力 STA；默认占位 5，机制待定）
-	"STR": 5, "DEX": 5, "INT": 5, "STA": 5,
 	# 生存
-	"HP_max": 10, "HP": 10,
+	"HP_max": 15, "HP": 15,
 	"armor_max": 0, "armor": 0,   # 护甲值（承伤池，来自防具，默认 0）
 	# 行动
 	"AP_max": 2,                  # AP 上限：每 turn 开始刷新到此值（行动经济基础 2）
 	"move": 6,                    # 移动力：一次「移动动作」（花 1 AP）获得的移动点数
 	"speed": 5,                   # 速度：出手顺序（大→小；同速玩家优先）
 	"sight": 5,                   # 视野半径：能看多远（六边形距离）；被 LOS 裁剪。夜/天气等环境挂修正。见 docs/感知系统.md
-	# 进攻
-	"atk": 5,                     # 攻击 → 武器 skill 物理伤害
-	"mag": 0,                     # 理术 → 魔法 spell 伤害 + 施加异常强度
+	# 进攻 / 防御（默认=人类基线，与 data/races.json human 一致；武器/熟练度/perk 经修正管线叠加）
+	"atk": 2.5,                   # 攻击面板（🔒 攻击来自武器：底值极低，主要由武器 mod 提供）
 	"atk_eff": 100,              # 攻击效能(%)：最终增伤乘数层，基线 100
 	"def_eff": 100,              # 防御效能(%)：最终减伤乘数层，基线 100
-	"acc": 90,                    # 命中
-	"eva": 10,                    # 闪避
-	"crit_rate": 5,               # 暴击率(%)
-	"crit_dmg": 150,              # 暴击威力(%)，未暴击=100
-	"block_rate": 0,              # 格挡率(%)
-	"block_power": 0,             # 格挡性能(%)
-	# 抗性（物理 / 异常 + 四元素；详见 docs/单位系统设计.md「元素/魔法系统」）
-	"res_phys": 0,                # 物理抗性(%)
-	"res_status": 0,              # 异常抗性(%)：抵抗纯异常施加
-	"res_fire": 0,                # 火焰抗性(%)
-	"res_thunder": 0,             # 雷电抗性(%)
-	"res_ice": 0,                 # 冰冻抗性(%)
-	"res_holy": 0,                # 神圣抗性(%)
+	"acc": 35,                    # 命中
+	"eva": 5,                     # 闪避
+	"crit_rate": 2.5,             # 暴击率(%)
+	"crit_dmg": 160,              # 暴击威力(%)，未暴击=100
+	"block_rate": 1,              # 格挡率(%)
+	"block_power": 1,             # 格挡性能(%)
+	# 抗性四轨 🔒（docs/属性与成长系统.md §5）：抗性=百分比减伤（人/甲分算）；强韧=异常豁免掷（防具永不提供）
+	"res_phys": 0,                # 物理抗性(%)：全部物理伤害
+	"res_nature": 0,              # 自然抗性(%)：全部元素伤害（含神圣）
+	"will_fort": 0,               # 意志强韧(%)：非物质异常豁免（眩晕/恐惧/混乱…）
+	"body_fort": 0,               # 肉体强韧(%)：物质异常豁免（寒冷/麻痹/流血…）
 }
 
 # —— 运行时回合状态（不是面板属性；每 turn 开始重置）——
@@ -183,39 +178,19 @@ func eff_reduce(bucket: String) -> float:
 func effective_stat(key: String) -> int:
 	return int(round(effective_stat_f(key)))
 
-# 由四维派生的第一层属性键（这些 stats 的“基础值”＝四维公式算出，装备/buff 的修正再叠在其上）。
-const DERIVED_KEYS := StatMeta.DERIVED_STATS   # 单一源在 StatMeta（序列化/编辑器白名单同处维护）
-
 # 一次「移动动作」（1 AP）获得的移动点——**唯一口径＝effective**（含装备/词条/buff 修正）。
 # 预览范围(_dijkstra)与实际购点(玩家/AI/_move_budget)都必须读这里，禁止再读裸 stats["move"]。
 func move_allowance() -> int:
 	return int(effective_stat("move"))
-
-# 重算「四维 → 第一层属性」基础值（写回 stats，作为该属性的 base；effective_stat 再叠修正）。
-# 用 effective 四维（含特性/装备对四维的修正）→ 特性加成能传导到派生属性。四维或其修正变化后须调用。
-func recompute_derived() -> void:
-	var strv := effective_stat_f("STR")
-	var dex := effective_stat_f("DEX")
-	var intl := effective_stat_f("INT")
-	var sta := effective_stat_f("STA")
-	stats["HP_max"] = round1(sta * 3.0)                          # 生命 = 体力 × 3
-	stats["atk"] = round1(strv * 0.5)                            # 攻击 = 力量 × 0.5
-	stats["mag"] = round1(intl * 0.5)                            # 理术 = 智力 × 0.5
-	stats["acc"] = round1(dex + 30.0)                            # 命中 = 灵巧 + 30
-	stats["eva"] = round1(dex)                                   # 闪避 = 灵巧
-	stats["block_rate"] = round1((dex + strv) * 0.1)             # 格挡率 = (灵巧+力量) × 0.1
-	stats["block_power"] = round1(strv * 0.2)                    # 格挡性能 = 力量 × 0.2
-	stats["crit_rate"] = round1(dex * 0.5)                       # 暴击率 = 灵巧 × 0.5
-	stats["crit_dmg"] = round1(150.0 + (strv + dex))            # 暴伤% = 150 + (力量+灵巧)（即 1.5+(力量+敏捷)×0.01）
-	stats["res_status"] = round1((sta + intl) * 0.1)            # 异常抵抗 = (体力+智力) × 0.1
 
 # 把当前生命/护甲注满到上限（生成时调用；上限 = effective，含装备/特性）。
 func init_vitals() -> void:
 	stats["HP"] = effective_stat("HP_max")
 	stats["armor"] = effective_stat("armor_max")
 
-# 获得经验（战后结算/击杀归属）：升级循环——每级 +3 属性点 +1 技能点 🔒（需求 §1.9）。返回升了几级。
-# exp_max 成长曲线占位（×1.2 向上取整）；点数只积累、分配 UI 后置。
+# 获得经验（战后结算/击杀归属）：升级循环。返回升了几级。
+# 🔒 属性重做（docs/属性与成长系统.md §1）：等级零数值——属性点/技能点已废除；
+# 升级的意义=技艺槽（1/5/9/13/17）与职业树层（3/6/9/12/15/18）的解锁节拍。
 func gain_exp(n: int) -> int:
 	var levels := 0
 	exp += maxi(0, n)
@@ -223,8 +198,6 @@ func gain_exp(n: int) -> int:
 		exp -= exp_max
 		level += 1
 		levels += 1
-		attr_points += 3
-		skill_points += 1
 		exp_max = int(ceil(exp_max * 1.2))   # 占位曲线（数值层后调）
 	return levels
 
@@ -254,7 +227,6 @@ func set_trait(id: String) -> void:
 		mod["source"] = "trait"
 		mod["source_label"] = str(t.get("name", id))
 		modifiers.append(mod)
-	recompute_derived()   # 特性可能改四维（如天性武者 +体力）→ 重算派生属性
 
 # 装备（模板 id 便捷入口）：从模板**造新实例**再装——原型/预设/沙盒路径零改动。
 # 装失败回收孤儿实例。成功 true。target_slot 非空＝指定目标槽（单手武器装进副手等，见 equip_instance）。
@@ -291,7 +263,6 @@ func equip_instance(iuid: int, target_slot := "") -> bool:
 	for s in slots:
 		equipment[s] = iuid
 	_apply_item_mods(item, iuid)
-	recompute_derived()   # 装备/词条可改四维 → 派生属性即时传导（与 set_trait 对齐）
 	return true
 
 # 卸下某槽的物品（双手武器从任一槽卸都连带清两槽 + 去掉它的修正，按实例 iuid 配对）。
@@ -310,7 +281,6 @@ func unequip(slot: String) -> void:
 			to_clear.append(s)
 	for s in to_clear:
 		equipment.erase(s)
-	recompute_derived()   # 对称：卸下也即时传导四维派生
 
 # 收编迁移用（WorldState._adopt_equipment）：装备实例换 uid——equipment 槽值 + 修正 source 前缀同步重写。
 func remap_equip_uid(old_uid: int, new_uid: int) -> void:
@@ -434,8 +404,8 @@ func has_state(tag: String) -> bool:
 	return false
 
 # ============ 技能（已学状态 / 学习 / 冷却 / 本战次数）============
-# 数值口径：冷却 = floor(base + 智力×per_int)（≥0）；本战次数 = floor(base + 智力×per_int)（≥1）。
-# 智力取 effective（含装备/特性修正）。
+# 数值口径：冷却 = floor(base)（≥0）；本战次数 = floor(base)（≥1）。
+# 🔒 属性重做：per_int 缩放随四维废除（智力已删）；将来数值缩放走公式对象（技能系统阶段2 resolve_num）。
 
 func has_skill(id: String) -> bool:
 	return skills.has(id)
@@ -447,14 +417,12 @@ func skill_level(id: String) -> int:
 # 冷却上限（回合，按本单位的 turn 计）
 func skill_cooldown_max(def) -> int:
 	var cd = def.get("cooldown", {})
-	var v := float(cd.get("base", 0)) + effective_stat_f("INT") * float(cd.get("per_int", 0))
-	return maxi(0, int(floor(v)))
+	return maxi(0, int(floor(float(cd.get("base", 0)))))
 
 # 本战使用次数上限（至少 1）
 func skill_uses_max(def) -> int:
 	var u = def.get("uses_per_battle", {})
-	var v := float(u.get("base", 0)) + effective_stat_f("INT") * float(u.get("per_int", 0))
-	return maxi(1, int(floor(v)))
+	return maxi(1, int(floor(float(u.get("base", 0)))))
 
 # 学习 / 升级一个技能（按 def.max_level 封顶）；首学初始化冷却=0、本战次数=满。返回新等级（0=失败）。
 func learn_skill(id: String) -> int:
@@ -495,7 +463,6 @@ func _init(p_name := "新兵", p_faction := "player", p_col := 0, p_row := 0) ->
 	faction = p_faction
 	col = p_col
 	row = p_row
-	recompute_derived()   # 由默认四维(5/5/5/5)算出一套派生基础；设四维/特性后会再重算
 	init_vitals()
 
 # turn 开始：AP 刷新到上限，移动点清零（上一 turn 零头作废），技能冷却各 −1（按本单位 turn 计）。

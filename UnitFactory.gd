@@ -10,11 +10,12 @@ extends RefCounted
 const Unit := preload("res://Unit.gd")
 const ItemInstances := preload("res://ItemInstances.gd")   # 装备实例库（equipment 存 uid、proto 存模板 id，此处互转）
 const StatMeta := preload("res://StatMeta.gd")             # stat 序列化白名单单一源
+const RaceDB := preload("res://RaceDB.gd")                 # 种族底值注册表（属性重做 🔒：基础面板值按种族给定）
 
 const PROTOS_PATH := "res://data/unit_prototypes.json"   # 内置原型
 const PRESETS_PATH := "user://unit_presets.json"         # 用户自存预设（跨次启动保留）
 
-# proto 字典 → 配置完毕的 Unit（四维/特性/装备/技能/AI 全组装，收尾 recompute_derived + init_vitals）。
+# proto 字典 → 配置完毕的 Unit（种族底值/特性/装备/技能/AI 全组装，收尾 init_vitals）。
 static func make_unit(proto: Dictionary, fac: String, col: int, row: int):
 	var u = Unit.new(str(proto.get("name", "新兵")), fac, col, row)
 	u.proto_id = str(proto.get("id", ""))   # 模板身份（图鉴/击杀统计按它归类；手捏单位=空）
@@ -23,9 +24,7 @@ static func make_unit(proto: Dictionary, fac: String, col: int, row: int):
 	for t in proto.get("tags", []):
 		if not u.tags.has(str(t)):
 			u.tags.append(str(t))
-	var four = proto.get("four", {})
-	if typeof(four) == TYPE_DICTIONARY and not four.is_empty():
-		set_four(u, int(four.get("STR", 5)), int(four.get("DEX", 5)), int(four.get("INT", 5)), int(four.get("STA", 5)))
+	RaceDB.apply_to(u, str(proto.get("race", "")))   # 种族底值先落（stats 基础值+种族 tags）；下方 proto.stats 再叠差异覆盖
 	if proto.get("speed", null) != null:
 		u.stats["speed"] = int(proto["speed"])
 	u.level = int(proto.get("level", 1))
@@ -36,7 +35,7 @@ static func make_unit(proto: Dictionary, fac: String, col: int, row: int):
 		u.set_trait(tr)
 	for it in proto.get("equip", []):
 		u.equip(str(it))
-	# 属性覆盖（预设里手动调过的非派生属性：move/speed/AP_max/armor_max/各抗/效能…）
+	# 属性覆盖（与种族底值的差异：HP_max/atk/acc/…全部面板值均可覆盖）
 	var ov = proto.get("stats", {})
 	if typeof(ov) == TYPE_DICTIONARY:
 		for k in ov:
@@ -55,17 +54,9 @@ static func make_unit(proto: Dictionary, fac: String, col: int, row: int):
 	u.ai_threat = bool(proto.get("ai_threat", true))
 	u.ai_region = str(proto.get("ai_region", ""))
 	u.ai_group = str(proto.get("ai_group", ""))
-	u.recompute_derived()
 	u.init_vitals()
 	u._sync_hands_to_state()   # 维持不变式：主手＝当前地/空态偏好的武器（比路兹专属；覆盖直接带 flying tag 构造等绕过 set_airborne 的路径）；无 prefer 单位 no-op
 	return u
-
-# 设四维主属性（力量/灵巧/智力/体力）
-static func set_four(u, strv: int, dex: int, intl: int, sta: int) -> void:
-	u.stats["STR"] = strv
-	u.stats["DEX"] = dex
-	u.stats["INT"] = intl
-	u.stats["STA"] = sta
 
 # Unit → proto 字典（可被 make_unit 复原）。阵营立场/flying/死门 不入 tags（单独存/运行时态）。
 static func unit_to_proto(u) -> Dictionary:
@@ -101,7 +92,7 @@ static func unit_to_proto(u) -> Dictionary:
 		"portrait": u.portrait,
 		"icon": u.icon,
 		"tags": keep_tags,
-		"four": {"STR": u.stats.get("STR", 5), "DEX": u.stats.get("DEX", 5), "INT": u.stats.get("INT", 5), "STA": u.stats.get("STA", 5)},
+		"race": u.race_id,
 		"level": u.level,
 		"exp": u.exp,
 		"exp_max": u.exp_max,
@@ -134,8 +125,6 @@ static func unit_to_campaign(u) -> Dictionary:
 		"equip_uids": equip_uids,
 		"hp": int(u.stats.get("HP", 0)),
 		"armor": int(u.stats.get("armor", 0)),
-		"attr_points": u.attr_points,
-		"skill_points": u.skill_points,
 		"injured_until": u.injured_until,
 	}
 
@@ -165,8 +154,6 @@ static func unit_from_campaign(entry: Dictionary):
 	u.uid = int(entry.get("uid", 0))
 	u.stats["HP"] = clampi(int(entry.get("hp", u.stats.get("HP", 0))), 0, int(u.effective_stat("HP_max")))
 	u.stats["armor"] = clampi(int(entry.get("armor", u.stats.get("armor", 0))), 0, int(u.effective_stat("armor_max")))
-	u.attr_points = int(entry.get("attr_points", 0))
-	u.skill_points = int(entry.get("skill_points", 0))
 	u.injured_until = int(entry.get("injured_until", 0))
 	return u
 
@@ -179,8 +166,9 @@ static func unit_to_battle_snapshot(u) -> Dictionary:
 	return {
 		"uid": u.uid, "proto_id": u.proto_id, "unit_name": u.unit_name,
 		"portrait": u.portrait, "icon": u.icon, "trait_id": u.trait_id,
+		"race_id": u.race_id,
 		"level": u.level, "exp": u.exp, "exp_max": u.exp_max,
-		"attr_points": u.attr_points, "skill_points": u.skill_points, "injured_until": u.injured_until,
+		"injured_until": u.injured_until,
 		"col": u.col, "row": u.row,
 		"tags": u.tags.duplicate(),
 		"stats": u.stats.duplicate(),
@@ -204,11 +192,10 @@ static func unit_from_battle_snapshot(d: Dictionary):
 	u.portrait = str(d.get("portrait", ""))
 	u.icon = str(d.get("icon", ""))
 	u.trait_id = str(d.get("trait_id", ""))   # 直写不走 set_trait：其修正已在 modifiers 整份快照里
+	u.race_id = str(d.get("race_id", ""))
 	u.level = int(d.get("level", 1))
 	u.exp = int(d.get("exp", 0))
 	u.exp_max = int(d.get("exp_max", 100))
-	u.attr_points = int(d.get("attr_points", 0))
-	u.skill_points = int(d.get("skill_points", 0))
 	u.injured_until = int(d.get("injured_until", 0))
 	u.col = int(d.get("col", -1))
 	u.row = int(d.get("row", -1))
