@@ -1080,9 +1080,11 @@ func _rebuild_prof_l3(l3col: VBoxContainer, main: VBoxContainer, page_key: Strin
 	btns[_prof_l3].button_pressed = true
 	_fill_prof_main(main, str(ids[_prof_l3]), u)
 
-# 一个装备技能格：VBox[ HBox(格 + 竖向计量槽), 下方「名-档位」]。d 空=（空槽）；d.locked=容量外未解锁。
+# 一个装备技能格：VBox[ HBox(格 + 竖向计量槽), 下方「名-档位」]。
+# d 有 name=已装载；d 空=（空槽，容量内未用）；d.locked=容量外未解锁（画 ✕，同物品栏锁定格）。
 func _prof_slot_unit(d: Dictionary) -> Control:
 	var has := d.has("name")
+	var locked := bool(d.get("locked", false))
 	var xp := int(d.get("xp", 0))
 	var tier := _prof_tier(xp)
 
@@ -1092,31 +1094,44 @@ func _prof_slot_unit(d: Dictionary) -> Control:
 
 	var top := HBoxContainer.new()
 	top.add_theme_constant_override("separation", 5)
-	var cell := Panel.new()
-	cell.custom_minimum_size = PROF_CELL_SIZE
-	cell.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(1, 1, 1, 0.04)
-	sb.set_corner_radius_all(4)
-	sb.set_border_width_all(1)
-	sb.border_color = Color(1, 1, 1, 0.22)
-	cell.add_theme_stylebox_override("panel", sb)
-	top.add_child(cell)
-	var fill_col := Color(str(tier["color"])) if has else Color(1, 1, 1, 0.12)
-	top.add_child(_prof_gauge(_prof_tier_progress(xp) if has else 0.0, fill_col))
+	if locked:
+		# 未解锁格＝物品栏锁定格同款（暗底 + 居中 ✕）；右侧留等宽透明占位，保列与其它格对齐。
+		var lc := _locked_slot(PROF_CELL_SIZE)
+		lc.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		top.add_child(lc)
+		var spacer := Control.new()
+		spacer.custom_minimum_size = Vector2(PROF_GAUGE_W, 0)
+		top.add_child(spacer)
+	else:
+		var cell := Panel.new()
+		cell.custom_minimum_size = PROF_CELL_SIZE
+		cell.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		var sb := StyleBoxFlat.new()
+		sb.bg_color = Color(1, 1, 1, 0.04)
+		sb.set_corner_radius_all(4)
+		sb.set_border_width_all(1)
+		sb.border_color = Color(1, 1, 1, 0.22)
+		cell.add_theme_stylebox_override("panel", sb)
+		top.add_child(cell)
+		var fill_col := Color(str(tier["color"])) if has else Color(1, 1, 1, 0.12)
+		top.add_child(_prof_gauge(_prof_tier_progress(xp) if has else 0.0, fill_col))
 	col.add_child(top)
 
 	col.add_child(_prof_cell_label(d))
 	return col
 
-# 格子下方「名-档位」：技艺名常色，档位名随档位变色（居中，宽度对齐 格+槽）。
+# 格子下方标签：宽度只对齐格子（不含计量槽）→ 文字居中于格子正下方。
+# 已装载=「名-档位」（档位随色）；空槽=（空槽）；未解锁=Lv.N（去「解锁」二字，✕ 已在格内表意）。
 func _prof_cell_label(d: Dictionary) -> Control:
 	var h := HBoxContainer.new()
 	h.alignment = BoxContainer.ALIGNMENT_CENTER
-	h.custom_minimum_size = Vector2(PROF_CELL_SIZE.x + PROF_GAUGE_W + 5, 0)
+	h.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN   # 贴格子左对齐、不被拉到含计量槽的整列宽
+	h.custom_minimum_size = Vector2(PROF_CELL_SIZE.x, 0)
 	if not d.has("name"):
 		var e := Label.new()
-		e.text = ("Lv.%d 解锁" % int(d.get("lv", 0))) if d.get("locked", false) else "（空槽）"
+		e.text = ("Lv.%d" % int(d.get("lv", 0))) if d.get("locked", false) else "（空槽）"
+		e.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		e.custom_minimum_size = Vector2(PROF_CELL_SIZE.x, 0)
 		e.add_theme_color_override("font_color", Color(1, 1, 1, 0.3))
 		e.add_theme_font_size_override("font_size", PROF_FONT_CELL)
 		h.add_child(e)
