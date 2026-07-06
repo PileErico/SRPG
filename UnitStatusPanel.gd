@@ -923,6 +923,8 @@ func _build_trait_tooltip(t) -> Control:
 #         映射 ProfDB 三页 weapon/style/life（战斗技能=风格页、其他=生活页「有些不太生活」）
 #         → L3 纵向＝该页各域（阶段浮现过滤）→ 内容页（待定）
 #       右侧窄列「已习得」＝Unit.prof_known（熟练度高→低）。
+# 图标：装载格读该域 proficiencies.json 的 `icon` 字段（res:// 路径，🟡 技艺图标待玩家自绘/委托——
+#   与物品图标逻辑不同，不复用物品图）；未填=空格（名字在格下）。要上图＝往对应域加 "icon":"res://…"。
 # ⚠️ 待接回：装载/卸载交互（点格换装）+ 战斗锁 _can_swap_prof（原列表版已拆，🔒 规格仍在）。
 
 # 熟练度档位 🔒（用户定曲线 2026-07-06：0/100/300/600/1000，大师满值 1500）：
@@ -962,7 +964,9 @@ func _build_prof_page(u) -> Control:
 	for i in PROF_CELL_COUNT:
 		if i < u.prof_slots.size():
 			var pid := str(u.prof_slots[i])
-			row.add_child(_prof_slot_unit({"name": ProfDB.prof_name(pid), "xp": int(u.prof_xp.get(pid, 0))}))
+			row.add_child(_prof_slot_unit({
+				"name": ProfDB.prof_name(pid), "xp": int(u.prof_xp.get(pid, 0)),
+				"icon": str(ProfDB.get_prof(pid).get("icon", ""))}))
 		elif i < cap:
 			row.add_child(_prof_slot_unit({}))
 		else:
@@ -1112,6 +1116,24 @@ func _prof_slot_unit(d: Dictionary) -> Control:
 		sb.set_border_width_all(1)
 		sb.border_color = Color(1, 1, 1, 0.22)
 		cell.add_theme_stylebox_override("panel", sb)
+		# 技艺图标（若域填了 icon 路径）：铺满格子留 4px 边距；未填=空格（名字在下方，图标你画好丢路径即显）。
+		var icon_path := str(d.get("icon", ""))
+		if has and icon_path != "":
+			var tex = TextureCache.get_tex(icon_path)
+			if tex != null:
+				var tr := TextureRect.new()
+				tr.texture = tex
+				tr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+				tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+				tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+				tr.custom_minimum_size = PROF_CELL_SIZE
+				tr.size = PROF_CELL_SIZE
+				tr.offset_left = 4
+				tr.offset_top = 4
+				tr.offset_right = -4
+				tr.offset_bottom = -4
+				tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+				cell.add_child(tr)
 		top.add_child(cell)
 		var fill_col := Color(str(tier["color"])) if has else Color(1, 1, 1, 0.12)
 		top.add_child(_prof_gauge(_prof_tier_progress(xp) if has else 0.0, fill_col))
