@@ -34,16 +34,15 @@ const CATEGORY_CN := {   # 下拉分隔标题的类别中文（缺省回退原 i
 	"skill_type": "技能类型", "effect": "效果",
 }
 
+# 🔒 属性重做（docs/属性与成长系统.md §4/§5）：四维/mag/res_status/五元素抗已删；
+# 抗性两轨=物理/自然（人/甲分算）；**强韧（will_fort/body_fort）不入物品**——防具/词条只有抗性、永不提供强韧。
 const STAT_GROUPS := [
-	["四维", [["STR", "力量", true], ["DEX", "灵巧", true], ["INT", "智力", true], ["STA", "体力", true]]],
 	["进攻", [["atk", "攻击", true], ["acc", "命中", true], ["crit_rate", "暴击率", true],
-		["crit_dmg", "暴击威力", true], ["atk_eff", "攻击效能", true], ["mag", "理术", false]]],
+		["crit_dmg", "暴击威力", true], ["atk_eff", "攻击效能", true]]],
 	["生存", [["HP_max", "生命上限", true], ["eva", "闪避", true], ["block_rate", "格挡率", true],
 		["block_power", "格挡性能", true], ["def_eff", "防御效能", true], ["armor_max", "护甲池", true]]],
-	["人抗（减对血量伤害·%）", [["res_phys", "物理抗性", true], ["res_status", "异常抗性", true], ["res_fire", "火焰抗性", true],
-		["res_thunder", "雷电抗性", true], ["res_ice", "冰冻抗性", true], ["res_holy", "神圣抗性", true]]],
-	["甲抗（减护甲承伤·防具专属·%）", [["armor_res_phys", "物理甲抗", true], ["armor_res_fire", "火焰甲抗", true],
-		["armor_res_thunder", "雷电甲抗", true], ["armor_res_ice", "冰冻甲抗", true], ["armor_res_holy", "神圣甲抗", true]]],
+	["人抗（减对血量伤害·%）", [["res_phys", "物理抗性", true], ["res_nature", "自然抗性", true]]],
+	["甲抗（减护甲承伤·防具专属·%）", [["armor_res_phys", "物理甲抗", true], ["armor_res_nature", "自然甲抗", true]]],
 	["固定减伤（承伤最后减固定值·非%）", [["dr_flat_armor", "甲固减", true], ["dr_flat_human", "人固减", true]]],
 	["行动", [["move", "移动力", true], ["speed", "速度", true], ["sight", "视野", true], ["AP_max", "AP上限", true]]],
 ]

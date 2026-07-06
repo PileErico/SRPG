@@ -17,6 +17,7 @@ const FactionDB := preload("res://FactionDB.gd")              # 派系单一数�
 const TextureCache := preload("res://TextureCache.gd")        # 棋子图标缩略图
 const EditorTheme := preload("res://EditorTheme.gd")
 const EditorUI := preload("res://EditorUI.gd")
+const RaceDB := preload("res://RaceDB.gd")                    # 种族底值（种族下拉同时驱动 race_id+底值，🔒 属性重做 §3）
 
 const FACTIONS := ["player", "ally", "enemy", "neutral"]
 const MANAGED_CATS := ["faction", "race", "biotype", "camp"]   # 有专属下拉（阵营/种族/生物类型/派系）→ 从「其他标签」排除
@@ -36,6 +37,12 @@ var _loaded_id := ""
 var _dirty := false
 var _free_tags: Array = []   # 自由标签（char_* + 自定义）
 var _bag: Array = []         # 背包内容（8 格，"" = 空；仅编辑器显示，不入档）
+# —— 外观组（成对绑定：一套外观 = 一张立绘 + 一个棋子；编辑器侧状态，经 proto 出入，不入 Unit）——
+# 每条 = {id, name, portrait, icon}。顶层 proto.portrait/icon 镜像「默认外观」→ 现有消费方零改动。
+# 引用/条件切换是后续步骤；本步只管在编辑器里增删/命名/管理多套。
+var _appearances: Array = []   # [{id,name,portrait,icon}]（至少 1 条）
+var _default_appear := ""      # 默认外观 id（无条件时用它；镜像到顶层 portrait/icon）
+var _editing_appear := ""      # 当前在卡上预览/编辑的外观 id（UI 态，可 ≠ 默认）
 
 # —— 控件 ——
 # 左侧原型清单：按阵营分折叠组 + 行卡片（棋子图标+名字〔阵营色〕/ id）+ 选中金框（仿物品编辑器）
@@ -63,6 +70,9 @@ var _f_elite: CheckBox
 var _icon_thumb: TextureRect
 var _icon_edit: LineEdit
 var _file_target := ""              # 文件对话框回填目标："portrait" | "icon"
+var _appear_row: HBoxContainer      # 外观 chip 行
+var _appear_id_edit: LineEdit       # 选中外观的 id（引用条件用；焦点离开/回车提交）
+var _appear_name_edit: LineEdit     # 选中外观的显示名（即时）
 
 
 func _ready() -> void:
@@ -329,7 +339,7 @@ func _do_new_unit() -> void:
 
 func _skeleton() -> Dictionary:
 	return {"id": "", "name": "新单位", "default_faction": "enemy",
-		"tags": ["human"], "four": {"STR": 5, "DEX": 5, "INT": 5, "STA": 5}, "level": 1}
+		"tags": ["human"], "race": "human", "level": 1}
 
 func _load_proto(id: String) -> void:
 	var p := UnitFactory.get_prototype(id)
@@ -364,6 +374,7 @@ func _open_proto(proto: Dictionary, is_new: bool) -> void:
 	_is_new = is_new
 	_loaded_id = "" if is_new else str(proto.get("id", ""))
 	_bag = ["", "", "", "", "", "", "", ""]   # 背包每次载入清空（不入档）
+	_init_appearances(proto)                  # 外观组：从 proto 载入（缺省=旧 portrait/icon 合成一条 base）
 	_build_strip()
 	_rebuild_panel()
 	_dirty = false
@@ -422,7 +433,9 @@ func _build_strip() -> void:
 	_f_home_faction.tooltip_text = "单位内在派系（camp_* tag；FactionDB 影响声望/敌对）。区别于「默认阵营」立场(本关站哪边)"
 	r2.add_child(_f_home_faction)
 	_strip.add_child(r2)
-	# 第三行：棋子图标（叠在六边形 token 上的小图；立绘在角色卡头像「＋」处点选）
+	# 外观组：多套「立绘+棋子」成对管理（选中某套 → 卡片立绘 + 下方棋子图标都编辑它）
+	_build_appear_ui()
+	# 第三行：棋子图标（叠在六边形 token 上的小图；立绘在角色卡头像「＋」处点选）——编辑当前选中外观
 	var r3 := HBoxContainer.new()
 	r3.add_theme_constant_override("separation", 6)
 	r3.add_child(_lbl("棋子图标"))
@@ -493,6 +506,15 @@ func _on_faction_changed() -> void:
 
 func _on_race_changed() -> void:
 	_sync_tags()
+	# 种族 tag 同时驱动种族底值 🔒（属性与成长系统.md §3）：tag id 与 races.json id 同词表。
+	# 选中已建档种族 → 写 race_id + 底值直落面板并注满；未建档种族 → 仅记 tag、面板保持。
+	if _unit != null:
+		var race := str(_f_race.get_selected_metadata())
+		if not RaceDB.get_race(race).is_empty():
+			_unit.race_id = race
+			RaceDB.apply_to(_unit, race)
+			_unit.init_vitals()
+			_rebuild_panel()
 
 func _on_biotype_changed() -> void:
 	_sync_tags()
@@ -507,6 +529,264 @@ func _on_icon_text(t: String) -> void:
 	_unit.icon = t.strip_edges()
 	if _icon_thumb != null and is_instance_valid(_icon_thumb):
 		_icon_thumb.texture = TextureCache.get_tex(_unit.icon)
+	_writeback_appearance(false)   # 写回当前外观（不逐键重建 chip 行，避免抢焦点）
+	_mark_dirty()
+
+
+# —— 外观组（成对绑定：一套 = 立绘 + 棋子；编辑器侧管理，经 proto 出入）——
+
+# 从 proto 载入外观组；缺省则用顶层 portrait/icon 合成单条 base（旧原型无缝）。
+func _init_appearances(proto: Dictionary) -> void:
+	_appearances = []
+	var raw = proto.get("appearances", [])
+	if raw is Array:
+		for e in raw:
+			if e is Dictionary:
+				_appearances.append({
+					"id": str(e.get("id", "")), "name": str(e.get("name", "")),
+					"portrait": str(e.get("portrait", "")), "icon": str(e.get("icon", "")),
+				})
+	if _appearances.is_empty():
+		_appearances.append({"id": "base", "name": "默认",
+			"portrait": _unit.portrait, "icon": _unit.icon})
+	_ensure_appear_ids()
+	_default_appear = str(proto.get("default_appearance", ""))
+	if not _appear_has(_default_appear):
+		_default_appear = str(_appearances[0]["id"])
+	_editing_appear = _default_appear
+	_apply_appearance(_editing_appear)   # 让 _unit.portrait/icon = 编辑对象（卡片/棋子预览它）
+
+# 给缺 id / 重复 id 的条目补唯一 id（防脏数据）。
+func _ensure_appear_ids() -> void:
+	var seen := {}
+	for a in _appearances:
+		var id := str(a["id"])
+		if id == "" or seen.has(id):
+			id = _unique_appear_id("look")
+			a["id"] = id
+		seen[id] = true
+
+func _appear_index(id: String) -> int:
+	for i in _appearances.size():
+		if str(_appearances[i]["id"]) == id:
+			return i
+	return -1
+
+func _appear_has(id: String) -> bool:
+	return id != "" and _appear_index(id) >= 0
+
+func _appear_get(id: String):
+	var i := _appear_index(id)
+	return _appearances[i] if i >= 0 else null
+
+func _unique_appear_id(base: String) -> String:
+	var i := 1
+	var cand := "%s_%d" % [base, i]
+	while _appear_has(cand):
+		i += 1
+		cand = "%s_%d" % [base, i]
+	return cand
+
+# 把某外观的图应用到活 _unit（供卡片/棋子预览）；不动 UI。
+func _apply_appearance(id: String) -> void:
+	var a = _appear_get(id)
+	if a == null or _unit == null:
+		return
+	_unit.portrait = str(a["portrait"])
+	_unit.icon = str(a["icon"])
+
+# 把 _unit 当前 portrait/icon 写回当前编辑外观（图改了就同步进外观组）。
+func _writeback_appearance(rebuild_chips: bool) -> void:
+	var a = _appear_get(_editing_appear)
+	if a == null:
+		return
+	a["portrait"] = _unit.portrait
+	a["icon"] = _unit.icon
+	if rebuild_chips:
+		_rebuild_appear_row()
+
+func _build_appear_ui() -> void:
+	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", 6)
+	head.add_child(_lbl("外观组"))
+	var addb := Button.new()
+	addb.text = "＋ 添加外观"
+	addb.tooltip_text = "新增一套空白外观（立绘+棋子），选它后再点选图片"
+	addb.pressed.connect(_add_appearance)
+	head.add_child(addb)
+	var defb := Button.new()
+	defb.text = "设为默认 ★"
+	defb.tooltip_text = "默认外观 = 无触发条件时使用；同步到顶层 portrait/icon，落子/大地图/战斗当前即用它"
+	defb.pressed.connect(_set_default_appearance)
+	head.add_child(defb)
+	var delb := Button.new()
+	delb.text = "✕ 删除当前"
+	delb.pressed.connect(_remove_appearance)
+	head.add_child(delb)
+	_strip.add_child(head)
+
+	_appear_row = HBoxContainer.new()
+	_appear_row.add_theme_constant_override("separation", 6)
+	_strip.add_child(_appear_row)
+
+	var meta := HBoxContainer.new()
+	meta.add_theme_constant_override("separation", 6)
+	meta.add_child(_lbl("外观 id"))
+	_appear_id_edit = LineEdit.new()
+	_appear_id_edit.custom_minimum_size = Vector2(110, 0)
+	_appear_id_edit.tooltip_text = "外观 id（字母/数字/下划线，唯一）——将来「引用条件」按它指定；回车/移开焦点提交"
+	_appear_id_edit.text_submitted.connect(func(_t): _commit_appear_id())
+	_appear_id_edit.focus_exited.connect(_commit_appear_id)
+	meta.add_child(_appear_id_edit)
+	meta.add_child(_lbl("名称"))
+	_appear_name_edit = LineEdit.new()
+	_appear_name_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_appear_name_edit.placeholder_text = "显示名（如 常态 / 狼形 / 精英版）"
+	_appear_name_edit.text_changed.connect(_on_appear_name_changed)
+	meta.add_child(_appear_name_edit)
+	_strip.add_child(meta)
+
+	_rebuild_appear_row()
+	_sync_appear_meta()
+
+# 重建 chip 行：每套外观一个缩略按钮（立绘→退棋子→淡显占位），选中金框、默认加 ★。
+func _rebuild_appear_row() -> void:
+	if _appear_row == null or not is_instance_valid(_appear_row):
+		return
+	for c in _appear_row.get_children():
+		c.queue_free()
+	for a in _appearances:
+		var id := str(a["id"])
+		var chip := Button.new()
+		chip.custom_minimum_size = Vector2(52, 60)
+		chip.clip_contents = true
+		chip.tooltip_text = "%s（%s）" % [str(a["name"]), id]
+		var tex = TextureCache.get_tex(str(a["portrait"]))
+		if tex == null:
+			tex = TextureCache.get_tex(str(a["icon"]))
+		var tr := TextureRect.new()
+		tr.set_anchors_preset(Control.PRESET_FULL_RECT)
+		tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		tr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		if tex != null:
+			tr.texture = tex
+		else:
+			tr.modulate = Color(1, 1, 1, 0.2)
+		chip.add_child(tr)
+		if id == _default_appear:
+			var star := Label.new()
+			star.text = "★"
+			star.add_theme_color_override("font_color", Color("#EBBC04"))
+			star.add_theme_font_size_override("font_size", 12)
+			star.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			chip.add_child(star)
+		var cid := id
+		chip.pressed.connect(func(): _select_appearance(cid))
+		_apply_row_selected(chip, id == _editing_appear)
+		_appear_row.add_child(chip)
+
+# 同步「选中外观」的 id/名称输入框到 UI（程序化设 .text 不触发 text_changed）。
+func _sync_appear_meta() -> void:
+	var a = _appear_get(_editing_appear)
+	if a == null:
+		return
+	if _appear_id_edit != null and is_instance_valid(_appear_id_edit):
+		_appear_id_edit.text = str(a["id"])
+	if _appear_name_edit != null and is_instance_valid(_appear_name_edit):
+		_appear_name_edit.text = str(a["name"])
+
+# 同步棋子图标缩略/输入框到当前 _unit.icon（切换外观后刷新）。
+func _refresh_icon_field() -> void:
+	if _icon_thumb != null and is_instance_valid(_icon_thumb):
+		_icon_thumb.texture = TextureCache.get_tex(_unit.icon)
+	if _icon_edit != null and is_instance_valid(_icon_edit):
+		_icon_edit.text = _unit.icon
+
+# 选一套外观 → 成为编辑对象：卡片立绘 + 棋子图标都切到它。
+func _select_appearance(id: String) -> void:
+	if not _appear_has(id):
+		return
+	_editing_appear = id
+	_apply_appearance(id)
+	_rebuild_panel()        # 立绘
+	_refresh_icon_field()   # 棋子
+	_sync_appear_meta()
+	_rebuild_appear_row()
+
+func _add_appearance() -> void:
+	if _unit == null:
+		return
+	var nid := _unique_appear_id("look")
+	_appearances.append({"id": nid, "name": "外观%d" % _appearances.size(),
+		"portrait": "", "icon": ""})   # 空白：立即看到占位「＋」提示去选图
+	_editing_appear = nid
+	_apply_appearance(nid)
+	_rebuild_panel()
+	_refresh_icon_field()
+	_sync_appear_meta()
+	_rebuild_appear_row()
+	_mark_dirty()
+	_info("已加外观「%s」——点卡片头像选立绘、下方选棋子；可「设为默认」" % nid)
+
+func _set_default_appearance() -> void:
+	if not _appear_has(_editing_appear):
+		return
+	_default_appear = _editing_appear
+	_rebuild_appear_row()
+	_mark_dirty()
+	_info("默认外观 → 「%s」（游戏内当前用它）" % _default_appear)
+
+func _remove_appearance() -> void:
+	if _appearances.size() <= 1:
+		_err("至少保留一套外观")
+		return
+	var idx := _appear_index(_editing_appear)
+	if idx < 0:
+		return
+	var was_default := (_editing_appear == _default_appear)
+	_appearances.remove_at(idx)
+	if was_default:
+		_default_appear = str(_appearances[0]["id"])
+	_editing_appear = _default_appear
+	_apply_appearance(_editing_appear)
+	_rebuild_panel()
+	_refresh_icon_field()
+	_sync_appear_meta()
+	_rebuild_appear_row()
+	_mark_dirty()
+
+# 提交外观 id 改名（回车/失焦）：校验字母数字下划线 + 唯一；无效则回退并报错。
+func _commit_appear_id() -> void:
+	var a = _appear_get(_editing_appear)
+	if a == null or _appear_id_edit == null or not is_instance_valid(_appear_id_edit):
+		return
+	var nid := _appear_id_edit.text.strip_edges()
+	var old := str(a["id"])
+	if nid == old:
+		return
+	if not _valid_id(nid):
+		_appear_id_edit.text = old
+		_err("外观 id 只能用 字母/数字/下划线")
+		return
+	for other in _appearances:
+		if other != a and str(other["id"]) == nid:
+			_appear_id_edit.text = old
+			_err("外观 id「%s」已重复" % nid)
+			return
+	a["id"] = nid
+	if _default_appear == old:
+		_default_appear = nid
+	_editing_appear = nid
+	_rebuild_appear_row()
+	_mark_dirty()
+
+func _on_appear_name_changed(t: String) -> void:
+	var a = _appear_get(_editing_appear)
+	if a == null:
+		return
+	a["name"] = t
 	_mark_dirty()
 
 
@@ -634,6 +914,7 @@ func _on_file_picked(path: String) -> void:
 	else:
 		_unit.portrait = path
 		_rebuild_panel()   # 立绘显示在角色卡头像，重建反映
+	_writeback_appearance(true)   # 写回当前外观 + 刷新 chip 缩略（离散事件，重建无妨）
 	_mark_dirty()
 
 func _on_equip_slot(slot_id: String) -> void:
@@ -713,7 +994,22 @@ func _open_item_picker(title: String, ids: Array, allow_clear: bool, on_pick: Ca
 # —— 保存 / 删除 ——
 
 func _collect_proto() -> Dictionary:
-	return UnitFactory.unit_to_proto(_unit)   # _unit 已持全部编辑态（含 tags/AI）；工厂单一序列化口
+	var proto := UnitFactory.unit_to_proto(_unit)   # _unit 已持全部编辑态（含 tags/AI）；工厂单一序列化口
+	# 外观组：编辑器侧状态挂回 proto（Unit/Factory 不参与）。
+	# 只在 >1 套时写 appearances/default_appearance——单套即旧格式（顶层 portrait/icon 已由 _unit 携带），零 diff 噪音。
+	if _appearances.size() > 1:
+		var d = _appear_get(_default_appear)
+		if d == null:
+			d = _appearances[0]
+		proto["portrait"] = str(d["portrait"])   # 顶层镜像默认外观 → 落子/大地图/战斗渲染即用它
+		proto["icon"] = str(d["icon"])
+		proto["default_appearance"] = str(d["id"])
+		var out := []
+		for a in _appearances:
+			out.append({"id": str(a["id"]), "name": str(a["name"]),
+				"portrait": str(a["portrait"]), "icon": str(a["icon"])})
+		proto["appearances"] = out
+	return proto
 
 func _on_save() -> void:
 	if _unit == null:

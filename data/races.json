@@ -9,7 +9,7 @@
       "res_phys": 0, "res_nature": 0, "will_fort": 0, "body_fort": 0
     }
   },
-  "lizardman": {
+  "lizardmen": {
     "name": "蜥蜴人",
     "tags": [],
     "stats": {

@@ -93,7 +93,7 @@
     "level": 1,
     "name": "黄蜥蜴人",
     "portrait": "res://icons/Characters/Lizardmen_Yellow.png",
-    "race": "lizardman",
+    "race": "lizardmen",
     "skills": {},
     "stats": {
       "HP_max": 36,
@@ -124,7 +124,7 @@
     "level": 1,
     "name": "蓝蜥蜴人",
     "portrait": "res://icons/Characters/Lizardmen_Blue.png",
-    "race": "lizardman",
+    "race": "lizardmen",
     "skills": {},
     "stats": {
       "HP_max": 12,

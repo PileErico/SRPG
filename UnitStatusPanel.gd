@@ -49,14 +49,14 @@ var _unit = null                       # 当前查看的单位
 var _current_tab := 0                  # 记住当前 Tab（翻页时保持）
 
 # —— 编辑器模式（角色编辑器嵌用；默认 false → 游戏内查看行为逐字节零改动）——
-# 打开＝设 editor_mode=true + 注入回调后 open(u)。可编辑：头像点选 / 四维填 / 姓名·等级 / 特性下拉 / 装备槽点选 / 背包。
+# 打开＝设 editor_mode=true + 注入回调后 open(u)。可编辑：头像点选 / 姓名·等级 / 特性下拉 / 装备槽点选 / 背包。
 var editor_mode := false               # true=可编辑 + docked 填充 + 无拖动/翻页/ESC 关闭
 var on_portrait_pick := Callable()     # 点头像 → 宿主开文件对话框（无参）
 var on_equip_slot := Callable()        # 点装备槽 → 宿主开物品选择器（参：slot_id:String）
 var on_bag_slot := Callable()          # 点背包格 → 宿主开物品选择器（参：index:int）
 var on_edit := Callable()              # 面板内任一编辑后 → 宿主标脏（无参）
 var bag_items: Array = []              # 编辑器背包内容（item id 列表；仅编辑器态显示，不入档）
-var _stats_col: VBoxContainer = null   # 右侧派生属性列引用（四维/特性改后就地刷新，免整卡重建）
+var _stats_col: VBoxContainer = null   # 右侧属性列引用（特性/种族/装备改后就地刷新，免整卡重建）
 var _trait_ids: Array = []             # 编辑器特性下拉的 index→id 映射
 
 func open(u) -> void:
@@ -914,14 +914,13 @@ func _build_stats(right: VBoxContainer, u) -> void:
 	right.add_child(_cell_cm(u, "生命值", u.effective_stat("HP"), "HP_max"))
 	right.add_child(_cell_cm(u, "护甲值", u.effective_stat("armor"), "armor_max"))
 	_two(right, _cell_cm(u, "行动点", int(u.ap), "AP_max"), _cell(u, "行动力", "move"))
-	_two(right, _cell(u, "攻击", "atk"), _cell(u, "理术", "mag"))
+	_two(right, _cell(u, "攻击", "atk"), _cell(u, "速度", "speed"))
 	_two(right, _cell(u, "攻击效能", "atk_eff", true), _cell(u, "防御效能", "def_eff", true))
 	_two(right, _cell(u, "命中", "acc"), _cell(u, "闪避", "eva"))
 	_two(right, _cell(u, "格挡率", "block_rate", true), _cell(u, "格挡性能", "block_power", true))
 	_two(right, _cell(u, "暴击率", "crit_rate", true), _cell(u, "暴击威力", "crit_dmg", true))
-	_two(right, _cell(u, "物理抗性", "res_phys", true), _cell(u, "异常抗性", "res_status", true))
-	_two(right, _cell(u, "火焰抗性", "res_fire", true), _cell(u, "雷电抗性", "res_thunder", true))
-	_two(right, _cell(u, "冰冻抗性", "res_ice", true), _cell(u, "神圣抗性", "res_holy", true))
+	_two(right, _cell(u, "物理抗性", "res_phys", true), _cell(u, "自然抗性", "res_nature", true))
+	_two(right, _cell(u, "意志强韧", "will_fort", true), _cell(u, "肉体强韧", "body_fort", true))
 
 # ============ 下半三列 ============
 
@@ -1299,32 +1298,11 @@ func _build_text_tooltip(text) -> Control:
 	panel.add_child(l)
 	return panel
 
-# tooltip 文本：基础X：N + 每条修正「来源：±值」
-# 派生属性 → 公式说明（带当前四维值），让玩家看到「基础面板怎么从四维来」。非派生属性返回 ""。
-func _derive_desc(u, key: String) -> String:
-	var s := int(u.effective_stat("STR"))
-	var d := int(u.effective_stat("DEX"))
-	var i := int(u.effective_stat("INT"))
-	var t := int(u.effective_stat("STA"))
-	match key:
-		"HP_max": return "体力%d × 3" % t
-		"atk": return "力量%d × 0.5" % s
-		"mag": return "智力%d × 0.5" % i
-		"acc": return "灵巧%d + 30" % d
-		"eva": return "灵巧%d" % d
-		"block_rate": return "(灵巧%d + 力量%d) × 0.1" % [d, s]
-		"block_power": return "力量%d × 0.2" % s
-		"crit_rate": return "灵巧%d × 0.5" % d
-		"crit_dmg": return "150 + (力量%d + 灵巧%d)" % [s, d]
-		"res_status": return "(体力%d + 智力%d) × 0.1" % [t, i]
-		_: return ""
-
+# tooltip 文本：基础X：N + 每条修正「来源：±值」。
+# 🔒 属性重做：四维派生公式已删——基础值=种族底值（RaceDB），修正=装备/特性/buff/熟练度。
 func _stat_tooltip(u, cn: String, key: String, pct: bool) -> String:
 	var sfx := "%" if pct else ""
 	var lines := ["基础%s：%s%s" % [cn, _fmt(float(u.stats.get(key, 0))), sfx]]
-	var df := _derive_desc(u, key)
-	if df != "":
-		lines.append("　＝ %s" % df)   # 派生公式（基础值由四维算出）
 	for m in u.modifiers:
 		if m.get("stat", "") != key:
 			continue
