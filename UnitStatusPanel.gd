@@ -922,14 +922,9 @@ func _build_trait_tooltip(t) -> Control:
 #       ③ 左侧纵向 3 tab（武器/战斗/其他技能）+ 竖线 + 右侧「已习得技能」列表（熟练度高→低、习得优先）。
 # ⚠️ 数据源（技能真值 / 熟练度字段）待定 → 现用占位数据（_PH_*）演示结构与配色。
 
-# 熟练度档位 🔒（用户规格 2026-07-06）：区间[lo,hi] + 颜色；计量槽显示「当前档位内进度」，色随档位。
-const PROF_TIERS := [
-	{"name": "生疏", "lo": 0,    "hi": 100,  "color": "#E0E0E0"},
-	{"name": "娴熟", "lo": 101,  "hi": 300,  "color": "#4FAE5A"},
-	{"name": "老练", "lo": 301,  "hi": 600,  "color": "#3A7BD5"},
-	{"name": "专家", "lo": 601,  "hi": 1000, "color": "#9B59B6"},
-	{"name": "大师", "lo": 1001, "hi": 1500, "color": "#EBBC04"},
-]
+# 熟练度档位 🔒（用户定曲线 2026-07-06：0/100/300/600/1000，大师满值 1500）：
+# 档位名/阈值读 ProfDB 单一源（STAGE_THRESHOLDS/STAGE_NAMES/MASTER_XP_CAP），本处只留 UI 配色。
+const PROF_STAGE_COLORS := ["#E0E0E0", "#4FAE5A", "#3A7BD5", "#9B59B6", "#EBBC04"]   # 生疏白/娴熟绿/老练蓝/专家紫/大师金
 const PROF_CELL_COUNT := 5                        # 装备技能格数
 const PROF_CELL_SIZE := Vector2(64, 64)           # 单格边长
 const PROF_GAUGE_W := 12                          # 竖向计量槽宽度
@@ -969,13 +964,12 @@ const _PH_LEARNED := {
 	],
 }
 
-# xp → 档位定义（Dictionary）
+# xp → 档位定义 {name, lo, hi, color}（阈值/名字来自 ProfDB.stage_of 单一源；hi＝下一档下界或大师满值）
 func _prof_tier(xp: int) -> Dictionary:
-	var t: Dictionary = PROF_TIERS[0]
-	for e in PROF_TIERS:
-		if xp >= int(e["lo"]):
-			t = e
-	return t
+	var stage: int = ProfDB.stage_of(xp)
+	var lo := int(ProfDB.STAGE_THRESHOLDS[stage - 1])
+	var hi := int(ProfDB.STAGE_THRESHOLDS[stage]) if stage < ProfDB.STAGE_THRESHOLDS.size() else int(ProfDB.MASTER_XP_CAP)
+	return {"name": ProfDB.stage_name(stage), "lo": lo, "hi": hi, "color": PROF_STAGE_COLORS[stage - 1]}
 
 # xp → 当前档位内进度 0..1（gauge 填充高度）
 func _prof_tier_progress(xp: int) -> float:

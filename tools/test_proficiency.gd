@@ -26,7 +26,9 @@ func _initialize() -> void:
 	ck(ProfDB.ids_by_page("style").size() == 10 and ProfDB.ids_by_page("weapon").size() == 11
 		and ProfDB.ids_by_page("life").size() == 10, "三页 10/11/10")
 	ck(ProfDB.stage_of(0) == 1 and ProfDB.stage_of(99) == 1 and ProfDB.stage_of(100) == 2
-		and ProfDB.stage_of(300) == 3 and ProfDB.stage_of(700) == 4 and ProfDB.stage_of(1500) == 5, "阶段阈值 0/100/300/700/1500")
+		and ProfDB.stage_of(300) == 3 and ProfDB.stage_of(599) == 3 and ProfDB.stage_of(600) == 4
+		and ProfDB.stage_of(999) == 4 and ProfDB.stage_of(1000) == 5, "阶段阈值 0/100/300/600/1000（🔒 2026-07-06 用户定曲线）")
+	ck(int(ProfDB.MASTER_XP_CAP) == 1500, "大师计量满值 1500")
 	ck(ProfDB.stage_name(3) == "老练" and ProfDB.stage_name(5) == "大师", "阶段名")
 
 	# 2) 槽位容量=等级解锁节拍 1/5/9/13/17

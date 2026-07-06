@@ -7,9 +7,10 @@ extends RefCounted
 const PATH := "res://data/proficiencies.json"
 
 # 五阶段 🔒：生疏→娴熟→老练→专家→大师＝4 次进阶＝每技艺 4 次 perk 选择权。
-# 阈值为 🟡 占位曲线（数值层后调）；阶段序号 1..5。
-const STAGE_THRESHOLDS := [0, 100, 300, 700, 1500]
+# 曲线 2026-07-06 用户定 0/100/300/600/1000（大师计量满值 1500）；仍 🟡 可随数值层调参。阶段序号 1..5。
+const STAGE_THRESHOLDS := [0, 100, 300, 600, 1000]
 const STAGE_NAMES := ["生疏", "娴熟", "老练", "专家", "大师"]
+const MASTER_XP_CAP := 1500   # 大师阶段的计量槽满值/显示上限（xp 本身不封顶）
 
 # 前置/浮现锚 🔒（§2.1，🟡数值可调）：前置域达到本阶段＝资格达标；派生域浮现同锚。
 const REQ_STAGE := 3   # 老练
