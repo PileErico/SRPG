@@ -25,7 +25,7 @@
   {"id": "melee", "cn": "近战", "cat": "wtype", "status": "in_use", "desc": "武器类型：近战"},
   {"id": "ranged", "cn": "远程", "cat": "wtype", "status": "planned", "desc": "武器类型：远程"},
   {"id": "thrown", "cn": "投掷", "cat": "wtype", "status": "planned", "desc": "武器类型：投掷（只吃投掷类加成、无种类细分）"},
-  {"id": "catalyst", "cn": "触媒", "cat": "wtype", "status": "planned", "desc": "武器类型：触媒（法系，攻击多走 mag）"},
+  {"id": "catalyst", "cn": "触媒", "cat": "wtype", "status": "planned", "desc": "武器类型：触媒（法系；数值取源随魔法体系待定，见 属性与成长系统.md §8）"},
   {"id": "shield", "cn": "盾", "cat": "wtype", "status": "planned", "desc": "武器类型：盾（独立类型，只进副手、不吃近战加成）"},
 
   {"id": "weapon_sword", "cn": "剑", "cat": "wcat_melee", "status": "in_use"},
@@ -76,6 +76,9 @@
 
   {"id": "bleeding", "cn": "流血类", "cat": "effect", "status": "in_use", "desc": "回合末按最大生命%掉血；可被清流血类技能整批移除"},
 
+  {"id": "fort_will", "cn": "意志系", "cat": "effect_dim", "status": "in_use", "desc": "异常维度：非物质异常（眩晕/恐惧/混乱…）——由意志强韧 will_fort 豁免（遭受时+每回合各掷一次，成功=免疫/挣脱）"},
+  {"id": "fort_body", "cn": "肉体系", "cat": "effect_dim", "status": "in_use", "desc": "异常维度：物质异常（寒冷/麻痹/流血…）——由肉体强韧 body_fort 豁免；不带维度 tag 的效果（一切 buff/纯机制效果）不参与豁免"},
+
   {"id": "head", "cn": "头部", "cat": "gear_type", "status": "in_use", "desc": "部位：头（戴头盔等）"},
   {"id": "body", "cn": "身体", "cat": "gear_type", "status": "in_use", "desc": "部位：身体（穿身甲等；与 stat armor/armor_max 区分）"},
   {"id": "accessory", "cn": "饰品", "cat": "gear_type", "status": "in_use"},
@@ -111,7 +114,7 @@
 
   {"id": "elite", "cn": "精锐", "cat": "unit_status", "status": "in_use", "color": "#C86BD5", "desc": "精锐/特殊单位标记：敌方带此 tag 才有死门资格（我方/友方全体天然有）；见需求 §1.11"},
 
-  {"id": "deaths_door", "cn": "死门", "cat": "unit_status", "status": "in_use", "color": "#C86BD5", "desc": "死门中：占格可被攻击、无法行动；每回合 1d20+体力 检定 ±1、被命中 −1；条 −3 倒下 / +3 爬回"},
+  {"id": "deaths_door", "cn": "死门", "cat": "unit_status", "status": "in_use", "color": "#C86BD5", "desc": "死门中：占格可被攻击、无法行动；每回合 1d20+求生(5+肉体强韧/5) 检定 ±1、被命中 −1；条 −3 倒下 / +3 爬回"},
   {"id": "injured", "cn": "重伤", "cat": "unit_status", "status": "in_use", "color": "#D5453A", "desc": "重伤：死门 −3 离场（非铁人）或 +3 爬回的 debuff 载体；战后休整 injured_until 前不可出战"},
   {"id": "dead", "cn": "阵亡", "cat": "unit_status", "status": "in_use", "color": "#555555", "desc": "真死标记（铁人死门 −3）：BattleResult 回写时从 roster 移除"}
 ]

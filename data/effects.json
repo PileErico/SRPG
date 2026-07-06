@@ -6,7 +6,8 @@
     "desc": "每回合按最大生命的百分比失去生命（无视护甲）。",
     "kind": "debuff",
     "tags": [
-      "bleeding"
+      "bleeding",
+      "fort_body"
     ],
     "duration_model": "fixed",
     "duration": {

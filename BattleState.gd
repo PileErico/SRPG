@@ -518,31 +518,54 @@ func _resolve_compute(attacker, target, skill) -> Dictionary:
 	r["inflict"] = _try_inflict_state(target, skill)
 	return r
 
-# 命中后尝试施加异常（流血等）：概率 × (1−异常抵抗)；成功则挂进 target.effects。
-# inflict 引用形态🔒（§2.2）：`{effect:"<id>", chance:N}`——effect id 查 EffectDB、chance 缺省 100。
-# 兼容旧内联形态（name+mods，无 effect 键，chance 缺省 0）——走匿名路径，防旧数据/测试断裂。
-# 返回掷骰事件 {name, base_ch, resist, ch, roll, applied}；skill 无 inflict ＝ 空 {}。
+# 命中后尝试施加异常（流血等）：先掷施加概率，命中再掷**强韧豁免**（🔒 属性与成长系统.md §5：
+# 遭受第一时间豁免一次，成功＝完全不受影响；之后每回合豁免见 _apply_turn_start_effects）。
+# inflict 引用形态🔒（§2.2）：`{effect:"<id>", chance:N, ignore_fort?:bool}`——effect id 查 EffectDB、
+# chance 缺省 100；ignore_fort=true＝无视强韧（施加豁免与每回合豁免一并跳过）。
+# 兼容旧内联形态（name+mods，无 effect 键，chance 缺省 0）——匿名路径无维度 tag、天然不参与豁免。
+# 返回掷骰事件 {name, base_ch, roll, applied, fort, fort_roll, shrugged}；skill 无 inflict ＝ 空 {}。
 func _try_inflict_state(target, skill) -> Dictionary:
 	var inf = skill.get("inflict", null)
 	if typeof(inf) != TYPE_DICTIONARY:
 		return {}
 	var eid := str(inf.get("effect", ""))
 	var base_ch := float(inf.get("chance", 100.0 if eid != "" else 0.0))
-	var resist := float(target.effective_stat_f("res_status"))
-	var ch := base_ch * (1.0 - resist / 100.0)
 	var iroll := randf() * 100.0
-	var applied := iroll < ch
+	var applied := iroll < base_ch
+	var ignore_fort := bool(inf.get("ignore_fort", false))
+	var fort := 0.0
+	var fort_roll := -1.0
+	var shrugged := false
 	var nm := ""
 	if eid != "":
 		var def = EffectDB.get_effect(eid)
 		nm = str(def.get("name", eid)) if def != null else eid
-		if applied:
-			_add_effect(target, {"id": eid})   # id 路径：定义查 EffectDB
+		if applied and not ignore_fort and def != null:
+			var fk := _fort_key_for(def.get("tags", []))
+			if fk != "":
+				fort = float(target.effective_stat_f(fk))
+				if fort > 0.0:
+					fort_roll = randf() * 100.0
+					shrugged = fort_roll < fort
+		if applied and not shrugged:
+			_add_effect(target, {"id": eid, "ignore_fort": ignore_fort})   # id 路径：定义查 EffectDB
 	else:
 		nm = str(inf.get("name", ""))          # 旧内联形态
 		if applied:
 			_add_effect(target, inf)
-	return {"name": nm, "base_ch": base_ch, "resist": resist, "ch": ch, "roll": iroll, "applied": applied}
+	return {"name": nm, "base_ch": base_ch, "roll": iroll, "applied": applied and not shrugged,
+		"fort": fort, "fort_roll": fort_roll, "shrugged": shrugged}
+
+# 强韧豁免的维度归轨 🔒（§5）：效果 tags 带 fort_will→意志强韧 / fort_body→肉体强韧；
+# 无维度 tag（一切 buff、纯机制效果如死门/重伤）＝"" ＝不参与豁免。tag 真值见 data/tags.json + 标签词典。
+func _fort_key_for(tags_arr) -> String:
+	if typeof(tags_arr) != TYPE_ARRAY:
+		return ""
+	if (tags_arr as Array).has("fort_will"):
+		return "will_fort"
+	if (tags_arr as Array).has("fort_body"):
+		return "body_fort"
+	return ""
 
 # ============ 效果 / buff↔modifier 桥 ============
 
@@ -618,6 +641,8 @@ func _add_effect_by_id(target, inf: Dictionary, eid: String) -> void:
 			"on_expire_apply": str(def.get("on_expire_apply", "")),   # 到期连锁施加另一效果 id（两段式，§决策20）
 			"source": source,
 		}
+		if bool(inf.get("ignore_fort", false)):
+			e["ignore_fort"] = true   # 无视强韧 🔒（§5）：每回合豁免也跳过（快照随 effects 原样保真）
 		if stackable:
 			e["stacks"] = 1
 		target.effects.append(e)
@@ -699,7 +724,8 @@ func _apply_turn_end_effects(u) -> Array:
 	_apply_expire_chains(u, chains, events)
 	return events
 
-# 回合开始对称 tick（§2.2）：只递减/到期 expire_timing=="turn_start" 的效果（长剑架势等到期在回合开头）。
+# 回合开始对称 tick（§2.2）：先掷**每回合强韧豁免**（🔒 §5：带维度 tag 的异常，成功＝立即挣脱、
+# ignore_fort 不可挣脱），再递减/到期 expire_timing=="turn_start" 的效果（长剑架势等到期在回合开头）。
 # 不结算 DoT/HoT（那些恒在 turn_end）。执行顺序锁定：本 tick → 失能检查 → 行动（宿主 _begin_active_turn）。
 func _apply_turn_start_effects(u) -> Array:
 	var events := []
@@ -708,6 +734,13 @@ func _apply_turn_start_effects(u) -> Array:
 	var keep := []
 	var chains := []
 	for e in u.effects:
+		var fk := _fort_key_for(e.get("tags", []))
+		if fk != "" and not bool(e.get("ignore_fort", false)):
+			var fort := float(u.effective_stat_f(fk))
+			if fort > 0.0 and randf() * 100.0 < fort:
+				_remove_mods_by_source(u, str(e.get("source", "buff:" + str(e.get("name", "")))))
+				events.append({"type": "fort_shrug", "name": str(e.get("name", ""))})
+				continue
 		if e.get("permanent", false) or str(e.get("expire_timing", "turn_end")) != "turn_start":
 			keep.append(e)
 		else:

@@ -1089,10 +1089,12 @@ func _begin_active_turn() -> void:
 	var u = active_unit()
 	if u != null:
 		u.refresh_for_turn()   # AP 刷新、移动点清零
-		# 回合开始对称 tick（§2.2 顺序 tick→失能→行动）：递减/到期 turn_start 效果（架势等回合初到期）
+		# 回合开始对称 tick（§2.2 顺序 tick→失能→行动）：强韧豁免掷 + 递减/到期 turn_start 效果
 		for ev in _state._apply_turn_start_effects(u):
 			if str(ev.get("type", "")) == "expired":
 				_log_line("%s %s 结束" % [_cname(u), str(ev.get("name", ""))])
+			elif str(ev.get("type", "")) == "fort_shrug":
+				_log_line("[color=#7FD5A0]%s 凭强韧挣脱了「%s」[/color]" % [_cname(u), str(ev.get("name", ""))])
 	# 死门单位：无法移动/行动——自动检定后跳过 turn（仿 AI 未激活即过；call_deferred 断递归链防全员死门爆栈）
 	if u != null and u.tags.has("deaths_door"):
 		u.ap = 0
@@ -1946,9 +1948,12 @@ func _resolve_one(attacker, target, skill, show_target := false) -> Dictionary:
 		_log_door_settle(target, str(r["door_result"]))
 	var inf: Dictionary = r.get("inflict", {})
 	if not inf.is_empty():
-		lines.append("%s %s%%（异抗%s%%→%s%%·骰%s）→ %s" % [
-			str(inf["name"]), _numf(inf["base_ch"]), _numf(inf["resist"]), _numf(inf["ch"]), _numf(inf["roll"]),
-			_oc(inf["applied"], "施加", "抵抗")])
+		var seg := "%s %s%%（骰%s）" % [str(inf["name"]), _numf(inf["base_ch"]), _numf(inf["roll"])]
+		if bool(inf.get("shrugged", false)):
+			seg += " → [color=#7FD5A0]强韧豁免[/color]（韧%s%%·骰%s）" % [_numf(inf["fort"]), _numf(inf["fort_roll"])]
+		else:
+			seg += " → %s" % _oc(bool(inf["applied"]), "施加", "未中")
+		lines.append(seg)
 	_push_log(lines)
 	return {"hit": true, "blocked": r["blocked"]}
 
