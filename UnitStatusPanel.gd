@@ -14,6 +14,8 @@ const ItemDB := preload("res://ItemDB.gd")                 # 编辑器背包格�
 const ItemSlot := preload("res://ItemSlot.gd")
 const TraitDB := preload("res://TraitDB.gd")
 const SkillDB := preload("res://SkillDB.gd")
+const ProfDB := preload("res://ProfDB.gd")               # 技艺（熟练度域）注册表——「技艺」页
+
 const TagDB := preload("res://TagDB.gd")                 # 稀有度→颜色单一数据源
 const TextureCache := preload("res://TextureCache.gd")   # 立绘/图标加载 + 缓存单一入口
 const ItemTooltip := preload("res://ItemTooltip.gd")     # 物品富 tooltip 通用渲染组件（与物品编辑器共用）
@@ -133,6 +135,10 @@ func _build(u) -> void:
 	var status_page := _build_status_page(u)
 	status_page.name = "角色状态"
 	tabs.add_child(status_page)
+	# 技艺（熟练度域 🔒 属性与成长系统.md §2）：三页分区 + 阶段进度 + 装载/卸载（非战斗随时；战斗中锁定只读）
+	var craft_page := _build_prof_page(u)
+	craft_page.name = "技艺"
+	tabs.add_child(craft_page)
 	# 通用技能：人人都有（即原「职业技能」页的 13 通用序列 + 进阶；命名修正——它一直是通用技能）
 	var common_page := _build_common_skill_page(u)
 	common_page.name = "通用技能"
@@ -907,6 +913,91 @@ func _build_trait_tooltip(t) -> Control:
 		d.add_theme_color_override("font_color", Color(0.82, 0.82, 0.86))
 		v.add_child(d)
 	return panel
+
+# ============ 技艺页（熟练度域 🔒 属性与成长系统.md §2）============
+# 术语切割 🔒：本页＝技艺（熟练度域，剑术/盾/烹饪…）；「技能」各页＝技能编辑器条目。
+# 装载=总开关：装载中=阶段补正+（将来）perk 生效+熟练度可涨；卸下=冻结保留。学习渠道（师承/公会）后置。
+
+# 非战斗才可换装载（🔒 §2.2）；编辑器模式恒可。
+func _can_swap_prof() -> bool:
+	if editor_mode:
+		return true
+	if host == null or not ("phase" in host):
+		return true
+	return str(host.phase) != "battle"
+
+func _build_prof_page(u) -> Control:
+	var sc := ScrollContainer.new()
+	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	var v := VBoxContainer.new()
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	v.add_theme_constant_override("separation", 6)
+	sc.add_child(v)
+	var head := Label.new()
+	head.text = "技艺槽 %d / %d（等级 1/5/9/13/17 各解锁一格）%s" % [
+		u.prof_slots.size(), u.prof_slot_capacity(), "" if _can_swap_prof() else "　——战斗中锁定"]
+	head.add_theme_color_override("font_color", Color("#EBBC04"))
+	v.add_child(head)
+	for p in [["风格", "style"], ["武器", "weapon"], ["生活", "life"]]:
+		_section(v, str(p[0]))
+		for pid in ProfDB.ids_by_page(str(p[1])):
+			if not u.prof_visible(str(pid)):
+				continue   # 派生/异种域：前置未达=隐藏（🔒 §2.1 阶段浮现）
+			v.add_child(_prof_row(u, str(pid)))
+	return sc
+
+# 一行技艺：名（装载=绿/未学=灰）+ 阶段与进度 + 装载/卸载钮（未学无钮——学习渠道后置）。
+func _prof_row(u, pid: String) -> Control:
+	var def := ProfDB.get_prof(pid)
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 8)
+	var known: bool = u.prof_known.has(pid)
+	var slotted: bool = u.prof_slots.has(pid)
+	var stage: int = u.prof_stage(pid)
+	var name_l := Label.new()
+	name_l.text = "%s%s" % [str(def.get("name", pid)), "（异种）" if def.get("exotic", false) else ""]
+	name_l.custom_minimum_size = Vector2(110, 0)
+	if slotted:
+		name_l.add_theme_color_override("font_color", STAT_GREEN)
+	elif not known:
+		name_l.add_theme_color_override("font_color", Color(1, 1, 1, 0.4))
+	h.add_child(name_l)
+	var st_l := Label.new()
+	if known:
+		var xp := int(u.prof_xp.get(pid, 0))
+		var prog := "" if stage >= 5 else "（%d/%d）" % [xp, int(ProfDB.STAGE_THRESHOLDS[stage])]
+		st_l.text = "%s%s" % [ProfDB.stage_name(stage), prog]
+	else:
+		st_l.text = "未学"
+		st_l.add_theme_color_override("font_color", Color(1, 1, 1, 0.4))
+	st_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	h.add_child(st_l)
+	if known and _can_swap_prof():
+		var btn := Button.new()
+		if slotted:
+			btn.text = "卸载"
+			btn.pressed.connect(func():
+				u.unslot_prof(pid)
+				_rebuild_prof_view(u))
+		else:
+			btn.text = "装载"
+			btn.disabled = u.prof_slots.size() >= u.prof_slot_capacity()
+			btn.pressed.connect(func():
+				if u.slot_prof(pid):
+					_rebuild_prof_view(u))
+		h.add_child(btn)
+	elif slotted:
+		var lock_l := Label.new()
+		lock_l.text = "已装载"
+		lock_l.add_theme_color_override("font_color", STAT_GREEN)
+		h.add_child(lock_l)
+	return _tip_host(h, str(def.get("desc", "")))
+
+# 装载/卸载后整卡重建（modifiers 已变 → 角色状态页同步刷新；_current_tab 保住停在技艺页）。
+func _rebuild_prof_view(u) -> void:
+	open(u)
+	if on_edit.is_valid():
+		on_edit.call()
 
 # 右上：属性两列
 # 属性两列：值读 effective_stat；受修正变高=绿/变低=红；鼠标悬停看基础值 + 各来源加成。
