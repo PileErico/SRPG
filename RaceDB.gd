@@ -1,5 +1,5 @@
 extends RefCounted
-## 种族底值注册表（data/races.json 单一数据源）——属性重做 🔒（docs/属性与成长系统.md §3）：
+## 种族底值注册表（data/races.json 单一数据源）——属性重做 🔒（docs/模块_属性成长_设计.md §3）：
 ## 四维派生已删，基础面板值（HP_max/atk/acc/eva/速度/移动/视野…）按种族给定、同种族底色趋同；
 ## 原型 stats 只写与种族底值的差异。扁平血量：底值不随等级增长。
 ## 仿 *DB 伪单例：preload + 静态缓存；刷新叫 reload_data（DB 铁律：不叫 reload，防命中 Script.reload）。

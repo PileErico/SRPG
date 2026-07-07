@@ -120,7 +120,7 @@ static func effects_text(entry) -> String:
 	return "；".join(parts)
 
 # 占据者视角「当前生效」的地块效果 grant 列表：逐条评估 when 条件、只回条件通过者的 grant。
-# **惰性读取用**（战斗命中/伤害结算即时调用，不材质化成持久 buff——见 docs/单位系统设计.md「森林掩蔽」🔒）。
+# **惰性读取用**（战斗命中/伤害结算即时调用，不材质化成持久 buff——见 docs/模块_战斗_设计.md「森林掩蔽」🔒）。
 # when 目前支持 occupant_lacks_tags（缺这些 tag 才生效，如森林对飞行态不生效）/ occupant_has_tags（须全有）。
 # grant 语义／战斗桶映射＝战斗域知识，留在 BattleState._terrain_eff_factor；本函数只做「数据×条件」过滤，保持地形层纯粹。
 static func active_grants(entry, occupant_tags: Array) -> Array:

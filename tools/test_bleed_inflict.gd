@@ -1,5 +1,5 @@
 extends SceneTree
-## bleed 迁引用端到端（阶段1A.2b）+ 强韧豁免（🔒 属性与成长系统.md §5）：
+## bleed 迁引用端到端（阶段1A.2b）+ 强韧豁免（🔒 模块_属性成长_设计.md §5）：
 ## 验 _try_inflict_state 解析引用 → EffectDB 取定义施加 → DoT/cleanse；强韧=施加时+每回合豁免掷、ignore_fort 穿透。
 ## 确定化：施加用 chance=100 副本（数据侧 chance=30 单独验）；豁免用 body_fort=0/100 两极。
 ## 运行：..._console.exe --headless --path "D:/1战棋" -s res://tools/test_bleed_inflict.gd（退出码 0=PASS）

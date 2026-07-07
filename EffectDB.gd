@@ -1,7 +1,7 @@
 extends RefCounted
 ## 效果注册表：读 data/effects.json，按 id 查。仿 ItemDB（静态缓存 + 写盘口 + reload_data）。
 ## 效果 = 有 id 的 buff/debuff（技能 inflict / apply_effect 引用其 id，不再内联匿名 dict）。
-## 见 docs/技能与效果系统.md §2.2。DRY：一份定义多技能引用（协同攻击目标/中毒/流血）。
+## 见 docs/模块_技能_设计.md §2.2。DRY：一份定义多技能引用（协同攻击目标/中毒/流血）。
 ## （不用 class_name：全局类需编辑器扫描注册，headless 跑找不到；静态变量仍是全局单例。）
 ## ⚠️ 刷新函数必须叫 reload_data 不能叫 reload——外部 EffectDB.reload() 会命中原生 Script.reload()
 ## （重编译 + 静态变量全重置）而非本函数（2026-07-02 全 DB 统一约定）。

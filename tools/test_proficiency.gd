@@ -1,5 +1,5 @@
 extends SceneTree
-## 技艺（熟练度域）子系统回归——🔒 docs/属性与成长系统.md §2。
+## 技艺（熟练度域）子系统回归——🔒 docs/模块_属性成长_设计.md §2。
 ## 覆盖：ProfDB 表/阶段阈值 → 学习/装载/卸载（装载=总开关、容量节拍）→ 涨值/进阶重挂 →
 ## 前置资格（AND/OR·一次性闸门·浮现）→ proto profs 块往返 → 战中快照往返 → 战斗涨值挂钩。
 ## 运行：..._console.exe --headless --path "D:/1战棋" -s res://tools/test_proficiency.gd（退出码 0=PASS）

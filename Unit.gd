@@ -2,7 +2,7 @@ extends RefCounted
 ## 单位数据（sandbox 起步版）。
 ## 身份字段固定；战斗属性放在 stats 字典里，方便“慢慢添加”——
 ## 每加一条属性，侧栏（与将来的 token）自动反映。
-## 属性口径 🔒 docs/属性与成长系统.md：四维已删——基础值=种族底值（RaceDB 写入，缺省=人类基线），
+## 属性口径 🔒 docs/模块_属性成长_设计.md：四维已删——基础值=种族底值（RaceDB 写入，缺省=人类基线），
 ## 装备/熟练度/perk 经修正管线叠加；等级零数值。
 
 const STANCE_TAGS := ["player", "ally", "enemy", "neutral"]   # 阵营立场 tag
@@ -10,14 +10,14 @@ const ItemInstances := preload("res://ItemInstances.gd")     # 物品实例门�
 const StatMeta := preload("res://StatMeta.gd")               # stat 元数据单一源（派生键/序列化白名单）
 const TraitDB := preload("res://TraitDB.gd")                 # 特性注册表（特性查表）
 const SkillDB := preload("res://SkillDB.gd")                 # 技能注册表（技能查表）
-const ProfDB := preload("res://ProfDB.gd")                   # 技艺（熟练度域）注册表（🔒 属性与成长系统.md §2）
+const ProfDB := preload("res://ProfDB.gd")                   # 技艺（熟练度域）注册表（🔒 模块_属性成长_设计.md §2）
 const EquipSlots := preload("res://EquipSlots.gd")          # 槽位 / 槽位资格（tag 驱动装备资格）
 
 var unit_name := "新兵"
 var col := 0
 var row := 0
 
-# 单位 tag（移动型 / 阵营立场 / 特性 / 状态 共用一张词表，见 docs/单位系统设计.md「tag 体系」）。
+# 单位 tag（移动型 / 阵营立场 / 特性 / 状态 共用一张词表，见 docs/模块_战斗_设计.md「tag 体系」）。
 # 默认地面单位（无 flying/spectral → 按地块基础 cost、不可进深水）；阵营立场 tag 由 faction 读写。
 var tags := ["ground"]
 
@@ -54,7 +54,7 @@ var trait_id := ""           # 特性 id（空=无；具名角色固定专属、
 var portrait := ""           # 头像图片路径（res://...，角色状态页大图），空=占位
 var icon := ""               # 棋子图标路径（res://...，叠在圆形 token 上），空=不画
 
-# 第一层属性面板（详见 docs/单位系统设计.md「第一层属性」）。
+# 第一层属性面板（详见 docs/模块_战斗_设计.md「第一层属性」）。
 # 这些是“基础值/上限”，默认值可为 0（面板 + 修正）；当前 turn 的剩余量是运行时状态，见下。
 var stats := {
 	# 生存
@@ -75,7 +75,7 @@ var stats := {
 	"crit_dmg": 160,              # 暴击威力(%)，未暴击=100
 	"block_rate": 1,              # 格挡率(%)
 	"block_power": 1,             # 格挡性能(%)
-	# 抗性四轨 🔒（docs/属性与成长系统.md §5）：抗性=百分比减伤（人/甲分算）；强韧=异常豁免掷（防具永不提供）
+	# 抗性四轨 🔒（docs/模块_属性成长_设计.md §5）：抗性=百分比减伤（人/甲分算）；强韧=异常豁免掷（防具永不提供）
 	"res_phys": 0,                # 物理抗性(%)：全部物理伤害
 	"res_nature": 0,              # 自然抗性(%)：全部元素伤害（含神圣）
 	"will_fort": 0,               # 意志强韧(%)：非物质异常豁免（眩晕/恐惧/混乱…）
@@ -102,7 +102,7 @@ var equipment := {}
 # 学过 = 键存在；等级 / 冷却 / 本战次数 都存这。技能定义（数值/门槛/效果）查 SkillDB，不在此重复。
 var skills := {}
 
-# —— 技艺（熟练度域）🔒 docs/属性与成长系统.md §2 ——
+# —— 技艺（熟练度域）🔒 docs/模块_属性成长_设计.md §2 ——
 # 三态：未学（prof_known 无）→ 已学（可装载，生疏起步）→ 阶段成长。熟练度永不丢失（卸下=冻结）。
 # 装载=总开关：装载中＝阶段补正（prof:<id> 修正）+perk 生效+可涨；定义查 ProfDB，不在此重复。
 var prof_xp := {}       # 域id -> 累计熟练度（int；卸下冻结不清零）
@@ -197,7 +197,7 @@ func init_vitals() -> void:
 	stats["armor"] = effective_stat("armor_max")
 
 # 获得经验（战后结算/击杀归属）：升级循环。返回升了几级。
-# 🔒 属性重做（docs/属性与成长系统.md §1）：等级零数值——属性点/技能点已废除；
+# 🔒 属性重做（docs/模块_属性成长_设计.md §1）：等级零数值——属性点/技能点已废除；
 # 升级的意义=技艺槽（1/5/9/13/17）与职业树层（3/6/9/12/15/18）的解锁节拍。
 func gain_exp(n: int) -> int:
 	var levels := 0
@@ -467,7 +467,7 @@ func reset_skill_charges() -> void:
 		skills[id]["cd"] = 0
 		skills[id]["uses"] = skill_uses_max(def)
 
-# ============ 技艺（熟练度域）🔒 属性与成长系统.md §2 ============
+# ============ 技艺（熟练度域）🔒 模块_属性成长_设计.md §2 ============
 
 # 技艺槽容量：等级 1/5/9/13/17 各解锁 1 格（共 5，暂定可调 🔒 §1）。等级唯一的解锁节拍职责之一。
 func prof_slot_capacity() -> int:

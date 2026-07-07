@@ -34,7 +34,7 @@ const CATEGORY_CN := {   # 下拉分隔标题的类别中文（缺省回退原 i
 	"skill_type": "技能类型", "effect": "效果",
 }
 
-# 🔒 属性重做（docs/属性与成长系统.md §4/§5）：四维/mag/res_status/五元素抗已删；
+# 🔒 属性重做（docs/模块_属性成长_设计.md §4/§5）：四维/mag/res_status/五元素抗已删；
 # 抗性两轨=物理/自然（人/甲分算）；**强韧（will_fort/body_fort）不入物品**——防具/词条只有抗性、永不提供强韧。
 const STAT_GROUPS := [
 	["进攻", [["atk", "攻击", true], ["acc", "命中", true], ["crit_rate", "暴击率", true],

@@ -1,12 +1,12 @@
 extends SceneTree
-## 数据 lint（技能与效果系统.md §10 全程护栏#1，阶段1 起）——机械执法数据规范、防回流。
+## 数据 lint（模块_技能_设计.md §10 全程护栏#1，阶段1 起）——机械执法数据规范、防回流。
 ## 当前覆盖（随阶段推进增补 bas→skills / 树/原型引用 / 双键期收口等）：
 ##  1) 禁键 element：data/*.json 任意层出现即 FAIL——守 damage_kind 正字（§7.2）不回流。
 ##  2) effects.json 形状：id 非空且唯一 / kind∈{buff,debuff} / tags 是数组 / duration_model∈{fixed,resist} /
 ##     stackable 为 bool / dot_pct_max_hp、hot_flat 数值。
 ##  3) 效果引用完整性：weapons/skills 里 inflict/apply 的 {effect:<id>} 引用必须在 EffectDB 存在
 ##     （当前无引用形态即空过；阶段1.2b bleed 迁引用后此项开始守护悬空 id）。
-##  4) 强韧不入物品（🔒 属性与成长系统.md §5）：weapons/armor/accessories 的 mods 出现 will_fort/body_fort 即 FAIL。
+##  4) 强韧不入物品（🔒 模块_属性成长_设计.md §5）：weapons/armor/accessories 的 mods 出现 will_fort/body_fort 即 FAIL。
 ##  5) damage_kind 白名单：data/ 任意处的 damage_kind 值必须 ∈ {physical,fire,ice,thunder,holy}
 ##     （未知种别在 CombatResolver 会告警回退物理轨；数据侧在此挡住）。
 ## 运行：..._console.exe --headless --path "D:/1战棋" -s res://tools/test_data_lint.gd（退出码 0=PASS）

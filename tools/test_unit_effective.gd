@@ -1,7 +1,7 @@
 extends SceneTree
 ## Unit.effective_stat 回归——AP_max 潜伏 bug：refresh_for_turn / AP 显示端须走 effective_stat。
 ## 裸读 stats["AP_max"] 时 +AP_max buff（督战 +1AP 等）会少刷 AP，且 pip 轨道格数与实心点错位。
-## 见 技能与效果系统.md §10 阶段0.3 + 附录A「AP bug」。
+## 见 模块_技能_设计.md §10 阶段0.3 + 附录A「AP bug」。
 ## 运行：..._console.exe --headless --path "D:/1战棋" -s res://tools/test_unit_effective.gd（退出码 0=PASS）
 
 const UnitC := preload("res://Unit.gd")

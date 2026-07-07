@@ -63,7 +63,7 @@ static func destroy(iuid: int) -> void:
 	_store().erase(iuid)
 
 # 给实例加一条词条（词条＝修正对象组：{name, mods:[{stat,op,value}], nature?}）。生成 roll/铁匠 UI 后续接。
-# 🔒 运行时护栏（属性与成长系统.md §5）：data lint 只扫模板文件，实例词条走这里——
+# 🔒 运行时护栏（模块_属性成长_设计.md §5）：data lint 只扫模板文件，实例词条走这里——
 # 未知 stat 键（旧键如 res_fire 永不被消费＝静默无效）或物品禁键（强韧）→ 整条拒收+告警。
 static func add_affix(iuid: int, affix: Dictionary) -> void:
 	var inst = _store().get(iuid)

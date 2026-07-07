@@ -4,7 +4,7 @@ extends RefCounted
 ## 不再靠 host.STAT_LABELS 跨对象取（解耦：单位编辑器不该依赖具体宿主的常量）。
 ## 用法：const StatMeta := preload("res://StatMeta.gd") → StatMeta.label("atk")
 ##
-## 🔒 属性重做（docs/属性与成长系统.md）：四维主属性/派生公式已删——全部面板值均为**基础 stat**
+## 🔒 属性重做（docs/模块_属性成长_设计.md）：四维主属性/派生公式已删——全部面板值均为**基础 stat**
 ## （基础值=种族底值 RaceDB，装备/熟练度/perk 经修正管线叠加）；抗性四轨=物理/自然抗性+意志/肉体强韧。
 
 const LABELS := {
@@ -42,7 +42,7 @@ const EDITOR_STATS := ["HP_max", "atk", "acc", "eva",
 # 非数值「状态旗」mod 键白名单（不在 LABELS、但属合法修正对象 stat）
 const FLAG_MOD_STATS := ["vision_state"]
 
-# 物品/词条永不可携带的 stat 🔒（属性与成长系统.md §5：强韧来源＝种族+perk，防具/词条只有抗性）。
+# 物品/词条永不可携带的 stat 🔒（模块_属性成长_设计.md §5：强韧来源＝种族+perk，防具/词条只有抗性）。
 # data lint 规则4 与 ItemInstances 运行时护栏共用此清单（stat 键清单从单一源取、严禁各处硬编码）。
 const ITEM_FORBIDDEN_STATS := ["will_fort", "body_fort"]
 

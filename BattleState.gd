@@ -11,7 +11,7 @@ const HexGrid := preload("res://HexGrid.gd")
 const TerrainDB := preload("res://TerrainDB.gd")
 const WorldState := preload("res://WorldState.gd")
 const EffectDB := preload("res://EffectDB.gd")
-const ProfDB := preload("res://ProfDB.gd")   # 技艺（熟练度域）注册表——战斗涨值挂钩用（🔒 属性与成长系统.md §2.4）
+const ProfDB := preload("res://ProfDB.gd")   # 技艺（熟练度域）注册表——战斗涨值挂钩用（🔒 模块_属性成长_设计.md §2.4）
 
 const DEFAULT_TERRAIN := "plain"
 const DEFAULT_VARIANT := "grassland"
@@ -383,7 +383,7 @@ func _effective_sight(u) -> int:
 # ============ 地块效果（惰性接入攻防效能；grant→战斗效能桶映射的单一处）============
 
 # grant.stat（人话属性名）→ 战斗效能桶。地块效果以「修正对象」语义进管线，但**不材质化持久 buff**：
-# 命中/伤害结算时读所在地块 effects、评估 when、按此表折成连乘因子（docs/单位系统设计.md「森林掩蔽」🔒）。
+# 命中/伤害结算时读所在地块 effects、评估 when、按此表折成连乘因子（docs/模块_战斗_设计.md「森林掩蔽」🔒）。
 const _TERRAIN_EFF_BUCKET := {
 	"evasion": "eva_eff",   # 守方：压低敌命中（减免向）
 	"accuracy": "hit_eff",  # 攻方：抬升命中（增益向）
@@ -519,7 +519,7 @@ func _resolve_compute(attacker, target, skill) -> Dictionary:
 	r["inflict"] = _try_inflict_state(target, skill)
 	return r
 
-# 命中后尝试施加异常（流血等）：先掷施加概率，命中再掷**强韧豁免**（🔒 属性与成长系统.md §5：
+# 命中后尝试施加异常（流血等）：先掷施加概率，命中再掷**强韧豁免**（🔒 模块_属性成长_设计.md §5：
 # 遭受第一时间豁免一次，成功＝完全不受影响；之后每回合豁免见 _apply_turn_start_effects）。
 # inflict 引用形态🔒（§2.2）：`{effect:"<id>", chance:N, ignore_fort?:bool}`——effect id 查 EffectDB、
 # chance 缺省 100；ignore_fort=true＝无视强韧（施加豁免与每回合豁免一并跳过）。
@@ -769,7 +769,7 @@ func _apply_expire_chains(u, chains: Array, events: Array) -> void:
 		_add_effect(u, {"id": cid})
 		events.append({"type": "chain", "id": cid})
 
-# ============ 技艺熟练度获取（🔒 属性与成长系统.md §2.4；日志在宿主）============
+# ============ 技艺熟练度获取（🔒 模块_属性成长_设计.md §2.4；日志在宿主）============
 
 # 行为基础值 🔒 权重序：攻击＞格挡＞挨打；具体数值=🟡占位（数值层后调）。
 const PROF_GAIN_ATTACK := 10

@@ -54,7 +54,7 @@ static func collect_result(roster: Array, kills: Array, win: bool, context: Dict
 			"dead": u.tags.has("dead"),         # 铁人死门 −3：真死
 			"injured": u.tags.has("injured"),   # 死门 −3 重伤离场 / +3 爬回：战后休整
 			"exp": int(exp_by_uid.get(u.uid, 0)) + EXP_PARTICIPATION,
-			# 技艺熟练度（🔒 属性与成长系统.md §2.4）：战斗涨值发生在副本上——随结果带回、apply_result 回写原件
+			# 技艺熟练度（🔒 模块_属性成长_设计.md §2.4）：战斗涨值发生在副本上——随结果带回、apply_result 回写原件
 			"prof_xp": u.prof_xp.duplicate(),
 			"prof_known": u.prof_known.duplicate(),
 			"prof_slots": u.prof_slots.duplicate(),

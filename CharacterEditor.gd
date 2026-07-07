@@ -507,7 +507,7 @@ func _on_faction_changed() -> void:
 
 func _on_race_changed() -> void:
 	_sync_tags()
-	# 种族 tag 同时驱动种族底值 🔒（属性与成长系统.md §3）：tag id 与 races.json id 同词表。
+	# 种族 tag 同时驱动种族底值 🔒（模块_属性成长_设计.md §3）：tag id 与 races.json id 同词表。
 	# 换族＝先重置引擎基线、再叠新种族底值——防旧种族的键在新种族未定义时残留（对抗 review 发现）；
 	# 未建档种族 → 仅记 tag、面板回引擎基线（race_id 清空）。
 	if _unit != null:

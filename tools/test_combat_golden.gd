@@ -1,7 +1,7 @@
 extends SceneTree
 ## 战斗伤害 golden 基线：对 BattleState._resolve_compute 的 out/伤害分量做数值断言。
 ## 目的：把「一次命中 → 分量减伤链落血」的数学锁成不回归基线——阶段3 BAS 迁移、后续
-##       效能/护甲改动一旦静默改数就 FAIL（blocker 静默回归的可测护栏；见技能与效果系统.md §10 阶段0）。
+##       效能/护甲改动一旦静默改数就 FAIL（blocker 静默回归的可测护栏；见模块_技能_设计.md §10 阶段0）。
 ##
 ## 确定化手法（无 flaky）：命中率 clamp[5,95] 无法钳到 100，但
 ##   crit_rate=0 → randf()*100<0 恒 false（暴击结果与 RNG 无关）；
@@ -26,7 +26,7 @@ func mk(overrides: Dictionary):
 	var u = UnitC.new("测试", "player", 3, 3)   # 站草原（无效能层地块 grant → 地形因子=1.0）
 	u.modifiers = []
 	u.equipment = {}
-	# 🔒 属性重做（docs/属性与成长系统.md）：四维已删、抗性两轨（物理/自然）——本基线为重做后重推（旧基线作废=预期）。
+	# 🔒 属性重做（docs/模块_属性成长_设计.md）：四维已删、抗性两轨（物理/自然）——本基线为重做后重推（旧基线作废=预期）。
 	var base := {
 		"HP": 100, "HP_max": 100, "armor": 0, "armor_max": 0,
 		"atk": 20, "acc": 200, "eva": 0,
@@ -109,7 +109,7 @@ func _initialize() -> void:
 	var rh := hit(s, a0, mk({"res_nature": 50}), {"coeff": 1.0, "damage_kind": "holy"})
 	ck(int(rh["hp_loss"]) == 10, "神圣伤同取自然抗 → hp_loss=10")
 
-	# 10) 规格招牌样例（docs/单位系统设计.md「减伤链」验算：out=50 打进 甲20+甲抗50%+人抗20%）——
+	# 10) 规格招牌样例（docs/模块_战斗_设计.md「减伤链」验算：out=50 打进 甲20+甲抗50%+人抗20%）——
 	#     到甲 50×0.5=25 → 破 20 甲、溢出 5×0.8=4 进人。锁「破甲溢出同时过甲抗+人抗」的双层减伤链
 	#     （case4/5 从不交叉甲抗与人抗，此条补上；后续 eff/护甲重构漏乘/调序会在此 FAIL）。
 	var t10 = mk({"HP": 100, "armor": 20, "armor_res_phys": 50, "res_phys": 20})

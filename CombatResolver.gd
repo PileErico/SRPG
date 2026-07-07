@@ -1,9 +1,9 @@
 extends RefCounted
 ## 战斗伤害结算：把「输出伤害 → 拆 (通道,属性) 分量 → 逐分量走减伤链 → 落血」的**纯数学**收在这里。
 ## 无 RNG / 无日志 / 不 mutate target——命中/暴击/格挡掷骰与日志留在 Sandbox。
-## 规格 🔒：docs/单位系统设计.md「减伤链 / 伤害结算」。下限 clamp 🔒：任何 lane 不为负（见各 maxf(0,…)）。
+## 规格 🔒：docs/模块_战斗_设计.md「减伤链 / 伤害结算」。下限 clamp 🔒：任何 lane 不为负（见各 maxf(0,…)）。
 ##
-## 键约定 🔒（属性重做 docs/属性与成长系统.md §5）：抗性两轨——物理(phys)/自然(nature)；
+## 键约定 🔒（属性重做 docs/模块_属性成长_设计.md §5）：抗性两轨——物理(phys)/自然(nature)；
 ##   人抗 = res_<suffix>（挂人）；甲抗 = armor_res_<suffix>（挂防具、默认0、无甲=无甲抗）；
 ##   固减 = dr_flat_human / dr_flat_armor（默认0）。
 ## damage_kind 保留细分：physical|fire|ice|thunder|holy（element 已废弃 §7.2）——伤害种别喂异常/内容层，
