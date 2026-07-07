@@ -53,6 +53,12 @@ var _prompt_edit: LineEdit
 var _prompt_lbl: Label
 var _prompt_cb := Callable()
 var _erase_object := false          # 橡皮·放置物：开则左键清除该格放置物
+# —— 地形工具（2026-07-07）：画笔（可调半径）/ 油漆桶 / 矩形 / 直线 ——
+var terrain_tool := "brush"           # "brush" | "fill" | "rect" | "line"
+var brush_radius := 0                 # 画笔半径（六边形距离 ≤N 一片；0=单格）
+var _fill_stroke_done := false        # 油漆桶：一次按下只填一回（拖动不重复触发）
+var _shape_anchor := Vector2i(-1, -1) # rect/line 两点工具：本次 stroke 起点格（-1=未定）
+var _shape_target := Vector2i(-1, -1) # rect/line：拖动中的当前终点格（预览/落形共用）
 
 # 新建画布的尺寸预设（下拉第 0 项是占位提示）
 const SIZE_PRESETS := [
@@ -225,6 +231,9 @@ var _dir_label: Label                  # 显示当前文件夹
 var _dir_dlg: FileDialog               # 选文件夹对话框
 var _newmap_dlg: ConfirmationDialog    # 「新建地图」弹窗（输入文件名，存到文件夹）
 var _newmap_name: LineEdit             # 新建地图的文件名输入框
+var _nameask_dlg: ConfirmationDialog   # 通用文件名输入弹窗（地图库 重命名/复制）
+var _nameask_edit: LineEdit
+var _nameask_cb: Callable = Callable() # 当前弹窗确认后要干嘛（每次 _ask_name 现装）
 var _newsize_dlg: ConfirmationDialog   # 「新建地图」弹窗（宽/高/预设，文件菜单调；内存新建不落盘）
 
 # 撤销/重做：以整图快照为单位，每项 {"snap":Dictionary, "label":String}
@@ -368,6 +377,19 @@ func _build_ui() -> void:
 	_newmap_dlg.register_text_enter(_newmap_name)
 	_newmap_dlg.confirmed.connect(_create_map)
 	add_child(_newmap_dlg)
+
+	# 通用文件名输入弹窗（地图库 重命名/复制 共用；确认回调经 _nameask_cb 现装）
+	_nameask_dlg = ConfirmationDialog.new()
+	_nameask_dlg.ok_button_text = "确定"
+	_nameask_dlg.get_cancel_button().text = "取消"
+	_nameask_edit = LineEdit.new()
+	_nameask_edit.custom_minimum_size = Vector2(280, 0)
+	_nameask_dlg.add_child(_nameask_edit)
+	_nameask_dlg.register_text_enter(_nameask_edit)
+	_nameask_dlg.confirmed.connect(func():
+		if _nameask_cb.is_valid():
+			_nameask_cb.call(_nameask_edit.text))
+	add_child(_nameask_dlg)
 
 	# 新尺寸弹窗（文件菜单「新建地图…」调）：宽/高/预设从顶栏迁进来——width_spin/height_spin 在此创建
 	_newsize_dlg = ConfirmationDialog.new()
@@ -530,6 +552,36 @@ func _build_terrain_brushes() -> Control:
 	erase_chk.tooltip_text = "开启后：左键点格＝清除该格的放置物（不动地形）"
 	erase_chk.toggled.connect(func(on: bool): _erase_object = on)
 	box.add_child(erase_chk)
+	# 工具行：画笔/油漆桶/矩形/直线（互斥）＋ 画笔半径
+	var toolrow := HBoxContainer.new()
+	var tool_group := ButtonGroup.new()
+	for t in [["brush", "画笔", "逐格涂（半径>0＝一片）"], ["fill", "填充", "油漆桶：同地形连通块整片刷"],
+			["rect", "矩形", "按下定起点、拖到对角松开成片"], ["line", "直线", "按下定起点、拖到终点松开连线"]]:
+		var tb := Button.new()
+		tb.text = str(t[1])
+		tb.tooltip_text = str(t[2])
+		tb.toggle_mode = true
+		tb.button_group = tool_group
+		tb.button_pressed = terrain_tool == str(t[0])
+		var tid := str(t[0])
+		tb.pressed.connect(func():
+			terrain_tool = tid
+			_shape_anchor = Vector2i(-1, -1)
+			set_status("地形工具：%s" % str(t[1])))
+		toolrow.add_child(tb)
+	box.add_child(toolrow)
+	var rrow := HBoxContainer.new()
+	var rlab := Label.new()
+	rlab.text = "画笔半径"
+	rrow.add_child(rlab)
+	var rspin := SpinBox.new()
+	rspin.min_value = 0
+	rspin.max_value = 4
+	rspin.value = brush_radius
+	rspin.tooltip_text = "0=单格；N=六边形距离 ≤N 的一片（仅画笔工具生效）"
+	rspin.value_changed.connect(func(v: float): brush_radius = int(v))
+	rrow.add_child(rspin)
+	box.add_child(rrow)
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -2081,6 +2133,16 @@ func _build_side_panel() -> Control:
 	new_map_btn.pressed.connect(_on_new_map_in_dir)
 	side.add_child(new_map_btn)
 
+	# 地图库操作（作用于列表选中项）：重命名 / 复制 / 删除
+	var ops_row := HBoxContainer.new()
+	for op in [["重命名", _on_map_rename], ["复制", _on_map_duplicate], ["删除", _on_map_delete]]:
+		var ob := Button.new()
+		ob.text = str(op[0])
+		ob.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		ob.pressed.connect(op[1])
+		ops_row.add_child(ob)
+	side.add_child(ops_row)
+
 	# —— 当前文件 ——
 	_file_label = _make_label("文件：(未保存)")
 	_file_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -2324,13 +2386,100 @@ func _on_new_map_in_dir() -> void:
 		_newmap_dlg.popup_centered())
 
 func _create_map() -> void:
-	var nm := _newmap_name.text.strip_edges()
+	var nm := _norm_json_name(_newmap_name.text)
 	if nm == "":
-		nm = "new_map"
-	if not nm.to_lower().ends_with(".json"):
-		nm += ".json"
+		nm = "new_map.json"
+	var target := _join(_map_dir, nm)
+	if FileAccess.file_exists(target):   # 同名提醒：撞已有文件先确认（防手快覆盖）
+		EditorUI.confirm(self, "已存在同名地图「%s」，覆盖它？" % nm, "覆盖",
+			func(): _do_create_map(target))
+		return
+	_do_create_map(target)
+
+func _do_create_map(target: String) -> void:
 	new_map(int(width_spin.value), int(height_spin.value))
-	save_to_file(_join(_map_dir, nm))   # 立刻落盘到文件夹（save_to_file 会重扫列表）
+	save_to_file(target)   # 立刻落盘到文件夹（save_to_file 会重扫列表）
+
+# ==================== 地图库操作（2026-07-07 进阶：重命名 / 复制 / 删除 选中项）====================
+
+func _norm_json_name(nm: String) -> String:
+	var s := nm.strip_edges()
+	if s == "":
+		return ""
+	return s if s.to_lower().ends_with(".json") else s + ".json"
+
+func _selected_map_path() -> String:
+	if _map_list == null:
+		return ""
+	var sel := _map_list.get_selected_items()
+	if sel.is_empty() or sel[0] >= _map_paths.size():
+		return ""
+	return _map_paths[sel[0]]
+
+func _ask_name(title: String, initial: String, cb: Callable) -> void:
+	_nameask_dlg.title = title
+	_nameask_edit.text = initial
+	_nameask_cb = cb
+	_nameask_dlg.popup_centered()
+	_nameask_edit.grab_focus()
+	_nameask_edit.select_all()
+
+func _on_map_rename() -> void:
+	var p := _selected_map_path()
+	if p == "":
+		set_status("先在列表选一张地图")
+		return
+	_ask_name("重命名地图", p.get_file(), func(nm: String):
+		var s := _norm_json_name(nm)
+		if s == "" or s == p.get_file():
+			return
+		var dst := _join(_map_dir, s)
+		if FileAccess.file_exists(dst):
+			set_status("已存在同名文件：%s" % s)
+			return
+		if DirAccess.rename_absolute(ProjectSettings.globalize_path(p), ProjectSettings.globalize_path(dst)) != OK:
+			set_status("重命名失败（文件被占用？）")
+			return
+		if current_path == p:
+			current_path = dst   # 当前打开的就是它 → 跟着改名
+			_update_file_label()
+		_scan_maps()
+		set_status("已重命名 → %s" % s))
+
+func _on_map_duplicate() -> void:
+	var p := _selected_map_path()
+	if p == "":
+		set_status("先在列表选一张地图")
+		return
+	_ask_name("复制地图", p.get_file().get_basename() + "_copy.json", func(nm: String):
+		var s := _norm_json_name(nm)
+		if s == "":
+			return
+		var dst := _join(_map_dir, s)
+		if FileAccess.file_exists(dst):
+			set_status("已存在同名文件：%s" % s)
+			return
+		if DirAccess.copy_absolute(ProjectSettings.globalize_path(p), ProjectSettings.globalize_path(dst)) != OK:
+			set_status("复制失败")
+			return
+		_scan_maps()
+		set_status("已复制 → %s" % s))
+
+func _on_map_delete() -> void:
+	var p := _selected_map_path()
+	if p == "":
+		set_status("先在列表选一张地图")
+		return
+	EditorUI.confirm(self, "删除地图文件「%s」？（不可恢复）" % p.get_file(), "删除", func():
+		if DirAccess.remove_absolute(ProjectSettings.globalize_path(p)) != OK:
+			set_status("删除失败（文件被占用？）")
+			return
+		if current_path == p:
+			current_path = ""   # 文件已删：内存内容保留、转为未保存状态
+			_dirty = true
+			_update_file_label()
+		_scan_maps()
+		set_status("已删除：%s" % p.get_file()))
 
 # ------------------------------------------------------------------ 配置（记住文件夹）
 
@@ -2521,7 +2670,13 @@ func primary_paint(col: int, row: int) -> void:
 	elif current_layer == "location":
 		_loc_paint(col, row)
 	else:
-		paint_cell(col, row)
+		match terrain_tool:
+			"fill":
+				_flood_fill(col, row)
+			"rect", "line":
+				_shape_track(col, row)
+			_:
+				_paint_radius(col, row)
 
 # 单位层左键：一次拖动在第一格决定并锁定动作——点到已有单位=编辑它；点空格=落子（拖动续落）
 func _unit_paint(col: int, row: int) -> void:
@@ -2744,6 +2899,67 @@ func new_map(w: int, h: int) -> void:
 	_refresh_map_highlight()
 	set_status("新建地图 %d×%d" % [width, height])
 
+# ==================== 地形工具（2026-07-07：画笔半径 / 油漆桶 / 矩形·直线 两点工具）====================
+# 三者最终都逐格走 paint_cell（放置物笔刷/橡皮/去重/分块重绘 逻辑单一实现）；一次 stroke 一步撤销照旧。
+
+# 画笔：半径 0=单格；>0＝六边形距离 ≤ 半径 的一片
+func _paint_radius(col: int, row: int) -> void:
+	if brush_radius <= 0:
+		paint_cell(col, row)
+		return
+	var center := Vector2i(col, row)
+	for r in range(maxi(0, row - brush_radius - 1), mini(height, row + brush_radius + 2)):
+		for c in range(maxi(0, col - brush_radius - 1), mini(width, col + brush_radius + 2)):
+			if HexGrid.distance(center, Vector2i(c, r)) <= brush_radius:
+				paint_cell(c, r)
+
+# 油漆桶：从起点 BFS「同底地形(terrain/variant)」连通块整片刷；一次按下只填一回（拖动不重复）
+func _flood_fill(col: int, row: int) -> void:
+	if _fill_stroke_done:
+		return
+	_fill_stroke_done = true
+	var t0 = tiles[row][col]
+	var tkey := "%s/%s" % [str(t0.get("terrain")), str(t0.get("variant"))]
+	var open := [Vector2i(col, row)]
+	var seen := {Vector2i(col, row): true}
+	while not open.is_empty():
+		var cur: Vector2i = open.pop_back()
+		paint_cell(cur.x, cur.y)
+		for nb in HexGrid.neighbors(cur):
+			if nb.x < 0 or nb.x >= width or nb.y < 0 or nb.y >= height or seen.has(nb):
+				continue
+			var t = tiles[nb.y][nb.x]
+			if "%s/%s" % [str(t.get("terrain")), str(t.get("variant"))] == tkey:
+				seen[nb] = true
+				open.append(nb)
+
+# rect/line 两点工具：按下定起点、拖动改终点（画布画预览描边）、松开在 end_stroke 落形
+func _shape_track(col: int, row: int) -> void:
+	if _shape_anchor == Vector2i(-1, -1):
+		_shape_anchor = Vector2i(col, row)
+	_shape_target = Vector2i(col, row)
+	if canvas:
+		canvas.queue_redraw()
+
+# 拖动中的预览格集合（EditorCanvas._draw 消费；非拖动/非两点工具＝空）
+func shape_preview_cells() -> Array:
+	if current_layer in ["region", "unit", "line", "location"] or _shape_anchor == Vector2i(-1, -1):
+		return []
+	return _shape_cells(_shape_anchor, _shape_target)
+
+func _shape_cells(a: Vector2i, b: Vector2i) -> Array:
+	var out := []
+	if terrain_tool == "line":
+		for c in HexGrid.line(a, b):
+			if c.x >= 0 and c.x < width and c.y >= 0 and c.y < height:
+				out.append(c)
+	else:
+		for r in range(mini(a.y, b.y), maxi(a.y, b.y) + 1):
+			for c in range(mini(a.x, b.x), maxi(a.x, b.x) + 1):
+				if c >= 0 and c < width and r >= 0 and r < height:
+					out.append(Vector2i(c, r))
+	return out
+
 func paint_cell(col: int, row: int) -> void:
 	var tile = tiles[row][col]
 	if _erase_object:
@@ -2932,8 +3148,16 @@ func begin_stroke() -> void:
 	_road_last_cell = Vector2i(-1, -1)   # 路刷：新一次拖动重起连线
 	_loc_stroke_placed = false           # 地点层：place 模式一次拖动只放一个
 	_loc_stroke_action = ""              # 地点层：新一次拖动重置动作锁（首格再定 选中/放置）
+	_fill_stroke_done = false            # 油漆桶：新一次按下允许再填
+	_shape_anchor = Vector2i(-1, -1)     # rect/line：新一次拖动重定起点
 
 func end_stroke() -> void:
+	if _shape_anchor != Vector2i(-1, -1):   # rect/line：松开落形（逐格 paint_cell，置 _stroke_dirty 走统一撤销）
+		for c in _shape_cells(_shape_anchor, _shape_target):
+			paint_cell(c.x, c.y)
+		_shape_anchor = Vector2i(-1, -1)
+		if canvas:
+			canvas.queue_redraw()
 	if _stroke_dirty and _stroke_snapshot != null:
 		var lbl := ""
 		match current_layer:

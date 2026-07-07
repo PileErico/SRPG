@@ -25,6 +25,16 @@ func _draw() -> void:
 	_draw_units()
 	_draw_locations()
 	_draw_hover_edge()
+	_draw_shape_preview()
+
+# 地形层 rect/直线 两点工具：拖动中的落形预览（黄描边；格集合由编辑器算）
+func _draw_shape_preview() -> void:
+	if not editor.has_method("shape_preview_cells"):
+		return
+	for cell in editor.shape_preview_cells():
+		var pts := hex_corners(hex_center(cell.x, cell.y))
+		pts.append(pts[0])
+		draw_polyline(pts, Color(1.0, 0.95, 0.2, 0.9), 2.0 / view_zoom)
 
 # 线特征层：悬停边高亮（黄色短线，指示河刷/桥刷/擦除将作用的边）
 func _draw_hover_edge() -> void:

@@ -225,6 +225,58 @@ func _initialize() -> void:
 	ck(ed.map_type == "overworld", "回滚：map_type 随快照")
 	ed.free()
 
+	# 9) 地形工具（2026-07-07）：油漆桶 / 画笔半径 / 矩形·直线 两点工具
+	var e2 = MapEditorScript.new()
+	e2._load_terrains()
+	e2.new_map(6, 6)
+	var bi := -1
+	for i in e2.PALETTE.size():
+		var pb: Dictionary = e2.PALETTE[i]
+		# 必须选「地形」刷（工坊扩容后同名条目可能是放置物刷——那种写 object 子字段不动地形；森林即已放置物化）
+		if str(pb.get("terrain", "")) == "mountain" and not TerrainDB.is_object(pb):
+			bi = i
+			break
+	ck(bi >= 0, "找到山地地形笔刷（非放置物）")
+	e2.brush_index = bi
+	var count_mnt := func() -> int:
+		var n := 0
+		for r in 6:
+			for c in 6:
+				if str(e2.tiles[r][c].get("terrain")) == "mountain":
+					n += 1
+		return n
+	e2.terrain_tool = "fill"
+	e2.begin_stroke()
+	e2.primary_paint(2, 2)
+	e2.primary_paint(3, 3)   # 拖动第二格：一次按下只填一回
+	e2.end_stroke()
+	ck(count_mnt.call() == 36, "油漆桶：连通草原整片染山（实得 %d/36）" % count_mnt.call())
+	e2.undo()
+	ck(str(e2.tiles[2][2].get("terrain")) == "plain", "油漆桶一步撤销")
+	e2.terrain_tool = "brush"
+	e2.brush_radius = 1
+	e2.begin_stroke()
+	e2.primary_paint(3, 3)
+	e2.end_stroke()
+	ck(count_mnt.call() == 7, "画笔半径1＝中心+六邻 7 格（实得 %d）" % count_mnt.call())
+	e2.new_map(6, 6)
+	e2.brush_index = bi
+	e2.terrain_tool = "rect"
+	e2.begin_stroke()
+	e2.primary_paint(0, 0)
+	e2.primary_paint(2, 1)   # 拖到对角
+	e2.end_stroke()
+	ck(count_mnt.call() == 6, "矩形工具 3×2＝6 格（实得 %d）" % count_mnt.call())
+	e2.terrain_tool = "line"
+	e2.begin_stroke()
+	e2.primary_paint(0, 3)
+	e2.primary_paint(4, 3)
+	e2.end_stroke()
+	ck(str(e2.tiles[3][0].get("terrain")) == "mountain" and str(e2.tiles[3][4].get("terrain")) == "mountain", "直线工具两端落形")
+	e2.undo()
+	ck(str(e2.tiles[3][0].get("terrain")) == "plain", "直线一步撤销")
+	e2.free()
+
 	# 8) decor 扰动（HexTileRender 单一实现）：确定性（同种子同输出）+ 幅度有界（±2.5px）+ seed 0=零偏移（笔刷缩略图规整）
 	var a: Vector2 = HexTileRender._jo(12345, 0)
 	var b: Vector2 = HexTileRender._jo(12345, 0)
