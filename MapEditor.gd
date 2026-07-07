@@ -89,6 +89,36 @@ var embedded := false      # 嵌入 Game 统一宿主时为 true：隐藏自己�
 var current_layer := "terrain"      # "terrain" | "line" | "region" | "unit" | "trigger" | "location"
 var regions := []
 var _active_region_idx := -1
+
+# ============ 数据层注册表（Layer 容器 2026-07-07）：顶层数据层 × 全生命周期唯一账本 ============
+# 行＝[内存变量名, 磁盘/试玩字段名, 空值形态]；快照/回滚/new_map 清空/_map_opts 序列化/load 反序列化
+# 五处生命周期全部循环本表——**加新数据层＝本表加一行**（+专属绘制/工具代码），不再五处复制粘贴。
+# tiles 不入表（随尺寸重建、快照走 _copy_tiles 保 object 子字段）；map_type 标量另走。
+# regions 内存形（cells=Vector2i 集合）≠磁盘形（[[x,y]]），出入经 _regions_to_json/_regions_from_json。
+const LAYERS := [
+	["regions", "regions", "array"],
+	["map_units", "units", "array"],
+	["map_triggers", "triggers", "array"],
+	["map_terrain_overrides", "terrain_overrides", "dict"],
+	["map_environment", "environment", "dict"],
+	["map_locations", "locations", "array"],
+	["map_rivers", "rivers", "array"],
+	["map_roads", "roads", "array"],
+	["map_bridges", "bridges", "array"],
+]
+
+func _layer_empty(kind: String):
+	return {} if kind == "dict" else []
+
+# 快照深拷贝分派：regions/units 有专用构造（cells 集合重建 / proto 字段归一），其余 duplicate(true)
+func _copy_layer(vname: String):
+	match vname:
+		"regions":
+			return _copy_regions(regions)
+		"map_units":
+			return _copy_map_units(map_units)
+		_:
+			return get(vname).duplicate(true)
 # 区域配色循环池（新建区域时按序取）
 const REGION_COLORS := ["#D5453A", "#EBBC04", "#4FAE5A", "#3A7BD5", "#9B59B6", "#E0822A", "#2AB0B0", "#C84BD5"]
 # 区域类型：[id, 中文]（写进地图 regions[].kind，战斗侧据此分派）
@@ -2694,16 +2724,9 @@ func new_map(w: int, h: int) -> void:
 		for col in width:
 			line.append({"terrain": DEFAULT_TERRAIN, "variant": DEFAULT_VARIANT})
 		tiles.append(line)
-	regions = []                 # 新图：清空区域层
-	map_units = []               # 新图：清空预置单位层
-	map_triggers = []            # 新图：清空触发器层
-	map_terrain_overrides = {}   # 新图：清空图级地形覆盖
-	map_environment = {}         # 新图：清空环境
+	for l in LAYERS:             # 新图：全数据层清空（注册表驱动）
+		set(l[0], _layer_empty(l[2]))
 	map_type = "battle"          # 新图：回缺省战斗图
-	map_locations = []           # 新图：清空地点
-	map_rivers = []              # 新图：清空线特征
-	map_roads = []
-	map_bridges = []
 	_active_region_idx = -1
 	_active_loc_idx = -1
 	current_path = ""
@@ -2826,7 +2849,10 @@ func _update_file_label() -> void:
 # ------------------------------------------------------------------ 撤销 / 重做
 
 func _snapshot() -> Dictionary:
-	return {"width": width, "height": height, "tiles": _copy_tiles(tiles), "regions": _copy_regions(regions), "map_units": _copy_map_units(map_units), "map_triggers": _copy_map_triggers(map_triggers), "map_terrain_overrides": map_terrain_overrides.duplicate(true), "map_environment": map_environment.duplicate(true), "map_type": map_type, "map_locations": map_locations.duplicate(true), "map_rivers": map_rivers.duplicate(true), "map_roads": map_roads.duplicate(true), "map_bridges": map_bridges.duplicate(true)}
+	var snap := {"width": width, "height": height, "map_type": map_type, "tiles": _copy_tiles(tiles)}
+	for l in LAYERS:
+		snap[l[0]] = _copy_layer(l[0])
+	return snap
 
 # 深拷贝单位层（含 proto 嵌套字典）——撤销快照要把单位层一起拷，否则落子/删单位无法撤销
 func _copy_map_units(src: Array) -> Array:
@@ -2834,14 +2860,6 @@ func _copy_map_units(src: Array) -> Array:
 	for e in src:
 		if typeof(e) == TYPE_DICTIONARY:
 			out.append({"proto": (e.get("proto", {}) as Dictionary).duplicate(true), "col": int(e.get("col", 0)), "row": int(e.get("row", 0)), "faction": str(e.get("faction", "enemy"))})
-	return out
-
-# 深拷贝触发器层（含 when/do 嵌套）——撤销快照一起拷，否则建/删触发器与动作无法撤销
-func _copy_map_triggers(src: Array) -> Array:
-	var out := []
-	for t in src:
-		if typeof(t) == TYPE_DICTIONARY:
-			out.append(t.duplicate(true))
 	return out
 
 func _copy_tiles(src: Array) -> Array:
@@ -2886,16 +2904,9 @@ func _apply_snapshot(snap: Dictionary) -> void:
 	width = snap.width
 	height = snap.height
 	tiles = snap.tiles
-	regions = snap.get("regions", [])
-	map_units = snap.get("map_units", [])
-	map_triggers = snap.get("map_triggers", map_triggers)
-	map_terrain_overrides = snap.get("map_terrain_overrides", {})
-	map_environment = snap.get("map_environment", {})
+	for l in LAYERS:   # 全数据层回滚（注册表驱动；_snapshot 恒写全键，缺省仅防御外源快照）
+		set(l[0], snap.get(l[0], _layer_empty(l[2])))
 	map_type = str(snap.get("map_type", map_type))
-	map_locations = snap.get("map_locations", map_locations)
-	map_rivers = snap.get("map_rivers", map_rivers)
-	map_roads = snap.get("map_roads", map_roads)
-	map_bridges = snap.get("map_bridges", map_bridges)
 	_active_region_idx = clampi(_active_region_idx, -1, regions.size() - 1)
 	_active_trigger_idx = clampi(_active_trigger_idx, -1, map_triggers.size() - 1)
 	_active_loc_idx = clampi(_active_loc_idx, -1, map_locations.size() - 1)
@@ -2983,12 +2994,12 @@ func _refresh_history() -> void:
 func to_json_dict() -> Dictionary:
 	return MapIO.to_dict(width, height, tiles, _map_opts())
 
-# 存盘/试玩共用的 MapIO opts 包（字段清单唯一处）
+# 存盘/试玩共用的 MapIO opts 包（字段清单＝LAYERS 注册表；regions 出盘转 [[x,y]] 形）
 func _map_opts() -> Dictionary:
-	return {"regions": _regions_to_json(), "units": map_units, "triggers": map_triggers,
-		"terrain_overrides": map_terrain_overrides, "environment": map_environment,
-		"map_type": map_type, "locations": map_locations,
-		"rivers": map_rivers, "roads": map_roads, "bridges": map_bridges}
+	var opts := {"map_type": map_type}
+	for l in LAYERS:
+		opts[l[1]] = _regions_to_json() if l[0] == "regions" else get(l[0])
+	return opts
 
 # 区域 → JSON：cells 集合转 [[x,y],…]（确定性排序，利于 diff）
 func _regions_to_json() -> Array:
@@ -3048,23 +3059,18 @@ func load_from_file(path: String) -> void:
 	var nw := int(res["width"])
 	var nh := int(res["height"])
 	var new_tiles: Array = res["tiles"]
-	# regions 仍由编辑器自己转成内存形（Vector2i 集合）；MapIO 透传的是 [[x,y]] 形（_regions_from_json 兼容）
-	var new_regions := _regions_from_json(res["regions"], nw, nh)
 	if not tiles.is_empty():
 		_push_undo(_snapshot(), "加载 %s" % path.get_file())
 	width = nw
 	height = nh
 	tiles = new_tiles
-	regions = new_regions
-	map_units = res["units"]   # 预置单位（单位层可编辑）
-	map_triggers = res["triggers"]   # 触发器（触发器层可编辑）
-	map_terrain_overrides = res.get("terrain_overrides", {})   # 图级地形覆盖（地形数据「本图」范围）
-	map_environment = res.get("environment", {})   # 环境（日夜/天气）
+	for l in LAYERS:   # 全数据层载入（注册表驱动；MapIO.normalize 已兜底类型，缺键回空值形态）
+		if l[0] == "regions":
+			# regions 由编辑器转内存形（Vector2i 集合）；MapIO 透传 [[x,y]] 形
+			regions = _regions_from_json(res.get("regions", []), nw, nh)
+		else:
+			set(l[0], res.get(l[1], _layer_empty(l[2])))
 	map_type = str(res.get("map_type", "battle"))   # 地图类型（顶栏可切换；决定笔刷过滤/层门禁）
-	map_locations = res.get("locations", [])   # 地点实例（地点层可编辑）
-	map_rivers = res.get("rivers", [])   # 线特征（线特征层可编辑）
-	map_roads = res.get("roads", [])
-	map_bridges = res.get("bridges", [])
 	_active_region_idx = -1 if regions.is_empty() else 0
 	_active_loc_idx = -1
 	current_path = path

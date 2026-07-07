@@ -196,6 +196,33 @@ func _initialize() -> void:
 	ck(has.call(vis_b, "road") and has.call(vis_b, "swamp"), "笔刷全通用：battle 也含 swamp")
 	ck(has.call(vis_o, "swamp") and has.call(vis_o, "road"), "笔刷全通用：overworld 也含 road")
 	ck(has.call(vis_b, "grassland") and has.call(vis_o, "grassland"), "both 地形两边都在")
+
+	# 8) Layer 容器（2026-07-07 注册表化）：全数据层快照往返 / new_map 清空 / _map_opts 字段齐全 / 深隔离
+	ed.regions = [{"id": "r1", "label": "区", "color": "#FFFFFF", "kind": "aggro", "cells": {Vector2i(1, 1): true}}]
+	ed.map_units = [{"proto": {"id": "empire_infantry", "name": "步"}, "col": 2, "row": 2, "faction": "enemy"}]
+	ed.map_triggers = [{"id": "t1", "label": "触", "when": {"region": "r1"}, "do": []}]
+	ed.map_terrain_overrides = {"plain/grassland": {"move": {"cost": 2}}}
+	ed.map_environment = {"time": "night"}
+	var snap: Dictionary = ed._snapshot()
+	for l in ed.LAYERS:
+		ck(snap.has(l[0]), "快照含层 %s" % l[0])
+	var opts: Dictionary = ed._map_opts()
+	for l in ed.LAYERS:
+		ck(opts.has(l[1]), "_map_opts 含磁盘字段 %s" % l[1])
+	ed.map_units[0]["proto"]["name"] = "改"   # 拍完快照改活数据 → 快照不受染（深拷贝隔离）
+	ck(str(((snap["map_units"][0] as Dictionary)["proto"] as Dictionary).get("name", "")) == "步", "快照与活数据深隔离（units proto）")
+	ed.new_map(4, 4)
+	ck(ed.regions.is_empty() and ed.map_units.is_empty() and ed.map_triggers.is_empty() \
+		and ed.map_terrain_overrides.is_empty() and ed.map_environment.is_empty() \
+		and ed.map_rivers.is_empty() and ed.map_locations.is_empty() and ed.map_type == "battle", "new_map 全层清空+类型回缺省")
+	ed._apply_snapshot(snap)
+	ck(ed.regions.size() == 1 and (ed.regions[0]["cells"] as Dictionary).has(Vector2i(1, 1)), "回滚：区域层（cells 集合形）")
+	ck(ed.map_units.size() == 1 and str((ed.map_units[0]["proto"] as Dictionary).get("name", "")) == "步", "回滚：单位层（快照时点值）")
+	ck(ed.map_triggers.size() == 1 and str(ed.map_triggers[0].get("id", "")) == "t1", "回滚：触发器层")
+	ck(int((ed.map_terrain_overrides.get("plain/grassland", {}) as Dictionary).get("move", {}).get("cost", 0)) == 2, "回滚：图级地形覆盖")
+	ck(str(ed.map_environment.get("time", "")) == "night", "回滚：环境层")
+	ck(ed.map_locations.size() == 2 and ed.map_rivers.size() == 1 and ed.map_roads.size() == 1, "回滚：地点/线特征层")
+	ck(ed.map_type == "overworld", "回滚：map_type 随快照")
 	ed.free()
 
 	# 8) decor 扰动（HexTileRender 单一实现）：确定性（同种子同输出）+ 幅度有界（±2.5px）+ seed 0=零偏移（笔刷缩略图规整）
