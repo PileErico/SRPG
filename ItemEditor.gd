@@ -10,6 +10,7 @@ const EquipSlots := preload("res://EquipSlots.gd")
 const TagDB := preload("res://TagDB.gd")
 const TextureCache := preload("res://TextureCache.gd")   # 图标加载 + 缓存单一入口
 const ItemTooltip := preload("res://ItemTooltip.gd")     # 物品富 tooltip 通用渲染组件（与角色状态页共用）
+const StatMeta := preload("res://StatMeta.gd")           # stat 键→中文单一源（本编辑器不再自带并行对照表）
 const EditorTheme := preload("res://EditorTheme.gd")     # 编辑器统一深色主题（与地图编辑器共用）
 const EditorUI := preload("res://EditorUI.gd")           # 编辑器公共 UI 控件工厂（分节/字段行/确认框/文件对话框，与地图编辑器共用）
 
@@ -36,15 +37,14 @@ const CATEGORY_CN := {   # 下拉分隔标题的类别中文（缺省回退原 i
 
 # 🔒 属性重做（docs/模块_属性成长_设计.md §4/§5）：四维/mag/res_status/五元素抗已删；
 # 抗性两轨=物理/自然（人/甲分算）；**强韧（will_fort/body_fort）不入物品**——防具/词条只有抗性、永不提供强韧。
+# 中文标签一律 StatMeta.label（D2 收敛 2026-07-07：本表只留 分组×键序，不再复挂并行对照表）。
 const STAT_GROUPS := [
-	["进攻", [["atk", "攻击", true], ["acc", "命中", true], ["crit_rate", "暴击率", true],
-		["crit_dmg", "暴击威力", true], ["atk_eff", "攻击效能", true]]],
-	["生存", [["HP_max", "生命上限", true], ["eva", "闪避", true], ["block_rate", "格挡率", true],
-		["block_power", "格挡性能", true], ["def_eff", "防御效能", true], ["armor_max", "护甲池", true]]],
-	["人抗（减对血量伤害·%）", [["res_phys", "物理抗性", true], ["res_nature", "自然抗性", true]]],
-	["甲抗（减护甲承伤·防具专属·%）", [["armor_res_phys", "物理甲抗", true], ["armor_res_nature", "自然甲抗", true]]],
-	["固定减伤（承伤最后减固定值·非%）", [["dr_flat_armor", "甲固减", true], ["dr_flat_human", "人固减", true]]],
-	["行动", [["move", "移动力", true], ["speed", "速度", true], ["sight", "视野", true], ["AP_max", "AP上限", true]]],
+	["进攻", ["atk", "acc", "crit_rate", "crit_dmg", "atk_eff"]],
+	["生存", ["HP_max", "eva", "block_rate", "block_power", "def_eff", "armor_max"]],
+	["人抗（减对血量伤害·%）", ["res_phys", "res_nature"]],
+	["甲抗（减护甲承伤·防具专属·%）", ["armor_res_phys", "armor_res_nature"]],
+	["固定减伤（承伤最后减固定值·非%）", ["dr_flat_armor", "dr_flat_human"]],
+	["行动", ["move", "speed", "sight", "AP_max"]],
 ]
 
 # 视觉状态（非数值 mod）：不进面板/数值管线，经 Unit.has_vision_state 影响视野计算。目前两种。
@@ -932,12 +932,9 @@ func _update_mod_row_mode(entry: Dictionary) -> void:
 func _fill_stat_options(ob: OptionButton) -> void:
 	for grp in STAT_GROUPS:
 		ob.add_separator(grp[0])
-		for s in grp[1]:
-			var label: String = "%s %s" % [s[0], s[1]]
-			if not s[2]:
-				label += " ⚠未参战"
-			ob.add_item(label)
-			ob.set_item_metadata(ob.item_count - 1, s[0])
+		for key in grp[1]:
+			ob.add_item("%s %s" % [key, StatMeta.label(key)])
+			ob.set_item_metadata(ob.item_count - 1, key)
 	ob.add_separator("视觉（角色面板不显示）")
 	ob.add_item("视觉状态（夜视/无视力…）")
 	ob.set_item_metadata(ob.item_count - 1, "vision_state")

@@ -296,6 +296,14 @@ func _enemy_zoc_in_range(mover, reach: Dictionary) -> Dictionary:
 func _rebuild_turn_order() -> void:
 	turn_order = _sorted_by_speed(units)
 
+# round 轮转（唯一实现处；调用方＝宿主 end_turn 走完一轮 / _handle_deaths_state 行动者阵亡越界）：
+# 序列重排 + 借机去重清空。宿主侧的天气计时等表现层 tick 不在此（模型不管表现）。
+func _wrap_round() -> void:
+	active_index = 0
+	round_num += 1
+	_rebuild_turn_order()
+	zoc_triggered = {}
+
 # 按速度（effective_stat，含修正）大→小排序；同速我方/友方优先。
 func _sorted_by_speed(arr: Array) -> Array:
 	var out := arr.duplicate()
@@ -944,10 +952,7 @@ func _handle_deaths_state() -> Dictionary:
 	if res["active_died"]:
 		# 行动者阵亡 → 其 turn 结束；下一个已被 filter 前移到同下标（越界则进新 round）
 		if active_index >= turn_order.size():
-			active_index = 0
-			round_num += 1
-			_rebuild_turn_order()
-			zoc_triggered = {}
+			_wrap_round()
 			res["new_round"] = true
 	else:
 		var idx: int = turn_order.find(cur)

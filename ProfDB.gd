@@ -1,6 +1,6 @@
 extends RefCounted
-## 技艺（熟练度域）注册表（data/proficiencies.json 单一数据源）——🔒 docs/模块_属性成长_设计.md §2。
-## 术语切割 🔒：技艺=熟练度域（本表）；技能=技能编辑器条目（SkillDB）；成长=个人树。
+## 技能（熟练度域，代码旧名 prof/技艺）注册表（data/proficiencies.json 单一数据源）——🔒 docs/模块_属性成长_设计.md §2。
+## 术语 🔒（表单-专用术语 2026-07-07 起）：技能=熟练度域（本表）；能力=SkillDB 主动招式；天赋=升级树。
 ## 仿 *DB 伪单例：preload + 静态缓存；刷新叫 reload_data（DB 铁律）。
 ## 用法：const ProfDB := preload("res://ProfDB.gd") → ProfDB.get_prof("wp_sword")
 

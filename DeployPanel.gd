@@ -180,8 +180,8 @@ func _rebuild_editor() -> void:
 	_editor_box.add_child(_section("特性"))
 	_editor_box.add_child(_trait_picker())
 
-	# 技能
-	_editor_box.add_child(_section("技能（点学习/升级）"))
+	# 能力（SkillDB 主动招式，术语🔒）
+	_editor_box.add_child(_section("能力（点学习/升级）"))
 	_build_skill_list()
 
 	# 物品
@@ -311,18 +311,19 @@ func _do_save_preset() -> void:
 func _on_save_units() -> void:
 	if host == null:
 		return
-	if host.units.is_empty():
+	var board: Array = host.board_units()   # S5：经访问器读场上单位，不直读 host.units
+	if board.is_empty():
 		_msg.text = "✗ 场上没有单位可存（先拖单位到地图）"
 		return
 	if host.save_units_to_map():
-		_msg.text = "✓ 已存 %d 个单位进地图（下次加载该图自动落子）" % host.units.size()
+		_msg.text = "✓ 已存 %d 个单位进地图（下次加载该图自动落子）" % board.size()
 	else:
 		_msg.text = "✗ 写入地图文件失败"
 
 func _on_start() -> void:
 	if host == null:
 		return
-	if host.units.is_empty():
+	if host.board_units().is_empty():
 		_msg.text = "✗ 先把至少一个单位拖到地图上再开始"
 		return
 	host.begin_game()

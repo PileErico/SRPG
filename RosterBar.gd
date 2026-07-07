@@ -55,7 +55,7 @@ func refresh() -> void:
 	for c in _row.get_children():
 		c.queue_free()
 	if host != null:
-		for u in host.roster:
+		for u in host.roster_units():   # S5：经访问器读花名册，不直读 host.roster
 			_row.add_child(_make_slot(u))
 	# 末尾「＋」
 	var add := Button.new()

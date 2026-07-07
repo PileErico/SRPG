@@ -662,7 +662,7 @@ func _apply_prof_mods(id: String) -> void:
 				best = sm
 	if best == null:
 		return
-	var label := "技艺·%s（%s）" % [str(def.get("name", id)), ProfDB.stage_name(stage)]
+	var label := "技能·%s（%s）" % [str(def.get("name", id)), ProfDB.stage_name(stage)]
 	for m in best.get("mods", []):
 		if typeof(m) != TYPE_DICTIONARY:
 			continue

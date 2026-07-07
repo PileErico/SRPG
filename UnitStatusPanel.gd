@@ -143,22 +143,22 @@ func _build(u) -> void:
 	var status_page := _build_status_page(u)
 	status_page.name = "角色状态"
 	tabs.add_child(status_page)
-	# 技艺（熟练度域 🔒 模块_属性成长_设计.md §2）：三页分区 + 阶段进度 + 装载/卸载（非战斗随时；战斗中锁定只读）
+	# 技能（熟练度域 🔒 模块_属性成长_设计.md §2；术语🔒 技能=可练的域）：三页分区 + 阶段进度 + 装载/卸载（非战斗随时；战斗中锁定只读）
 	var craft_page := _build_prof_page(u)
 	craft_page.name = "技能"
 	tabs.add_child(craft_page)
-	# 通用技能：人人都有（即原「职业技能」页的 13 通用序列 + 进阶；命名修正——它一直是通用技能）
+	# 通用能力：人人都有（13 通用序列 + 进阶；术语🔒 能力=SkillDB 主动招式）
 	var common_page := _build_common_skill_page(u)
-	common_page.name = "通用技能"
+	common_page.name = "通用能力"
 	tabs.add_child(common_page)
-	# 第三页二选一：具名角色（char_*）→ 专属技能；其余杂兵 → 职业技能（同类共享树）
+	# 第三页二选一：具名角色（char_*）→ 专属能力；其余杂兵 → 职业能力（同类共享树）
 	if _has_exclusive_skills(u):
 		var exclusive_page := _build_exclusive_skill_page(u)
-		exclusive_page.name = "专属技能"
+		exclusive_page.name = "专属能力"
 		tabs.add_child(exclusive_page)
 	else:
 		var prof_page := _build_profession_skill_page(u)
-		prof_page.name = "职业技能"
+		prof_page.name = "职业能力"
 		tabs.add_child(prof_page)
 	tabs.current_tab = clampi(_current_tab, 0, tabs.get_tab_count() - 1)
 	tabs.tab_changed.connect(func(idx): _current_tab = idx)
@@ -245,7 +245,7 @@ func _cycle(dir: int) -> void:
 		return
 	var side := _side(_unit.faction)
 	var group := []
-	for x in host.units:
+	for x in host.board_units():   # S5：经访问器读场上单位，不直读 host.units
 		if _side(x.faction) == side:
 			group.append(x)
 	if group.size() <= 1:
@@ -364,8 +364,8 @@ func _build_common_skill_page(u) -> Control:
 	var page := VBoxContainer.new()
 	page.add_theme_constant_override("separation", 10)
 
-	# ① 基础技能：13 个（通用序列 seq 1-13），两行；上排 7 铺满，下排 6 整体错位半格（砖墙/蜂窝式）
-	_section(page, "基础技能")
+	# ① 基础能力：13 个（通用序列 seq 1-13），两行；上排 7 铺满，下排 6 整体错位半格（砖墙/蜂窝式）
+	_section(page, "基础能力")
 	var basic := VBoxContainer.new()
 	basic.add_theme_constant_override("separation", 10)
 	page.add_child(basic)
@@ -386,8 +386,8 @@ func _build_common_skill_page(u) -> Control:
 
 	page.add_child(HSeparator.new())
 
-	# ②③④ 进阶技能：三类各一块彩色背景板，左右成簇并排（不竖向拉伸 → 下方留空可增长）
-	_section(page, "进阶技能")
+	# ②③④ 进阶能力：三类各一块彩色背景板，左右成簇并排（不竖向拉伸 → 下方留空可增长）
+	_section(page, "进阶能力")
 	var adv := HBoxContainer.new()
 	adv.add_theme_constant_override("separation", 12)
 	page.add_child(adv)
@@ -636,13 +636,13 @@ func _hspacer(ratio: float) -> Control:
 	s.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	return s
 
-# 「专属技能」页：具名角色（char_*）独占的技能树——随等级解锁、常选 1/N 分支定走向（占位，待实现）
+# 「专属能力」页：具名角色（char_*）独占的天赋树输出——随等级解锁、常选 1/N 分支定走向（占位，待实现）
 func _build_exclusive_skill_page(_u) -> Control:
-	return _skill_placeholder("专属技能 —— 待实现")
+	return _skill_placeholder("专属能力 —— 待实现")
 
-# 「职业技能」页：同类单位共享、跨类不通的技能树（杂兵主进度；按 class_* 类别）（占位，待实现）
+# 「职业能力」页：同类单位共享、跨类不通的天赋树输出（杂兵主进度；按原型归类）（占位，待实现）
 func _build_profession_skill_page(_u) -> Control:
-	return _skill_placeholder("职业技能 —— 待实现（同类单位共享技能树）")
+	return _skill_placeholder("职业能力 —— 待实现（同类单位共享天赋树）")
 
 # 占位空白页（居中淡灰提示）
 func _skill_placeholder(text: String) -> Control:
@@ -936,8 +936,8 @@ func _build_trait_tooltip(t) -> Control:
 		v.add_child(d)
 	return panel
 
-# ============ 技艺页（熟练度域 🔒 模块_属性成长_设计.md §2；视觉稿 v1 → 真数据已接）============
-# 术语切割 🔒：本页＝技艺（熟练度域）；「技能」各页＝技能编辑器条目。
+# ============ 技能页（熟练度域 🔒 模块_属性成长_设计.md §2；视觉稿 v1 → 真数据已接）============
+# 术语 🔒（表单-专用术语）：本页＝技能（熟练度域，代码旧名 prof/技艺）；「能力」各页＝SkillDB 主动招式。
 # 布局：① 顶部 5 装备格＝Unit.prof_slots（竖向计量槽=档位内进度、色随档位；容量外格=未解锁）② 横线
 #       ③ 三级 tab：L2 横向三 tab 名/序不改（用户令 2026-07-06）＝武器技能/战斗技能/其他技能，
 #         映射 ProfDB 三页 weapon/style/life（战斗技能=风格页、其他=生活页「有些不太生活」）
@@ -1288,7 +1288,7 @@ func _fill_prof_main(main: VBoxContainer, pid: String, u) -> void:
 		c.queue_free()
 	if pid == "":
 		var e := Label.new()
-		e.text = "（本页暂无可见技艺）"
+		e.text = "（本页暂无可见技能）"
 		e.add_theme_color_override("font_color", Color(1, 1, 1, 0.35))
 		main.add_child(e)
 		return

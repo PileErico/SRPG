@@ -27,7 +27,8 @@ const WorldState := preload("res://WorldState.gd")   # 战役档静态引用（�
 const WorldClock := preload("res://WorldClock.gd")   # 世界时钟：小时→日夜映射（战斗不耗世界时间 🔒，战中日夜冻结）
 const EventEngine := preload("res://EventEngine.gd") # when/do 事件引擎：触发器评估/执行迁入（本类只做宿主原语 event_*）
 const Checks := preload("res://Checks.gd")           # d20 检定原语（死门每回合检定用）
-const ProfDB := preload("res://ProfDB.gd")           # 技艺注册表（进阶播报取名/阶段名）
+const ProfDB := preload("res://ProfDB.gd")           # 技能（熟练度域）注册表（进阶播报取名/阶段名）
+const StatMeta := preload("res://StatMeta.gd")       # stat 键→中文单一源（悬停卡条名等，禁字面量）
 const BattleIO := preload("res://BattleIO.gd")       # 战斗进出契约：战役模式快照进/结果出（M5）
 const SaveIO := preload("res://SaveIO.gd")           # 战役战斗结算后自动存档
 const DialogueUI := preload("res://DialogueUI.gd")   # 通用对话模块：战场内触发（do: dialogue，M8）
@@ -512,6 +513,14 @@ func select_roster_unit(u) -> void:
 func is_placed(u) -> bool:
 	return units.has(u)
 
+# 面板只读访问器（S5 解耦：DeployPanel/RosterBar/UnitStatusPanel 不再直读 host.units/roster 可变集合；
+# 返回浅拷贝＝面板拿到的是快照列表，元素仍为活 Unit 引用）。
+func board_units() -> Array:
+	return units.duplicate()
+
+func roster_units() -> Array:
+	return roster.duplicate()
+
 # 把 roster 单位落到 (col,row)（已落子则移到新格）；越界/被占则拒绝
 func place_roster_unit(u, col: int, row: int) -> void:
 	if u == null or phase != "deploy" or not _cell_in_bounds(col, row):
@@ -776,7 +785,7 @@ func _on_hover_bar(col: int, row: int) -> void:
 # 阵营色单一源＝tags.json faction 条目 color（TagDB.color）；未知阵营回退玩家蓝
 func faction_color(f: String) -> Color:
 	var hex := TagDB.color(f)
-	return Color(hex) if hex != "" else Color("#3A7BD5")
+	return Color(hex) if hex != "" else Color(0.8, 0.8, 0.8)   # 未知阵营灰（与 MapEditor 同 fallback；权威色=tags.json）
 
 # 按 tile 的 terrain/variant 查地形定义（经 TerrainDB O(1) 查表，找不到返回 null）
 func _terrain_entry(tile):
@@ -873,8 +882,8 @@ func _build_unit_hover_card(u) -> Control:
 	# 护甲条（在血条上面，有甲才画）+ 血条
 	var amax := int(u.effective_stat("armor_max"))
 	if amax > 0:
-		col.add_child(_hover_stat_bar("护甲", int(u.stats.get("armor", 0)), amax, FLOAT_ARMOR_COLOR))
-	col.add_child(_hover_stat_bar("生命", int(u.stats.get("HP", 0)), int(u.effective_stat("HP_max")), FLOAT_HP_COLOR))
+		col.add_child(_hover_stat_bar(StatMeta.label("armor"), int(u.stats.get("armor", 0)), amax, FLOAT_ARMOR_COLOR))
+	col.add_child(_hover_stat_bar(StatMeta.label("HP"), int(u.stats.get("HP", 0)), int(u.effective_stat("HP_max")), FLOAT_HP_COLOR))
 	# 武器 + 技能（各一行「图标 + 名字」）
 	var skills := _hover_skill_section(u)
 	if skills != null:
@@ -1437,12 +1446,9 @@ func end_turn() -> void:
 		if battle_over or not (cur in units):
 			return
 	active_index += 1
-	if active_index >= turn_order.size():   # 全员走完一轮 → 新 round
-		active_index = 0
-		round_num += 1
-		_rebuild_turn_order()
-		zoc_triggered = {}   # 新 round：借机去重清空
-		_tick_weather()      # 新 round：天气计时 −1，到期重摇
+	if active_index >= turn_order.size():   # 全员走完一轮 → 新 round（轮转逻辑单一实现＝模型 _wrap_round）
+		_state._wrap_round()
+		_tick_weather()      # 新 round：天气计时 −1，到期重摇（表现层 tick 留宿主）
 	_begin_active_turn()
 
 # 单位自己 turn 末：结算个人 DoT（按最大生命百分比直接掉 HP，无视护甲）+ 时长递减（按 round）+ 到期移除。
@@ -1635,9 +1641,9 @@ func open_context_menu() -> void:
 	if controllable:
 		if _can_attack(u):
 			_context_menu.add_item("攻击", 3)
-		if _learned_active_skills(u).size() > 0 and u.ap > 0:   # 技能：插在攻击后、移动前
+		if _learned_active_skills(u).size() > 0 and u.ap > 0:   # 能力（主动招式，术语🔒）：插在攻击后、移动前
 			_build_skill_submenu(u)
-			_context_menu.add_submenu_item("技能", "SkillSubmenu")
+			_context_menu.add_submenu_item("能力", "SkillSubmenu")
 		if _can_move(u):
 			_context_menu.add_item("移动", 0)
 		if u.can_fly() and u.ap > 0:                      # 起飞/降落＝动作，耗 1 AP
@@ -2333,7 +2339,6 @@ func _tick_weather() -> void:
 func _apply_env_modifiers() -> void:
 	var w_mod := EnvDB.weather_sight(_cur_weather)
 	for u in units:
-		u.remove_modifiers_by_source("env:time")     # 清理旧版可能留下的日夜 flat（现日夜=乘子、不再挂 flat）
 		u.remove_modifiers_by_source("env:weather")
 		if w_mod != 0:
 			u.modifiers.append({"stat": "sight", "op": "flat", "value": w_mod,
