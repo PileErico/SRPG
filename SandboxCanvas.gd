@@ -292,6 +292,7 @@ func _draw_unit(u) -> void:
 	# 头顶血条/护甲条已移除——单位血量/护甲改在左下「光标信息栏」悬停单位卡里看（见 Sandbox.hover_extra）。
 	# _draw_hp_bar/_draw_armor_bar 函数保留（将来若想「受伤才显示」再按需调用）。
 	_draw_ap_pips(u, c, r)
+	_draw_morale_flag(u, c, r)
 
 # 有工坊拼装外观的单位 → 返回其 look（单一判定 UnitPiece.look_for），否则 null。
 func _sprite_look(u):
@@ -318,6 +319,7 @@ func _draw_sprite_piece(u, ground: Vector2, look: Dictionary) -> void:
 	})
 	UnitPiece.draw_piece(self, ground, r, TextureCache.get_tex(u.icon), editor.faction_color(u.faction), opts)
 	_draw_ap_pips(u, ground + Vector2(0, r * 0.55), r)
+	_draw_morale_flag(u, ground, r)
 
 # 飞行单位的地面投影：固定贴在原格（不随漂浮上下动），抬得越高→略小略淡（透视感，但有下限保证看得见）
 func _draw_ground_shadow(ground: Vector2, r: float, lift: float) -> void:
@@ -333,6 +335,17 @@ func _ellipse_pts(center: Vector2, rx: float, ry: float) -> PackedVector2Array:
 		var a := TAU * float(i) / 24.0
 		pts.append(center + Vector2(cos(a) * rx, sin(a) * ry))
 	return pts
+
+# 士气旗（🔒 模块_属性成长_设计.md §10.7 五档各配图标）：战斗阶段在棋子右下角标当前档位。
+# 素材 icons/UI/stat/flag1~5_16x16.png ＝ 档位 0~4（崩溃→狂热）；缺图静默跳过（素材未落地不报错）。
+func _draw_morale_flag(u, base: Vector2, r: float) -> void:
+	if editor.phase != "battle":
+		return
+	var tex = TextureCache.get_tex("res://icons/UI/stat/flag%d_16x16.png" % (u.morale_band() + 1))
+	if tex == null:
+		return
+	var s := r * 0.85
+	draw_texture_rect(tex, Rect2(base + Vector2(r * 0.28, r * 0.18), Vector2(s, s)), false)
 
 # 棋子上居中叠一个单位图标（保留圆形与阵营色，留一圈色边）；modulate 可压灰（已行动）
 func _draw_icon(u, c: Vector2, r: float, modulate: Color = Color.WHITE) -> void:
