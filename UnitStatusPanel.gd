@@ -1464,8 +1464,10 @@ func _build_stats(right: VBoxContainer, u) -> void:
 	split.add_child(col_l)
 	split.add_child(VSeparator.new())
 	var col_r := VBoxContainer.new()
-	col_r.size_flags_horizontal = Control.SIZE_EXPAND_FILL   # 右半（ratio 1）＝留白
+	col_r.size_flags_horizontal = Control.SIZE_EXPAND_FILL   # 右半（ratio 1）：属性提升区（无点数＝留白，常驻四属性显示归数据显示线）
+	col_r.add_theme_constant_override("separation", 6)
 	split.add_child(col_r)
+	_build_attr_picks(col_r, u)
 	# 血量/护甲＝读 stats（有 _max 上限）；士气＝Unit.morale（0..MORALE_MAX），图标随区间取 flag1-5。
 	col_l.add_child(_stat_bar_row(float(u.effective_stat("HP")), u.effective_stat_f("HP_max"),
 		ICON_DIR + "HP_16x16.png", Color("#9A2E22")))            # 血量＝深红
@@ -1473,6 +1475,58 @@ func _build_stats(right: VBoxContainer, u) -> void:
 		ICON_DIR + "护甲值_16x16.png", Color("#66707A")))          # 护甲＝深钢灰
 	col_l.add_child(_stat_bar_row(float(u.morale), float(u.MORALE_MAX),
 		_morale_icon(int(u.morale)), _morale_color(int(u.morale), int(u.MORALE_MAX))))   # 士气＝红→绿线性
+
+# ============ 属性提升（加点 UI v1，🔒 §10.1/§10.6：c 节点每级 2 次四选二·战后结算）============
+# attr_picks>0 才浮现；成对约束（同节点两次限不同属性）判据＝Unit.can_attr_pick，不满足灰显；
+# 战斗中整区锁定只读（一切结算战后进行 🔒）。图标缺失（决心待画）静默空位。
+const ATTR_PICK_ICONS := {"finesse": "技巧_16x16.png", "agility": "灵活_16x16.png",
+	"luck": "幸运_16x16.png", "resolve": "决心_16x16.png"}
+
+func _build_attr_picks(col: VBoxContainer, u) -> void:
+	if int(u.attr_picks) <= 0:
+		return
+	var in_battle: bool = host != null and "phase" in host and str(host.phase) == "battle"
+	var head := Label.new()
+	head.text = "属性提升：剩 %d 点%s" % [int(u.attr_picks), "（战斗中锁定）" if in_battle else ""]
+	head.add_theme_font_size_override("font_size", 13)
+	head.add_theme_color_override("font_color", Color("#EBBC04"))
+	col.add_child(head)
+	if int(u.attr_picks) % 2 == 1 and str(u.attr_pick_last) != "":
+		var hint := Label.new()
+		hint.text = "本对已选「%s」，第二点须选其他属性" % StatMeta.label(u.attr_pick_last)
+		hint.add_theme_font_size_override("font_size", 11)
+		hint.add_theme_color_override("font_color", Color(1, 1, 1, 0.45))
+		col.add_child(hint)
+	for key in ["finesse", "agility", "luck", "resolve"]:
+		col.add_child(_attr_pick_row(u, key, in_battle))
+
+func _attr_pick_row(u, key: String, locked: bool) -> Control:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	var icon := TextureRect.new()
+	icon.texture = TextureCache.get_tex(ICON_DIR + str(ATTR_PICK_ICONS.get(key, "")))
+	icon.custom_minimum_size = Vector2(22, 22)
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(icon)
+	var lab := Label.new()
+	lab.text = "%s  %d" % [StatMeta.label(key), int(u.effective_stat(key))]
+	lab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(lab)
+	var btn := Button.new()
+	btn.text = "＋%d" % int(u.ATTR_PICK_INC[key])
+	btn.custom_minimum_size = Vector2(44, 0)
+	btn.disabled = locked or not u.can_attr_pick(key)
+	if btn.disabled:
+		btn.tooltip_text = "战斗中锁定（一切结算战后进行）" if locked else "本对第二点须选不同属性"
+	else:
+		btn.tooltip_text = "花 1 点：%s +%d" % [StatMeta.label(key), int(u.ATTR_PICK_INC[key])]
+	btn.pressed.connect(func():
+		if u.apply_attr_pick(key):
+			open(u))   # 重建面板：数值/剩余点数/按钮灰显一并刷新
+	row.add_child(btn)
+	return row
 
 # 士气图标：按当前值五档 → flag1-5（<10 / 10-19 / 20-29 / 30-39 / ≥40）；与 Unit.morale_band() 一致，默认 25 落 flag3。
 func _morale_icon(morale: int) -> String:

@@ -37,6 +37,7 @@ static func make_unit(proto: Dictionary, fac: String, col: int, row: int):
 		u.equip(str(it))
 	u.ensure_natural_weapon()   # 🔒 §10.4：主手空 → 种族天生武器（拳脚）实装入位
 	u.attr_picks = int(proto.get("attr_picks", 0))
+	u.attr_pick_last = str(proto.get("attr_pick_last", ""))   # 加点对首选择（成对约束跨存档保真）
 	# 属性覆盖（与种族底值的差异：HP_max/atk/acc/…全部面板值均可覆盖）
 	var ov = proto.get("stats", {})
 	if typeof(ov) == TYPE_DICTIONARY:
@@ -137,6 +138,8 @@ static func unit_to_proto(u) -> Dictionary:
 		proto["profs"] = profs
 	if u.attr_picks > 0:
 		proto["attr_picks"] = u.attr_picks   # 待分配加点（战后结算 🔒 §10.6；0 不写、旧档零影响）
+		if u.attr_pick_last != "":
+			proto["attr_pick_last"] = u.attr_pick_last   # 对中断档：对首已选、对尾未花
 	# 敌方 AI 警觉字段：仅对 enemy/neutral 写出（player/ally 忽略这些字段——不写省噪音）。
 	# make_unit 读回时按缺省兜底（ai_threat 默认 true）；补上后 proto/preset 往返不再丢 AI 配置。
 	if u.faction in ["enemy", "neutral"]:
@@ -209,7 +212,7 @@ static func unit_to_battle_snapshot(u) -> Dictionary:
 		"stats": u.stats.duplicate(),
 		"prof_xp": u.prof_xp.duplicate(), "prof_known": u.prof_known.duplicate(), "prof_slots": u.prof_slots.duplicate(),
 		"ap": u.ap, "move_points": u.move_points,
-		"morale": u.morale, "attr_picks": u.attr_picks,
+		"morale": u.morale, "attr_picks": u.attr_picks, "attr_pick_last": u.attr_pick_last,
 		"door_gauge": u.door_gauge, "door_checks": u.door_checks,
 		"effects": u.effects.duplicate(true),
 		"modifiers": u.modifiers.duplicate(true),   # 整份含 trait/equip 烘焙条 + buff:/env: 临时条（source 配对保真 🔒）
@@ -264,6 +267,7 @@ static func unit_from_battle_snapshot(d: Dictionary):
 	u.move_points = int(d.get("move_points", 0))
 	u.morale = int(d.get("morale", 25))   # 旧快照缺省＝常态 25
 	u.attr_picks = int(d.get("attr_picks", 0))
+	u.attr_pick_last = str(d.get("attr_pick_last", ""))
 	u.door_gauge = int(d.get("door_gauge", 0))
 	u.door_checks = int(d.get("door_checks", 0))
 	u.effects = d.get("effects", []) if typeof(d.get("effects", [])) == TYPE_ARRAY else []

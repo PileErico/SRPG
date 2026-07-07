@@ -93,7 +93,10 @@ func _initialize() -> void:
 	ck(int(g.stats["will_fort"]) == 2 and int(g.stats["body_fort"]) == 2, "双强韧每级 +2")
 	ck(g.attr_picks == 2, "c 节点得 2 次加点")
 	ck(g.apply_attr_pick("finesse") and int(g.stats["finesse"]) == 12, "技巧加点 +2/次")
-	ck(g.apply_attr_pick("luck") and int(g.stats["luck"]) == 6, "运气加点 +1/次")
+	ck(g.attr_pick_last == "finesse" and not g.can_attr_pick("finesse"), "成对约束：对尾不得重复对首（🔒 同节点两次限不同属性）")
+	ck(not g.apply_attr_pick("finesse"), "重复对首被拒")
+	ck(g.apply_attr_pick("luck") and int(g.stats["luck"]) == 6, "运气加点 +1/次（对尾异属性放行）")
+	ck(g.attr_pick_last == "", "对花完清空对首记录")
 	ck(not g.apply_attr_pick("luck"), "加点次数用尽")
 	g.gain_exp(10000000)
 	ck(g.level == 15, "等级帽 15（实际 %d）" % g.level)
@@ -128,13 +131,15 @@ func _initialize() -> void:
 	ck(is_equal_approx(d.effective_stat_f("block_rate"), 15.0) and is_equal_approx(d.effective_stat_f("block_power"), 35.0),
 		"盾格挡天生激活（15/35）")
 
-	# —— 6) attr_picks 序列化往返 ——
+	# —— 6) attr_picks / attr_pick_last 序列化往返（对中断档不破成对约束）——
 	g.attr_picks = 7
+	g.attr_pick_last = "agility"
 	var snap: Dictionary = UnitFactory.unit_to_battle_snapshot(g)
 	var back = UnitFactory.unit_from_battle_snapshot(JSON.parse_string(JSON.stringify(snap)))
-	ck(back.attr_picks == 7, "battle 快照 attr_picks 往返")
+	ck(back.attr_picks == 7 and back.attr_pick_last == "agility", "battle 快照 attr_picks/对首 往返")
+	ck(not back.can_attr_pick("agility") and back.can_attr_pick("luck"), "载回后成对约束仍生效")
 	var p2 := UnitFactory.unit_to_proto(g)
-	ck(int(p2.get("attr_picks", 0)) == 7, "proto 层 attr_picks 保留")
+	ck(int(p2.get("attr_picks", 0)) == 7 and str(p2.get("attr_pick_last", "")) == "agility", "proto 层 attr_picks/对首 保留")
 
 	if _fail == 0:
 		print("=== 四属性/成长定案 全 PASS ===")

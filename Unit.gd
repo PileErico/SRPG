@@ -239,9 +239,12 @@ func morale_band_name() -> String:
 
 # —— 等级三轨 🔒（模块_属性成长_设计.md §10.1/§10.6，2026-07-07 数值定案）——
 const LEVEL_CAP := 15                          # 15 级毕业（三轨轮转：天赋 1/3/6/9/12/15·技能槽 1/4/7/10/13·加点 2/5/8/11/14）
-const ATTR_PICK_LEVELS := [2, 5, 8, 11, 14]    # c 节点：每到一级得 2 次加点（四选二——同节点两次应选不同属性，约束在 UI 层）
+const ATTR_PICK_LEVELS := [2, 5, 8, 11, 14]    # c 节点：每到一级得 2 次加点（四选二——同节点两次限不同属性 🔒）
 const ATTR_PICK_INC := {"finesse": 2, "agility": 1, "luck": 1, "resolve": 1}   # 每次加点增量 🔒
-var attr_picks := 0                            # 待分配加点次数（战后结算；加点 UI 后到，先记账）
+var attr_picks := 0                            # 待分配加点次数（战后结算）
+# 「同节点两次限不同属性」的成对约束：点数按对花（每节点恰 +2 → 余点偶数=对首、奇数=对尾）。
+# attr_pick_last＝对首选了啥（对尾须异于此；对尾花完清空）。随 attr_picks 一起序列化，中途存档不破约束。
+var attr_pick_last := ""
 
 # 获得经验（🔒 战后结算：战中静默记录、BattleIO 回写主档后才走到这里）：升级循环。返回升了几级。
 # 每级＝种族自动轨成长（growth 块：HP 小幅+双强韧固定）；c 节点另得加点次数；15 级封顶。
@@ -270,11 +273,18 @@ func _apply_level_growth() -> void:
 	if g.has("HP_max") and stats.has("HP"):
 		stats["HP"] = round1(float(stats.get("HP", 0)) + float(g["HP_max"]))
 
-# 花 1 次待分配加点、给指定属性固定增量（战后 UI 消费）。成功 true。
-func apply_attr_pick(key: String) -> bool:
+# 该属性现在可否加点（UI 灰显判据）：有余点 + 合法键 + 成对约束（对尾不得重复对首）。
+func can_attr_pick(key: String) -> bool:
 	if attr_picks <= 0 or not ATTR_PICK_INC.has(key):
 		return false
+	return attr_picks % 2 == 0 or key != attr_pick_last
+
+# 花 1 次待分配加点、给指定属性固定增量（战后 UI 消费）。成功 true。
+func apply_attr_pick(key: String) -> bool:
+	if not can_attr_pick(key):
+		return false
 	stats[key] = round1(float(stats.get(key, 0)) + float(ATTR_PICK_INC[key]))
+	attr_pick_last = key if attr_picks % 2 == 0 else ""   # 对首记住选择；对尾花完清空
 	attr_picks -= 1
 	return true
 
