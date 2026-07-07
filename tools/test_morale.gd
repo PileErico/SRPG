@@ -33,10 +33,10 @@ func _initialize() -> void:
 	pb.stats["resolve"] = 3
 	pb.init_vitals()
 	ck(pb.morale == 31, "决心 3 → 初始 25+6=31（实际 %d）" % pb.morale)
-	ck(pb.morale_band_name() == "稳定", "31 仍稳定档（档界 25~34）")
-	# 档界全边界（🔒 0~14/15~24/25~34/35~44/45~50）
-	var edges := {0: "崩溃", 14: "崩溃", 15: "动摇", 24: "动摇", 25: "稳定", 34: "稳定",
-		35: "高昂", 44: "高昂", 45: "狂热", 50: "狂热"}
+	ck(pb.morale_band_name() == "高昂", "31 落高昂档（档界 30~39）")
+	# 档界全边界（🔒 每 10 一档：0~9/10~19/20~29/30~39/40~50）
+	var edges := {0: "崩溃", 9: "崩溃", 10: "动摇", 19: "动摇", 20: "稳定", 29: "稳定",
+		30: "高昂", 39: "高昂", 40: "狂热", 50: "狂热"}
 	for v in edges:
 		pb.morale = v
 		ck(pb.morale_band_name() == edges[v], "档界 %d → %s（实际 %s）" % [v, edges[v], pb.morale_band_name()])
