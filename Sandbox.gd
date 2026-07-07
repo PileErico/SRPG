@@ -1093,6 +1093,13 @@ func _begin_active_turn() -> void:
 				_log_line("%s %s 结束" % [_cname(u), str(ev.get("name", ""))])
 			elif str(ev.get("type", "")) == "fort_shrug":
 				_log_line("[color=#7FD5A0]%s 凭强韧挣脱了「%s」[/color]" % [_cname(u), str(ev.get("name", ""))])
+			elif str(ev.get("type", "")) == "morale":
+				var md := int(ev.get("delta", 0))
+				var shift := _morale_band_shift(u, md)
+				if shift != "":
+					_log_line(shift)
+				elif md <= -2:   # 未跨档：只报邻近围逼压力（回归 ±1 静默防刷屏）
+					_log_line("%s 遭敌围逼，士气 %d（现 %d·%s）" % [_cname(u), md, u.morale, str(ev.get("band", ""))])
 	# 死门单位：无法移动/行动——自动检定后跳过 turn（仿 AI 未激活即过；call_deferred 断递归链防全员死门爆栈）
 	if u != null and u.tags.has("deaths_door"):
 		u.ap = 0
@@ -1242,6 +1249,14 @@ func _handle_deaths() -> void:
 			hover_unit = null
 		if selected_unit == u:
 			selected_unit = null
+	for mev in res.get("morale", []):   # 士气事件渲染（🔒 §10.7；模型只上抛）
+		if str(mev.get("kind", "")) == "kill":
+			var k = mev["who"]
+			_log_line("[color=%s]%s 击败对手，士气 %+d（现 %d·%s）[/color]" % [
+				OK_GREEN, _cname(k), int(mev["delta"]), k.morale, k.morale_band_name()])
+		elif str(mev.get("kind", "")) == "ally_death":
+			_log_line("[color=#D5453A]%s 之死撼动同侧全军：士气 −5（波及 %d 人，决心可抵）[/color]" % [
+				_cname(mev["victim"]), int(mev["count"])])
 	if res["new_round"]:
 		_tick_weather()   # 新 round：天气计时 −1，到期重摇
 	_check_battle_over()
@@ -1914,6 +1929,9 @@ func _resolve_one(attacker, target, skill, show_target := false) -> Dictionary:
 	lines.append("→ %s" % _oc(r["hit"], "已命中", "未命中"))
 	if not r["hit"]:
 		_spawn_hit_feedback(target, false, false, false, 0, 0)   # 飘字：未命中/闪避（看目标阵营）
+		var miss_shift := _morale_band_shift(attacker, int(r.get("morale_att", 0)))
+		if miss_shift != "":
+			lines.append(miss_shift)
 		_push_log(lines)
 		_log_prof_ups(_state.grant_combat_prof(attacker, target, r))   # 挥空也算练习（🔒 §2.4）
 		return {"hit": false, "blocked": false}
@@ -1953,9 +1971,23 @@ func _resolve_one(attacker, target, skill, show_target := false) -> Dictionary:
 		else:
 			seg += " → %s" % _oc(bool(inf["applied"]), "施加", "未中")
 		lines.append(seg)
+	var att_shift := _morale_band_shift(attacker, int(r.get("morale_att", 0)))
+	if att_shift != "":
+		lines.append(att_shift)
 	_push_log(lines)
 	_log_prof_ups(_state.grant_combat_prof(attacker, target, r))
 	return {"hit": true, "blocked": r["blocked"]}
+
+# 士气跨档播报（🔒 §10.7 骨架 v1：只报跨档，常规小幅波动静默防刷屏）；未跨档返回 ""。
+func _morale_band_shift(u, delta: int) -> String:
+	if delta == 0:
+		return ""
+	var before: int = clampi((u.morale - delta) / 10, 0, 4)
+	if before == u.morale_band():
+		return ""
+	var color: String = OK_GREEN if delta > 0 else "#D5453A"
+	return "[color=%s]%s 士气%s至「%s」（%+d，现 %d）[/color]" % [
+		color, _cname(u), "回升" if delta > 0 else "跌落", u.morale_band_name(), delta, u.morale]
 
 # 技艺进阶播报（只报进阶；涨值本身静默防刷屏）
 func _log_prof_ups(events: Array) -> void:

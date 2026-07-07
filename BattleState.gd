@@ -915,16 +915,24 @@ func _handle_deaths_state() -> Dictionary:
 			"by_uid": (u.last_hit_by.uid if u.last_hit_by != null else 0)})
 	# 士气（🔒 §10.7）：击败者 +3（按击杀归属，含重伤离场——"击败"口径）；
 	# 真死（dead tag / 无死门资格即死）→ 同侧存活者全场 −5；重伤离场不算"挂了"、无全场事件。
+	# 事件上抛宿主渲染（{kind:"kill"|"ally_death"}；模型不写日志）。
+	var morale_events := []
 	for u in dead:
 		if u.last_hit_by != null and not (u.last_hit_by in dead):
-			_morale_add(u.last_hit_by, 3)
+			var md: int = _morale_add(u.last_hit_by, 3)
+			if md != 0:
+				morale_events.append({"kind": "kill", "who": u.last_hit_by, "delta": md})
 		if u.tags.has("dead") or not _door_eligible(u):
+			var hit_n := 0
 			for w in units:
 				if w == u or (w in dead):
 					continue
 				if not _is_hostile(u, w):
-					_morale_add(w, -5)
-	var res := {"dead": dead, "entered_door": entered_door, "active_died": false, "new_round": false}
+					if _morale_add(w, -5) != 0:
+						hit_n += 1
+			if hit_n > 0:
+				morale_events.append({"kind": "ally_death", "victim": u, "count": hit_n})
+	var res := {"dead": dead, "entered_door": entered_door, "active_died": false, "new_round": false, "morale": morale_events}
 	if dead.is_empty():
 		return res
 	var cur = active_unit()
