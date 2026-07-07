@@ -979,7 +979,6 @@
         "id": "empire_light_infantry",
         "name": "帝国轻步兵",
         "portrait": "res://icons/Characters/Empire_Light_Infantry.png",
-        "speed": 7.0,
         "tags": [
           "human"
         ]
@@ -996,7 +995,6 @@
         "id": "empire_light_infantry",
         "name": "帝国轻步兵",
         "portrait": "res://icons/Characters/Empire_Light_Infantry.png",
-        "speed": 7.0,
         "tags": [
           "human"
         ]
@@ -1013,7 +1011,6 @@
         "id": "empire_light_infantry",
         "name": "帝国轻步兵",
         "portrait": "res://icons/Characters/Empire_Light_Infantry.png",
-        "speed": 7.0,
         "tags": [
           "human"
         ]
@@ -1030,7 +1027,6 @@
         "id": "empire_light_infantry",
         "name": "帝国轻步兵",
         "portrait": "res://icons/Characters/Empire_Light_Infantry.png",
-        "speed": 7.0,
         "tags": [
           "human"
         ]
@@ -1047,7 +1043,6 @@
         "id": "empire_light_infantry",
         "name": "帝国轻步兵",
         "portrait": "res://icons/Characters/Empire_Light_Infantry.png",
-        "speed": 7.0,
         "tags": [
           "human"
         ]
@@ -1064,7 +1059,6 @@
         "id": "empire_light_infantry",
         "name": "帝国轻步兵",
         "portrait": "res://icons/Characters/Empire_Light_Infantry.png",
-        "speed": 7.0,
         "tags": [
           "human"
         ]
@@ -1080,16 +1074,6 @@
           "spear_dragon_calamity"
         ],
         "race": "human",
-        "stats": {
-          "HP_max": 24,
-          "atk": 4,
-          "acc": 36,
-          "eva": 6,
-          "block_rate": 1.4,
-          "block_power": 1.6,
-          "crit_rate": 3,
-          "crit_dmg": 164
-        },
         "icon": "res://icons/Unit_Icons/Player_Special_Veiken.png",
         "id": "veiken",
         "name": "维肯",

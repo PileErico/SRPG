@@ -1230,7 +1230,7 @@ func _ai_nearest_hostile(unit):
 func _handle_deaths() -> void:
 	var res := _state._handle_deaths_state()
 	for u in res["entered_door"]:
-		_log_line("[b][color=#C86BD5]%s 踏入死门！[/color][/b]（占格可被攻击；每回合 1d20+求生 检定 ±1、被命中 −1；−3 倒下 / +3 爬回）" % _cname(u))
+		_log_line("[b][color=#C86BD5]%s 踏入死门！[/color][/b]（占格可被攻击；每回合 1d20+运气+强韧/5 检定 ±1、被命中 −1；−3 倒下 / +3 爬回）" % _cname(u))
 	var dead: Array = res["dead"]
 	if dead.is_empty():
 		return
@@ -1255,15 +1255,15 @@ func _handle_deaths() -> void:
 
 # ============ 死门（需求 §1.11 🔒；模型在 BattleState，检定/日志留宿主）============
 
-# 死门每回合检定（该单位 turn 自动执行）：1d20+求生 vs 难度（首回合 15、之后每回合 +5）。过 +1 / 不过 −1。
-# 求生＝底值 5＋肉体强韧/5（🔒 属性重做：原读体力 STA；底值 5 保住旧默认基线，强韧训练可改善）。
+# 死门每回合检定（该单位 turn 自动执行）：1d20＋运气＋肉体强韧/5 vs 难度（逐轮 5/10/15/20/25… 递增）。过 +1 / 不过 −1。
+# 🔒 §10.6 死门改版：自动轨（双强韧/级）与加点轨（运气）在鬼门关汇合——等级越高越扛、点命硬真命硬。
 func _door_turn_check(u) -> void:
-	var dc: int = 15 + 5 * u.door_checks
+	var dc: int = 5 + 5 * u.door_checks
 	u.door_checks += 1
-	var bonus: int = 5 + int(floor(u.effective_stat_f("body_fort") / 5.0))
+	var bonus: int = int(u.effective_stat("luck")) + int(floor(u.effective_stat_f("body_fort") / 5.0))
 	var r: Dictionary = Checks.check_flat(bonus, dc)
 	u.door_gauge += 1 if bool(r["ok"]) else -1
-	_log_line("%s 死门检定：1d20(%d)+求生(%d)=%d vs %d → %s（条 %+d）" % [
+	_log_line("%s 死门检定：1d20(%d)+运气/强韧(%d)=%d vs %d → %s（条 %+d）" % [
 		_cname(u), int(r["roll"]), int(r["bonus"]), int(r["total"]), dc,
 		_oc(bool(r["ok"]), "挺住", "恶化"), u.door_gauge])
 	_door_settle(u)

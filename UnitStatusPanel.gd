@@ -951,7 +951,7 @@ func _build_trait_tooltip(t) -> Control:
 # 档位名/阈值读 ProfDB 单一源（STAGE_THRESHOLDS/STAGE_NAMES/MASTER_XP_CAP），本处只留 UI 配色。
 const PROF_STAGE_COLORS := ["#E0E0E0", "#4FAE5A", "#3A7BD5", "#9B59B6", "#EBBC04"]   # 生疏白/娴熟绿/老练蓝/专家紫/大师金
 const PROF_CELL_COUNT := 5                        # 装备技能格数（=技艺槽上限）
-const PROF_SLOT_LV := [1, 5, 9, 13, 17]           # 各格解锁等级 🔒（与 Unit.prof_slot_capacity 同节拍）
+const PROF_SLOT_LV := [1, 4, 7, 10, 13]           # 各格解锁等级 🔒（15 级三轨 b 节拍 §10.1，与 Unit.prof_slot_capacity 同源）
 const PROF_CELL_SIZE := Vector2(64, 64)           # 单格边长
 const PROF_GAUGE_W := 12                          # 竖向计量槽宽度
 const PROF_GAUGE_TRACK := Color(1, 1, 1, 0.10)    # 槽底（暗）

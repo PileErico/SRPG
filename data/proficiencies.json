@@ -66,6 +66,8 @@
      {"stage": 4, "mods": [{"stat": "block_rate", "op": "flat", "value": 6}]},
      {"stage": 5, "mods": [{"stat": "block_rate", "op": "flat", "value": 8}]}],
    "desc": "盾的运用（格挡训练喂养）。"},
+  {"id": "style_block", "name": "格挡", "page": "style", "match_tags": [],
+   "desc": "以武器招架的技术——装载后激活武器自带的格挡数值（🔒 §10.3 武器格挡须此域；喂养与档位加成 🟡 数值轮）。"},
   {"id": "style_armor", "name": "防具", "page": "style", "match_tags": [],
    "stage_mods": [
      {"stage": 2, "mods": [{"stat": "def_eff", "op": "flat", "value": 2}]},
@@ -156,7 +158,7 @@
 
   {"id": "life_tracking", "name": "追踪", "page": "life", "match_tags": [], "desc": "追寻踪迹、识破潜行、发现陷阱。"},
   {"id": "life_negotiation", "name": "谈判", "page": "life", "match_tags": [], "desc": "对外交涉与议价。"},
-  {"id": "life_meditation", "name": "冥想", "page": "life", "match_tags": [], "desc": "静心凝神（职责边界 🟡 待定勿实现：属性与成长系统.md §8）。"},
+  {"id": "life_meditation", "name": "冥想", "page": "life", "match_tags": [], "desc": "静心凝神（职责边界 🟡 待定勿实现：模块_属性成长_设计.md §8）。"},
   {"id": "life_logging", "name": "采伐", "page": "life", "match_tags": [], "desc": "伐木采矿等野外采集劳作。"},
   {"id": "life_cooking", "name": "烹饪", "page": "life", "match_tags": [], "desc": "烹制食物。"},
   {"id": "life_scholarship", "name": "学识", "page": "life", "match_tags": [], "desc": "研究学习、鉴定未知。"},

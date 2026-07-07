@@ -1008,24 +1008,6 @@
         "skills": {
 
         },
-        "stats": {
-          "AP_max": 2.0,
-          "HP_max": 24.0,
-          "acc": 36.0,
-          "armor_max": 0.0,
-          "atk": 4.0,
-          "atk_eff": 100.0,
-          "block_power": 1.6,
-          "block_rate": 1.4,
-          "crit_dmg": 164.0,
-          "crit_rate": 3.0,
-          "def_eff": 100.0,
-          "eva": 6.0,
-          "move": 6.0,
-          "res_phys": 0.0,
-          "sight": 5.0,
-          "speed": 5.0
-        },
         "tags": [
           "ground",
           "char_veiken",
@@ -1034,6 +1016,74 @@
         "trait": "dragonslayer"
       },
       "row": 13.0
+    },
+    {
+      "col": 2,
+      "faction": "player",
+      "proto": {
+        "_preset": true,
+        "default_faction": "player",
+        "equip": [
+          "claw_wing",
+          "claw_foot"
+        ],
+        "exp": 35.0,
+        "exp_max": 100.0,
+        "icon": "res://icons/Unit_Icons/Player_Special_Belooz.png",
+        "id": "belooz",
+        "level": 5.0,
+        "name": "比路兹",
+        "portrait": "res://icons/Characters/Plyer_Special_Belooz.png",
+        "profs": {
+          "known": [
+            "style_unarmed"
+          ],
+          "slots": [
+            "style_unarmed"
+          ],
+          "xp": {
+            "style_unarmed": 300.0
+          }
+        },
+        "race": "harpy",
+        "skills": {
+
+        },
+        "tags": [
+          "ground",
+          "char_belooz",
+          "harpy"
+        ],
+        "trait": "innate_martial"
+      },
+      "row": 13
+    },
+    {
+      "col": 2,
+      "faction": "player",
+      "proto": {
+        "_preset": true,
+        "ai_threat": true,
+        "default_faction": "enemy",
+        "equip": [],
+        "exp": 0.0,
+        "exp_max": 100.0,
+        "icon": "res://icons/Characters/appearance_empire_infantry.png",
+        "id": "empire_infantry",
+        "level": 1.0,
+        "name": "帝国步兵",
+        "portrait": "res://icons/Characters/appearance_empire_infantry.png",
+        "race": "human",
+        "skills": {
+
+        },
+        "tags": [
+          "ground",
+          "human"
+        ],
+        "trait": ""
+      },
+      "row": 14
     }
   ],
   "width": 15

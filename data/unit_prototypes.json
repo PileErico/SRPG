@@ -14,12 +14,20 @@
     "name": "比路兹",
     "portrait": "res://icons/Characters/Plyer_Special_Belooz.png",
     "profs": {
-      "known": ["style_unarmed"],
-      "slots": ["style_unarmed"],
-      "xp": {"style_unarmed": 300}
+      "known": [
+        "style_unarmed"
+      ],
+      "slots": [
+        "style_unarmed"
+      ],
+      "xp": {
+        "style_unarmed": 300
+      }
     },
     "race": "harpy",
-    "skills": {},
+    "skills": {
+
+    },
     "tags": [
       "ground",
       "char_belooz",
@@ -28,31 +36,38 @@
     "trait": "innate_martial"
   },
   {
+    "_preset": true,
     "default_faction": "player",
     "equip": [
-      "spear_dragon_calamity"
+      "spear_dragon_calamity",
+      "breast_plate"
     ],
+    "exp": 0,
+    "exp_max": 100,
     "icon": "res://icons/Unit_Icons/Player_Special_Veiken.png",
     "id": "veiken",
+    "level": 1,
     "name": "维肯",
     "portrait": "res://icons/Characters/Plyer_Special_Veiken.png",
     "profs": {
-      "known": ["wp_spear", "style_two_handed"],
-      "slots": ["wp_spear"],
-      "xp": {"wp_spear": 300, "style_two_handed": 150}
+      "known": [
+        "wp_spear",
+        "style_two_handed"
+      ],
+      "slots": [
+        "wp_spear"
+      ],
+      "xp": {
+        "style_two_handed": 150,
+        "wp_spear": 300
+      }
     },
     "race": "human",
-    "stats": {
-      "HP_max": 24,
-      "atk": 4,
-      "acc": 36,
-      "eva": 6,
-      "block_rate": 1.4,
-      "block_power": 1.6,
-      "crit_rate": 3,
-      "crit_dmg": 164
+    "skills": {
+
     },
     "tags": [
+      "ground",
       "char_veiken",
       "human"
     ],
@@ -71,7 +86,9 @@
     "name": "帝国步兵",
     "portrait": "res://icons/Characters/appearance_empire_infantry.png",
     "race": "human",
-    "skills": {},
+    "skills": {
+
+    },
     "tags": [
       "ground",
       "human"
@@ -86,7 +103,6 @@
     "name": "帝国轻步兵",
     "portrait": "res://icons/Characters/Empire_Light_Infantry.png",
     "race": "human",
-    "speed": 7,
     "tags": [
       "human"
     ]
@@ -104,16 +120,8 @@
     "name": "黄蜥蜴人",
     "portrait": "res://icons/Characters/Lizardmen_Yellow.png",
     "race": "lizardmen",
-    "skills": {},
-    "stats": {
-      "HP_max": 36,
-      "atk": 5,
-      "acc": 33,
-      "eva": 3,
-      "block_rate": 1.3,
-      "block_power": 2,
-      "crit_rate": 1.5,
-      "crit_dmg": 163
+    "skills": {
+
     },
     "tags": [
       "lizardmen",
@@ -135,16 +143,8 @@
     "name": "蓝蜥蜴人",
     "portrait": "res://icons/Characters/Lizardmen_Blue.png",
     "race": "lizardmen",
-    "skills": {},
-    "stats": {
-      "HP_max": 12,
-      "atk": 3,
-      "acc": 40,
-      "eva": 10,
-      "block_rate": 1.6,
-      "block_power": 1.2,
-      "crit_rate": 5,
-      "crit_dmg": 166
+    "skills": {
+
     },
     "tags": [
       "lizardmen",

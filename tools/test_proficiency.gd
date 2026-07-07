@@ -22,22 +22,24 @@ func _initialize() -> void:
 	ItemInstances.clear()
 
 	# 1) 注册表与阶段曲线
-	ck(ProfDB.all_ids().size() == 31, "31 个域（实得 %d）" % ProfDB.all_ids().size())
-	ck(ProfDB.ids_by_page("style").size() == 10 and ProfDB.ids_by_page("weapon").size() == 11
-		and ProfDB.ids_by_page("life").size() == 10, "三页 10/11/10")
+	ck(ProfDB.all_ids().size() == 32, "32 个域（实得 %d）" % ProfDB.all_ids().size())
+	ck(ProfDB.ids_by_page("style").size() == 11 and ProfDB.ids_by_page("weapon").size() == 11
+		and ProfDB.ids_by_page("life").size() == 10, "三页 11/11/10（2026-07-07 +style_block 格挡域 §10.3）")
 	ck(ProfDB.stage_of(0) == 1 and ProfDB.stage_of(99) == 1 and ProfDB.stage_of(100) == 2
 		and ProfDB.stage_of(300) == 3 and ProfDB.stage_of(599) == 3 and ProfDB.stage_of(600) == 4
 		and ProfDB.stage_of(999) == 4 and ProfDB.stage_of(1000) == 5, "阶段阈值 0/100/300/600/1000（🔒 2026-07-06 用户定曲线）")
 	ck(int(ProfDB.MASTER_XP_CAP) == 1500, "大师计量满值 1500")
 	ck(ProfDB.stage_name(3) == "老练" and ProfDB.stage_name(5) == "大师", "阶段名")
 
-	# 2) 槽位容量=等级解锁节拍 1/5/9/13/17
+	# 2) 槽位容量=等级解锁节拍 1/4/7/10/13（🔒 §10.1 三轨 b）
 	var u = Unit.new("练习生", "player", -1, -1)
 	ck(u.prof_slot_capacity() == 1, "1 级容量 1")
 	u.level = 9
-	ck(u.prof_slot_capacity() == 3, "9 级容量 3")
-	u.level = 17
-	ck(u.prof_slot_capacity() == 5, "17 级容量 5")
+	ck(u.prof_slot_capacity() == 3, "9 级容量 3（1/4/7）")
+	u.level = 12
+	ck(u.prof_slot_capacity() == 4, "12 级容量 4（13 未到）")
+	u.level = 13
+	ck(u.prof_slot_capacity() == 5, "13 级容量 5（满）")
 
 	# 3) 学习/装载/卸载：未学不可装；装载挂阶段补正、卸载全摘（装载=总开关）；熟练度冻结保留
 	u.level = 1

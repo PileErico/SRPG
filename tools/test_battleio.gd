@@ -23,7 +23,7 @@ func _initialize() -> void:
 	var protos := UnitFactory.all_prototypes()
 	ck(not protos.is_empty(), "有内置原型可用")
 
-	# 1) Checks：结构 + 恒过/恒败边界（1d20 无法定桩，用极端 DC；🔒 属性重做：死门检定改 check_flat 求生）
+	# 1) Checks：结构 + 恒过/恒败边界（1d20 无法定桩，用极端 DC；🔒 §10.6：死门检定＝check_flat 运气+强韧/5）
 	WorldState.current = null
 	var cu = UnitFactory.make_unit(protos[0], "player", -1, -1)
 	var r: Dictionary = Checks.check(cu, "body_fort", 1)

@@ -25,8 +25,6 @@ static func make_unit(proto: Dictionary, fac: String, col: int, row: int):
 		if not u.tags.has(str(t)):
 			u.tags.append(str(t))
 	RaceDB.apply_to(u, str(proto.get("race", "")))   # 种族底值先落（stats 基础值+种族 tags）；下方 proto.stats 再叠差异覆盖
-	if proto.get("speed", null) != null:
-		u.stats["speed"] = int(proto["speed"])
 	u.level = int(proto.get("level", 1))
 	for _i in range(maxi(0, u.level - 1)):
 		u._apply_level_growth()   # 🔒 §10.6 自动轨追溯：level>1 原型补齐种族成长（原型×等级纯函数；proto.stats 覆盖仍在下方后置生效）

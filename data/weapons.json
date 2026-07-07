@@ -234,7 +234,7 @@
         "single_target"
       ]
     },
-    "icon": "",
+    "icon": "res://icons/Items/Weapons/weapon_human_unarmed.png",
     "id": "unarmed_fists",
     "innate": true,
     "natural": true,

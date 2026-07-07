@@ -1,8 +1,8 @@
 extends RefCounted
 ## 属性检定原语（DB 范式：preload + static，无 class_name）——项目**唯一**的 d20 检定实现处（需求 §1.11 实现注记）。
 ## check(unit, attr, dc)＝1d20 + 单位属性（effective 口径，含装备/buff）vs 难度，>=DC 过。
-## check_flat(bonus, dc)＝调用方自算修正值的形状——如死门求生检定（🔒 属性重做：原读体力，
-## 四维已删，改为 求生底值5＋肉体强韧/5，见 Sandbox._door_turn_check）。
+## check_flat(bonus, dc)＝调用方自算修正值的形状——如死门检定（🔒 §10.6 改版：
+## 1d20＋运气＋肉体强韧/5，DC 逐轮 5/10/15/20/25 递增，见 Sandbox._door_turn_check）。
 ## 大地图/营地事件的 BB 式检定（M7+）按取材复用两种形状。
 ## （既有 4 处 randf()*100<X 的百分比判定是另一形状，不并入。）
 
