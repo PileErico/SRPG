@@ -25,7 +25,8 @@ const ROMAN := ["", "I", "II", "III", "IV", "V"]   # 技能等级 → 罗马数�
 
 # 属性键 / tag → 中文均走单一数据源：stat 用 StatMeta.label（全量、无漂移），tag 用 TagDB.cn。
 
-const CARD_SIZE := Vector2(900, 660)   # 卡片固定尺寸（含抬头区）
+const CARD_SIZE := Vector2(900, 660)   # 卡片设计尺寸（1080p 下的像素尺寸；缩放基准）
+const UIScale := preload("res://UIScale.gd")   # 全 UI 同比缩放：参考/夹值单一源（1080p 基准）
 const FRAME_SCALE := 3                 # 角饰放大倍数
 const GUTTER := 52                     # 上下留白：≥角饰高(17×scale) 以避让角饰
 const SIDE_PAD := 28                   # 左右内缩
@@ -105,9 +106,14 @@ func _build(u) -> void:
 	else:
 		card.custom_minimum_size = CARD_SIZE
 		card.size = CARD_SIZE
+		card.pivot_offset = Vector2.ZERO          # 从左上角缩放 → position 仍是左上角，居中/拖动照旧
+		card.scale = Vector2.ONE * _card_scale()
 	card.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(card)
 	_card = card
+	# 窗口/视口尺寸变化 → 重算缩放并复位（编辑器模式恒 1、由宿主布局，无需监听）
+	if not editor_mode and not resized.is_connected(_on_resized):
+		resized.connect(_on_resized)
 
 	# 内容内缩：上下留白避让角饰
 	var margin := MarginContainer.new()
@@ -125,7 +131,7 @@ func _build(u) -> void:
 	root.add_child(_make_header(u))
 
 	# 顶部 Tab：角色状态 / 通用技能 / 第三页（具名角色＝专属技能 / 杂兵＝职业技能，二选一）
-	# 技能三分类（见 docs/单位系统设计.md「技能三分类」）：通用＝人人；职业＝同类单位共享树（杂兵主进度）；专属＝具名独有。
+	# 技能三分类（见 docs/模块_战斗_设计.md「技能三分类」）：通用＝人人；职业＝同类单位共享树（杂兵主进度）；专属＝具名独有。
 	var tabs := TabContainer.new()
 	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	var empty := StyleBoxEmpty.new()
@@ -137,9 +143,9 @@ func _build(u) -> void:
 	var status_page := _build_status_page(u)
 	status_page.name = "角色状态"
 	tabs.add_child(status_page)
-	# 技艺（熟练度域 🔒 属性与成长系统.md §2）：三页分区 + 阶段进度 + 装载/卸载（非战斗随时；战斗中锁定只读）
+	# 技艺（熟练度域 🔒 模块_属性成长_设计.md §2）：三页分区 + 阶段进度 + 装载/卸载（非战斗随时；战斗中锁定只读）
 	var craft_page := _build_prof_page(u)
-	craft_page.name = "技艺"
+	craft_page.name = "技能"
 	tabs.add_child(craft_page)
 	# 通用技能：人人都有（即原「职业技能」页的 13 通用序列 + 进阶；命名修正——它一直是通用技能）
 	var common_page := _build_common_skill_page(u)
@@ -254,18 +260,32 @@ func _cycle(dir: int) -> void:
 func _side(faction: String) -> String:
 	return "friend" if faction in ["player", "ally"] else "foe"
 
-# 初次居中；之后沿用上次拖到的位置
+# 卡片缩放系数：随视口等比（编辑器模式恒 1）；1080p 基准 + 夹值 → UIScale 单一源。
+func _card_scale() -> float:
+	if editor_mode:
+		return 1.0
+	return UIScale.factor(get_viewport_rect().size)
+
+# 视口尺寸变化：重算缩放 + 复位（居中或沿用拖动位并钳制）
+func _on_resized() -> void:
+	if editor_mode or _card == null or not is_instance_valid(_card):
+		return
+	_card.scale = Vector2.ONE * _card_scale()
+	_place_card()
+
+# 初次居中；之后沿用上次拖到的位置（用缩放后的可视尺寸）
 func _place_card() -> void:
 	var vp := get_viewport_rect().size
 	if _win_pos.x < 0.0:
-		_card.position = ((vp - CARD_SIZE) * 0.5).floor()
+		var cs := CARD_SIZE * _card.scale.x
+		_card.position = ((vp - cs) * 0.5).floor()
 	else:
 		_set_card_pos(_win_pos)
 
-# 设卡片位置并钳制：横向至少留 min_vis 可见，标题条不超出顶/底
+# 设卡片位置并钳制：横向至少留 min_vis 可见，标题条不超出顶/底（用缩放后尺寸）
 func _set_card_pos(p: Vector2) -> void:
 	var vp := get_viewport_rect().size
-	var cs: Vector2 = _card.size
+	var cs: Vector2 = _card.size * _card.scale.x
 	var min_vis := 140.0
 	p.x = clampf(p.x, -(cs.x - min_vis), vp.x - min_vis)
 	p.y = clampf(p.y, 0.0, vp.y - HEADER_H)
@@ -329,7 +349,7 @@ func _build_status_page(u) -> Control:
 #   ②③④ 三类「进阶技能」各一块彩色背景板（色=分类，作底、不画在边框上），左右成簇并排，下方留空（可增长）：
 #       红=力量/双手/重武器/进攻 · 蓝=体力/盾牌/铠甲/抗性/防御 · 绿=迅捷/远程/轻武器/精密。
 #   每格 = 图标 + 下方技能名（名现预留占位）。进阶每类先象征性摆 3 个。
-#   数据暂用常量占位，将来接 data/skills.json（见 docs/单位系统设计.md「技能系统」）。
+#   数据暂用常量占位，将来接 data/skills.json（见 docs/模块_战斗_设计.md「技能系统」）。
 const COMMON_BASIC_COUNT := 13
 const COMMON_BASIC_ROWS := 2          # 基础技能铺成几行（13 → 7 + 6）
 const COMMON_ADVANCED := [
@@ -916,7 +936,7 @@ func _build_trait_tooltip(t) -> Control:
 		v.add_child(d)
 	return panel
 
-# ============ 技艺页（熟练度域 🔒 属性与成长系统.md §2；视觉稿 v1 → 真数据已接）============
+# ============ 技艺页（熟练度域 🔒 模块_属性成长_设计.md §2；视觉稿 v1 → 真数据已接）============
 # 术语切割 🔒：本页＝技艺（熟练度域）；「技能」各页＝技能编辑器条目。
 # 布局：① 顶部 5 装备格＝Unit.prof_slots（竖向计量槽=档位内进度、色随档位；容量外格=未解锁）② 横线
 #       ③ 三级 tab：L2 横向三 tab 名/序不改（用户令 2026-07-06）＝武器技能/战斗技能/其他技能，
@@ -951,9 +971,19 @@ func _prof_tier_progress(xp: int) -> float:
 	var t := _prof_tier(xp)
 	return clampf(float(xp - int(t["lo"])) / float(maxi(1, int(t["hi"]) - int(t["lo"]))), 0.0, 1.0)
 
+# 档位「显示」名/色（🔒 用户 2026-07-07）：xp=0→深灰「未学习」；xp>0 首段→白「入门」（覆盖 ProfDB 的"生疏"）；
+# 其后 娴熟/老练/专家/大师 照旧。仅覆盖 UI 显示、不动数据层；gauge 填充/进度仍走 _prof_tier。
+const PROF_UNLEARNED := {"name": "未学习", "color": "#808080"}
+const PROF_TIER0_NAME := "入门"
+func _prof_disp(xp: int) -> Dictionary:
+	if xp <= 0:
+		return PROF_UNLEARNED
+	var t := _prof_tier(xp)
+	return {"name": PROF_TIER0_NAME if int(t["lo"]) == 0 else str(t["name"]), "color": str(t["color"])}
+
 func _build_prof_page(u) -> Control:
 	var page := VBoxContainer.new()
-	page.add_theme_constant_override("separation", 10)
+	page.add_theme_constant_override("separation", 4)   # 收紧上部区块间距 → 让位给中轴计量条
 
 	# ① 顶部：5 个装备技能格＝Unit.prof_slots；容量内空格=（空槽）、容量外=未解锁（Lv 节拍）
 	var row := HBoxContainer.new()
@@ -984,7 +1014,7 @@ func _build_prof_page(u) -> Control:
 	# 左区：上＝L2 横向 tab 行；中＝横线；下＝[L3 纵向 tab | 竖线 | 主内容]
 	var left_area := VBoxContainer.new()
 	left_area.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	left_area.add_theme_constant_override("separation", 8)
+	left_area.add_theme_constant_override("separation", 4)   # 收紧 → 让位给计量条
 	body.add_child(left_area)
 	# L2 横向 tab 行——起始右移一截，避免与下方 L3 纵向 tab 同列混淆
 	var tabrow := HBoxContainer.new()
@@ -1000,11 +1030,16 @@ func _build_prof_page(u) -> Control:
 	inner.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	inner.add_theme_constant_override("separation", 8)
 	left_area.add_child(inner)
+	# L3 列套滚动容器：图标放大后条目可能超高，纵向滚动兜底（不裁切）
+	var l3scroll := ScrollContainer.new()
+	l3scroll.custom_minimum_size = Vector2(90, 0)
+	l3scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	l3scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	inner.add_child(l3scroll)
 	var l3col := VBoxContainer.new()          # L3：纵向具体技能 tab（随 L2 重建）
-	l3col.custom_minimum_size = Vector2(84, 0)
-	l3col.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	l3col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	l3col.add_theme_constant_override("separation", 4)
-	inner.add_child(l3col)
+	l3scroll.add_child(l3col)
 	inner.add_child(VSeparator.new())
 	var main := VBoxContainer.new()           # 选中技能的内容页（待定）
 	main.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1068,12 +1103,21 @@ func _rebuild_prof_l3(l3col: VBoxContainer, main: VBoxContainer, page_key: Strin
 	var grp := ButtonGroup.new()
 	var btns := []
 	for i in ids.size():
+		var pid := str(ids[i])
 		var b := Button.new()
-		b.text = ProfDB.prof_name(str(ids[i]))
 		b.toggle_mode = true
 		b.button_group = grp
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		b.custom_minimum_size = Vector2(0, 28)
+		b.custom_minimum_size = Vector2(0, 48)               # 加高 → 小图标(16×16)放大更可读
+		b.tooltip_text = ProfDB.prof_name(pid)
+		var tex = _prof_l3_icon(pid, page_key)
+		if tex != null:
+			b.icon = tex                                     # 有图标：图标居中撑满、像素硬边
+			b.expand_icon = true
+			b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			b.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		else:
+			b.text = ProfDB.prof_name(pid)                   # 无图标：退回文字
 		var idx := i
 		b.pressed.connect(func():
 			_prof_l3 = idx
@@ -1083,6 +1127,14 @@ func _rebuild_prof_l3(l3col: VBoxContainer, main: VBoxContainer, page_key: Strin
 	_prof_l3 = clampi(_prof_l3, 0, btns.size() - 1)
 	btns[_prof_l3].button_pressed = true
 	_fill_prof_main(main, str(ids[_prof_l3]), u)
+
+# L3 tab 图标：约定 res://icons/Skills/SkillsTree-<page>/<域id去首段前缀>.png
+# （wp_sword→SkillsTree-weapon/sword.png；style_one_handed→SkillsTree-style/one_handed.png）。
+# 无对应文件返回 null → 调用处退回文字，随美术补图自动点亮。
+func _prof_l3_icon(pid: String, page_key: String) -> Texture2D:
+	var us := pid.find("_")
+	var slug := pid.substr(us + 1) if us >= 0 else pid
+	return TextureCache.get_tex("res://icons/Skills/SkillsTree-%s/%s.png" % [page_key, slug])
 
 # 一个装备技能格：VBox[ HBox(格 + 竖向计量槽), 下方「名-档位」]。
 # d 有 name=已装载；d 空=（空槽，容量内未用）；d.locked=容量外未解锁（画 ✕，同物品栏锁定格）。
@@ -1158,14 +1210,14 @@ func _prof_cell_label(d: Dictionary) -> Control:
 		e.add_theme_font_size_override("font_size", PROF_FONT_CELL)
 		h.add_child(e)
 		return h
-	var tier := _prof_tier(int(d.get("xp", 0)))
+	var disp := _prof_disp(int(d.get("xp", 0)))   # xp=0→未学习(灰)；xp>0→入门/娴熟/…
 	var nm := Label.new()
 	nm.text = str(d.get("name", "")) + "-"
 	nm.add_theme_font_size_override("font_size", PROF_FONT_CELL)
 	h.add_child(nm)
 	var tl := Label.new()
-	tl.text = str(tier["name"])
-	tl.add_theme_color_override("font_color", Color(str(tier["color"])))
+	tl.text = str(disp["name"])
+	tl.add_theme_color_override("font_color", Color(str(disp["color"])))
 	tl.add_theme_font_size_override("font_size", PROF_FONT_CELL)
 	h.add_child(tl)
 	return h
@@ -1214,7 +1266,7 @@ func _fill_learned_list(list: VBoxContainer, u) -> void:
 # 一行：名（常色）+ 档位（含 xp 值，色随档位）——紧挨不拉远。
 func _learned_row(d: Dictionary) -> Control:
 	var xp := int(d.get("xp", 0))
-	var tier := _prof_tier(xp)
+	var disp := _prof_disp(xp)
 	var h := HBoxContainer.new()
 	h.add_theme_constant_override("separation", 10)
 	var nm := Label.new()
@@ -1223,13 +1275,13 @@ func _learned_row(d: Dictionary) -> Control:
 	nm.custom_minimum_size = Vector2(78, 0)
 	h.add_child(nm)
 	var t := Label.new()
-	t.text = "%s（%d）" % [str(tier["name"]), xp]
+	t.text = "%s（%d）" % [str(disp["name"]), xp]
 	t.add_theme_font_size_override("font_size", PROF_FONT_LIST)
-	t.add_theme_color_override("font_color", Color(str(tier["color"])))
+	t.add_theme_color_override("font_color", Color(str(disp["color"])))
 	h.add_child(t)
 	return h
 
-# 主内容区（选中 L3 技艺域）：域名 + 本单位状态行；perk/详情内容待定。
+# 主内容区（选中 L3 技艺域）：头（域名 + 状态） + 脊柱式技能树（ProfTreeView）。
 func _fill_prof_main(main: VBoxContainer, pid: String, u) -> void:
 	for c in main.get_children():
 		main.remove_child(c)
@@ -1241,41 +1293,263 @@ func _fill_prof_main(main: VBoxContainer, pid: String, u) -> void:
 		main.add_child(e)
 		return
 	var def := ProfDB.get_prof(pid)
+	var known: bool = u.prof_known.has(pid)
+	var xp := int(u.prof_xp.get(pid, 0))
+	# 头：域名 + 状态（未学 / 档位·装载）
+	var hdr := HBoxContainer.new()
+	hdr.add_theme_constant_override("separation", 10)
 	var title := Label.new()
 	title.text = "%s%s" % [str(def.get("name", pid)), "（异种）" if def.get("exotic", false) else ""]
 	title.add_theme_font_size_override("font_size", 17)
 	title.add_theme_color_override("font_color", Color("#EBBC04"))
-	main.add_child(title)
+	hdr.add_child(title)
+	var disp := _prof_disp(xp)   # xp>0→入门/娴熟/…（未学习不在标题重复：计量条底部已示）
 	var st := Label.new()
-	if u.prof_known.has(pid):
-		var xp := int(u.prof_xp.get(pid, 0))
-		var tier := _prof_tier(xp)
-		st.text = "%s（%d）%s" % [str(tier["name"]), xp, "　·　已装载" if u.prof_slots.has(pid) else ""]
-		st.add_theme_color_override("font_color", Color(str(tier["color"])))
-	else:
-		st.text = "未学"
-		st.add_theme_color_override("font_color", Color(1, 1, 1, 0.4))
-	st.add_theme_font_size_override("font_size", 14)
-	main.add_child(st)
-	var hint := Label.new()
-	hint.text = "—— 内容待定（perk 池/详情随技能编辑器轮入库）"
-	hint.add_theme_color_override("font_color", Color(1, 1, 1, 0.3))
-	hint.add_theme_font_size_override("font_size", 12)
-	main.add_child(hint)
+	st.text = "" if xp <= 0 else "%s%s" % [str(disp["name"]), "　·　已装载" if u.prof_slots.has(pid) else ""]
+	st.add_theme_color_override("font_color", Color(str(disp["color"])))
+	st.add_theme_font_size_override("font_size", 13)
+	st.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	hdr.add_child(st)
+	main.add_child(hdr)
+	# 脊柱式技能树（🟡 占位；读真 xp/档位，perk/奖励数据待接）
+	var tree := ProfTreeView.new()
+	tree.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	tree.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	main.add_child(tree)
+	tree.setup(xp, known)
 
-# 右上：属性两列
-# 属性两列：值读 effective_stat；受修正变高=绿/变低=红；鼠标悬停看基础值 + 各来源加成。
+# ============ 脊柱式技能树视图（🟡 占位）============
+# 中轴＝熟练度计量条（自底向上填 + 每100小刻度 + 档位边界大刻度 + 底部当前档位）；
+# 左＝各阶段固定奖励（1/阶，装备该技能时激活）；右＝各阶段 perk（多/阶，四选一）。均小图标格 + tooltip。
+# 行按 4 次进阶等距排布（不与大刻度对齐——各阶所需熟练度不等，刻度本就不均匀）；未达阶段压暗。
+# ⚠️ 奖励/perk 数据未接（proficiencies.json 后加池）；本类只搭视觉、读真 xp。
+class ProfTreeView extends Control:
+	# {name,lo,hi,color}；首段＝入门(白，xp>0)；xp=0 另显「未学习」深灰。
+	const TIERS := [
+		{"name": "入门", "lo": 0,    "hi": 100,  "color": "#E0E0E0"},
+		{"name": "娴熟", "lo": 101,  "hi": 300,  "color": "#4FAE5A"},
+		{"name": "老练", "lo": 301,  "hi": 600,  "color": "#3A7BD5"},
+		{"name": "专家", "lo": 601,  "hi": 1000, "color": "#9B59B6"},
+		{"name": "大师", "lo": 1001, "hi": 1500, "color": "#EBBC04"},
+	]
+	const MAXXP := 1500
+	const MAJORS := [100, 300, 600, 1000]   # 档位边界大刻度（顶端 1500 单独画）
+	const BAR_W := 11                        # 计量条宽（原 16 → 约 2/3）
+	const TOP_PAD := 2                        # 顶留白收窄 → 计量条更长
+	const BOT_PAD := 38                       # 底部留给当前档位标签
+	const BOX := 40                          # 奖励/perk 小图标格
+	const GAP := 8
+	const ARM := 16                          # 中轴到格子的连线臂长
+	const PERKS := 3                         # 占位：每阶右侧 perk 数
+
+	var xp := 0
+	var reached := 1                         # 当前阶段序号 1..5（=TIERS 索引+1）
+
+	func setup(_xp: int, _known: bool) -> void:
+		xp = clampi(_xp, 0, MAXXP)
+		reached = 1
+		for i in TIERS.size():
+			if xp >= int(TIERS[i]["lo"]):
+				reached = i + 1
+		_rebuild()
+
+	func _ready() -> void:
+		resized.connect(_relayout)
+
+	func _rebuild() -> void:
+		for c in get_children():
+			c.queue_free()
+		# 各进阶行的 perk 格交错分布：显示自上而下＝左·右·左·右（大师在上）；
+		# 格子所在侧的对侧＝该阶段「加成」文本位（数据待接，暂空、不占格）。
+		for row in 4:
+			var ti := row + 1                # TIERS 索引：娴熟=1 … 大师=4
+			var unlocked := xp > 0 and reached >= ti + 1
+			var col := Color(str(TIERS[ti]["color"]))
+			var side := "L" if row % 2 == 1 else "R"   # 大师(左)·专家(右)·老练(左)·娴熟(右)
+			for k in PERKS:
+				add_child(_box(side, row, k, "%s perk —— 待定" % str(TIERS[ti]["name"]), unlocked, col))
+		_relayout.call_deferred()
+
+	func _box(side: String, row: int, slot: int, tip: String, unlocked: bool, col: Color) -> Panel:
+		var p := Panel.new()
+		p.custom_minimum_size = Vector2(BOX, BOX)
+		p.size = Vector2(BOX, BOX)
+		p.tooltip_text = tip
+		p.set_meta("side", side)
+		p.set_meta("row", row)
+		p.set_meta("slot", slot)
+		var sb := StyleBoxFlat.new()
+		sb.bg_color = Color(0.03, 0.04, 0.07, 0.72)   # 深底 → 与窗口背景对比、可见度更高
+		sb.set_corner_radius_all(4)
+		sb.set_border_width_all(2 if unlocked else 1)
+		sb.border_color = col if unlocked else Color(1, 1, 1, 0.16)
+		p.add_theme_stylebox_override("panel", sb)
+		p.modulate = Color(1, 1, 1, 1.0 if unlocked else 0.45)
+		return p
+
+	func _row_cy(row: int) -> float:
+		var top := float(TOP_PAD)
+		var bot := size.y - BOT_PAD
+		# row0=娴熟(最低阶)在下、row3=大师(最高阶)在上 —— 与「熟练度自底向上涨」一致
+		return top + ((3 - row) + 0.5) / 4.0 * maxf(1.0, bot - top)
+
+	func _relayout() -> void:
+		var cx := size.x * 0.5
+		for c in get_children():
+			if not (c is Panel):
+				continue
+			var row := int(c.get_meta("row", 0))
+			var side := str(c.get_meta("side", "R"))
+			var slot := int(c.get_meta("slot", 0))
+			var cy := _row_cy(row) - BOX * 0.5
+			var x := 0.0
+			if side == "L":
+				x = cx - BAR_W * 0.5 - ARM - BOX * (slot + 1) - GAP * slot
+			else:
+				x = cx + BAR_W * 0.5 + ARM + slot * (BOX + GAP)
+			c.position = Vector2(x, cy)
+		queue_redraw()
+
+	func _draw() -> void:
+		var cx := size.x * 0.5
+		var bar_top := float(TOP_PAD)
+		var bar_bot := size.y - BOT_PAD
+		var barh := maxf(1.0, bar_bot - bar_top)
+		draw_rect(Rect2(cx - BAR_W * 0.5, bar_top, BAR_W, barh), Color(0.03, 0.04, 0.07, 0.82), true)   # 轨道（深底：衬托填充、对比窗口背景）
+		if xp > 0:   # 填充（自底向上，当前档位色）
+			var fh := barh * clampf(float(xp) / float(MAXXP), 0.0, 1.0)
+			draw_rect(Rect2(cx - BAR_W * 0.5, bar_bot - fh, BAR_W, fh), Color(str(TIERS[reached - 1]["color"])), true)
+		for row in 4:   # 每行中轴 → 该阶格子侧的连线（交错：左/右）
+			var cy := _row_cy(row)
+			var ti := row + 1
+			var lc := Color(str(TIERS[ti]["color"]))
+			lc.a = 0.35 if (xp > 0 and reached >= ti + 1) else 0.12
+			if row % 2 == 1:   # 左
+				draw_line(Vector2(cx - BAR_W * 0.5, cy), Vector2(cx - BAR_W * 0.5 - ARM, cy), lc, 2.0)
+			else:              # 右
+				draw_line(Vector2(cx + BAR_W * 0.5, cy), Vector2(cx + BAR_W * 0.5 + ARM, cy), lc, 2.0)
+		for v in range(100, MAXXP, 100):   # 刻度：每100小刻度；档位边界大刻度（该边界之上档位色）
+			var ty := bar_bot - barh * (float(v) / MAXXP)
+			var is_major: bool = v in MAJORS
+			var ext := (BAR_W * 0.5) if is_major else (BAR_W * 0.5 - 2.0)   # 刻度不超过条宽：大刻度=满宽、小刻度略内缩
+			var tcol := Color(1, 1, 1, 0.2)
+			if is_major:
+				tcol = Color(1, 1, 1, 0.5)
+				for t in TIERS:
+					if int(t["lo"]) == v + 1:
+						tcol = Color(str(t["color"]))
+			draw_line(Vector2(cx - ext, ty), Vector2(cx + ext, ty), tcol, 2.0 if is_major else 1.0)
+		draw_line(Vector2(cx - BAR_W * 0.5, bar_top), Vector2(cx + BAR_W * 0.5, bar_top), Color(str(TIERS[4]["color"])), 2.0)   # 顶端 1500 大师满（满宽）
+		var font := get_theme_default_font()
+		if font != null:   # 底部当前档位（自底往上涨 → 精通阶段写最下）
+			var nm := "未学习" if xp <= 0 else str(TIERS[reached - 1]["name"])
+			var col := Color("#808080") if xp <= 0 else Color(str(TIERS[reached - 1]["color"]))
+			draw_string(font, Vector2(cx - 60, size.y - BOT_PAD + 22), nm, HORIZONTAL_ALIGNMENT_CENTER, 120, 16, col)
+			if xp > 0:
+				draw_string(font, Vector2(cx - 60, size.y - BOT_PAD + 35), "%d / %d" % [xp, MAXXP], HORIZONTAL_ALIGNMENT_CENTER, 120, 11, Color(1, 1, 1, 0.45))
+
+# 右上属性区（重排中·先放核心两条）：血量 / 护甲值 —— 图标 + 横向计量条（叠当前/上限）。
+# 构件 _cell / _cell_cm / _two（读 effective_stat、按修正染色、悬停 tooltip）保留待复用。
+const ICON_DIR := "res://icons/UI/stat/"
+
 func _build_stats(right: VBoxContainer, u) -> void:
-	right.add_child(_cell_cm(u, "生命值", u.effective_stat("HP"), "HP_max"))
-	right.add_child(_cell_cm(u, "护甲值", u.effective_stat("armor"), "armor_max"))
-	_two(right, _cell_cm(u, "行动点", int(u.ap), "AP_max"), _cell(u, "行动力", "move"))
-	_two(right, _cell(u, "攻击", "atk"), _cell(u, "速度", "speed"))
-	_two(right, _cell(u, "攻击效能", "atk_eff", true), _cell(u, "防御效能", "def_eff", true))
-	_two(right, _cell(u, "命中", "acc"), _cell(u, "闪避", "eva"))
-	_two(right, _cell(u, "格挡率", "block_rate", true), _cell(u, "格挡性能", "block_power", true))
-	_two(right, _cell(u, "暴击率", "crit_rate", true), _cell(u, "暴击威力", "crit_dmg", true))
-	_two(right, _cell(u, "物理抗性", "res_phys", true), _cell(u, "自然抗性", "res_nature", true))
-	_two(right, _cell(u, "意志强韧", "will_fort", true), _cell(u, "肉体强韧", "body_fort", true))
+	# 右区再左右均分：左＝血量/护甲/士气计量条；中间竖线；右＝留白（待续排）。
+	var split := HBoxContainer.new()
+	split.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	split.add_theme_constant_override("separation", 16)
+	right.add_child(split)
+	var col_l := VBoxContainer.new()
+	col_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL   # 左半（ratio 1）
+	col_l.add_theme_constant_override("separation", 8)
+	split.add_child(col_l)
+	split.add_child(VSeparator.new())
+	var col_r := VBoxContainer.new()
+	col_r.size_flags_horizontal = Control.SIZE_EXPAND_FILL   # 右半（ratio 1）＝留白
+	split.add_child(col_r)
+	# 血量/护甲＝读 stats（有 _max 上限）；士气＝Unit.morale（0..MORALE_MAX），图标随区间取 flag1-5。
+	col_l.add_child(_stat_bar_row(float(u.effective_stat("HP")), u.effective_stat_f("HP_max"),
+		ICON_DIR + "HP_16x16.png", Color("#9A2E22")))            # 血量＝深红
+	col_l.add_child(_stat_bar_row(float(u.effective_stat("armor")), u.effective_stat_f("armor_max"),
+		ICON_DIR + "护甲值_16x16.png", Color("#66707A")))          # 护甲＝深钢灰
+	col_l.add_child(_stat_bar_row(float(u.morale), float(u.MORALE_MAX),
+		_morale_icon(int(u.morale)), _morale_color(int(u.morale), int(u.MORALE_MAX))))   # 士气＝红→绿线性
+
+# 士气图标：按当前值五档 → flag1-5（<10 / 10-19 / 20-29 / 30-39 / ≥40）；与 Unit.morale_band() 一致，默认 25 落 flag3。
+func _morale_icon(morale: int) -> String:
+	var n := 1
+	if morale >= 40: n = 5
+	elif morale >= 30: n = 4
+	elif morale >= 20: n = 3
+	elif morale >= 10: n = 2
+	return ICON_DIR + "flag%d_16x16.png" % n
+
+# 士气条色：随值线性 红(0)→绿(满)——走 HSV 色相插值（红→黄→绿），比 RGB 直插好看。
+func _morale_color(morale: int, mmax: int) -> Color:
+	var t := clampf(float(morale) / float(maxi(1, mmax)), 0.0, 1.0)
+	return Color.from_hsv(lerpf(0.0, 0.33, t), 0.72, 0.66)
+
+# 一条「图标 + 横向计量条」：条内右对齐叠「当前 / 上限」；深底 + 指定色填充（同技能页深槽调性）。
+func _stat_bar_row(cur: float, max_raw: float, icon_path: String, fill_color: Color) -> Control:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	var icon := TextureRect.new()
+	icon.texture = TextureCache.get_tex(icon_path)
+	icon.custom_minimum_size = Vector2(22, 22)                    # 16×16 源放大（小图标）
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST       # 像素图硬边
+	icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(icon)
+
+	var has := max_raw > 0.0                                      # 无上限（如无护甲）→ -- / --、条空
+	var mx := maxf(1.0, max_raw)
+
+	# 外框＝黑色粗边框 + 深底；内部计量条内缩。ProgressBar 自身 fill 会满高从左画、盖住背景边框，
+	# 故不给条本体设边框，改套一层带边框的 PanelContainer，条内缩其中 → 填充绝不触边框。
+	var frame := PanelContainer.new()
+	frame.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	frame.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var fb := StyleBoxFlat.new()
+	fb.bg_color = Color(0.03, 0.04, 0.07, 0.82)                   # 深底
+	fb.border_color = Color(0, 0, 0, 1)                          # 纯黑粗边框
+	fb.set_border_width_all(2)
+	fb.set_corner_radius_all(3)
+	fb.set_content_margin_all(2)                                  # 内缩 → 内部条不触边框
+	frame.add_theme_stylebox_override("panel", fb)
+	row.add_child(frame)
+
+	var bar := ProgressBar.new()
+	bar.custom_minimum_size = Vector2(0, 4)                       # 条最低高；实高由数值字高撑起（见下）
+	bar.size_flags_horizontal = Control.SIZE_FILL
+	bar.size_flags_vertical = Control.SIZE_FILL                   # 撑满外框内容区（否则只按最低高画成细线）
+	bar.min_value = 0
+	bar.max_value = mx
+	bar.value = clampf(cur, 0.0, mx) if has else 0.0
+	bar.show_percentage = false
+	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var track := StyleBoxFlat.new()
+	track.bg_color = Color(0, 0, 0, 0)                            # 透明（深底由外框提供）
+	bar.add_theme_stylebox_override("background", track)
+	var fill := StyleBoxFlat.new()
+	fill.bg_color = fill_color
+	fill.set_corner_radius_all(1)
+	bar.add_theme_stylebox_override("fill", fill)
+	frame.add_child(bar)
+
+	# 数值：作 frame 的第二个子节点（与条同区叠放、画在上层）；其字高撑起外框 →
+	# 文字在边框内上下自然居中（不再塞进定高条里被顶到下边框）。
+	var txt_color := Color(1, 1, 1, 0.96 if has else 0.4)
+	var val := Label.new()
+	val.text = ("%s / %s" % [_fmt(cur), _fmt(max_raw)]) if has else "-- / --"
+	val.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	val.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	val.add_theme_font_size_override("font_size", 15)
+	val.add_theme_color_override("font_color", txt_color)
+	val.add_theme_constant_override("outline_size", 2)          # 伪加粗：同色描边加粗字形
+	val.add_theme_color_override("font_outline_color", txt_color)
+	val.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	frame.add_child(val)
+	return row
 
 # ============ 下半三列 ============
 
