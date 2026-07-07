@@ -15,6 +15,7 @@ const LABELS := {
 	"block_rate": "格挡率", "block_power": "格挡性能",
 	"res_phys": "物理抗性", "res_nature": "自然抗性",
 	"will_fort": "意志强韧", "body_fort": "肉体强韧",
+	"resolve": "决心",
 	"armor_res_phys": "物理甲抗", "armor_res_nature": "自然甲抗",
 	"dr_flat_armor": "甲固减", "dr_flat_human": "人固减",
 }
@@ -29,6 +30,7 @@ const SERIALIZABLE_BASE_STATS := ["HP_max", "atk", "acc", "eva",
 	"move", "speed", "sight", "AP_max", "armor_max",
 	"atk_eff", "def_eff",
 	"res_phys", "res_nature", "will_fort", "body_fort",
+	"resolve",
 	"armor_res_phys", "armor_res_nature",
 	"dr_flat_human", "dr_flat_armor"]
 
@@ -37,7 +39,8 @@ const EDITOR_STATS := ["HP_max", "atk", "acc", "eva",
 	"crit_rate", "crit_dmg", "block_rate", "block_power",
 	"move", "speed", "sight", "AP_max", "armor_max",
 	"atk_eff", "def_eff",
-	"res_phys", "res_nature", "will_fort", "body_fort"]
+	"res_phys", "res_nature", "will_fort", "body_fort",
+	"resolve"]
 
 # 非数值「状态旗」mod 键白名单（不在 LABELS、但属合法修正对象 stat）
 const FLAG_MOD_STATS := ["vision_state"]

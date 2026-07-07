@@ -80,11 +80,21 @@ var stats := {
 	"res_nature": 0,              # 自然抗性(%)：全部元素伤害（含神圣）
 	"will_fort": 0,               # 意志强韧(%)：非物质异常豁免（眩晕/恐惧/混乱…）
 	"body_fort": 0,               # 肉体强韧(%)：物质异常豁免（寒冷/麻痹/流血…）
+	# 加点属性 🔒（模块_属性成长_设计.md §10.6 加点轨：默认 0、不随等级自动涨；技巧/灵活/运气 后续批次）
+	"resolve": 0,                 # 决心：初始士气 +2/点；每次士气损失抵消 1/点（单次损失保底 1）
 }
 
 # —— 运行时回合状态（不是面板属性；每 turn 开始重置）——
 var ap := 0           # 本 turn 剩余 AP
 var move_points := 0  # 本 turn 剩余移动点（买移动动作时按 move 注入，可分批花、零头作废）
+
+# —— 士气（战斗运行时态，随战中快照走、不入档；🔒 模块_属性成长_设计.md §10.7）——
+# 0~50 五档（档宽 10）、常态 25、无溃逃；初始 = 25 + 2×决心（init_vitals 时定）。
+# v1 只有数值与事件（变化入口＝BattleState._morale_add）；档位战斗判定（±命中/伤害）延后批次。
+const MORALE_MAX := 50
+const MORALE_BASELINE := 25
+const MORALE_BANDS := ["崩溃", "动摇", "稳定", "高昂", "狂热"]
+var morale := MORALE_BASELINE
 
 # —— 挂在身上的效果 / buff（修正对象的载体；将来由修正管线填充，见 docs 装备/修正管线）——
 # 每条形如 {name, kind:"buff"/"debuff", permanent:bool, duration:int(按 round)}；状态页右下列表读它。
@@ -191,10 +201,18 @@ func effective_stat(key: String) -> int:
 func move_allowance() -> int:
 	return int(effective_stat("move"))
 
-# 把当前生命/护甲注满到上限（生成时调用；上限 = effective，含装备/特性）。
+# 把当前生命/护甲注满到上限（生成时调用；上限 = effective，含装备/特性）。士气一并归初始值。
 func init_vitals() -> void:
 	stats["HP"] = effective_stat("HP_max")
 	stats["armor"] = effective_stat("armor_max")
+	morale = clampi(MORALE_BASELINE + 2 * effective_stat("resolve"), 0, MORALE_MAX)   # 🔒 §10.7
+
+# 当前士气档位 0~4（崩溃/动摇/稳定/高昂/狂热；50 归入狂热）与档位名。
+func morale_band() -> int:
+	return clampi(morale / 10, 0, 4)
+
+func morale_band_name() -> String:
+	return MORALE_BANDS[morale_band()]
 
 # 获得经验（战后结算/击杀归属）：升级循环。返回升了几级。
 # 🔒 属性重做（docs/模块_属性成长_设计.md §1）：等级零数值——属性点/技能点已废除；

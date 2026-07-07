@@ -202,6 +202,7 @@ static func unit_to_battle_snapshot(u) -> Dictionary:
 		"stats": u.stats.duplicate(),
 		"prof_xp": u.prof_xp.duplicate(), "prof_known": u.prof_known.duplicate(), "prof_slots": u.prof_slots.duplicate(),
 		"ap": u.ap, "move_points": u.move_points,
+		"morale": u.morale,
 		"door_gauge": u.door_gauge, "door_checks": u.door_checks,
 		"effects": u.effects.duplicate(true),
 		"modifiers": u.modifiers.duplicate(true),   # 整份含 trait/equip 烘焙条 + buff:/env: 临时条（source 配对保真 🔒）
@@ -254,6 +255,7 @@ static func unit_from_battle_snapshot(d: Dictionary):
 	u.prof_slots = psl   # 阶段补正随 modifiers 整份快照走（prof: source），不重挂——与 trait/equip 同律
 	u.ap = int(d.get("ap", 0))
 	u.move_points = int(d.get("move_points", 0))
+	u.morale = int(d.get("morale", 25))   # 旧快照缺省＝常态 25
 	u.door_gauge = int(d.get("door_gauge", 0))
 	u.door_checks = int(d.get("door_checks", 0))
 	u.effects = d.get("effects", []) if typeof(d.get("effects", [])) == TYPE_ARRAY else []

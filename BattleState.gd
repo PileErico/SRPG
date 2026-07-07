@@ -449,6 +449,7 @@ func _resolve_compute(attacker, target, skill) -> Dictionary:
 	var hit := roll < hc
 	var r := {"hit": hit, "roll": roll, "hc": hc, "acc": acc, "eva": eva}
 	if not hit:
+		r["morale_att"] = _morale_add(attacker, -1)   # 士气：失手 −1（🔒 §10.7）
 		return r
 	# 暴击（属性吃 1 位小数：crit_rate 等可为 X.5）
 	var cr := float(attacker.effective_stat_f("crit_rate"))
@@ -466,6 +467,8 @@ func _resolve_compute(attacker, target, skill) -> Dictionary:
 	# 格挡 + 全域减伤 G = max(0, 1−格挡性能/100) × 防御效能因子（下限 clamp🔒）
 	var br := float(target.effective_stat_f("block_rate"))
 	var blocked := randf() * 100.0 < br
+	if not blocked:
+		r["morale_att"] = _morale_add(attacker, 2)   # 士气：命中 +2、被格挡无变化（🔒 §10.7）
 	var bp := float(target.effective_stat_f("block_power")) if blocked else 0.0
 	# 防御效能 def_eff：base 100=中性、越高越减伤。def_factor = max(0, 2 − def_eff/100)
 	var deff: float = float(target.effective_stat_f("def_eff"))
@@ -730,7 +733,12 @@ func _apply_turn_end_effects(u) -> Array:
 # 不结算 DoT/HoT（那些恒在 turn_end）。执行顺序锁定：本 tick → 失能检查 → 行动（宿主 _begin_active_turn）。
 func _apply_turn_start_effects(u) -> Array:
 	var events := []
-	if u == null or not ("effects" in u) or u.effects.is_empty():
+	if u == null:
+		return events
+	var mev := _morale_turn_tick(u)   # 士气回合开始步（🔒 §10.7）——先于效果 tick、不依赖 effects 存在
+	if not mev.is_empty():
+		events.append(mev)
+	if not ("effects" in u) or u.effects.is_empty():
 		return events
 	var keep := []
 	var chains := []
@@ -803,6 +811,43 @@ func grant_combat_prof(attacker, target, r: Dictionary) -> Array:
 				events.append({"unit": target, "prof": "style_armor", "stage": ns3})
 	return events
 
+# ============ 士气（骨架 v1：数值+事件；档位战斗判定延后批次；🔒 模块_属性成长_设计.md §10.7）============
+
+# 士气变化唯一入口：负向先经决心抵消（每点抵 1、单次损失保底 1）、再钳 0~50。返回实际变化量（0=无事发生）。
+func _morale_add(u, delta: int) -> int:
+	if u == null or delta == 0:
+		return 0
+	var d := delta
+	if d < 0:
+		d = -maxi(1, -d - int(u.effective_stat("resolve")))
+	var before: int = u.morale
+	u.morale = clampi(before + d, 0, u.MORALE_MAX)
+	return u.morale - before
+
+# 士气·回合开始步：有邻敌＝掉 (邻敌−邻友，钳 0~6)；无邻敌＝向常态 25 回归 ±1。两者不叠加（取其一）。
+# 由 _apply_turn_start_effects 每单位 turn 开始调用。返回事件 {type:"morale",...}；无变化＝{}。
+func _morale_turn_tick(u) -> Dictionary:
+	var enemies := 0
+	var friends := 0
+	for n in _neighbors(u.col, u.row):
+		var o = unit_at(n.x, n.y)
+		if o == null:
+			continue
+		if _is_hostile(u, o):
+			enemies += 1
+		else:
+			friends += 1
+	var applied := 0
+	if enemies > 0:
+		var loss := clampi(enemies - friends, 0, 6)
+		if loss > 0:
+			applied = _morale_add(u, -loss)
+	elif u.morale != u.MORALE_BASELINE:
+		applied = _morale_add(u, 1 if u.morale < u.MORALE_BASELINE else -1)
+	if applied == 0:
+		return {}
+	return {"type": "morale", "delta": applied, "morale": u.morale, "band": u.morale_band_name()}
+
 # ============ 死门 + 收尸（需求 §1.11 🔒；日志/编排在宿主）============
 
 # 死门资格：我方/友方全体 + 敌方精锐（elite tag，数据标记）；常规敌兵无资格＝HP 归零即死
@@ -864,6 +909,17 @@ func _handle_deaths_state() -> Dictionary:
 	for u in dead:
 		_battle_kills.append({"proto_id": u.proto_id, "victim_uid": u.uid, "faction": u.faction,
 			"by_uid": (u.last_hit_by.uid if u.last_hit_by != null else 0)})
+	# 士气（🔒 §10.7）：击败者 +3（按击杀归属，含重伤离场——"击败"口径）；
+	# 真死（dead tag / 无死门资格即死）→ 同侧存活者全场 −5；重伤离场不算"挂了"、无全场事件。
+	for u in dead:
+		if u.last_hit_by != null and not (u.last_hit_by in dead):
+			_morale_add(u.last_hit_by, 3)
+		if u.tags.has("dead") or not _door_eligible(u):
+			for w in units:
+				if w == u or (w in dead):
+					continue
+				if not _is_hostile(u, w):
+					_morale_add(w, -5)
 	var res := {"dead": dead, "entered_door": entered_door, "active_died": false, "new_round": false}
 	if dead.is_empty():
 		return res
