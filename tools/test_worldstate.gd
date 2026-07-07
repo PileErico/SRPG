@@ -59,7 +59,9 @@ func _initialize() -> void:
 	ck(ld != null, "load_campaign 非空")
 	if ld != null:
 		ck(ld.save_version == WorldState.SAVE_VERSION, "save_version")
-		ck(ld.next_uid == ws.next_uid, "next_uid 续存（要 %d 实得 %d）" % [ws.next_uid, ld.next_uid])
+		# 载入水合时 make_unit 会为天生武器临时铸 uid（随后被存档实例顶替销毁）——计数只增不回收，
+		# 断言放宽为「≥ 存档值」：唯一+单调契约不破（🔒 §10.4 拳脚实装的已知副作用）。
+		ck(ld.next_uid >= ws.next_uid, "next_uid 续存不倒退（存 %d 载 %d）" % [ws.next_uid, ld.next_uid])
 		ck(ld.clock_hours == 37, "clock_hours")
 		ck(ld.ironman == true, "ironman flag")
 		ck(int(ld.flags.get("chapter", 0)) == 2 and bool(ld.flags.get("met_smith", false)), "flags")

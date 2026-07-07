@@ -2,29 +2,40 @@
   "human": {
     "name": "人类",
     "tags": [],
+    "natural_weapon": "unarmed_fists",
     "stats": {
-      "HP_max": 15, "atk": 2.5, "acc": 35, "eva": 5,
-      "crit_rate": 2.5, "crit_dmg": 160, "block_rate": 1, "block_power": 1,
-      "AP_max": 2, "move": 6, "speed": 5, "sight": 5,
+      "HP_max": 40, "atk": 0, "acc": 0, "eva": 0,
+      "crit_rate": 0, "crit_dmg": 160, "block_rate": 0, "block_power": 0,
+      "finesse": 10, "agility": 10, "luck": 5, "resolve": 0,
+      "AP_max": 2, "move": 6, "speed": 0, "sight": 5,
       "res_phys": 0, "res_nature": 0, "will_fort": 0, "body_fort": 0
-    }
+    },
+    "growth": { "HP_max": 1, "will_fort": 2, "body_fort": 2 }
   },
   "lizardmen": {
     "name": "蜥蜴人",
     "tags": [],
+    "natural_weapon": "unarmed_fists",
     "stats": {
-      "AP_max": 2, "move": 6, "speed": 5, "sight": 5,
+      "HP_max": 40, "atk": 0, "acc": 0, "eva": 0,
+      "crit_rate": 0, "crit_dmg": 160, "block_rate": 0, "block_power": 0,
+      "finesse": 10, "agility": 10, "luck": 5, "resolve": 0,
+      "AP_max": 2, "move": 6, "speed": 0, "sight": 5,
       "res_phys": 0, "res_nature": 0, "will_fort": 0, "body_fort": 5
-    }
+    },
+    "growth": { "HP_max": 1, "will_fort": 2, "body_fort": 2 }
   },
   "harpy": {
     "name": "鸟妖",
     "tags": ["harpy"],
+    "natural_weapon": "unarmed_fists",
     "stats": {
-      "HP_max": 15, "atk": 2, "acc": 35, "eva": 5,
-      "crit_rate": 2.5, "crit_dmg": 159, "block_rate": 0.9, "block_power": 0.8,
-      "AP_max": 2, "move": 6, "speed": 5, "sight": 5,
+      "HP_max": 35, "atk": 0, "acc": 0, "eva": 0,
+      "crit_rate": 0, "crit_dmg": 160, "block_rate": 0, "block_power": 0,
+      "finesse": 10, "agility": 10, "luck": 5, "resolve": 0,
+      "AP_max": 2, "move": 6, "speed": 0, "sight": 5,
       "res_phys": 0, "res_nature": 0, "will_fort": 0, "body_fort": 0
-    }
+    },
+    "growth": { "HP_max": 1, "will_fort": 2, "body_fort": 2 }
   }
 }

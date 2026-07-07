@@ -54,7 +54,7 @@ func _initialize() -> void:
 	b.proto_id = "proto_b"
 	b.uid = 0
 	sb.units = [a, b, c, d, e]
-	var eva_before: float = a.effective_stat("eva")
+	var agi_before: float = a.effective_stat("agility")   # 🔒 §10.6 人身闪避＝灵活；死门减半修正打 agility
 	a.stats["HP"] = 0
 	b.stats["HP"] = 0
 	b.last_hit_by = a
@@ -64,7 +64,7 @@ func _initialize() -> void:
 	ck(a in sb.units, "死门单位仍占格在场")
 	ck(not (b in sb.units), "常规敌兵 HP0 → 原路径即死移除")
 	ck(sb._battle_kills.size() == 1 and str(sb._battle_kills[0]["proto_id"]) == "proto_b" and int(sb._battle_kills[0]["by_uid"]) == 77, "击杀记录 proto_id+归属")
-	ck(a.effective_stat("eva") < eva_before, "死门挂上闪避减半修正（eva %.1f → %.1f）" % [eva_before, a.effective_stat("eva")])
+	ck(a.effective_stat("agility") < agi_before, "死门挂上闪避（灵活）减半修正（agility %.1f → %.1f）" % [agi_before, a.effective_stat("agility")])
 	var has_perm := false
 	for ef in a.effects:
 		if str(ef.get("name", "")) == "死门" and bool(ef.get("permanent", false)):
@@ -95,7 +95,7 @@ func _initialize() -> void:
 		if str(ef.get("name", "")) == "重伤" and bool(ef.get("permanent", false)):
 			has_injury_debuff = true
 	ck(has_injury_debuff, "+3 挂「重伤」permanent debuff")
-	ck(is_equal_approx(c.effective_stat("eva"), UnitFactory.make_unit(protos[0], "enemy", 0, 0).effective_stat("eva")), "爬回后死门修正已摘（eva 复原）")
+	ck(is_equal_approx(c.effective_stat("agility"), UnitFactory.make_unit(protos[0], "enemy", 0, 0).effective_stat("agility")), "爬回后死门修正已摘（agility 复原）")
 	# 3f) 铁人＝真死标记
 	var iws = WorldState.new()
 	iws.ironman = true
@@ -134,8 +134,10 @@ func _initialize() -> void:
 	ck(bool(entry["injured"]) and int(entry["exp"]) == 2 * BattleIO.EXP_PER_KILL + BattleIO.EXP_PARTICIPATION, "经验＝2 杀 + 参战奖励（实得 %d）" % int(entry["exp"]))
 	var hp_before: int = int(src.stats["HP"])
 	var exp_before: int = src.exp
+	var lvl_before: int = src.level
 	BattleIO.apply_result(ws, result)
-	ck(int(src.stats["HP"]) == 1, "重伤离场者回写 HP 保底 1（原 %d）" % hp_before)
+	# 保底 1 + 战后经验升级的种族成长回气（每级 HP+1，🔒 §10.6 自动轨）——升几级补几点
+	ck(int(src.stats["HP"]) == 1 + (src.level - lvl_before), "重伤离场者回写 HP=保底1+升级回气（原 %d，升 %d 级 → %d）" % [hp_before, src.level - lvl_before, int(src.stats["HP"])])
 	ck(src.injured_until == ws.clock_hours + BattleIO.INJURY_HOURS, "injured_until＝时钟+%d" % BattleIO.INJURY_HOURS)
 	ck(not src.tags.has("injured"), "injured tag 转持久字段后清掉")
 	ck(src.exp != exp_before or src.level > 1, "经验已入账")

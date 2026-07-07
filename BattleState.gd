@@ -303,8 +303,8 @@ func _sorted_by_speed(arr: Array) -> Array:
 	return out
 
 func _speed_cmp(a, b) -> bool:
-	var sa: int = a.effective_stat("speed")
-	var sb: int = b.effective_stat("speed")
+	var sa: int = a.initiative()   # 战斗速度＝speed 面板＋灵活（🔒 §10.6）
+	var sb: int = b.initiative()
 	if sa != sb:
 		return sa > sb
 	var fa := _is_friendly(a)
@@ -418,11 +418,13 @@ func _terrain_eff_factor(u, bucket: String, gain_dir: bool) -> float:
 
 # ============ 战斗结算（掷骰/伤害/异常；展示渲染在宿主 _resolve_one）============
 
-# 命中率（%）= clamp( (命中 − 闪避) × Π命中效能, 5, 95 )，读 effective_stat。
+# 命中率（%）= clamp( (武器命中+技巧 − 闪避−灵活) × Π命中效能, 5, 95 )　🔒 §10.6 数值定案：
+# 人身命中＝技巧（acc 面板底 0、由武器 mods 承载）；人身闪避＝灵活（eva 面板底 0、修正落点）。
 # Π命中效能 = 攻方命中效能(增益向) × 守方闪避效能(减免向) × 攻方地块命中效能 × 守方地块闪避效能（森林掩蔽）——
 # 无效能修正 / 无地块效果时 =1.0（与旧行为一致）。地块贡献惰性读取，见 _terrain_eff_factor。
 func _hit_chance(attacker, target) -> int:
-	var base: int = attacker.effective_stat("acc") - target.effective_stat("eva")
+	var base: int = int(round(attacker.effective_stat_f("acc") + attacker.effective_stat_f("finesse") \
+		- target.effective_stat_f("eva") - target.effective_stat_f("agility")))
 	var eff: float = attacker.eff_mult("hit_eff") * target.eff_reduce("eva_eff")
 	eff *= _terrain_eff_factor(attacker, "hit_eff", true)    # 攻方地块命中效能（增益向）
 	eff *= _terrain_eff_factor(target, "eva_eff", false)     # 守方地块闪避效能（森林掩蔽·减免向）
@@ -441,9 +443,9 @@ func _skill_bonus(attacker, skill) -> float:
 # 单次攻击完整结算——命中/暴击/格挡掷骰、伤害分量落血、死门条 −1+结算、异常施加。
 # 只改单位状态，不写日志/飘字；返回展示所需全部数值（未命中时只有 hit/roll/hc/acc/eva）。
 func _resolve_compute(attacker, target, skill) -> Dictionary:
-	# 命中
-	var acc := int(attacker.effective_stat("acc"))
-	var eva := int(target.effective_stat("eva"))
+	# 命中（r 携带的 acc/eva ＝含技巧/灵活的合计口径，供战斗记录展示）
+	var acc := int(round(attacker.effective_stat_f("acc") + attacker.effective_stat_f("finesse")))
+	var eva := int(round(target.effective_stat_f("eva") + target.effective_stat_f("agility")))
 	var hc := _hit_chance(attacker, target)   # 命中公式单一来源（见 _hit_chance）
 	var roll := int(randf() * 100.0)
 	var hit := roll < hc
@@ -451,8 +453,9 @@ func _resolve_compute(attacker, target, skill) -> Dictionary:
 	if not hit:
 		r["morale_att"] = _morale_add(attacker, -1)   # 士气：失手 −1（🔒 §10.7）
 		return r
-	# 暴击（属性吃 1 位小数：crit_rate 等可为 X.5）
-	var cr := float(attacker.effective_stat_f("crit_rate"))
+	# 暴击 🔒 §10.6：无人身底率——crit_rate 面板（招式/武器承载）＋技巧×0.5 −受击方运气，钳底 0
+	var cr := maxf(0.0, float(attacker.effective_stat_f("crit_rate")) \
+		+ float(attacker.effective_stat_f("finesse")) * 0.5 - float(target.effective_stat_f("luck")))
 	var crit := randf() * 100.0 < cr
 	# 伤害 = 攻击 × 系数 [× 暴击] [× 效能≠100%]
 	var coeff := float(skill.get("coeff", 1.0))
@@ -864,7 +867,8 @@ func _enter_deaths_door_state(u) -> void:
 	if not u.tags.has("deaths_door"):
 		u.tags.append("deaths_door")
 	_add_effect(u, {"name": "死门", "kind": "debuff", "permanent": true, "tags": ["deaths_door"],
-		"mods": [{"stat": "eva", "op": "pct", "value": -50}, {"stat": "def_eff", "op": "pct", "value": -50}]})
+		"mods": [{"stat": "agility", "op": "pct", "value": -50}, {"stat": "def_eff", "op": "pct", "value": -50}]})
+	# ⚠️ 闪避减半改打 agility（🔒 §10.6 人身闪避＝灵活；eva 面板底 0、pct 打上去无效）——顺带减半回合序，垂死者反正跳过行动。
 
 # 门条 ±3 结算（只改状态、不移除、不写日志）。返回 ""=未触发 / "down_dead"（铁人真死）/ "down_injured"（重伤离场）/ "climb"（爬回）。
 # −3＝倒下（非铁人挂 injured 重伤离场 / 铁人挂 dead 真死 🔒）；+3＝爬回（HP 保底占位 1，挂重伤 debuff 至战斗结束）。

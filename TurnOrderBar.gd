@@ -338,7 +338,7 @@ func _style_slot(slot: Control, e: Dictionary) -> void:
 		sb.shadow_size = 6
 	frame.add_theme_stylebox_override("panel", sb)
 	var spd: Label = slot.get_meta("speed_lbl")
-	spd.text = "速 %d" % u.effective_stat("speed")
+	spd.text = "速 %d" % u.initiative()   # 战斗速度＝speed 面板＋灵活（🔒 §10.6）
 
 # 点头像 = 把镜头切到该单位所在格（不再开角色状态）
 func _on_slot_input(event: InputEvent, u) -> void:

@@ -12,6 +12,7 @@ const TraitDB := preload("res://TraitDB.gd")                 # 特性注册表�
 const SkillDB := preload("res://SkillDB.gd")                 # 技能注册表（技能查表）
 const ProfDB := preload("res://ProfDB.gd")                   # 技艺（熟练度域）注册表（🔒 模块_属性成长_设计.md §2）
 const EquipSlots := preload("res://EquipSlots.gd")          # 槽位 / 槽位资格（tag 驱动装备资格）
+const RaceDB := preload("res://RaceDB.gd")                  # 种族底值/成长曲线/天生武器（🔒 §10.4/§10.6）
 
 var unit_name := "新兵"
 var col := 0
@@ -57,31 +58,34 @@ var icon := ""               # 棋子图标路径（res://...，叠在圆形 tok
 # 第一层属性面板（详见 docs/模块_战斗_设计.md「第一层属性」）。
 # 这些是“基础值/上限”，默认值可为 0（面板 + 修正）；当前 turn 的剩余量是运行时状态，见下。
 var stats := {
-	# 生存
-	"HP_max": 15, "HP": 15,
+	# 生存（🔒 §10.6 HP 重基：基准 40、种族成长曲线每级 +1——"变肉但没变很肉"）
+	"HP_max": 40, "HP": 40,
 	"armor_max": 0, "armor": 0,   # 护甲值（承伤池，来自防具，默认 0）
 	# 行动
 	"AP_max": 2,                  # AP 上限：每 turn 开始刷新到此值（行动经济基础 2）
 	"move": 6,                    # 移动力：一次「移动动作」（花 1 AP）获得的移动点数
-	"speed": 5,                   # 速度：出手顺序（大→小；同速玩家优先）
+	"speed": 0,                   # 速度面板（装备/buff 修正落点）；回合序＝speed+灵活（🔒 §10.6，读 initiative()）
 	"sight": 5,                   # 视野半径：能看多远（六边形距离）；被 LOS 裁剪。夜/天气等环境挂修正。见 docs/感知系统.md
 	# 进攻 / 防御（默认=人类基线，与 data/races.json human 一致；武器/熟练度/perk 经修正管线叠加）
-	"atk": 2.5,                   # 攻击面板（🔒 攻击来自武器：底值极低，主要由武器 mod 提供）
+	"atk": 0,                     # 攻击面板（🔒 §10.4 攻击全来自武器：人底 0，徒手数值在拳脚条目）
 	"atk_eff": 100,              # 攻击效能(%)：最终增伤乘数层，基线 100
 	"def_eff": 100,              # 防御效能(%)：最终减伤乘数层，基线 100
-	"acc": 35,                    # 命中
-	"eva": 5,                     # 闪避
-	"crit_rate": 2.5,             # 暴击率(%)
-	"crit_dmg": 160,              # 暴击威力(%)，未暴击=100
-	"block_rate": 1,              # 格挡率(%)
-	"block_power": 1,             # 格挡性能(%)
-	# 抗性四轨 🔒（docs/模块_属性成长_设计.md §5）：抗性=百分比减伤（人/甲分算）；强韧=异常豁免掷（防具永不提供）
+	"acc": 0,                     # 命中面板＝武器侧承载（武器 mods 落点）；人身命中＝技巧（🔒 §10.6 命中=武器命中+技巧−闪避−灵活）
+	"eva": 0,                     # 闪避面板＝修正落点；人身闪避＝灵活（同上）
+	"crit_rate": 0,               # 暴击率(%)：无人身底率 🔒——暴击＝招式/武器 + 技巧×0.5 − 对方运气
+	"crit_dmg": 160,              # 暴击威力(%)＝全招式默认值（🔒 归招式），未暴击=100
+	"block_rate": 0,              # 格挡率(%)：人底 0 🔒 §10.3——纯物品承载（盾天生激活/武器须格挡域）
+	"block_power": 0,             # 格挡性能(%)：同上
+	# 抗性四轨 🔒（docs/模块_属性成长_设计.md §5）：抗性=百分比减伤（人/甲分算）；强韧=异常豁免掷（防具永不提供＋等级自动曲线）
 	"res_phys": 0,                # 物理抗性(%)：全部物理伤害
 	"res_nature": 0,              # 自然抗性(%)：全部元素伤害（含神圣）
-	"will_fort": 0,               # 意志强韧(%)：非物质异常豁免（眩晕/恐惧/混乱…）
-	"body_fort": 0,               # 肉体强韧(%)：物质异常豁免（寒冷/麻痹/流血…）
-	# 加点属性 🔒（模块_属性成长_设计.md §10.6 加点轨：默认 0、不随等级自动涨；技巧/灵活/运气 后续批次）
-	"resolve": 0,                 # 决心：初始士气 +2/点；每次士气损失抵消 1/点（单次损失保底 1）
+	"will_fort": 0,               # 意志强韧(%)：非物质异常豁免（眩晕/恐惧/混乱…）；每级 +2（种族 growth）
+	"body_fort": 0,               # 肉体强韧(%)：物质异常豁免（寒冷/麻痹/流血…）；每级 +2（种族 growth）
+	# 加点四属性 🔒（§10.6 加点轨：不随等级自动涨、c 节点四选二；人类底值＝技巧10/灵活10/运气5/决心0）
+	"finesse": 10,                # 技巧：等额加进命中；暴击率 +0.5%/点（加点 +2/次）
+	"agility": 10,                # 灵活：战斗速度＝灵活；闪避＝灵活（加点 +1/次；防具减灵活、防具域缓解）
+	"luck": 5,                    # 运气：受击时压低对方暴击率（等额）；全 d20 检定补正（加点 +1/次）
+	"resolve": 0,                 # 决心：初始士气 +2/点；每次士气损失抵消 1/点（单次损失保底 1）（加点 +1/次）
 }
 
 # —— 运行时回合状态（不是面板属性；每 turn 开始重置）——
@@ -133,29 +137,48 @@ var ai_aggroed := false
 static func round1(v: float) -> float:
 	return round(v * 10.0) / 10.0
 
+const BLOCK_MAX_KEYS := ["block_rate", "block_power"]   # 装备来源取高聚合的键（🔒 §10.3：只用一件器械格挡）
+
+# 修正对象是否生效（🔒 §10.3 条件 mod 基建）：`requires_prof` 字段＝须装载指定技艺域才计入
+# （首例＝武器格挡须装载「格挡」域；triple_vs 等条件修正将来同走此口）。无字段＝无条件生效。
+func _mod_active(m: Dictionary) -> bool:
+	var req := str(m.get("requires_prof", ""))
+	return req == "" or prof_slots.has(req)
+
 # 有效属性（保留 1 位小数）= 基础面板 + 修正：base + Σflat + base×Σpct%。面板显示用这个。
 # 去重规则 🔒：同一 source（同名 buff/技能）对同一 (stat, op) 只算一次、**取高**（重复挂不叠加、数值不同取大）；
 # 不同 source 才互相累加。无 source 标识的修正各自独立计入。
+# 格挡两键特例 🔒（§10.3）：装备来源（equip:*）按**件**聚合——件内累加、件间取高（"只用一件器械格挡"，
+# 双持不翻倍、单手+盾时盾生效）；buff/perk/阶段奖励等非装备来源照常叠加其上。
 func effective_stat_f(key: String) -> float:
 	var base := float(stats.get(key, 0))
 	var flat := 0.0
 	var pct := 0.0
 	var flat_src := {}   # source → 该源对本 stat 的 flat 取高值
 	var pct_src := {}
+	var block_max := key in BLOCK_MAX_KEYS
+	var equip_item := {}   # 格挡键：iuid → 该件装备 flat 合计
 	for m in modifiers:
-		if str(m.get("stat", "")) != key:
+		if str(m.get("stat", "")) != key or not _mod_active(m):
 			continue
 		var v := float(m.get("value", 0))
 		var src := str(m.get("source", ""))
 		match str(m.get("op", "flat")):
 			"flat":
-				if src == "": flat += v
+				if block_max and src.begins_with("equip:"):
+					var iuid := src.get_slice(":", 1)
+					equip_item[iuid] = float(equip_item.get(iuid, 0.0)) + v
+				elif src == "": flat += v
 				else: flat_src[src] = maxf(flat_src.get(src, v), v)
 			"pct":
 				if src == "": pct += v
 				else: pct_src[src] = maxf(pct_src.get(src, v), v)
 	for s in flat_src: flat += flat_src[s]
 	for s in pct_src: pct += pct_src[s]
+	if not equip_item.is_empty():
+		var best := 0.0
+		for k2 in equip_item: best = maxf(best, float(equip_item[k2]))
+		flat += best
 	return round1(base + flat + base * pct / 100.0)
 
 # —— 效能层（修正三层的第三层 op:"eff"，乘算）——
@@ -168,7 +191,7 @@ func eff_mult(bucket: String) -> float:
 	var by_src := {}
 	var prod := 1.0
 	for m in modifiers:
-		if str(m.get("op", "")) != "eff" or str(m.get("stat", "")) != bucket:
+		if str(m.get("op", "")) != "eff" or str(m.get("stat", "")) != bucket or not _mod_active(m):
 			continue
 		var v := float(m.get("value", 0))
 		var src := str(m.get("source", ""))
@@ -183,7 +206,7 @@ func eff_reduce(bucket: String) -> float:
 	var by_src := {}
 	var prod := 1.0
 	for m in modifiers:
-		if str(m.get("op", "")) != "eff" or str(m.get("stat", "")) != bucket:
+		if str(m.get("op", "")) != "eff" or str(m.get("stat", "")) != bucket or not _mod_active(m):
 			continue
 		var v := float(m.get("value", 0))
 		var src := str(m.get("source", ""))
@@ -214,18 +237,50 @@ func morale_band() -> int:
 func morale_band_name() -> String:
 	return MORALE_BANDS[morale_band()]
 
-# 获得经验（战后结算/击杀归属）：升级循环。返回升了几级。
-# 🔒 属性重做（docs/模块_属性成长_设计.md §1）：等级零数值——属性点/技能点已废除；
-# 升级的意义=技艺槽（1/5/9/13/17）与职业树层（3/6/9/12/15/18）的解锁节拍。
+# —— 等级三轨 🔒（模块_属性成长_设计.md §10.1/§10.6，2026-07-07 数值定案）——
+const LEVEL_CAP := 15                          # 15 级毕业（三轨轮转：天赋 1/3/6/9/12/15·技能槽 1/4/7/10/13·加点 2/5/8/11/14）
+const ATTR_PICK_LEVELS := [2, 5, 8, 11, 14]    # c 节点：每到一级得 2 次加点（四选二——同节点两次应选不同属性，约束在 UI 层）
+const ATTR_PICK_INC := {"finesse": 2, "agility": 1, "luck": 1, "resolve": 1}   # 每次加点增量 🔒
+var attr_picks := 0                            # 待分配加点次数（战后结算；加点 UI 后到，先记账）
+
+# 获得经验（🔒 战后结算：战中静默记录、BattleIO 回写主档后才走到这里）：升级循环。返回升了几级。
+# 每级＝种族自动轨成长（growth 块：HP 小幅+双强韧固定）；c 节点另得加点次数；15 级封顶。
 func gain_exp(n: int) -> int:
 	var levels := 0
 	exp += maxi(0, n)
-	while exp >= exp_max and exp_max > 0:
+	while exp >= exp_max and exp_max > 0 and level < LEVEL_CAP:
 		exp -= exp_max
 		level += 1
 		levels += 1
 		exp_max = int(ceil(exp_max * 1.2))   # 占位曲线（数值层后调）
+		_apply_level_growth()
+		if level in ATTR_PICK_LEVELS:
+			attr_picks += 2
+	if level >= LEVEL_CAP:
+		exp = mini(exp, exp_max)   # 毕业：经验冻结在条内，不再滚级
 	return levels
+
+# 种族自动轨成长 🔒（§10.6）：growth 块逐键落面板；HP 上限涨多少、当前 HP 顺势补多少（升级回气）。
+func _apply_level_growth() -> void:
+	var g = RaceDB.get_race(race_id).get("growth", {})
+	if typeof(g) != TYPE_DICTIONARY:
+		return
+	for k in g:
+		stats[str(k)] = round1(float(stats.get(str(k), 0)) + float(g[k]))
+	if g.has("HP_max") and stats.has("HP"):
+		stats["HP"] = round1(float(stats.get("HP", 0)) + float(g["HP_max"]))
+
+# 花 1 次待分配加点、给指定属性固定增量（战后 UI 消费）。成功 true。
+func apply_attr_pick(key: String) -> bool:
+	if attr_picks <= 0 or not ATTR_PICK_INC.has(key):
+		return false
+	stats[key] = round1(float(stats.get(key, 0)) + float(ATTR_PICK_INC[key]))
+	attr_picks -= 1
+	return true
+
+# 回合序战斗速度 🔒（§10.6）：＝速度面板（装备/buff 修正落点，人底 0）＋ 灵活。出手排序/UI 显示都读这里。
+func initiative() -> int:
+	return int(round(effective_stat_f("speed") + effective_stat_f("agility")))
 
 # 能否装备：①特性限制（如「天性武者」no_weapon → 不能装带 attack 的武器；**天生武器 innate 豁免**）②物品 requires 的 tag 须全有。
 func can_equip(item: Dictionary) -> bool:
@@ -281,19 +336,37 @@ func equip_instance(iuid: int, target_slot := "") -> bool:
 	for s in slots:
 		if equipment.has(s):
 			var occ = ItemInstances.view(int(equipment[s]))
-			if occ != null and occ.get("innate", false):
-				return false   # innate 占槽不可顶（unequip 对 innate 早退，硬写会泄漏其烘焙修正）
+			if occ != null and occ.get("innate", false) and not occ.get("natural", false):
+				return false   # 锁定型天生武器（比路兹爪）占槽不可顶；默认型（natural 拳脚）可被顶替 🔒 §10.4
 	for s in slots:
 		if equipment.has(s):
-			unequip(s)
+			_displace_slot(s)
 	for s in slots:
 		equipment[s] = iuid
 	_apply_item_mods(item, iuid)
 	return true
 
+# 顶替占槽者（equip_instance 内部用）：默认型天生武器＝收回肉身（摘修正+清槽+销毁实例，空位时再造）；
+# 普通装备＝正常卸下（不销毁、将来进背包）——但**不**触发拳脚自动回位（新武器马上落座）。
+func _displace_slot(slot: String) -> void:
+	var iuid: int = int(equipment.get(slot, 0))
+	var item = ItemInstances.view(iuid)
+	if item != null and item.get("natural", false):
+		remove_modifiers_by_source_prefix("equip:%d:" % iuid)
+		var to_clear := []
+		for s in equipment:
+			if int(equipment[s]) == iuid:
+				to_clear.append(s)
+		for s in to_clear:
+			equipment.erase(s)
+		ItemInstances.destroy(iuid)
+	else:
+		unequip(slot, false)
+
 # 卸下某槽的物品（双手武器从任一槽卸都连带清两槽 + 去掉它的修正，按实例 iuid 配对）。
-# 天生武器（innate）永不卸下/缴械——直接忽略。卸下不销毁实例（将来进背包）。
-func unequip(slot: String) -> void:
+# 天生武器（innate，含拳脚）不可手动卸下/缴械——直接忽略。卸下不销毁实例（将来进背包）。
+# auto_natural：卸空主手后拳脚自动回位（🔒 §10.4）；equip_instance 顶替路径传 false（新武器马上落座）。
+func unequip(slot: String, auto_natural := true) -> void:
 	if not equipment.has(slot):
 		return
 	var iuid: int = int(equipment[slot])
@@ -307,6 +380,18 @@ func unequip(slot: String) -> void:
 			to_clear.append(s)
 	for s in to_clear:
 		equipment.erase(s)
+	if auto_natural and to_clear.has("main_hand"):
+		ensure_natural_weapon()
+
+# 天生武器入位 🔒（§10.4 实装·可替换）：主手空且种族配有 natural_weapon → 造实例装上。
+# 生成时（UnitFactory.make_unit）与卸下主手武器后（unequip）两处调用；race 空/未配＝no-op
+# （无种族的裸单位退回 UNARMED_ATTACK 常量兜底）。
+func ensure_natural_weapon() -> void:
+	if equipment.has("main_hand"):
+		return
+	var nid := str(RaceDB.get_race(race_id).get("natural_weapon", ""))
+	if nid != "":
+		equip(nid)
 
 # 收编迁移用（WorldState._adopt_equipment）：装备实例换 uid——equipment 槽值 + 修正 source 前缀同步重写。
 func remap_equip_uid(old_uid: int, new_uid: int) -> void:
@@ -320,8 +405,8 @@ func remap_equip_uid(old_uid: int, new_uid: int) -> void:
 		if src.begins_with(oldp):
 			m["source"] = newp + src.substr(oldp.length())
 
-# 无武器时的基础攻击（徒手）；装了武器则用其 attack skill（兑现“换武器=换攻击”）。
-# unarmed tag：喂养「体术」技艺（ProfDB match_tags）。
+# 徒手兜底常量：🔒 §10.4 后拳脚＝weapons.json 数据条目（实装占主手），正常单位打不到这里；
+# 仅无种族/无天生武器配置的裸单位（编辑器草稿、测试）与快照缺实例时兜底。unarmed tag：喂养徒手系技艺。
 const UNARMED_ATTACK := {
 	"name": "徒手", "coeff": 1.0, "range": 1, "ap_cost": 1,
 	"damage_kind": "physical", "tags": ["unarmed"], "aoe": null,
@@ -487,10 +572,10 @@ func reset_skill_charges() -> void:
 
 # ============ 技艺（熟练度域）🔒 模块_属性成长_设计.md §2 ============
 
-# 技艺槽容量：等级 1/5/9/13/17 各解锁 1 格（共 5，暂定可调 🔒 §1）。等级唯一的解锁节拍职责之一。
+# 技艺槽容量：等级 1/4/7/10/13 各解锁 1 格（共 5；🔒 §10.1 十五级三轨轮转 2026-07-07 定案）。
 func prof_slot_capacity() -> int:
 	var c := 1
-	for lv in [5, 9, 13, 17]:
+	for lv in [4, 7, 10, 13]:
 		if level >= int(lv):
 			c += 1
 	return c

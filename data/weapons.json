@@ -28,6 +28,11 @@
       },
       {
         "op": "flat",
+        "stat": "acc",
+        "value": 30
+      },
+      {
+        "op": "flat",
         "stat": "res_nature",
         "value": 10
       }
@@ -72,6 +77,11 @@
         "op": "flat",
         "stat": "atk",
         "value": 9.5
+      },
+      {
+        "op": "flat",
+        "stat": "acc",
+        "value": 15
       }
     ],
     "name": "比路兹的翼爪",
@@ -111,6 +121,11 @@
         "op": "flat",
         "stat": "atk",
         "value": 9.5
+      },
+      {
+        "op": "flat",
+        "stat": "acc",
+        "value": 15
       }
     ],
     "name": "比路兹的足爪",
@@ -145,14 +160,14 @@
     "innate": true,
     "mods": [
       {
-        "op": "pct",
+        "op": "flat",
         "stat": "atk",
-        "value": 3
+        "value": 9
       },
       {
-        "op": "pct",
+        "op": "flat",
         "stat": "acc",
-        "value": 3
+        "value": 32
       }
     ],
     "name": "戴斯蒙的狼爪",
@@ -192,7 +207,7 @@
       {
         "op": "flat",
         "stat": "acc",
-        "value": 5
+        "value": 30
       }
     ],
     "name": "长剑",
@@ -203,6 +218,45 @@
       "melee",
       "weapon_sword",
       "one_handed"
+    ],
+    "two_handed": false
+  },
+  {
+    "attack": {
+      "ap_cost": 1,
+      "coeff": 1,
+      "damage_kind": "physical",
+      "icon": "",
+      "name": "徒手",
+      "range": 1,
+      "tags": [
+        "unarmed",
+        "single_target"
+      ]
+    },
+    "icon": "",
+    "id": "unarmed_fists",
+    "innate": true,
+    "natural": true,
+    "mods": [
+      {
+        "op": "flat",
+        "stat": "atk",
+        "value": 2.5
+      },
+      {
+        "op": "flat",
+        "stat": "acc",
+        "value": 25
+      }
+    ],
+    "name": "拳脚",
+    "requires": [],
+    "slot": "main_hand",
+    "tags": [
+      "common",
+      "unarmed",
+      "melee"
     ],
     "two_handed": false
   },

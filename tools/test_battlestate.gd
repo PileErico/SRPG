@@ -143,7 +143,7 @@ func _initialize() -> void:
 	# —— 6) 地块效果惰性接入（森林掩蔽→守方闪避效能，仅地面态；命中/因子对拍）——
 	var atk = UnitFactory.make_unit(protos[0], "player", 0, 1)
 	var tgt = UnitFactory.make_unit(protos[0], "enemy", 4, 4)
-	atk.stats["acc"] = 100   # 命中基数拉高、避开 5/95 钳制以露出 ×0.85 差异
+	atk.stats["acc"] = 40   # 中段命中基数（含爪 mods+技巧后 ~80、减守方 30 → 50）：避开 5/95 钳制以露出 ×0.85 差异
 	tgt.stats["eva"] = 20
 	var hc_plain := s._hit_chance(atk, tgt)   # 目标站草原（无地块效果）
 	s.tiles[4][4] = {"terrain": "forest", "variant": "forest"}   # (4,4) 改森林、目标站其上
