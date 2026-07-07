@@ -1807,7 +1807,10 @@ func _ranges_cached(u) -> Dictionary:
 		stamp.append(x.get_instance_id())
 		stamp.append(x.col)
 		stamp.append(x.row)
-	var key := [u.get_instance_id(), u.move_allowance(), round_num, stamp]
+	# 键含被预览单位自身 tags 指纹＋武器射程（对抗审查修复：起飞/降落换 tag、换武器改射程都不动坐标——
+	# 少这两维会命中过期缓存，飞行 tag_cost/深水通行/攻击圈全会算错）
+	var key := [u.get_instance_id(), u.move_allowance(), int(u.basic_attack().get("range", 1)),
+		u.tags.duplicate(), round_num, stamp]
 	if _range_memo.get("key", null) != key:
 		_range_memo = {"key": key, "r": _compute_ranges(u)}
 	return _range_memo["r"]

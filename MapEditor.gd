@@ -2669,6 +2669,8 @@ func primary_paint(col: int, row: int) -> void:
 			road_paint_cell(col, row)
 	elif current_layer == "location":
 		_loc_paint(col, row)
+	elif current_layer == "trigger":
+		pass   # 触发器层画布无绘制语义（编辑走左栏表单）——防误触地形工具（油漆桶下尤其危险）
 	else:
 		match terrain_tool:
 			"fill":
