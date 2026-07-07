@@ -3,7 +3,7 @@ extends RefCounted
 ## **快照进 / 结果出 🔒**：战斗操作 roster 的序列化副本，campaign 只被 apply_result 显式回写——
 ## 根治「双所有权」（沙盒 exit_battle 的 init_vitals 回满只影响副本，campaign 战损不再被抹）。
 ## BattleSetup＝纯数据可序列化：将来战前选人 UI / 可保存预设队伍 / 食物 provisions 都长在它上面
-## （铺垫见 docs/情报与烹饪系统.md §3.1；M5 只留 provisions 键位、不消费）。
+## （铺垫见 docs/模块_营地后勤.md §3.1；M5 只留 provisions 键位、不消费）。
 ## 经验/重伤数值全部占位（细则待需求 §2.3 与数值层）。
 
 const WorldState := preload("res://WorldState.gd")
@@ -94,7 +94,7 @@ static func apply_result(ws, result: Dictionary) -> void:
 					u.slot_prof(str(pid), true)
 			for pid in u.prof_slots:
 				u._apply_prof_mods(str(pid))
-	# 击杀统计累计（按敌方原型；情报系统「战后按击杀解锁」的输入源，见 docs/情报与烹饪系统.md）
+	# 击杀统计累计（按敌方原型；情报系统「战后按击杀解锁」的输入源，见 docs/模块_营地后勤.md）
 	for k in result.get("kills", []):
 		var pid := str(k.get("proto_id", ""))
 		if pid != "" and str(k.get("faction", "")) in ["enemy", "neutral"]:

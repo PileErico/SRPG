@@ -36,7 +36,7 @@ const HEADER_H := 56                   # 抬头/拖动区高度（覆盖标题�
 
 const STAT_GREEN := Color("#6FCF6F")   # 属性被修正调高
 const STAT_RED := Color("#E07A5A")     # 属性被修正调低
-# 稀有度 → 槽位边框色（见 docs/标签词典.md）
+# 稀有度 → 槽位边框色（见 docs/表单-标签.md）
 # 稀有度→颜色改从 TagDB 单一数据源读（见 _rarity_color_of），不再在此硬编码副本。
 
 # —— 拖动状态（非模态悬浮窗）——

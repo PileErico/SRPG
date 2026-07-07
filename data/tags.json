@@ -76,6 +76,10 @@
   {"id": "slashing", "cn": "斩击", "cat": "damage", "status": "in_use"},
 
   {"id": "bleeding", "cn": "流血类", "cat": "effect", "status": "in_use", "desc": "回合末按最大生命%掉血；可被清流血类技能整批移除"},
+  {"id": "incapacitated", "cn": "失能", "cat": "effect", "status": "in_use", "desc": "眩晕/麻痹等：该单位回合直接跳过（不行动即不行使 ZOC/借机）；Unit.has_state 消费"},
+  {"id": "silenced", "cn": "失语", "cat": "effect", "status": "in_use", "desc": "禁用带 verbal tag 的能力；Unit.has_state 消费"},
+
+  {"id": "verbal", "cn": "言语", "cat": "skill_type", "status": "in_use", "desc": "该能力需发声（鼓舞/号令类）——失语 silenced 期间不可用（决策19 正字为 tag）"},
 
   {"id": "fort_will", "cn": "意志系", "cat": "effect_dim", "status": "in_use", "desc": "异常维度：非物质异常（眩晕/恐惧/混乱…）——由意志强韧 will_fort 豁免（遭受时+每回合各掷一次，成功=免疫/挣脱）"},
   {"id": "fort_body", "cn": "肉体系", "cat": "effect_dim", "status": "in_use", "desc": "异常维度：物质异常（寒冷/麻痹/流血…）——由肉体强韧 body_fort 豁免；不带维度 tag 的效果（一切 buff/纯机制效果）不参与豁免"},

@@ -32,7 +32,7 @@ const SaveIO := preload("res://SaveIO.gd")           # 战役战斗结算后自�
 const DialogueUI := preload("res://DialogueUI.gd")   # 通用对话模块：战场内触发（do: dialogue，M8）
 const FactionDB := preload("res://FactionDB.gd")     # 派系/声望：战场内触发器改声望（do: add_rep，M9；纯沙盒无档=跳过）
 const MapIO := preload("res://MapIO.gd")   # 地图读 / 写单一入口（与 MapEditor 共用）
-const BattleState := preload("res://BattleState.gd")   # 战斗模型层（纯数据+规则；见 docs/解耦规划.md）
+const BattleState := preload("res://BattleState.gd")   # 战斗模型层（纯数据+规则；见 docs/架构.md「战斗侧」）
 # 战斗地图：默认与地图编辑器共享同一张图（编辑器改 → 这里读到）。
 # 实际打开哪张：优先 SandboxConfig.map_path（选地图界面传入），空则用此默认；缺失/损坏回退全草原。
 const MAP_PATH := "res://maps/sandbox.json"

@@ -532,7 +532,7 @@ func _edge_from_pair(p) -> Array:
 # 地点旗帜（大地图地点 / 编辑器地点层共用）：底座 + 旗杆 + 旗面 + 名字（缩放够大才画字）
 # 地点标记（大地图地点 / 编辑器地点层共用）：按类型画矢量线稿符号（LocationMarker）+ 名字。
 # active=false（据点已肃清）→ 灰显。icon 非空且能载入 → **优先画位图**（将来引入更精细素材的替换口：
-# 位图按 token 尺寸居中绘，锐/糊由画布 texture_filter 决定，源分辨率建议见 docs/地块美术升级.md）；否则回退矢量。
+# 位图按 token 尺寸居中绘，锐/糊由画布 texture_filter 决定，源分辨率建议见 docs/模块_地图美术.md）；否则回退矢量。
 func draw_location_marker(c2: Vector2, type_id: String, base_col: Color, loc_label: String, active := true, icon := "") -> void:
 	var col := base_col if active else Color(0.52, 0.52, 0.55)
 	var tex: Texture2D = TextureCache.get_tex(icon) if icon != "" else null

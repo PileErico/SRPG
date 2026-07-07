@@ -1,5 +1,5 @@
 extends RefCounted
-## tag 注册表：读 data/tags.json（标签词典 docs/标签词典.md 的机器可读版），按 id 查。
+## tag 注册表：读 data/tags.json（标签词典 docs/表单-标签.md 的机器可读版），按 id 查。
 ## 单一数据源——替代各处硬编码的 TAG_CN / RARITY_COLORS（消除手动同步漂移）；tag 统一判断（项目核心理念）。
 ## 用法：const TagDB := preload("res://TagDB.gd")，再 TagDB.cn(id) / TagDB.color(id) / TagDB.by_cat(cat)。
 ## 字段：{id, cn, cat, status, color?, desc?}。其中 id/cn/cat/color 有功能性，desc/status 仅参考。

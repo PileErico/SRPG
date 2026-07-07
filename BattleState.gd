@@ -1,5 +1,5 @@
 extends RefCounted
-## BattleState：战斗模型层（纯数据 + 规则，非 Node）——解耦规划 Phase 1~3（见 docs/解耦规划.md）。
+## BattleState：战斗模型层（纯数据 + 规则，非 Node）——2026-07-02 解耦 Phase 1~3（架构见 docs/架构.md「战斗侧」）。
 ## 持有战斗领域状态（棋盘/单位/回合/视野/环境/区域/触发器/击杀账）+ 纯查询/变更方法；
 ## **不认识 canvas / UI / 场景树**——日志、飘字、重绘、回合编排全留宿主（Sandbox）。
 ## Sandbox 经同名薄访问器属性委托到这里（画布 editor.* 契约、测试直调签名零破坏）。
@@ -860,7 +860,7 @@ func _handle_deaths_state() -> Dictionary:
 			entered_door.append(u)
 			continue
 		dead.append(u)   # 无死门资格（常规敌兵）：原路径即死
-	# 击杀记录（经验结算 + 情报解锁共用一份；铺垫见 docs/情报与烹饪系统.md §3.1）
+	# 击杀记录（经验结算 + 情报解锁共用一份；铺垫见 docs/模块_营地后勤.md §3.1）
 	for u in dead:
 		_battle_kills.append({"proto_id": u.proto_id, "victim_uid": u.uid, "faction": u.faction,
 			"by_uid": (u.last_hit_by.uid if u.last_hit_by != null else 0)})
@@ -985,7 +985,7 @@ func _ai_nearest_hostile(unit):
 			best = u
 	return best
 
-# ============ 序列化（战中 suspend 地基；见 docs/解耦规划.md §3 硬前置）============
+# ============ 序列化（战中 suspend 地基；约定 🔒 见 docs/架构.md「战中快照约定」）============
 # 白名单原则：派生态不存——_vis_visible / aggro_regions·_all_region_cells·_deploy_cells（restore 重算），
 # _vis_seen＝唯一不可重建的历史必存；_time_sight_mult 随存（模型自洽），重入场景时宿主仍应重挂环境叠层。
 # 单位主键＝快照内「单位池下标」：uid 在沙盒/地图预置单位恒 0 且可重复，不能当战斗内主键 🔒。
