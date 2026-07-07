@@ -89,8 +89,8 @@ var ap := 0           # 本 turn 剩余 AP
 var move_points := 0  # 本 turn 剩余移动点（买移动动作时按 move 注入，可分批花、零头作废）
 
 # —— 士气（战斗运行时态，随战中快照走、不入档；🔒 模块_属性成长_设计.md §10.7）——
-# 0~50 五档（档宽 10）、常态 25、无溃逃；初始 = 25 + 2×决心（init_vitals 时定）。
-# v1 只有数值与事件（变化入口＝BattleState._morale_add）；档位战斗判定（±命中/伤害）延后批次。
+# 0~50 五档（档界 0~14/15~24/25~34/35~44/45~50，常态 25＝稳定下缘）、无溃逃；初始 = 25 + 2×决心（init_vitals 时定）。
+# v1 只有数值与事件（变化入口＝BattleState._morale_add）；档位战斗判定（±命中/伤害）延后批次；五档图标 UI＝状态面板侧。
 const MORALE_MAX := 50
 const MORALE_BASELINE := 25
 const MORALE_BANDS := ["崩溃", "动摇", "稳定", "高昂", "狂热"]
@@ -207,9 +207,13 @@ func init_vitals() -> void:
 	stats["armor"] = effective_stat("armor_max")
 	morale = clampi(MORALE_BASELINE + 2 * effective_stat("resolve"), 0, MORALE_MAX)   # 🔒 §10.7
 
-# 当前士气档位 0~4（崩溃/动摇/稳定/高昂/狂热；50 归入狂热）与档位名。
+# 当前士气档位 0~4（崩溃/动摇/稳定/高昂/狂热；档界 🔒 0~14/15~24/25~34/35~44/45~50）与档位名。
 func morale_band() -> int:
-	return clampi(morale / 10, 0, 4)
+	if morale >= 45: return 4
+	elif morale >= 35: return 3
+	elif morale >= 25: return 2
+	elif morale >= 15: return 1
+	return 0
 
 func morale_band_name() -> String:
 	return MORALE_BANDS[morale_band()]
