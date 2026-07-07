@@ -1201,8 +1201,7 @@ func _ai_step_toward(unit, target) -> bool:
 	for cell in best:
 		if cell == start:
 			continue
-		if _occupied_by_other(cell.x, cell.y, unit):
-			continue
+		# （占位格无需再查：_dijkstra 的 best 本就不含他人占位格——预计算 occupied 集合直接跳过）
 		var dd := _hex_dist(cell, tcell)
 		var cc := int(best[cell])
 		if dd < pick_dist or (dd == pick_dist and cc < pick_cost):

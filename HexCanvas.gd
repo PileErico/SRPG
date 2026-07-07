@@ -209,9 +209,10 @@ func _map_bounds() -> Rect2:
 	return Rect2(mn, mx - mn)
 
 # 把某格移到画布正中（保持当前缩放）。world = view_offset + w*zoom，令其 = 画布中心。
+# 纯视图变换 → 走 _apply_view（GPU 变换，与平移/缩放同路径）；原 refresh_static 全图重烘（≈93ms）是浪费。
 func center_on_cell(col: int, row: int) -> void:
 	view_offset = size * 0.5 - hex_center(col, row) * view_zoom
-	refresh_static()
+	_apply_view()
 
 # ---- 六边形几何（世界坐标，未经视图变换）----
 
@@ -220,11 +221,21 @@ func hex_center(col: int, row: int) -> Vector2:
 	var y := row_step * (row + 0.5 * (col % 2)) + hex_h * 0.5
 	return Vector2(x, y)
 
-func hex_corners(center: Vector2) -> PackedVector2Array:
-	var pts := PackedVector2Array()
+# 六角偏移常量（角度恒定 → 三角函数只算一次；hex_corners 是迷雾/范围/ZOC 每帧每格热路径）
+static var _CORNER_OFF: PackedVector2Array = _make_corner_off()
+
+static func _make_corner_off() -> PackedVector2Array:
+	var off := PackedVector2Array()
 	for i in 6:
 		var ang := deg_to_rad(60.0 * i)
-		pts.append(center + Vector2(cos(ang), sin(ang)) * HEX_SIZE)
+		off.append(Vector2(cos(ang), sin(ang)) * HEX_SIZE)
+	return off
+
+func hex_corners(center: Vector2) -> PackedVector2Array:
+	var pts := PackedVector2Array()
+	pts.resize(6)
+	for i in 6:
+		pts[i] = center + _CORNER_OFF[i]
 	return pts
 
 # 相邻格对 (a,b) 的共享边两端点（世界坐标）。任意相邻方向通用：

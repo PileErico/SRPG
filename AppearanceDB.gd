@@ -22,14 +22,27 @@ static var _looks_override := ""
 static func _looks_path() -> String:
 	return _looks_override if _looks_override != "" else LOOKS_PATH
 
-# 外观配方存储（proto_id → recipe {parts,palettes}）——即时读写，无缓存（仿 all_prototypes）。
+# 外观配方存储（proto_id → recipe {parts,palettes}）。
+# get_look 读缓存（性能 2026-07-07）：它是棋子渲染热路径（SandboxCanvas 每帧每单位查配方），
+# 原「即时读盘」＝每帧磁盘 I/O＋JSON 解析。缓存按**路径**键失效（_looks_override 测试注入裸赋值切换也安全）；
+# 写口 save_look 直刷缓存（工坊即改即见不变）；外部改文件走 reload_data（DB 铁律）。all_looks 低频维持直读。
+static var _look_cache := {}
+static var _look_cache_path := ""
+
 static func get_look(id: String):
-	return _read_doc(_looks_path()).get(id)
+	var p := _looks_path()
+	if _look_cache_path != p:
+		_look_cache = _read_doc(p)
+		_look_cache_path = p
+	return _look_cache.get(id)
 
 static func save_look(id: String, recipe: Dictionary) -> bool:
-	var d := _read_doc(_looks_path())
+	var p := _looks_path()
+	var d := _read_doc(p)
 	d[id] = recipe
-	return _write_doc(_looks_path(), d)
+	_look_cache = d
+	_look_cache_path = p
+	return _write_doc(p, d)
 
 static func all_looks() -> Dictionary:
 	return _read_doc(_looks_path())
@@ -208,6 +221,8 @@ static func reload_data() -> void:
 	_by_part.clear()
 	_by_pal.clear()
 	_loaded = false
+	_look_cache = {}
+	_look_cache_path = ""
 	_ensure()
 
 # —— 内部 ——

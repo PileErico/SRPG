@@ -64,10 +64,12 @@ func _drop_data(at_position: Vector2, data) -> void:
 	if _in_bounds(off):
 		editor.deploy_drop(off.x, off.y, data)
 
-# 鼠标换格：移动模式即时重建路径线；任何时候都更新「悬停单位的范围预览」
+# 鼠标换格：移动模式即时重建路径线；任何时候都更新「悬停单位的范围预览」。
+# 同格内微动（每个 motion 事件都进这里）＝零工作：路径重建/范围预览/动态层重绘全免（性能 2026-07-07）。
 func _update_hover(screen_pos: Vector2) -> void:
+	var prev := hover_cell
 	super(screen_pos)
-	if editor == null:
+	if editor == null or hover_cell == prev:
 		return
 	if editor.move_mode:
 		editor.update_hover_path(hover_cell)
@@ -97,15 +99,16 @@ func _draw() -> void:
 	if editor.move_mode:
 		_draw_move_path()
 	_draw_hover_unit()   # 行动顺序槽悬停 → 高亮该单位所在格（在单位 token 之下）
-	# 按屏幕 y 升序画：后排(y 小)先画、前排(y 大)后画——前面的单位压住后面的（精灵是从脚下往上立的）
+	# 按屏幕 y 升序画：后排(y 小)先画、前排(y 大)后画——前面的单位压住后面的（精灵是从脚下往上立的）。
+	# 排序键预先算好（原比较器内每次比较双调 hex_center——每帧 O(n log n) 次三角函数）。
 	var _vis := []
 	for u in editor.units:
 		if editor._unit_hidden_by_fog(u):
 			continue     # 迷雾里的敌人不渲染（看不到）
-		_vis.append(u)
-	_vis.sort_custom(func(a, b): return hex_center(a.col, a.row).y < hex_center(b.col, b.row).y)
-	for u in _vis:
-		_draw_unit(u)
+		_vis.append([hex_center(u.col, u.row).y, u])
+	_vis.sort_custom(func(a, b): return a[0] < b[0])
+	for e in _vis:
+		_draw_unit(e[1])
 
 # 把一组格按给定色填充（范围层通用）
 func _draw_cells(cells: Dictionary, color: Color) -> void:
