@@ -1,5 +1,5 @@
 extends RefCounted
-## 大地图动态单位模拟器（🟡 v1 框架；DB 范式：preload + static，无 class_name）。设计 → docs/大地图动态单位.md。
+## 大地图动态单位模拟器（🟡 v1 框架；DB 范式：preload + static，无 class_name）。设计 → docs/模块_大地图_动态单位.md。
 ## 核心语义 🔒对齐：**玩家移动＝世界回合**——时间只随玩家活动流逝（M2），本模块只在 WorldClock 推进后被喂小时数；
 ## 玩家不动，世界单位不动。每单位按 hours_per_cell 折算步数（budget 累积制，跨 tick 不丢零头）。
 ## 职责：① ensure_spawned＝按类型生成规则落初始单位（进 ws.world_units，随档）
