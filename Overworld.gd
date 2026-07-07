@@ -24,6 +24,7 @@ const LocationDB := preload("res://LocationDB.gd")   # 地点类型/服务注册
 const FactionDB := preload("res://FactionDB.gd")     # 派系/声望注册表（M9）
 const WorldSim := preload("res://WorldSim.gd")       # 大地图动态单位模拟（🟡 v1：玩家移动=世界回合）
 const WorldUnitDB := preload("res://WorldUnitDB.gd") # 动态单位类型注册表
+const MinHeap := preload("res://MinHeap.gd")         # 寻路优先队列（find_path；与 BattleState._dijkstra 共用实现）
 
 const MAP_PATH := "res://maps/overworld/world.json"
 const HOURS_PER_COST := 2    # 占位：1 点地形通行成本 ＝ 2 小时行程（数值层后调）
@@ -296,25 +297,24 @@ func find_path(from: Vector2i, to: Vector2i) -> Array:
 		return []
 	var best := {from: 0}
 	var came := {}
-	var open := [from]
+	var open = MinHeap.new()   # 二叉堆优先队列（2026-07-07 规模化；懒删除无 decrease-key）
+	open.push(0, from)
 	while not open.is_empty():
-		var idx := 0   # 简版优先队列：线性取最小（大地图尺寸下开销可忽略）
-		for i in open.size():
-			if best[open[i]] < best[open[idx]]:
-				idx = i
-		var cur: Vector2i = open[idx]
-		open.remove_at(idx)
+		var e: Array = open.pop()
+		var cur: Vector2i = e[1]
+		if int(e[0]) > int(best.get(cur, -1)):
+			continue   # 过期堆项：该格已有更优成本
 		if cur == to:
 			break
 		for nb in HexGrid.neighbors(cur):
 			var step := _move_cost_between(cur.x, cur.y, nb.x, nb.y)
 			if step < 0:
 				continue
-			var nc: int = best[cur] + step
-			if not best.has(nb) or nc < best[nb]:
+			var nc: int = int(best[cur]) + step
+			if not best.has(nb) or nc < int(best[nb]):
 				best[nb] = nc
 				came[nb] = cur
-				open.append(nb)
+				open.push(nc, nb)
 	if not came.has(to):
 		return []
 	var path := [to]

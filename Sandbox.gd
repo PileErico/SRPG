@@ -1797,6 +1797,22 @@ func _overlay(unit, reach: Dictionary, attack: Dictionary) -> Dictionary:
 	var zoc: Dictionary = {} if _is_friendly(unit) else _zoc_cells(unit)
 	return {"reach": reach, "attack": attack, "zoc": zoc, "move_color": mc, "atk_color": RANGE_ATTACK}
 
+# 范围预览 memo（性能 2026-07-07）：move 模式下每次悬停换格都重建 overlay，其中敌预览/悬停预览的
+# _compute_ranges＝全图 Dijkstra——按〔单位·预算·round·全盘面位置戳〕键缓存，键不变直接复用。
+# 盘面戳含所有单位坐标：任何人挪位/离场（改变占位与 ZOC）都自然失效；戳记 O(单位数) ≪ 全图 Dijkstra。
+var _range_memo := {}
+
+func _ranges_cached(u) -> Dictionary:
+	var stamp := []
+	for x in units:
+		stamp.append(x.get_instance_id())
+		stamp.append(x.col)
+		stamp.append(x.row)
+	var key := [u.get_instance_id(), u.move_allowance(), round_num, stamp]
+	if _range_memo.get("key", null) != key:
+		_range_memo = {"key": key, "r": _compute_ranges(u)}
+	return _range_memo["r"]
+
 # 重建画布要画的范围层（按当前模式 / 悬停 / Tab 状态）
 func _update_overlays() -> void:
 	range_overlays = []
@@ -1812,10 +1828,10 @@ func _update_overlays() -> void:
 		if show_enemy_preview:
 			var foe = _ai_nearest_hostile(selected_unit)   # 距离最近的敌方单位
 			if foe != null and not _unit_hidden_by_fog(foe):   # 迷雾里的敌人不预览
-				var r := _compute_ranges(foe)
+				var r := _ranges_cached(foe)
 				range_overlays.append(_overlay(foe, r["reach"], r["attack"]))
 	elif hover_range_unit != null and not _animating:
-		var r := _compute_ranges(hover_range_unit)
+		var r := _ranges_cached(hover_range_unit)
 		range_overlays.append(_overlay(hover_range_unit, r["reach"], r["attack"]))
 	if canvas != null:
 		canvas.queue_redraw()

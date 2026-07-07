@@ -11,7 +11,8 @@ const HexGrid := preload("res://HexGrid.gd")
 const TerrainDB := preload("res://TerrainDB.gd")
 const WorldState := preload("res://WorldState.gd")
 const EffectDB := preload("res://EffectDB.gd")
-const ProfDB := preload("res://ProfDB.gd")   # 技艺（熟练度域）注册表——战斗涨值挂钩用（🔒 模块_属性成长_设计.md §2.4）
+const ProfDB := preload("res://ProfDB.gd")   # 技能（熟练度域）注册表——战斗涨值挂钩用（🔒 模块_属性成长_设计.md §2.4）
+const MinHeap := preload("res://MinHeap.gd") # 寻路优先队列（_dijkstra；与 Overworld.find_path 共用实现）
 
 const DEFAULT_TERRAIN := "plain"
 const DEFAULT_VARIANT := "grassland"
@@ -191,37 +192,46 @@ func _occupied_by_other(col: int, row: int, self_u) -> bool:
 	return false
 
 # Dijkstra：算 unit 在 budget 内可达的格 + 前驱树。返回 {best:{格:累计消耗,含起点0}, came_from:{格:前驱}}。
-# 玩家移动范围、敌方 AI 走位共用。
+# 玩家移动范围、敌方 AI 走位共用。性能（规模化 2026-07-07）：open＝二叉堆（原线性扫描 O(V²)）；
+# 占位格/敌 ZOC 预计算成集合（原每邻居/每 pop 都 O(单位数) 重扫）。
 func _dijkstra(unit, budget: int) -> Dictionary:
 	var start := Vector2i(unit.col, unit.row)
 	var best := {start: 0}
 	var came := {}
-	var open := [start]
+	var occupied := {}
+	var zoc := {}
+	for u in units:
+		if u == unit:
+			continue
+		occupied[Vector2i(u.col, u.row)] = true
+		if _is_hostile(unit, u):
+			for nb in _neighbors(u.col, u.row):
+				zoc[nb] = true
+	var open = MinHeap.new()
+	open.push(0, start)
 	while not open.is_empty():
-		var bi := 0
-		for i in range(1, open.size()):
-			if best[open[i]] < best[open[bi]]:
-				bi = i
-		var cur: Vector2i = open[bi]
-		open.remove_at(bi)
+		var e: Array = open.pop()
+		var cur: Vector2i = e[1]
+		if int(e[0]) > int(best.get(cur, -1)):
+			continue   # 懒删除：该格已有更优成本，此堆项过期
 		# ZOC：踏入敌对控制区即停（该格可达但不能从它继续外扩）；起点格除外
-		if cur != start and _in_hostile_zoc(cur, unit):
+		if cur != start and zoc.has(cur):
 			continue
 		for nb in _neighbors(cur.x, cur.y):
 			if not _cell_in_bounds(nb.x, nb.y):
 				continue
-			if _occupied_by_other(nb.x, nb.y, unit):
+			if occupied.has(nb):
 				continue
 			var step := _move_cost_at(nb.x, nb.y, unit)
 			if step < 0:
 				continue
-			var nc: int = best[cur] + step
+			var nc: int = int(best[cur]) + step
 			if nc > budget:
 				continue
-			if not best.has(nb) or nc < best[nb]:
+			if not best.has(nb) or nc < int(best[nb]):
 				best[nb] = nc
 				came[nb] = cur
-				open.append(nb)
+				open.push(nc, nb)
 	return {"best": best, "came_from": came}
 
 # 单位的「理论最远」移动 + 攻击范围（预览用）。
