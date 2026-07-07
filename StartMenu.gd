@@ -5,11 +5,14 @@ extends Control
 
 const WorldState := preload("res://WorldState.gd")
 const SaveIO := preload("res://SaveIO.gd")
+const GameSettings := preload("res://GameSettings.gd")
+const SettingsOverlay := preload("res://Settings.gd")
 
 func _ready() -> void:
 	# 回到菜单＝退出战役语义：清 current（活档已由 Overworld 落盘、「继续」从磁盘重读，保留无收益）。
 	# 不清则 current 泄漏进沙盒/编辑器——日夜跟战役时钟走、实例/uid 写进战役档，违反「沙盒不挂档 🔒」。
 	WorldState.activate(null)
+	GameSettings.apply_all()   # 应用已存设置（音量 + 玩家显式选过的分辨率）
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 
 	var center := CenterContainer.new()
@@ -42,7 +45,7 @@ func _ready() -> void:
 	box.add_child(_menu_button("角色编辑器", _on_char_editor, false))
 	box.add_child(_menu_button("外观工坊（换装换色）", _on_appearance_workshop, false))
 	box.add_child(_menu_button("地块绘制工坊", _on_terrain_workshop, false))
-	box.add_child(_menu_button("设置（暂未开放）", Callable(), true))
+	box.add_child(_menu_button("设置", _on_settings, false))
 	box.add_child(_spacer(8))
 	box.add_child(_menu_button("退出", _on_quit, false))
 
@@ -92,6 +95,9 @@ func _on_appearance_workshop() -> void:
 
 func _on_terrain_workshop() -> void:
 	get_tree().change_scene_to_file("res://TerrainArtWorkshop.tscn")
+
+func _on_settings() -> void:
+	add_child(SettingsOverlay.new())   # 叠加在菜单上；返回/ESC 自行 free
 
 func _on_quit() -> void:
 	get_tree().quit()

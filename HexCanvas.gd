@@ -30,6 +30,11 @@ var hover_cell := Vector2i(-1, -1)
 var info_label: Label             # 地形信息文字（底段，永远显示当前格）
 var _info_panel: PanelContainer   # 左下可扩展信息栏（含底 + 内边距）
 var _info_extra: VBoxContainer    # 扩展段（宿主经 hover_extra 填，如单位卡）；无则空
+
+# 悬停格变化通知：宿主据此更新自己的 UI（如战斗常驻底边栏），tile 数据仍经 hover_text 单一源读。
+signal hover_changed(col: int, row: int)
+# 弹窗是否内含地形段：默认 true（编辑器/大地图）；战斗宿主设 false → 地形移交常驻栏、弹窗只留单位卡。
+var terrain_in_popup := true
 var _need_fit := false   # 新建/加载后置位：待布局尺寸就绪时在 _draw 里自动适配窗口
 
 # —— 静态层：地形/过渡边**分块** + 线特征/区域轮廓，拆成独立子树（§7 性能·分块版）——
@@ -616,6 +621,7 @@ func _update_hover(screen_pos: Vector2) -> void:
 func _update_info_label() -> void:
 	if _info_panel == null:
 		return
+	hover_changed.emit(hover_cell.x, hover_cell.y)   # 通知宿主（战斗底边栏据此读 hover_text 更新地形）
 	# 每次换格：先清扩展段（立即移出树，不残留一帧）
 	for c in _info_extra.get_children():
 		_info_extra.remove_child(c)
@@ -624,14 +630,20 @@ func _update_info_label() -> void:
 		_info_panel.visible = false
 		info_label.text = ""
 		return
-	info_label.text = editor.hover_text(hover_cell.x, hover_cell.y)
-	_info_panel.visible = true
 	# 宿主可选钩子：给该格提供一个扩展控件（有单位→单位卡，否则 null）。编辑器无此方法 = 只显示地形。
+	var extra = null
 	if editor != null and editor.has_method("hover_extra"):
-		var extra = editor.hover_extra(hover_cell.x, hover_cell.y)
+		extra = editor.hover_extra(hover_cell.x, hover_cell.y)
+	if extra != null:
+		_info_extra.add_child(extra)
+	if terrain_in_popup:   # 编辑器/大地图：弹窗含地形段
+		info_label.text = editor.hover_text(hover_cell.x, hover_cell.y)
 		if extra != null:
-			_info_extra.add_child(extra)
 			_info_extra.add_child(HSeparator.new())   # 单位段与地形段之间的分隔
+		_info_panel.visible = true
+	else:                  # 战斗：地形已在常驻栏 → 弹窗只留单位卡，无卡则隐藏
+		info_label.text = ""
+		_info_panel.visible = (extra != null)
 
 func _on_mouse_exit() -> void:
 	if hover_cell.x >= 0:

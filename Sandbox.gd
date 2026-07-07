@@ -8,6 +8,7 @@ const UnitFactory := preload("res://UnitFactory.gd")   # 造单位/序列化单�
 const CombatResolver := preload("res://CombatResolver.gd")   # 伤害分量化 + 减伤链（纯数学）
 const SkillDB := preload("res://SkillDB.gd")
 const ItemInstances := preload("res://ItemInstances.gd")    # 物品实例门面（悬停单位卡经合成视图取武器）
+const BattleBottomBar := preload("res://BattleBottomBar.gd")  # 常驻底边栏（独立 UI，自决布局；宿主喂数据）
 const TextureCache := preload("res://TextureCache.gd")      # 立绘/图标加载 + 缓存单一入口
 
 # damage_kind → 抗性中文标签（战斗记录用；element 已废弃 §7.2）
@@ -207,6 +208,7 @@ var battle_over: bool:
 	get: return _state.battle_over
 	set(v): _state.battle_over = v
 var _banner: Label        # 胜利 / 失败 横幅（含「按 R 重开」）
+var _bottom_bar           # 常驻底边栏（BattleBottomBar；左地块信息 · 右按键提示）
 
 # —— 阶段：deploy=布置（调试侧栏摆单位、回合不跑）/ battle=战斗（回合+AI 正常）——
 var phase: String:
@@ -638,8 +640,14 @@ func _build_ui() -> void:
 	# ③ 天气 VFX（后加＝在上层，雨雪雾粒子画在调色之上）
 	_weather_vfx = WeatherVFX.new()
 	canvas.add_child(_weather_vfx)
-	# ③ 调试快捷键提示（战场右下角，最上层、点击穿透）
-	_build_shortcut_hint()
+	# ③ 常驻底边栏（独立 UI，自决布局）：左＝地块信息（读 canvas.hover_changed→hover_text）、右＝按键提示
+	_bottom_bar = BattleBottomBar.new()
+	canvas.add_child(_bottom_bar)
+	_bottom_bar.set_hint("[调试]  V 迷雾开关   N 昼/夜   C 切天气")
+	_bottom_bar.set_terrain("移动光标查看地块信息")
+	canvas.terrain_in_popup = false                     # 地形移交底边栏；弹窗只留单位卡
+	if not canvas.hover_changed.is_connected(_on_hover_bar):
+		canvas.hover_changed.connect(_on_hover_bar)
 
 	var side := VBoxContainer.new()
 	side.custom_minimum_size = Vector2(320, 0)
@@ -754,25 +762,14 @@ func _add_info(k: String, v: String) -> void:
 	l.text = "%s：%s" % [k, v]
 	_turn_panel.add_child(l)
 
-# 战场右下角：调试快捷键提示（半透明深底 + 浅字，点击穿透、最上层）
-func _build_shortcut_hint() -> void:
-	if canvas == null:
+# 悬停格变化（canvas.hover_changed）→ 把地块信息喂给常驻底边栏（数据经 hover_text 单一源读）。
+func _on_hover_bar(col: int, row: int) -> void:
+	if _bottom_bar == null:
 		return
-	var panel := PanelContainer.new()
-	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0, 0, 0, 0.45)
-	sb.set_corner_radius_all(4)
-	sb.set_content_margin_all(6)
-	panel.add_theme_stylebox_override("panel", sb)
-	var lbl := Label.new()
-	lbl.text = "[调试]  V 迷雾开关   N 昼/夜   C 切天气"
-	lbl.add_theme_color_override("font_color", Color(0.85, 0.88, 0.95))
-	lbl.add_theme_font_size_override("font_size", 12)
-	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	panel.add_child(lbl)
-	canvas.add_child(panel)
-	panel.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT, Control.PRESET_MODE_MINSIZE, 8)
+	if col < 0 or row < 0:
+		_bottom_bar.set_terrain("移动光标查看地块信息")
+	else:
+		_bottom_bar.set_terrain(hover_text(col, row))
 
 # ============ 供 HexCanvas / SandboxCanvas 调用的“editor”接口 ============
 
