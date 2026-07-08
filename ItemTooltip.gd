@@ -84,7 +84,8 @@ static func render(item: Dictionary) -> Control:
 		ul.add_theme_color_override("font_color", Color("#7FD08A"))
 		v.add_child(ul)
 		var tgt := str(item.get("target", "ally"))
-		v.add_child(_kv("　作用对象", "自身" if tgt == "self" else "友方（距离 %d）" % int(item.get("range", 1))))
+		var tgt_cn := str({"self": "自身", "ally": "友方", "enemy": "敌对"}.get(tgt, tgt))
+		v.add_child(_kv("　作用对象", tgt_cn if tgt == "self" else "%s（距离 %d）" % [tgt_cn, int(item.get("range", 1))]))
 		if float(ou.get("heal_pct_max_hp", 0)) > 0.0:
 			v.add_child(_kv("　回复生命", "最大生命 %s%%" % _num(float(ou.get("heal_pct_max_hp", 0)))))
 		if float(ou.get("heal_flat", 0)) > 0.0:

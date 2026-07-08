@@ -24,7 +24,7 @@ const DAMAGE_KINDS := ["physical", "fire", "ice", "thunder", "holy"]
 const OPS := [["flat", "固定"], ["pct", "百分比%"]]
 # 物品大类下拉（基础区，id 上方）：kind 选择器——替掉旧的 4 个「＋类别」按钮
 const KIND_PAIRS := [["weapon", "武器"], ["armor", "防具"], ["accessory", "饰品"], ["item", "物品"]]
-const USE_TARGETS := [["ally", "友方单位"], ["self", "自身"]]   # on_use 作用对象（可使用物品）
+const USE_TARGETS := [["ally", "友方单位"], ["enemy", "敌对单位"], ["self", "自身"]]   # on_use 作用对象（可使用物品；敌对=投掷类攻击道具）
 # on_use 使用效果类型（动态行下拉；键＝on_use 字典键，复用技能效果负载）
 const OU_EFFECTS := [["heal_pct_max_hp", "回复生命（最大生命 %）"], ["heal_flat", "回复生命（固定值）"], ["restore_fatigue_pct", "回复疲劳（最大疲劳 %·待疲劳系统）"]]
 # 「物品」表单里由勾选管理的结构性 tag（从「其他标签」自由区排除，防取消勾选后残留）
@@ -661,7 +661,7 @@ func _build_item_form() -> void:
 	_ou_box.add_child(EditorUI.section_title("使用设置"))
 	_w_use_target = _dropdown_pairs(_ou_box, "作用对象 target", USE_TARGETS, str(_current.get("target", "ally")))
 	_w_use_target.item_selected.connect(func(_i): _update_range_visible())
-	_w_use_range = _add_spin(_ou_box, "使用距离 range（格；0=同格/自身，作用对象=友方时生效）", float(_current.get("range", 1)), 0, 20, 1)
+	_w_use_range = _add_spin(_ou_box, "使用距离 range（格；0=同格/自身，作用对象≠自身时生效）", float(_current.get("range", 1)), 0, 20, 1)
 	_range_row = _w_use_range.get_parent()
 	_w_stack = _add_check(_ou_box, "可叠加计数 stack", bool(_current.get("stack", true)))
 	_ou_box.add_child(EditorUI.section_title("使用效果 on_use（消耗时施加；每条一项，＋添加）"))
@@ -691,10 +691,10 @@ func _on_usable_toggled() -> void:
 	_refresh_preview()
 
 
-# 使用距离只在「作用对象=友方」时有意义——自身时藏起该行
+# 使用距离只在「作用对象≠自身」时有意义（友方/敌对都要距离）——自身时藏起该行
 func _update_range_visible() -> void:
 	if _range_row != null and is_instance_valid(_range_row):
-		_range_row.visible = _w_use_target != null and is_instance_valid(_w_use_target) and str(_w_use_target.get_selected_metadata()) == "ally"
+		_range_row.visible = _w_use_target != null and is_instance_valid(_w_use_target) and str(_w_use_target.get_selected_metadata()) != "self"
 	_refresh_preview()
 
 

@@ -46,7 +46,11 @@ func _initialize() -> void:
 	ck(int((d.get("on_use", {})).get("restore_fatigue_pct", 0)) == 30, "使用效果=回疲劳30")
 	ck(str(d.get("target", "")) == "ally" and int(d.get("range", -1)) == 1, "作用对象 ally / 距离 1")
 
-	# 作用对象切自身 → 距离行隐藏
+	# 作用对象=敌对 → 距离行仍可见（投掷类）；切自身 → 隐藏
+	ed._select_meta(ed._w_use_target, "enemy")
+	ed._update_range_visible()
+	ck(ed._range_row.visible, "作用对象=敌对→距离行可见")
+	ck(str(ed._collect().get("target", "")) == "enemy", "collect target=enemy")
 	ed._select_meta(ed._w_use_target, "self")
 	ed._update_range_visible()
 	ck(not ed._range_row.visible, "作用对象=自身→距离行隐藏")
