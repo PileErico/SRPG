@@ -159,6 +159,26 @@ func _initialize() -> void:
 	ck(is_equal_approx(s._terrain_eff_factor(atk, "eva_eff", false), 1.0), "攻方站草原无地块效能（=1）")
 	ck(TerrainDB.active_grants(null, []).is_empty(), "无地块 active_grants 空")
 
+	# —— 7) 地块 tick（灵泉回合末回血：钳 HP_max、飞行/亡灵不享受）——
+	var htgt = UnitFactory.make_unit(protos[0], "player", 3, 3)
+	s.tiles[3][3] = {"terrain": "fh", "variant": "fountain_of_youth"}
+	var hpmax := int(htgt.effective_stat("HP_max"))
+	htgt.tags = ["ground"]
+	htgt.stats["HP"] = hpmax - 3          # 缺 3：回 5 钳到满、净回 3
+	var hev := s._apply_terrain_ticks(htgt)
+	ck(int(htgt.stats["HP"]) == hpmax and hev.size() == 1 and str(hev[0].get("type")) == "terrain_heal" and int(hev[0].get("heal")) == 3, "灵泉回血钳 HP_max（缺3→净回3）")
+	htgt.stats["HP"] = hpmax - 10         # 缺 10：回满 5
+	s._apply_terrain_ticks(htgt)
+	ck(int(htgt.stats["HP"]) == hpmax - 5, "灵泉每回合回 5 点")
+	htgt.stats["HP"] = hpmax - 10
+	htgt.tags = ["flying"]
+	ck(s._apply_terrain_ticks(htgt).is_empty() and int(htgt.stats["HP"]) == hpmax - 10, "飞行态不享受灵泉")
+	htgt.tags = ["undead"]
+	ck(s._apply_terrain_ticks(htgt).is_empty() and int(htgt.stats["HP"]) == hpmax - 10, "亡灵不享受灵泉")
+	htgt.tags = ["ground"]
+	htgt.stats["HP"] = hpmax
+	ck(s._apply_terrain_ticks(htgt).is_empty(), "满血不产生回血事件")
+
 	if _fail == 0:
 		print("=== 全部断言 PASS ===")
 	else:

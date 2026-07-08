@@ -108,9 +108,17 @@
   {"id": "human", "cn": "人类", "cat": "race", "status": "in_use"},
   {"id": "harpy", "cn": "鸟人", "cat": "race", "status": "in_use"},
   {"id": "lizardmen", "cn": "蜥蜴人", "cat": "race", "status": "planned"},
+  {"id": "undead", "cn": "亡灵", "cat": "race", "status": "in_use", "desc": "种族：亡灵。免疫灵泉等生命回复类地块效果（地块 when.occupant_lacks_tags）；供后续腐蚀/圣光克制条件"},
 
   {"id": "monster", "cn": "怪物", "cat": "biotype", "status": "planned", "desc": "生物类型：怪物（供屠龙者等条件特性、克制关系）"},
   {"id": "beast", "cn": "野兽", "cat": "biotype", "status": "planned", "desc": "生物类型：野兽"},
+
+  {"id": "usable", "cn": "可使用", "cat": "item_type", "status": "in_use", "desc": "物品类型：可使用（可直接 on_use，战斗/大地图皆可）——门控物品编辑器的使用效果段（草药/药水类）。物品编辑器☑勾选"},
+  {"id": "quest_item", "cn": "任务物品", "cat": "item_type", "status": "in_use", "desc": "物品类型：任务物品（任务线用，无 on_use）。物品编辑器☑勾选"},
+  {"id": "consumable", "cn": "消耗品", "cat": "item_type", "status": "in_use", "desc": "物品类型：消耗品（食物/药水等统称，描述性）；能否直接使用看 usable。物品编辑器自由标签区"},
+  {"id": "food", "cn": "食物", "cat": "item_type", "status": "in_use", "desc": "物品类型：食物（特殊消耗品，不可直接使用、特定场合食用；不带 usable）。物品编辑器自由标签区"},
+  {"id": "medical", "cn": "医疗物品", "cat": "item_type", "status": "in_use", "desc": "物品类型：医疗物品（治疗/解伤；能直接用的草药再叠 usable）。物品编辑器自由标签区"},
+  {"id": "material", "cn": "素材", "cat": "item_type", "status": "in_use", "desc": "物品类型：素材（制作/铁匠原料，无 on_use）。物品编辑器自由标签区"},
 
   {"id": "camp_player", "cn": "玩家", "cat": "camp", "status": "in_use", "color": "#3A7BD5", "desc": "派系归属：玩家。tag=camp_<factions.json id>；影响声望/敌对(FactionDB)、供 tag 条件（对某派系+X）。区别于阵营立场(player/ally/enemy/neutral)"},
   {"id": "camp_empire", "cn": "帝国", "cat": "camp", "status": "in_use", "color": "#5B84C8", "desc": "派系归属：帝国"},

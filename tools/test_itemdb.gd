@@ -9,6 +9,7 @@ const StatMeta := preload("res://StatMeta.gd")
 const P_W := "user://_test_items_w.json"
 const P_A := "user://_test_items_a.json"
 const P_C := "user://_test_items_c.json"
+const P_I := "user://_test_items_i.json"
 
 var _fail := 0
 
@@ -81,10 +82,21 @@ func _initialize() -> void:
 	ck(StatMeta.is_pct("res_nature") and StatMeta.is_pct("armor_res_phys") and StatMeta.is_pct("atk_eff") and StatMeta.is_pct("crit_rate") and StatMeta.is_pct("block_power") and StatMeta.is_pct("crit_dmg") and StatMeta.is_pct("will_fort"), "百分比语义真集（含甲抗/强韧）")
 	ck(not StatMeta.is_pct("atk") and not StatMeta.is_pct("move") and not StatMeta.is_pct("armor_max") and not StatMeta.is_pct("dr_flat_armor"), "百分比语义假集（固减非%）")
 
+	# 9) item kind（消耗品/物品：显式 kind 字段路由 items.json，无装备槽）——授权 B
+	ItemDB._paths_override = {"weapon": P_W, "armor": P_A, "accessory": P_C, "item": P_I}
+	DirAccess.remove_absolute(P_I)
+	ItemDB.reload_data()
+	ck(ItemDB.kind_of({"kind": "item", "tags": ["consumable"]}) == "item", "kind_of: 显式 kind=item 优先")
+	ck(ItemDB.kind_of({"slot": "main_hand"}) == "weapon", "kind_of: 无 kind 仍按 slot（向后兼容）")
+	ck(str(ItemDB.kind_cn("item")) == "物品", "kind_cn: item→物品")
+	ck(ItemDB.save_item({"id": "potion_t", "name": "药水", "kind": "item", "tags": ["consumable", "medical"], "on_use": {"heal_pct_max_hp": 50}}), "save 消耗品成功")
+	ck(ItemDB.get_item("potion_t") != null and _ids(P_I) == ["potion_t"], "写进 items 文件")
+	ck(ItemDB.delete_item("potion_t") and not _ids(P_I).has("potion_t"), "消耗品删除落盘")
+
 	# 收尾：还原真路径 + 清临时文件
 	ItemDB._paths_override = {}
 	ItemDB.reload_data()
-	for p in [P_W, P_A, P_C]:
+	for p in [P_W, P_A, P_C, P_I]:
 		DirAccess.remove_absolute(p)
 	ck(ItemDB.get_item("ring_t") == null, "还原后测试物品不在真库")
 

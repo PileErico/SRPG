@@ -1450,14 +1450,21 @@ func end_turn() -> void:
 		_tick_weather()      # 新 round：天气计时 −1，到期重摇（表现层 tick 留宿主）
 	_begin_active_turn()
 
-# 单位自己 turn 末：结算个人 DoT（按最大生命百分比直接掉 HP，无视护甲）+ 时长递减（按 round）+ 到期移除。
-# 返回是否造成了伤害（用于触发死亡检查）。
+# 单位自己 turn 末：结算个人 DoT（按最大生命百分比直接掉 HP，无视护甲）+ 时长递减（按 round）+ 到期移除，
+# 再结算所站地块 tick（灵泉回血/岩浆掉血等，_state._apply_terrain_ticks）。返回是否造成伤害（触发死亡检查）。
 func _tick_turn_end_effects(u) -> bool:
 	var dmg_done := false
 	for ev in _state._apply_turn_end_effects(u):
 		if str(ev.get("type", "")) == "dot":
 			dmg_done = true
 			_log_line("%s %s：-%d（最大生命%s%%）" % [_cname(u), str(ev["name"]), int(ev["dmg"]), _numf(ev["pct"])])
+	for ev in _state._apply_terrain_ticks(u):
+		match str(ev.get("type", "")):
+			"terrain_heal":
+				_log_line("%s %s：+%d 生命" % [_cname(u), str(ev["name"]), int(ev["heal"])])
+			"terrain_damage":
+				dmg_done = true
+				_log_line("%s %s：-%d 生命" % [_cname(u), str(ev["name"]), int(ev["dmg"])])
 	return dmg_done
 
 func _on_context_menu(id: int) -> void:

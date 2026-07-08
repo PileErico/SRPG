@@ -1,5 +1,5 @@
 {
-  "_note": "地形单一数据源：编辑器取 label/color/accent/decor/tags 绘制；战斗取 move（通行性+成本）与 effects（地块效果）。move.passable_by: \"all\"=任何单位可进 / \"none\"=不可通行 / [tag,...]=仅含其中之一可进（如深水仅<飞行>）；move.cost=基础通行成本，tag_cost 按单位 tag 取更优（最小）；effects=站在该格的单位获得的效果，带 when 条件，伤害结算时惰性读取。 scope=地形适用图类型：battle=仅战场 / overworld=仅大地图 / both=通用（缺省 both，旧数据零迁移）——编辑器笔刷栏按当前地图 map_type 过滤，渲染/通行不受影响。",
+  "_note": "地形单一数据源：编辑器取 label/color/accent/decor/tags 绘制；战斗取 move（通行性+成本）与 effects（地块效果）。move.passable_by: \"all\"=任何单位可进 / \"none\"=不可通行 / [tag,...]=仅含其中之一可进（如深水仅<飞行>）；move.cost=基础通行成本，tag_cost 按单位 tag 取更优（最小）；effects=站在该格的单位获得的效果，带 when 条件（occupant_lacks_tags/has_tags，tag 驱动）惰性读取：grant.layer=效能→折进命中/伤害四效能桶；grant.layer=tick→回合末回血(kind:heal)/掉血(kind:damage)、amount 为点数（仅战斗域，见 BattleState._apply_terrain_ticks）。 scope=地形适用图类型：battle=仅战场 / overworld=仅大地图 / both=通用（缺省 both，旧数据零迁移）——编辑器笔刷栏按当前地图 map_type 过滤，渲染/通行不受影响。",
   "categories": [
     "草原",
     "稀树草原",
@@ -1379,9 +1379,25 @@
       "category": "草原",
       "color": "#3e9b46",
       "decor": "none",
-      "effects": [],
+      "effects": [
+        {
+          "desc": "每回合末回复5点生命（飞行/亡灵单位不享受）",
+          "grant": {
+            "amount": 5,
+            "kind": "heal",
+            "layer": "tick"
+          },
+          "name": "灵泉回复",
+          "when": {
+            "occupant_lacks_tags": [
+              "flying",
+              "undead"
+            ]
+          }
+        }
+      ],
       "id": "fh_fountain_of_youth",
-      "label": "Fountain of Youth",
+      "label": "灵泉",
       "move": {
         "cost": 1.0,
         "passable_by": "all"
@@ -1461,7 +1477,7 @@
       "decor": "none",
       "effects": [],
       "id": "fh_grassland_farm",
-      "label": "Grassland+Farm",
+      "label": "草原-农场",
       "move": {
         "cost": 1.0,
         "passable_by": "all"
@@ -1481,7 +1497,7 @@
       "decor": "none",
       "effects": [],
       "id": "fh_grassland_forest_camp",
-      "label": "Grassland+Forest+Camp",
+      "label": "草原-森林-营地",
       "move": {
         "cost": 1.0,
         "passable_by": "all"
@@ -1501,7 +1517,7 @@
       "decor": "none",
       "effects": [],
       "id": "fh_grassland_forest_deer_camp",
-      "label": "Grassland+Forest+Deer+Camp",
+      "label": "草原-森林-营地-鹿",
       "move": {
         "cost": 1.0,
         "passable_by": "all"
@@ -1581,7 +1597,7 @@
       "decor": "none",
       "effects": [],
       "id": "fh_grassland_hill_farm",
-      "label": "Grassland+Hill+Farm",
+      "label": "草原-农场-山丘",
       "move": {
         "cost": 1.0,
         "passable_by": "all"

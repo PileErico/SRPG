@@ -46,8 +46,9 @@ static func render(item: Dictionary) -> Control:
 		name_l.add_theme_color_override("font_color", rc)
 	headv.add_child(name_l)
 	var slot := str(item.get("slot", ""))
+	var slot_cn := str(EquipSlots.SLOT_CN.get(slot, slot))
 	var sub := Label.new()
-	sub.text = "%s · %s" % [ItemDB.kind_cn(ItemDB.kind_of(item)), str(EquipSlots.SLOT_CN.get(slot, slot))]
+	sub.text = ("%s · %s" % [ItemDB.kind_cn(ItemDB.kind_of(item)), slot_cn]) if slot_cn != "" else ItemDB.kind_cn(ItemDB.kind_of(item))
 	sub.add_theme_font_size_override("font_size", 12)
 	sub.add_theme_color_override("font_color", Color(0.66, 0.7, 0.78))
 	headv.add_child(sub)
@@ -72,6 +73,30 @@ static func render(item: Dictionary) -> Control:
 	for m in item.get("mods", []):
 		if typeof(m) == TYPE_DICTIONARY:
 			v.add_child(mod_line(m))
+
+	# 使用效果 on_use（消耗品；数据/渲染共用一处，编辑器预览与将来背包 tooltip 同源）
+	var ou = item.get("on_use", null)
+	if typeof(ou) == TYPE_DICTIONARY and not ou.is_empty():
+		v.add_child(HSeparator.new())
+		var ul := Label.new()
+		ul.text = "使用效果"
+		ul.add_theme_font_size_override("font_size", 14)
+		ul.add_theme_color_override("font_color", Color("#7FD08A"))
+		v.add_child(ul)
+		var tgt := str(item.get("target", "ally"))
+		v.add_child(_kv("　作用对象", "自身" if tgt == "self" else "友方（距离 %d）" % int(item.get("range", 1))))
+		if float(ou.get("heal_pct_max_hp", 0)) > 0.0:
+			v.add_child(_kv("　回复生命", "最大生命 %s%%" % _num(float(ou.get("heal_pct_max_hp", 0)))))
+		if float(ou.get("heal_flat", 0)) > 0.0:
+			v.add_child(_kv("　回复生命", "%s 点" % _num(float(ou.get("heal_flat", 0)))))
+		if float(ou.get("restore_fatigue_pct", 0)) > 0.0:
+			v.add_child(_kv("　回复疲劳", "最大疲劳 %s%%" % _num(float(ou.get("restore_fatigue_pct", 0)))))
+		var cl = ou.get("cleanse_tags", [])
+		if typeof(cl) == TYPE_ARRAY and not cl.is_empty():
+			var cln := []
+			for t in cl:
+				cln.append(TagDB.cn(str(t)))
+			v.add_child(_kv("　净化", "、".join(cln)))
 
 	# 攻击 skill
 	var atk = item.get("attack", null)

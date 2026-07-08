@@ -1,0 +1,16 @@
+[
+  {
+    "id": "potion_spring_water",
+    "name": "灵泉之水",
+    "kind": "item",
+    "icon": "",
+    "tags": ["common", "usable", "medical"],
+    "target": "ally",
+    "range": 1,
+    "stack": true,
+    "on_use": {
+      "heal_pct_max_hp": 50,
+      "restore_fatigue_pct": 50
+    }
+  }
+]

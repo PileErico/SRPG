@@ -119,11 +119,12 @@ static func effects_text(entry) -> String:
 		parts.append("%s：%s" % [nm, d] if (nm != "" and d != "") else nm + d)
 	return "；".join(parts)
 
-# 占据者视角「当前生效」的地块效果 grant 列表：逐条评估 when 条件、只回条件通过者的 grant。
-# **惰性读取用**（战斗命中/伤害结算即时调用，不材质化成持久 buff——见 docs/模块_战斗_设计.md「森林掩蔽」🔒）。
-# when 目前支持 occupant_lacks_tags（缺这些 tag 才生效，如森林对飞行态不生效）/ occupant_has_tags（须全有）。
-# grant 语义／战斗桶映射＝战斗域知识，留在 BattleState._terrain_eff_factor；本函数只做「数据×条件」过滤，保持地形层纯粹。
-static func active_grants(entry, occupant_tags: Array) -> Array:
+# 占据者视角「当前生效」的地块效果（整条 effect 字典：name/desc/grant）：逐条评估 when、只回条件通过者。
+# **惰性读取用**（战斗即时调用，不材质化成持久 buff——见 docs/模块_战斗_设计.md「森林掩蔽」🔒）。
+# when 支持 occupant_lacks_tags（缺其一才生效，如森林/灵泉对飞行态不生效）/ occupant_has_tags（须全有）。
+# 两路消费：效能桶折算读 grant（active_grants）、tick 回血/掉血需 effect.name 记日志（读整条）——故本函数给「整条」视图。
+# grant 语义／桶映射＝战斗域知识（BattleState._terrain_eff_factor/_apply_terrain_ticks）；本函数只做「数据×条件」过滤，保持地形层纯粹。
+static func active_effects(entry, occupant_tags: Array) -> Array:
 	var out := []
 	if entry == null:
 		return out
@@ -135,6 +136,13 @@ static func active_grants(entry, occupant_tags: Array) -> Array:
 			continue
 		if not _when_passes(ef.get("when", {}), occupant_tags):
 			continue
+		out.append(ef)
+	return out
+
+# active_effects 的 grant 投影（效能桶消费用，不需 name）。保旧签名/行为，既有调用方零改动。
+static func active_grants(entry, occupant_tags: Array) -> Array:
+	var out := []
+	for ef in active_effects(entry, occupant_tags):
 		var g = ef.get("grant", null)
 		if typeof(g) == TYPE_DICTIONARY:
 			out.append(g)

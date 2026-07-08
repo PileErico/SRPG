@@ -441,6 +441,38 @@ func _terrain_eff_factor(u, bucket: String, gain_dir: bool) -> float:
 		factor *= maxf(0.0, (1.0 + p / 100.0) if gain_dir else (1.0 - p / 100.0))
 	return factor
 
+# 地块 tick（回合末结算，占据者视角）：读所在地块 tick 类效果（grant.layer=="tick"）、按 when 过滤 tag，
+# 结算回血(kind:heal，钳 HP_max)/掉血(kind:damage，无视护甲直扣)——与 HoT/DoT 同律。amount＝点数。
+# 返回结构化事件供宿主记日志/判死：[{type:"terrain_heal", name, heal} | {type:"terrain_damage", name, dmg}]。
+# 不写日志、不判死（宿主 Sandbox._tick_turn_end_effects 与 DoT 同点收口）。
+func _apply_terrain_ticks(u) -> Array:
+	var events := []
+	if u == null:
+		return events
+	var entry = _terrain_at_unit(u)
+	if entry == null:
+		return events
+	for ef in TerrainDB.active_effects(entry, u.tags):
+		var g = ef.get("grant", null)
+		if typeof(g) != TYPE_DICTIONARY or str(g.get("layer", "")) != "tick":
+			continue
+		var amt := int(round(float(g.get("amount", 0))))
+		if amt <= 0:
+			continue
+		var nm := str(ef.get("name", "地块"))
+		match str(g.get("kind", "")):
+			"heal":
+				var hpmax := int(u.effective_stat("HP_max"))
+				var cur := int(u.stats.get("HP", 0))
+				var newhp := mini(hpmax, cur + amt)
+				if newhp > cur:
+					u.stats["HP"] = newhp
+					events.append({"type": "terrain_heal", "name": nm, "heal": newhp - cur})
+			"damage":
+				u.stats["HP"] = int(u.stats.get("HP", 0)) - amt
+				events.append({"type": "terrain_damage", "name": nm, "dmg": amt})
+	return events
+
 # ============ 战斗结算（掷骰/伤害/异常；展示渲染在宿主 _resolve_one）============
 
 # 命中率（%）= clamp( (武器命中+技巧 − 闪避−灵活) × Π命中效能, 5, 95 )　🔒 §10.6 数值定案：

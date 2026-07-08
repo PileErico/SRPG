@@ -9,8 +9,9 @@ const FILE_BY_KIND := {
 	"weapon": "res://data/weapons.json",
 	"armor": "res://data/armor.json",
 	"accessory": "res://data/accessories.json",
+	"item": "res://data/items.json",
 }
-const KIND_CN := {"weapon": "武器", "armor": "防具", "accessory": "饰品"}
+const KIND_CN := {"weapon": "武器", "armor": "防具", "accessory": "饰品", "item": "物品"}
 
 static var _items := {}
 static var _loaded := false
@@ -37,15 +38,16 @@ static func all() -> Dictionary:
 	_ensure()
 	return _items
 
-# 由 slot 推断类别（weapon/armor/accessory）——决定写回哪个文件。
+# 类别推断：显式 kind 字段优先（消耗品等非装备类无 slot，编辑器写 kind:"item"）；否则由 slot 推断——决定写回哪个文件。
 static func kind_of(item) -> String:
-	var slot := ""
 	if typeof(item) == TYPE_DICTIONARY:
-		slot = str(item.get("slot", ""))
-	match slot:
-		"main_hand", "off_hand": return "weapon"
-		"head", "body": return "armor"
-		"accessory_1", "accessory_2": return "accessory"
+		var explicit := str(item.get("kind", ""))
+		if explicit != "":
+			return explicit
+		match str(item.get("slot", "")):
+			"main_hand", "off_hand": return "weapon"
+			"head", "body": return "armor"
+			"accessory_1", "accessory_2": return "accessory"
 	return "weapon"
 
 static func kind_cn(kind: String) -> String:

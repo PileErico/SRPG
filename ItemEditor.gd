@@ -18,9 +18,17 @@ const ICON_DIR := {
 	"weapon": "res://icons/Items/Weapons",
 	"armor": "res://icons/Items/Armors",
 	"accessory": "res://icons/Items/Accessories",
+	"item": "res://icons/Items",
 }
 const DAMAGE_KINDS := ["physical", "fire", "ice", "thunder", "holy"]
 const OPS := [["flat", "固定"], ["pct", "百分比%"]]
+# 物品大类下拉（基础区，id 上方）：kind 选择器——替掉旧的 4 个「＋类别」按钮
+const KIND_PAIRS := [["weapon", "武器"], ["armor", "防具"], ["accessory", "饰品"], ["item", "物品"]]
+const USE_TARGETS := [["ally", "友方单位"], ["self", "自身"]]   # on_use 作用对象（可使用物品）
+# on_use 使用效果类型（动态行下拉；键＝on_use 字典键，复用技能效果负载）
+const OU_EFFECTS := [["heal_pct_max_hp", "回复生命（最大生命 %）"], ["heal_flat", "回复生命（固定值）"], ["restore_fatigue_pct", "回复疲劳（最大疲劳 %·待疲劳系统）"]]
+# 「物品」表单里由勾选管理的结构性 tag（从「其他标签」自由区排除，防取消勾选后残留）
+const ITEM_FLAG_TAGS := ["usable", "quest_item"]
 
 # 「自动管理」的 tag 类别（这些 tag 由专门控件管，从「其他标签」自由区排除）
 const MANAGED_CATS := ["rarity", "wtype", "wcat_melee", "wcat_ranged", "wcat_catalyst",
@@ -70,8 +78,19 @@ var _list_scroll: ScrollContainer         # 分类清单滚动区
 var _list_root: VBoxContainer             # 三大分类折叠组的容器
 var _rows: Dictionary = {}                # id -> 物品行 Button（选中高亮 / 滚动定位）
 var _selected_id: String = ""            # 当前高亮的物品 id（"" = 无）
-var _cat_collapsed: Dictionary = {"weapon": false, "armor": false, "accessory": false}   # 各分类折叠态（跨刷新保留）
+var _cat_collapsed: Dictionary = {"weapon": false, "armor": false, "accessory": false, "item": false}   # 各分类折叠态（跨刷新保留）
 var _search: LineEdit
+# —— 物品（可使用/道具）表单控件 ——
+var _w_kind: OptionButton                # 基础区「物品大类」下拉（kind 选择器）
+var _w_usable: CheckBox                   # 可使用（=usable tag，门控 on_use 段）
+var _w_quest: CheckBox                    # 任务物品（=quest_item tag）
+var _ou_box: VBoxContainer               # 使用效果 on_use 段容器（勾「可使用」才显）
+var _w_use_target: OptionButton
+var _w_use_range: SpinBox                 # 使用距离（格；作用对象=友方时生效）
+var _range_row                            # 距离字段行（作用对象=自身时藏）
+var _w_stack: CheckBox
+var _ou_rows_box: VBoxContainer           # 使用效果行容器（动态·仿武器 mods）
+var _ou_rows: Array = []                  # 效果行：[{type:OptionButton, value:SpinBox, row}]
 var _msg: Label
 var _form: VBoxContainer
 var _preview: VBoxContainer
@@ -213,15 +232,11 @@ func _build_left_pane() -> Control:
 	var box := VBoxContainer.new()
 	box.custom_minimum_size = Vector2(300, 0)
 	box.add_theme_constant_override("separation", 8)
-	var newbar := HBoxContainer.new()
-	newbar.add_theme_constant_override("separation", 6)
-	for kind in ["weapon", "armor", "accessory"]:
-		var b := Button.new()
-		b.text = "＋" + ItemDB.kind_cn(kind)
-		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		b.pressed.connect(_new_item.bind(kind))
-		newbar.add_child(b)
-	box.add_child(newbar)
+	var newbtn := Button.new()
+	newbtn.text = "＋ 新建（大类在表单里选）"
+	newbtn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	newbtn.pressed.connect(_new_item.bind("weapon"))   # 默认武器；基础区「物品大类」下拉可改成防具/饰品/物品
+	box.add_child(newbtn)
 	_search = LineEdit.new()
 	_search.placeholder_text = "🔍 搜 id / 名字"
 	_search.clear_button_enabled = true
@@ -254,7 +269,7 @@ func _refresh_list() -> void:
 	var q := (_search.text.strip_edges().to_lower() if _search != null else "")
 	var searching := q != ""
 	var items := ItemDB.all()
-	var by_kind := {"weapon": [], "armor": [], "accessory": []}
+	var by_kind := {"weapon": [], "armor": [], "accessory": [], "item": []}
 	for id in items.keys():
 		var itf = items[id]
 		if searching and not (str(id).to_lower().contains(q) or str(itf.get("name", "")).to_lower().contains(q)):
@@ -262,7 +277,7 @@ func _refresh_list() -> void:
 		var k := ItemDB.kind_of(itf)
 		if by_kind.has(k):
 			by_kind[k].append(id)
-	for kind in ["weapon", "armor", "accessory"]:
+	for kind in ["weapon", "armor", "accessory", "item"]:
 		var ids: Array = by_kind[kind]
 		ids.sort_custom(func(a, b): return _sort_key(items[a], kind) < _sort_key(items[b], kind))
 		var section := VBoxContainer.new()
@@ -280,7 +295,7 @@ func _refresh_list() -> void:
 			_rows[id] = row
 		if ids.is_empty():
 			var hint := Label.new()
-			hint.text = "（无匹配）" if searching else "（暂无，点上方 ＋%s 新建）" % ItemDB.kind_cn(kind)
+			hint.text = "（无匹配）" if searching else "（暂无——点上方「＋新建」、大类选「%s」）" % ItemDB.kind_cn(kind)
 			hint.add_theme_color_override("font_color", Color(0.5, 0.54, 0.6))
 			hint.add_theme_font_size_override("font_size", 12)
 			section.add_child(hint)
@@ -522,6 +537,9 @@ func _skeleton(kind: String) -> Dictionary:
 			return {"id": "", "name": "新防具", "slot": "body", "icon": "",
 				"tags": ["common", "body", "medium_armor"], "requires": [],
 				"mods": [{"stat": "armor_max", "op": "flat", "value": 10}]}
+		"item":
+			return {"id": "", "name": "新物品", "kind": "item", "icon": "",
+				"tags": ["common", "usable"], "target": "ally", "range": 1, "stack": true, "on_use": {}}
 		_:
 			return {"id": "", "name": "新饰品", "slot": "accessory_1", "icon": "",
 				"tags": ["common", "accessory"], "requires": [], "mods": []}
@@ -542,9 +560,24 @@ func _build_form() -> void:
 
 	# 1. 基础
 	_form.add_child(EditorUI.section_title("基础"))
+	_w_kind = OptionButton.new()
+	for p in KIND_PAIRS:
+		_w_kind.add_item(str(p[1]))
+		_w_kind.set_item_metadata(_w_kind.item_count - 1, str(p[0]))
+	_select_meta(_w_kind, _current_kind)
+	_w_kind.item_selected.connect(func(i): _on_kind_changed(str(_w_kind.get_item_metadata(i))))
+	_form.add_child(EditorUI.field_row("物品大类", _w_kind))
 	_w_id = _add_line(_form, "id（唯一主键）", str(_current.get("id", "")))
 	_w_name = _add_line(_form, "名字", str(_current.get("name", "")))
 	_build_icon_row()
+
+	# 物品（非装备类：消耗品/任务物品/素材/食物/医疗物品）——独立表单，无装备槽/mods/BAS
+	if _current_kind == "item":
+		_build_item_form()
+		_building = false
+		_refresh_preview()
+		_dirty = false
+		return
 
 	# 2. 标签
 	_form.add_child(EditorUI.section_title("标签"))
@@ -590,6 +623,123 @@ func _build_form() -> void:
 	_building = false
 	_refresh_preview()
 	_dirty = false   # 建表单过程的控件信号会把 _dirty 打真——载入完成＝干净基线
+
+
+# 基础区「物品大类」下拉改选 → 换 kind、按新骨架重建表单（保留 id/名/图标）。等价旧的 4 个「＋类别」按钮。
+func _on_kind_changed(new_kind: String) -> void:
+	if _building or new_kind == _current_kind:
+		return
+	var kid := _w_id.text.strip_edges()
+	var knm := _w_name.text.strip_edges()
+	var kic := _w_icon.text.strip_edges()
+	_current = _skeleton(new_kind)
+	_current["id"] = kid
+	_current["name"] = knm
+	_current["icon"] = kic
+	_current_kind = new_kind
+	_build_form()
+
+
+# —— 物品（非装备类）授权表单 ——
+# 标签区：稀有度 + ☑可使用（=usable tag，门控 on_use）+ ☑任务物品（=quest_item）+ 其他标签自由区（食物/医疗/素材…可叠）。
+# 无装备槽/mods/BAS。可使用＝战斗/大地图皆可直接 on_use（故无 use_scope）。使用机制(消耗→施 on_use)+队伍背包=后续切片。
+func _build_item_form() -> void:
+	_form.add_child(EditorUI.section_title("标签"))
+	_w_rarity = _cat_dropdown_inline("稀有度", "rarity", false)
+	_select_meta(_w_rarity, _rarity_of(_current))
+	var cur_tags: Array = _current.get("tags", [])
+	# 结构性标记（勾选即 tag）：可使用（门控 on_use）/ 任务物品
+	_w_usable = _add_check(_form, "可使用（可直接使用·战斗/大地图皆可 → 下方使用效果）", cur_tags.has("usable"))
+	_w_usable.toggled.connect(func(_v): _on_usable_toggled())
+	_w_quest = _add_check(_form, "任务物品", cur_tags.has("quest_item"))
+	# 其他标签自由区：食物/医疗物品/素材… 手动置入、可叠（结构性标记 tag 已由上面勾选管，排除防残留）
+	_free_tags = _collect_free_from(cur_tags).filter(func(t): return not ITEM_FLAG_TAGS.has(str(t)))
+	_build_free_tag_ui(_form, "other", "其他标签（食物/医疗物品/素材… 可多个）", _free_tags)
+	# 使用效果 on_use（仅勾「可使用」时显）：使用设置(作用对象/距离/可叠加) + 动态效果行（仿武器 mods）
+	_ou_box = VBoxContainer.new()
+	_ou_box.add_theme_constant_override("separation", 6)
+	_ou_box.add_child(EditorUI.section_title("使用设置"))
+	_w_use_target = _dropdown_pairs(_ou_box, "作用对象 target", USE_TARGETS, str(_current.get("target", "ally")))
+	_w_use_target.item_selected.connect(func(_i): _update_range_visible())
+	_w_use_range = _add_spin(_ou_box, "使用距离 range（格；0=同格/自身，作用对象=友方时生效）", float(_current.get("range", 1)), 0, 20, 1)
+	_range_row = _w_use_range.get_parent()
+	_w_stack = _add_check(_ou_box, "可叠加计数 stack", bool(_current.get("stack", true)))
+	_ou_box.add_child(EditorUI.section_title("使用效果 on_use（消耗时施加；每条一项，＋添加）"))
+	_ou_rows = []
+	_ou_rows_box = VBoxContainer.new()
+	_ou_rows_box.add_theme_constant_override("separation", 4)
+	_ou_box.add_child(_ou_rows_box)
+	var ou = _current.get("on_use", {})
+	if typeof(ou) == TYPE_DICTIONARY:
+		for k in ou:
+			_add_ou_row(str(k), ou[k])
+	var add_ou := Button.new()
+	add_ou.text = "＋ 添加使用效果"
+	add_ou.pressed.connect(func():
+		_add_ou_row("heal_pct_max_hp", 0)
+		_refresh_preview())
+	_ou_box.add_child(add_ou)
+	_form.add_child(_ou_box)
+	_on_usable_toggled()      # on_use 段显隐（可使用）
+	_update_range_visible()   # 距离行显隐（作用对象）
+
+
+# 勾/取消「可使用」：显隐 on_use 段（只有可使用物品才有使用效果）
+func _on_usable_toggled() -> void:
+	if _ou_box != null and is_instance_valid(_ou_box):
+		_ou_box.visible = _w_usable != null and is_instance_valid(_w_usable) and _w_usable.button_pressed
+	_refresh_preview()
+
+
+# 使用距离只在「作用对象=友方」时有意义——自身时藏起该行
+func _update_range_visible() -> void:
+	if _range_row != null and is_instance_valid(_range_row):
+		_range_row.visible = _w_use_target != null and is_instance_valid(_w_use_target) and str(_w_use_target.get_selected_metadata()) == "ally"
+	_refresh_preview()
+
+
+# 使用效果一行（仿 _add_mod_row）：效果类型下拉 + 数值 + ✕删除。effect_key ∈ OU_EFFECTS 键。
+func _add_ou_row(effect_key: String, value) -> void:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	var type_ob := OptionButton.new()
+	type_ob.custom_minimum_size = Vector2(280, 0)
+	for e in OU_EFFECTS:
+		type_ob.add_item(str(e[1]))
+		type_ob.set_item_metadata(type_ob.item_count - 1, str(e[0]))
+	_select_meta(type_ob, effect_key)
+	type_ob.item_selected.connect(func(_i): _refresh_preview())
+	row.add_child(type_ob)
+	var val := SpinBox.new()
+	val.min_value = 0
+	val.max_value = 9999
+	val.step = 1
+	val.value = float(value)
+	val.custom_minimum_size = Vector2(120, 0)
+	val.value_changed.connect(func(_v): _refresh_preview())
+	row.add_child(val)
+	var rm := Button.new()
+	rm.text = "✕"
+	var entry := {"type": type_ob, "value": val, "row": row}
+	rm.pressed.connect(func():
+		_ou_rows.erase(entry)
+		row.queue_free()
+		_refresh_preview())
+	row.add_child(rm)
+	_ou_rows_box.add_child(row)
+	_ou_rows.append(entry)
+
+
+# 固定枚举下拉（非 TagDB 类别）：pairs=[[value, label],…]，加进 parent，返回 OptionButton
+func _dropdown_pairs(parent: VBoxContainer, label: String, pairs: Array, sel: String) -> OptionButton:
+	var ob := OptionButton.new()
+	for p in pairs:
+		ob.add_item(str(p[1]))
+		ob.set_item_metadata(ob.item_count - 1, str(p[0]))
+	_select_meta(ob, sel)
+	ob.item_selected.connect(func(_i): _refresh_preview())
+	parent.add_child(EditorUI.field_row(label, ob))
+	return ob
 
 
 # 武器标签：类型(级联) + 种类 + 握持 + 天生(+主副手)
@@ -1031,6 +1181,9 @@ func _collect() -> Dictionary:
 	out["name"] = _w_name.text.strip_edges()
 	out["icon"] = _w_icon.text.strip_edges()
 
+	if _current_kind == "item":
+		return _collect_item(out)
+
 	var tags: Array = [_w_rarity.get_selected_metadata()]
 	var slot := ""
 	match _current_kind:
@@ -1105,6 +1258,38 @@ func _collect() -> Dictionary:
 		else:
 			mods.append({"stat": e["stat"].get_selected_metadata(), "op": e["op"].get_selected_metadata(), "value": _num(e["value"].value)})
 	out["mods"] = mods
+	return out
+
+
+# 物品（非装备类）表单 → 物品字典：kind=item、类型多选 tag、消耗品时含 on_use/设置。无 slot/mods/requires。
+func _collect_item(out: Dictionary) -> Dictionary:
+	out["kind"] = "item"
+	for k in ["slot", "mods", "requires", "two_handed", "innate", "attack", "use_scope"]:
+		out.erase(k)   # 装备专属 + 废弃字段：物品一律不带
+	var tags: Array = [_w_rarity.get_selected_metadata()]
+	if _w_usable.button_pressed:
+		tags.append("usable")
+	if _w_quest.button_pressed:
+		tags.append("quest_item")
+	for t in _free_tags:
+		if not tags.has(t):
+			tags.append(t)
+	out["tags"] = tags
+	# on_use 与设置：仅「可使用」时写入，否则整体移除（不可使用＝纯道具/素材/任务物品/食物）
+	if _w_usable.button_pressed:
+		var ou := {}   # 由动态效果行组装（每条 效果类型→数值；0 值/空类型跳过，同类型后者覆盖）
+		for e in _ou_rows:
+			var key := str(e["type"].get_selected_metadata())
+			var v := int(e["value"].value)
+			if key != "" and v != 0:
+				ou[key] = v
+		out["on_use"] = ou
+		out["target"] = str(_w_use_target.get_selected_metadata())
+		out["range"] = int(_w_use_range.value)
+		out["stack"] = _w_stack.button_pressed
+	else:
+		for k in ["on_use", "target", "range", "stack"]:
+			out.erase(k)
 	return out
 
 
