@@ -1,12 +1,14 @@
 extends Control
-## 大地图场景（Overworld，M4）：战役层——队伍 token 在大地图上移动；**时间仅在移动/扎营时流动 🔒**。
+## 大地图场景（Overworld，M4）：战役层——队伍 token 在大地图上移动；**时钟可播放/暂停（空格总开关）🔒**：
+## 播放即流动——沿路径伪即时行军（token 像素插值滑行，地块成本越高过格越慢）or 原地等待；抵达/模态事件自动暂停；
+## 战斗仍不耗世界时间 🔒。（2026-07-08 修订旧规则「时间仅移动/扎营时流动」→ 注记见 meta层需求提炼_1.md §1.1）
 ## 复用底层：HexCanvas(经 OverworldCanvas)/MapIO/TerrainDB/HexGrid——与战斗地图同构（flat-top odd-q）。
-## 事件：每落一格评估 EventEngine 的 enter_tile + timer（fired/冷却＝WorldState.event_* 世界持久层）——
+## 事件：每落一格评估 EventEngine 的 enter_tile、每跨整点推 WorldClock+WorldSim（时间推进＝世界回合）+timer——
 ## 两路事件源并行：每图 triggers（地图 JSON）+ 全局事件池（EventDB，带地形限定 when.terrain）；📜 顶栏面板只读查看。
 ## 日夜：随时钟推导（WorldClock.time_of_day → 标签 + EnvDB tint 变暗叠层）；战斗侧日夜注入见 Sandbox._world_time。
 ## 宿主原语：event_log / event_start_battle / event_dialogue（大地图不支持战斗动作 spawn/aggro/set_weather——EventEngine 守卫警告跳过）。
-## 存档：移动完成/扎营后自动写 AUTO_SLOT；「继续战役」从 StartMenu 读它。
-## 可测性：寻路/耗时/事件评估不依赖 UI 节点（UI 刷新全走 null 守卫）——headless new() 即可测纯逻辑。
+## 存档：抵达目的地/扎营后自动写 AUTO_SLOT；「继续战役」从 StartMenu 读它。
+## 可测性：寻路/耗时/事件评估不依赖 UI 节点（UI 刷新全走 null 守卫）——headless new() 直调 _tick_time(dh) 即可测时间步进。
 
 const HexGrid := preload("res://HexGrid.gd")
 const TerrainDB := preload("res://TerrainDB.gd")
@@ -32,7 +34,8 @@ const MAP_PATH := "res://maps/overworld/world.json"
 const HOURS_PER_COST := 2    # 占位：1 点地形通行成本 ＝ 2 小时行程（数值层后调）
 const CAMP_HOURS := 8        # 占位：扎营一次休整 8 小时（临时据点/职务＝M6）
 # 自动存档槽名单一源＝SaveIO.AUTO_SLOT（实例注入见 _save_slot）
-const STEP_DELAY := 0.12     # 行进逐格停顿（秒）
+const TIME_RATE := 2.5       # 时间流速（游戏小时/真实秒，占位可调）：cost-1 格（2h）≈0.8 真实秒
+const MAX_FRAME_DELTA := 0.1 # 单帧 delta 钳制（秒）：卡帧不折成一大坨小时（_tick_time 内仍逐小时逐格结算兜底）
 const PARTY_TAGS: Array = [] # 队伍通行 tag（暂无船/坐骑——深水/墙 passable_by 列表对空 tags 关闭＝天然屏障）
 
 var width := 15
@@ -53,9 +56,13 @@ var _map_regions := []        # 地图 regions 字段：大地图按「区域外
 
 var canvas
 var _time_label: Label
+var _play_label: Label                  # ▶/⏸ 播放指示（顶栏极简）
 var _log: RichTextLabel
 var _night_overlay: ColorRect
-var _moving := false                    # 行进中（忽略新指令）
+var _time_playing := false              # 时间播放中（空格总开关）：播放即流动——行军 or 原地等待
+var _route: Array = []                  # 行军剩余路径（Vector2i 待走格序列，[0]=当前段终点；空＝无目的地）
+var _seg_progress := 0.0                # 当前段插值分数 [0,1)：token 平滑绘制 + 跨格判定
+var _hour_acc := 0.0                    # 整点累加器（浮点游戏小时）：跨 1.0 才推 WorldClock——clock_hours 恒整数
 var _move_target := Vector2i(-1, -1)    # 当前行进目的地（画布标记用）
 var _save_slot: String = SaveIO.AUTO_SLOT   # 自动存档槽（单一源在 SaveIO；测试可注入独立槽）
 var _transient := false                 # 兜底建的调试档：只活内存、绝不自动落盘（防覆盖玩家 auto 真档）
@@ -68,7 +75,7 @@ func _ready() -> void:
 	WorldSim.ensure_spawned(WorldState.current, self)   # 动态单位开局生成（幂等，flags 记账）
 	_build_ui()
 	_refresh_time_ui()
-	_log_line("抵达大地图。左键点击目标格移动；移动与扎营会推进时间。")
+	_log_line("抵达大地图。左键点目标格出发（自动播放时间）；空格＝播放/暂停。")
 	_autosave()   # 新开局立即落盘（否则首次移动前关窗＝战役无痕消失）；调试兜底档在 _autosave 内被拦
 
 # 无档兜底（直接跑本场景调试/headless 冒烟）：正常入口是 StartMenu 建/读档后进来。
@@ -248,17 +255,25 @@ func _site_status_text(loc: Dictionary) -> String:
 	var left := LocationDB.site_respawn_in(loc, WorldState.current)
 	return "——已肃清（%s）" % ("约 %d 小时后刷新" % left if left > 0 else "不再刷新")
 
+# 右键＝中止行军：清路径并暂停（就地停在当前格；段内进度作废，已推的时钟不回退）
 func cancel_action() -> void:
-	pass   # 行进不可中断（每格结算已落账）；预留给将来的选目标模式
-
-# 左键点格：寻路并出发（行进中忽略）
-func left_click_cell(col: int, row: int) -> void:
-	if _moving or not _cell_in_bounds(col, row):
+	if _route.is_empty():
 		return
+	_clear_route()
+	_pause_time()
+	_log_line("↩ 行军中止。")
+	if canvas != null:
+		canvas.queue_redraw()
+
+# 左键点格：寻路并出发（自动播放）。行军中再点＝从当前格重新寻路（伪即时：指令可随时改）。
+func left_click_cell(col: int, row: int) -> void:
+	if not _cell_in_bounds(col, row) or _dialogue != null or SandboxConfig.battle_setup != null:
+		return   # 模态事件（对话/战斗待切场景）中不收移动指令
 	var ws = WorldState.current
 	var from := Vector2i(ws.party_col, ws.party_row)
 	var to := Vector2i(col, row)
 	if from == to:
+		_clear_route()   # 点自己脚下＝就地停下
 		if _loc_by_cell.has(to):
 			_open_location_panel(_loc_by_cell[to])   # 原地点自己脚下的地点＝重新进入
 		return
@@ -266,7 +281,11 @@ func left_click_cell(col: int, row: int) -> void:
 	if path.size() < 2:
 		_log_line("那里去不了（无可通行路径）。")
 		return
-	_travel(path)
+	_set_route(path)
+	_time_playing = true   # 点目的地＝自动播放
+	_refresh_time_ui()
+	if canvas != null:
+		canvas.queue_redraw()
 
 # ============ 寻路 / 行程（纯逻辑，可 headless 测）============
 
@@ -281,7 +300,7 @@ func _move_cost_at(col: int, row: int) -> int:
 
 # 跨边通行成本（from→to 相邻格；-1=不可跨）——线特征语义的单一实现：
 #   河边无桥＝硬阻断；有桥＝可跨且享道路折扣；道路边＝成本折为 min(目的格成本, 1)（穿林翻山的大道）。
-# 寻路（find_path）与行程扣时（_travel）都读这里，保证「路径成本＝实际耗时」不脱节；WorldSim 游荡同用。
+# 寻路（find_path）与行军扣时（_tick_time 段时长）都读这里，保证「路径成本＝实际耗时」不脱节；WorldSim 游荡同用。
 func _move_cost_between(from_col: int, from_row: int, col: int, row: int) -> int:
 	var base := _move_cost_at(col, row)
 	if base < 0:
@@ -326,34 +345,112 @@ func find_path(from: Vector2i, to: Vector2i) -> Array:
 		path.push_front(walker)
 	return path
 
-# 沿路径逐格行进：每格＝落位 → 推进时钟（跨边成本×HOURS_PER_COST，与寻路同源）→ 评估事件 → 重绘停顿
-func _travel(path: Array) -> void:
-	_moving = true
+# ============ 伪即时时间（🔒 修订 2026-07-08：时钟可播放/暂停，播放即流动——行军 or 原地等待）============
+
+# 每帧步进：播放中把真实秒折成游戏小时喂 _tick_time（步进逻辑全在那，headless 直调可测）。
+# delta 钳 MAX_FRAME_DELTA：卡帧的大 delta 不折成一大坨小时（_tick_time 内仍逐小时逐格结算，双保险）。
+func _process(delta: float) -> void:
+	if not _time_playing:
+		return
+	_tick_time(minf(delta, MAX_FRAME_DELTA) * TIME_RATE)
+	_refresh_time_ui()
+	if canvas != null:
+		canvas.queue_redraw()
+
+# 空格＝时间总开关（播放/暂停）；只吃空格、不吞其它键。顶栏按钮已设 FOCUS_NONE，空格不会误触聚焦按钮。
+func _unhandled_key_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_SPACE:
+		_toggle_time()
+		get_viewport().set_input_as_handled()
+
+func _toggle_time() -> void:
+	if not _time_playing and (_dialogue != null or SandboxConfig.battle_setup != null):
+		return   # 模态事件（对话/战斗待切场景）中不允许开表
+	_time_playing = not _time_playing
+	_refresh_time_ui()
+
+func _pause_time() -> void:
+	_time_playing = false
+	_refresh_time_ui()
+
+# 设定行军路径（path＝find_path 产物，含起点）：只存待走格；段进度清零。
+func _set_route(path: Array) -> void:
+	_route = path.slice(1)
 	_move_target = path.back()
+	_seg_progress = 0.0
+
+func _clear_route() -> void:
+	_route = []
+	_seg_progress = 0.0
+	_move_target = Vector2i(-1, -1)
+
+# 时间步进核心（纯逻辑，headless 直调）：dh＝本次推进的游戏小时（浮点）。
+# 逐边界消化：每轮至多吃到「下个整点 / 当前段走完」——大 dh 不跳步，事件/战斗逐小时逐格必查。
+# 段时长＝跨边成本×HOURS_PER_COST（与寻路同源，成本越高走得越慢）；跨格＝落位＋评事件（同旧 _travel 序：
+# 落位→推钟→评事件）；跨整点＝WorldClock.advance(1)＋世界回合＋timer（clock_hours 恒整数 🔒）。
+# 自动暂停：模态事件（对话/战斗待切场景）→ 停给玩家读选；抵达目的地 → 停＋autosave＋地点面板。
+func _tick_time(dh: float) -> void:
 	var ws = WorldState.current
-	for i in range(1, path.size()):
-		var prev: Vector2i = path[i - 1]
-		var cell: Vector2i = path[i]
-		ws.party_col = cell.x
-		ws.party_row = cell.y
-		_advance_world(maxi(_move_cost_between(prev.x, prev.y, cell.x, cell.y), 0) * HOURS_PER_COST)
-		_refresh_time_ui()
-		_check_cell_events(cell)
-		if _dialogue != null and is_inside_tree():
-			await _dialogue.finished   # 事件对话：行进暂停到播完（headless 无 UI 不等）
-		if canvas != null:
-			canvas.queue_redraw()
-		if is_inside_tree():
-			await get_tree().create_timer(STEP_DELAY).timeout
-	_moving = false
+	if ws == null:
+		return
+	var remain := dh
+	while _time_playing:
+		# 当前段时长（游戏小时）；-1＝无路径（原地等待）。0 时长段（病态成本 0）瞬跨不耗时。
+		var seg_hours := -1.0
+		if not _route.is_empty():
+			var to: Vector2i = _route[0]
+			seg_hours = maxi(_move_cost_between(ws.party_col, ws.party_row, to.x, to.y), 0) * HOURS_PER_COST
+		if remain <= 0.0 and seg_hours != 0.0:
+			break   # dh 耗尽（0 时长段例外：还要落格）
+		if seg_hours != 0.0:
+			# 本轮步长：吃到下个整点为止；行军中再被「当前段剩余」截断
+			var step := minf(remain, 1.0 - _hour_acc)
+			if seg_hours > 0.0:
+				step = minf(step, (1.0 - _seg_progress) * seg_hours)
+			remain -= step
+			_hour_acc += step
+			if seg_hours > 0.0:
+				_seg_progress += step / seg_hours
+		# ① 跨格：先落位（事件评估放到推钟后）
+		var landed := Vector2i(-1, -1)
+		if seg_hours >= 0.0 and (seg_hours == 0.0 or _seg_progress >= 1.0 - 1e-6):
+			landed = _route.pop_front()
+			ws.party_col = landed.x
+			ws.party_row = landed.y
+			_seg_progress = 0.0
+		# ② 跨整点：推钟＋世界回合＋timer（每整点一次；浮点累加器只驱动插值）
+		if _hour_acc >= 1.0 - 1e-6:
+			_hour_acc = maxf(_hour_acc - 1.0, 0.0)
+			_advance_world(1)
+			_eval_all_timers()
+		# ③ 落格事件（enter_tile 每图+全局池 + 遭伏 + timer）
+		if landed.x >= 0:
+			_check_cell_events(landed)
+		# ④ 暂停判定：模态事件优先（战斗已在 _start_battle_with 落盘；对话读完按空格续行）；其次抵达
+		if _dialogue != null or SandboxConfig.battle_setup != null:
+			_pause_time()
+		elif landed.x >= 0 and _route.is_empty():
+			_arrive(landed)
+
+# 抵达目的地：自动暂停＋落盘；地点＝自动进入（面板；途经不进——BB 式点到才停靠）
+func _arrive(dest: Vector2i) -> void:
+	_pause_time()
 	_move_target = Vector2i(-1, -1)
 	if canvas != null:
 		canvas.queue_redraw()
 	_autosave()
-	# 抵达地点＝自动进入（面板；途经不进——BB 式点到才停靠）。change_scene 已在途（事件开战）则不弹。
-	var dest := Vector2i(ws.party_col, ws.party_row)
 	if _loc_by_cell.has(dest):
 		_open_location_panel(_loc_by_cell[dest])
+
+# 测试助手：把整条路径一次跑完（headless 无真 _process——小步反复 _tick_time 直到自动暂停/抵达）
+func simulate_travel_to_arrival(path: Array) -> void:
+	_set_route(path)
+	_time_playing = true
+	for i in 100000:
+		if not _time_playing:
+			return
+		_tick_time(0.5)
+	push_error("simulate_travel_to_arrival：10 万步未抵达（路径/暂停逻辑有问题）")
 
 # 时钟推进统一入口：推钟（恢复调度）→ 世界回合（动态单位随玩家活动移动 🔒）→ 事件表现。
 # 战斗类事件（engage）由 _start_battle_with 收口；一次推进至多一场（WorldSim 保证）。
@@ -418,10 +515,10 @@ func _hostile_ambush_triggers() -> Array:
 				{"action": "start_battle", "map": str(amb.get("battle_map", "res://maps/sandbox.json"))}]})
 	return out
 
-# 扎营：原地休整推进时钟（恢复结算走 WorldClock 调度表；临时据点/职务＝M6）
+# 扎营：原地休整推进时钟（维持离散 +8h；恢复结算走 WorldClock 调度表；临时据点/职务＝M6）
 func _on_camp() -> void:
-	if _moving:
-		return
+	if not _route.is_empty():
+		return   # 行军中不可扎营（先右键中止/点脚下停车）
 	_advance_world(CAMP_HOURS)
 	_log_line("⛺ 扎营休整 %d 小时。" % CAMP_HOURS)
 	_refresh_time_ui()
@@ -451,7 +548,7 @@ func event_set_flag(key: String, value) -> void:
 		return
 	ws.flags[key] = value
 
-# 开对话（do: dialogue）：模态覆盖大地图；行进中触发＝_travel 暂停等 finished（M8）
+# 开对话（do: dialogue）：模态覆盖大地图；行军中触发＝_tick_time 自动暂停（读完按空格续行）（M8）
 func event_dialogue(dialogue_id: String) -> void:
 	if _dialogue != null and is_instance_valid(_dialogue):
 		push_warning("Overworld：已有对话进行中，跳过「%s」" % dialogue_id)
@@ -601,6 +698,13 @@ func party_cell() -> Vector2i:
 func move_target() -> Vector2i:
 	return _move_target
 
+# 队伍 token 绘制段（画布插值钩子）：{from,to,t}——行军中＝当前格→下一格按段进度插值；静止＝from==to、t=0。
+func party_seg() -> Dictionary:
+	var cell := party_cell()
+	if _route.is_empty():
+		return {"from": cell, "to": cell, "t": 0.0}
+	return {"from": cell, "to": _route[0], "t": _seg_progress}
+
 # 动态单位标记数据（画布逐帧调；量级＝个位数）：敌对（对玩家）标红圈
 func world_units_for_draw() -> Array:
 	var out := []
@@ -647,6 +751,10 @@ func _build_ui() -> void:
 	top.custom_minimum_size = Vector2(0, 40)
 	top.add_theme_constant_override("separation", 12)
 	root.add_child(top)
+	_play_label = Label.new()
+	_play_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_play_label.tooltip_text = "空格＝播放/暂停时间"
+	top.add_child(_play_label)
 	_time_label = Label.new()
 	_time_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_time_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -671,6 +779,9 @@ func _build_ui() -> void:
 	menu_b.text = "返回菜单"
 	menu_b.pressed.connect(_on_back_to_menu)
 	top.add_child(menu_b)
+	for b in top.get_children():
+		if b is Button:
+			b.focus_mode = Control.FOCUS_NONE   # 空格留给时间开关（聚焦按钮会吃空格误触发）
 
 	canvas = OverworldCanvas.new()
 	canvas.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -691,6 +802,8 @@ func _refresh_time_ui() -> void:
 	var ws = WorldState.current
 	if ws == null:
 		return
+	if _play_label != null:
+		_play_label.text = "  ▶" if _time_playing else "  ⏸"
 	if _time_label != null:
 		_time_label.text = "  🕐 %s　💰 %d" % [WorldClock.describe(ws.clock_hours), ws.gold]
 	EnvDB.apply_time_tint(_night_overlay, WorldClock.time_of_day(ws.clock_hours))

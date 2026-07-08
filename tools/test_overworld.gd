@@ -1,5 +1,6 @@
 extends SceneTree
-## M4 回归：map_type schema / TerrainDB.move_cost 单一实现 / WorldState party 往返 / Overworld 寻路与耗时（纯逻辑，不进树）。
+## M4 回归：map_type schema / TerrainDB.move_cost 单一实现 / WorldState party 往返 / Overworld 寻路与耗时 /
+## 伪即时行军（_tick_time 直调模拟帧：插值/整点推钟/自动暂停；纯逻辑，不进树）。
 ## 注意：不触碰 "auto" 存档槽（那是玩家真档）；本测试用独立槽并清理。
 ## 运行：..._console.exe --headless --path "D:/1战棋" -s res://tools/test_overworld.gd（退出码 0=PASS）
 
@@ -9,6 +10,8 @@ const WorldState := preload("res://WorldState.gd")
 const SaveIO := preload("res://SaveIO.gd")
 const EnvDB := preload("res://EnvDB.gd")
 const OverworldScript := preload("res://Overworld.gd")
+
+const SandboxConfig := preload("res://SandboxConfig.gd")
 
 const SLOT := "_test_m4"
 const TMP_MAP := "user://_test_m4_map.json"
@@ -77,25 +80,55 @@ func _initialize() -> void:
 	ck(ow.hover_text(8, 8).contains("小时"), "悬停：可走格显示行程耗时")
 	ow.free()   # Control 是 Node：手动释放（未进树无人管）
 
-	# 6) _travel/_on_camp 闭环（M4 审查补：核心语义逐格推钟+事件钩+自动存档；注入独立槽，绝不碰玩家 auto 档）
+	# 6) 伪即时行军/_on_camp 闭环（2026-07-08 重写自 _travel：_tick_time 直调模拟帧；断言等价——终点/时钟增量/事件钩/自动存档）
 	var ow2 = OverworldScript.new()
 	var ws2 = WorldState.start_new()
 	ow2._save_slot = "_test_m4_travel"
 	ow2._ensure_campaign()   # current 已有 → 非 transient（真存档路径）
 	ck(not ow2._transient, "已有档不标 transient")
 	ow2._load_map()
-	# 换成受控触发器：every_hours=1 的 timer——每格推 2h 必触发，验证行进中事件评估在跑
+	# 换成受控触发器：every_hours=1 的 timer——每整点必触发，验证行军中事件评估在跑
 	ow2._map_triggers = [{"id": "t_test", "when": {"event": "timer", "every_hours": 1}, "do": [{"action": "show_message", "text": "tick"}]}]
+	# 受控环境：中和开局敌对派系（流寇 start_rep=-50）——遭伏概率触发会按新语义正当地中停行军，测试要确定性
+	ws2.reputation["bandits"] = 0
+	SandboxConfig.battle_setup = null   # 静态跨场景通道：清残留，防误判「战斗待切」暂停
 	ws2.party_col = 8
 	ws2.party_row = 8
 	var tpath: Array = ow2.find_path(Vector2i(8, 8), Vector2i(11, 8))   # 沿道路 3 格（cost 1/格）
 	ck(tpath.size() == 4, "道路 3 格路径（含起点 4 节点）")
 	var t0: int = ws2.clock_hours
-	await ow2._travel(tpath)
-	ck(ws2.party_col == 11 and ws2.party_row == 8, "travel 落终点")
-	ck(ws2.clock_hours == t0 + 3 * 1 * ow2.HOURS_PER_COST, "travel 逐格推钟（3 格×cost1×%dh，实得 +%d）" % [ow2.HOURS_PER_COST, ws2.clock_hours - t0])
-	ck(ws2.event_timer_last.has("t_test"), "行进中 timer 事件被评估（timer_last 记账）")
-	ck(SaveIO.list_slots().has("_test_m4_travel"), "travel 完成自动存档写入注入槽")
+	ow2.simulate_travel_to_arrival(tpath)
+	ck(ws2.party_col == 11 and ws2.party_row == 8, "行军落终点")
+	ck(ws2.clock_hours == t0 + 3 * 1 * ow2.HOURS_PER_COST, "行军推钟（路径总成本 3×cost1×%dh，实得 +%d）" % [ow2.HOURS_PER_COST, ws2.clock_hours - t0])
+	ck(not ow2._time_playing, "抵达自动暂停")
+	ck(ow2._route.is_empty() and ow2.move_target() == Vector2i(-1, -1), "抵达清路径/目的地标记")
+	ck(ws2.event_timer_last.has("t_test"), "行军中 timer 事件被评估（timer_last 记账）")
+	ck(SandboxConfig.battle_setup == null, "受控环境无战斗排队（有＝遭伏没被中和）")
+	ck(SaveIO.list_slots().has("_test_m4_travel"), "抵达自动存档写入注入槽")
+	# 6b) 段内插值 + 半路改令：cost1 段＝2h，推 1h＝半段——token 半途、未落格、时钟已推 1 整点
+	var tb0: int = ws2.clock_hours
+	ow2._set_route(ow2.find_path(Vector2i(11, 8), Vector2i(8, 8)))
+	ow2._time_playing = true
+	ow2._tick_time(1.0)
+	ck(ws2.party_col == 11 and absf(ow2._seg_progress - 0.5) < 0.001, "半段：未落格、seg_progress=0.5")
+	ck(ws2.clock_hours == tb0 + 1, "半段已推 1 整点（clock_hours 恒整数）")
+	var seg: Dictionary = ow2.party_seg()
+	ck(seg["from"] == Vector2i(11, 8) and seg["to"] == Vector2i(10, 8) and absf(float(seg["t"]) - 0.5) < 0.001, "party_seg 插值钩子透出半途段")
+	ow2.left_click_cell(10, 8)   # 半路改令：从当前格重新寻路（段内进度作废）
+	ck(ow2._seg_progress == 0.0 and ow2._time_playing, "半路重新寻路：段进度重置、自动播放")
+	for i in 100:
+		if not ow2._time_playing:
+			break
+		ow2._tick_time(0.5)
+	ck(ws2.party_col == 10 and ws2.party_row == 8 and not ow2._time_playing, "改令后抵达新目的地并自动暂停")
+	ck(ws2.clock_hours == tb0 + 3, "改令重走整段（1h 半段作废 + 2h 新段，共 +3h）")
+	# 6c) 原地等待：无路径播放＝时间照常流逝（WorldSim/timer 逐整点推进），不自动暂停
+	var tw0: int = ws2.clock_hours
+	ow2._time_playing = true
+	ow2._tick_time(2.0)
+	ck(ws2.clock_hours == tw0 + 2 and ow2._time_playing, "原地等待推钟 +2h、不自动暂停")
+	ow2._pause_time()
+	# 6d) 扎营维持离散休整（本刀不动）
 	var t1: int = ws2.clock_hours
 	ow2._on_camp()
 	ck(ws2.clock_hours == t1 + ow2.CAMP_HOURS, "扎营 +%dh" % ow2.CAMP_HOURS)

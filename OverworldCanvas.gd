@@ -1,6 +1,7 @@
 extends "res://HexCanvas.gd"
 ## 大地图画布（M4）：地形渲染/平移/缩放/悬停沿用 HexCanvas；在其上叠画玩家队伍 token 与移动目的地标记。
-## 左键＝移动指令（点目标格），右键＝取消，中键/滚轮/悬停沿用父类。宿主＝Overworld。
+## 左键＝移动指令（点目标格），右键＝中止行军，中键/滚轮/悬停沿用父类。宿主＝Overworld。
+## token 伪即时插值：画在当前段 from→to 格心 lerp（editor.party_seg 钩子）；静止退化为格心。
 
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed:
@@ -51,11 +52,13 @@ func _draw() -> void:
 		var tp := hex_corners(hex_center(tgt.x, tgt.y))
 		tp.append(tp[0])
 		draw_polyline(tp, Color(1.0, 0.85, 0.25, 0.95), 3.0 / view_zoom, true)
-	# 队伍 token：主金圆 + 深边 + 白心（大地图上只有这一枚棋子）
-	var cell: Vector2i = editor.party_cell()
-	if cell.x < 0:
+	# 队伍 token：主金圆 + 深边 + 白心（大地图上只有这一枚棋子）——行军中沿当前段插值滑行（伪即时）
+	var seg: Dictionary = editor.party_seg()
+	var from: Vector2i = seg["from"]
+	if from.x < 0:
 		return
-	var c := hex_center(cell.x, cell.y)
+	var to: Vector2i = seg["to"]
+	var c := hex_center(from.x, from.y).lerp(hex_center(to.x, to.y), float(seg["t"]))
 	var r := HEX_SIZE * 0.52
 	draw_circle(c, r, Color(0.93, 0.78, 0.25))
 	draw_arc(c, r, 0.0, TAU, 28, Color(0.25, 0.18, 0.02, 0.9), 2.5)
