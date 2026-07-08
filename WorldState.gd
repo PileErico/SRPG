@@ -41,6 +41,8 @@ var event_fired := {}            # 已触发事件 {tid: true}（once 消费）
 var event_timer_last := {}       # timer 事件上次节拍时刻 {tid: clock_hours}
 var event_cooldown_until := {}   # 事件冷却到期时刻 {tid: clock_hours}
 var last_world_event_hours := -1000000   # 上次 global_gap 事件时刻（全局事件间隔用；极小初值＝开局不卡）
+var event_disabled := {}          # 📜事件管理器里被玩家禁用的事件 {tid: true}（含伪触发器 tid 如 faction_ambush_bandits）——引擎硬闸跳过
+var overworld_combat_off := false # 大地图遭遇战总开关：关＝无派系伏击 + 世界单位不主动追上开战（「给我关咯」）
 
 # ============ 战役生命周期入口（场景入口层专用；底层模块别碰 current，改收显式参数）============
 
@@ -190,6 +192,8 @@ func to_dict() -> Dictionary:
 		"event_timer_last": event_timer_last.duplicate(true),
 		"event_cooldown_until": event_cooldown_until.duplicate(true),
 		"last_world_event_hours": last_world_event_hours,
+		"event_disabled": event_disabled.duplicate(true),
+		"overworld_combat_off": overworld_combat_off,
 		"item_instances": items_json,
 		"inventory": inventory.duplicate(true),
 		"roster": roster_json,
@@ -223,6 +227,9 @@ static func from_dict(d: Dictionary):
 	ws.event_timer_last = _int_valued(d.get("event_timer_last", {}))
 	ws.event_cooldown_until = _int_valued(d.get("event_cooldown_until", {}))
 	ws.last_world_event_hours = int(d.get("last_world_event_hours", -1000000))
+	var ed2 = d.get("event_disabled", {})
+	ws.event_disabled = ed2 if typeof(ed2) == TYPE_DICTIONARY else {}
+	ws.overworld_combat_off = bool(d.get("overworld_combat_off", false))
 	ws.item_instances = ItemInstances.parse_json(d.get("item_instances", []))
 	ws.inventory = _int_valued(d.get("inventory", {}))
 	var prev = current

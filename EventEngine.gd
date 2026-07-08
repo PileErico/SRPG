@@ -226,6 +226,8 @@ static func _faction_match(when: Dictionary, faction: String) -> bool:
 
 # 硬闸（不通过＝本次评估不消耗任何状态）：once/fired → 冷却 → 全局间隔（后两者仅世界层 ws 生效）
 static func _gates_open(when: Dictionary, tid: String, fired: Dictionary, ws, default_once: bool) -> bool:
+	if ws != null and ws.event_disabled.has(tid):
+		return false   # 玩家在📜事件管理器禁用（含伪触发器；随档持久）——硬闸不评估、不消耗状态
 	if bool(when.get("once", default_once)) and fired.has(tid):
 		return false
 	if ws != null:

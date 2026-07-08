@@ -203,6 +203,8 @@ static func _reachable_adjacent(world, a: Vector2i, b: Vector2i) -> bool:
 
 # 敌对单位追上玩家（同格/边可跨的邻格）→ engage 事件 + 冷静期（防战败归来原地连环追击）
 static func _check_engage_player(ws, u: Dictionary, _t: Dictionary, world, events: Array) -> bool:
+	if ws.overworld_combat_off:
+		return false   # 遭遇战总开关（关）：世界单位不主动追上开战（仍游荡/摩擦战，只是不把玩家拽进战斗）
 	if not FactionDB.hostile(ws, str(u.get("faction", ""))):
 		return false
 	if ws.clock_hours < int(u.get("calm_until", 0)):

@@ -37,6 +37,7 @@ const CAMP_HOURS := 8        # 占位：扎营一次休整 8 小时（临时据�
 # 自动存档槽名单一源＝SaveIO.AUTO_SLOT（实例注入见 _save_slot）
 const TIME_RATE := 2.5       # 时间流速（游戏小时/真实秒，占位可调）：cost-1 格（2h）≈0.8 真实秒
 const MAX_FRAME_DELTA := 0.1 # 单帧 delta 钳制（秒）：卡帧不折成一大坨小时（_tick_time 内仍逐小时逐格结算兜底）
+const WU_ANIM_SECONDS := 0.3 # 世界单位每步滑行时长（真实秒，占位）：略短于典型步间隔，滑完再走下一步
 const PARTY_TAGS: Array = [] # 队伍通行 tag（暂无船/坐骑——深水/墙 passable_by 列表对空 tags 关闭＝天然屏障）
 
 var width := 15
@@ -64,6 +65,7 @@ var _time_playing := false              # 时间播放中（空格总开关）�
 var _route: Array = []                  # 行军剩余路径（Vector2i 待走格序列，[0]=当前段终点；空＝无目的地）
 var _seg_progress := 0.0                # 当前段插值分数 [0,1)：token 平滑绘制 + 跨格判定
 var _hour_acc := 0.0                    # 整点累加器（浮点游戏小时）：跨 1.0 才推 WorldClock——clock_hours 恒整数
+var _wu_anim := {}                      # 世界单位滑行插值 {uid: {from:Vector2i, to:Vector2i, t:float}}——纯表现、不随档
 var _move_target := Vector2i(-1, -1)    # 当前行进目的地（画布标记用）
 var _save_slot: String = SaveIO.AUTO_SLOT   # 自动存档槽（单一源在 SaveIO；测试可注入独立槽）
 var _transient := false                 # 兜底建的调试档：只活内存、绝不自动落盘（防覆盖玩家 auto 真档）
@@ -351,12 +353,24 @@ func find_path(from: Vector2i, to: Vector2i) -> Array:
 # 每帧步进：播放中把真实秒折成游戏小时喂 _tick_time（步进逻辑全在那，headless 直调可测）。
 # delta 钳 MAX_FRAME_DELTA：卡帧的大 delta 不折成一大坨小时（_tick_time 内仍逐小时逐格结算，双保险）。
 func _process(delta: float) -> void:
-	if not _time_playing:
-		return
-	_tick_time(minf(delta, MAX_FRAME_DELTA) * TIME_RATE)
-	_refresh_time_ui()
-	if canvas != null:
+	var anim_moving := _advance_wu_anim(delta)   # 世界单位滑行插值（与时钟播放无关；暂停时也把上一步滑完）
+	if _time_playing:
+		_tick_time(minf(delta, MAX_FRAME_DELTA) * TIME_RATE)
+		_refresh_time_ui()
+		if canvas != null:
+			canvas.queue_redraw()
+	elif anim_moving and canvas != null:
 		canvas.queue_redraw()
+
+# 推进世界单位滑行插值：每步 WU_ANIM_SECONDS 真实秒 from→to；返回是否有单位仍在滑（决定是否重绘）。
+func _advance_wu_anim(delta: float) -> bool:
+	var moving := false
+	for uid in _wu_anim:
+		var a: Dictionary = _wu_anim[uid]
+		if float(a["t"]) < 1.0:
+			a["t"] = minf(1.0, float(a["t"]) + delta / WU_ANIM_SECONDS)
+			moving = true
+	return moving
 
 # 空格＝时间总开关（播放/暂停）；只吃空格、不吞其它键。顶栏按钮已设 FOCUS_NONE，空格不会误触聚焦按钮。
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -458,6 +472,7 @@ func simulate_travel_to_arrival(path: Array) -> void:
 func _advance_world(hours: int) -> void:
 	var ws = WorldState.current
 	WorldClock.advance(ws, hours)
+	var before := _wu_positions(ws)   # 世界回合前各单位位置（滑行插值 diff）
 	for e in WorldSim.tick(ws, hours, self):
 		match str(e.get("kind", "")):
 			"engage_player":
@@ -472,6 +487,32 @@ func _advance_world(hours: int) -> void:
 				_log_line("🗡 %s%s了%s。" % [hunter, "击溃" if bool(e.get("prey_died", true)) else "反被击溃——输给", prey])
 			"caravan_arrive":
 				pass   # 商队到站：暂不播报（避免刷屏；交易接入后再表现）
+	_sync_wu_anim(ws, before)   # 世界回合后：为移动过的单位起滑行插值
+
+# 世界单位当前位置快照 {uid: Vector2i}（世界回合前后 diff，判定谁移动了）
+func _wu_positions(ws) -> Dictionary:
+	var out := {}
+	for u in ws.world_units:
+		out[int(u.get("uid", 0))] = Vector2i(int(u.get("col", 0)), int(u.get("row", 0)))
+	return out
+
+# 为世界回合中移动过的单位起滑行插值：相邻步=滑行(t:0)、传送/重生成=直接落位(t:1)、消失单位清表。
+func _sync_wu_anim(ws, before: Dictionary) -> void:
+	var live := {}
+	for u in ws.world_units:
+		var uid := int(u.get("uid", 0))
+		live[uid] = true
+		var cur := Vector2i(int(u.get("col", 0)), int(u.get("row", 0)))
+		if not before.has(uid):
+			_wu_anim[uid] = {"from": cur, "to": cur, "t": 1.0}
+		elif before[uid] != cur:
+			if HexGrid.distance(before[uid], cur) == 1:
+				_wu_anim[uid] = {"from": before[uid], "to": cur, "t": 0.0}
+			else:
+				_wu_anim[uid] = {"from": cur, "to": cur, "t": 1.0}
+	for uid in _wu_anim.keys():
+		if not live.has(uid):
+			_wu_anim.erase(uid)
 
 # 一格落位后的事件评估：地图触发器 enter_tile + 全局事件池（带有效地形 id）+ 敌对派系遭伏（M9 伪触发器）+ timer（时钟刚被推进）
 func _check_cell_events(cell: Vector2i) -> void:
@@ -502,6 +543,8 @@ func _eval_all_timers() -> void:
 func _hostile_ambush_triggers() -> Array:
 	var out := []
 	var ws = WorldState.current
+	if ws == null or ws.overworld_combat_off:
+		return out   # 遭遇战总开关（关）：无派系伏击
 	for f in FactionDB.all_factions():
 		var fid := str(f["id"])
 		if not FactionDB.hostile(ws, fid):
@@ -725,8 +768,13 @@ func world_units_for_draw() -> Array:
 		var t = WorldUnitDB.type_def(str(u.get("type", "")))
 		if t == null:
 			continue
+		var uid := int(u.get("uid", 0))
+		var cur := Vector2i(int(u.get("col", 0)), int(u.get("row", 0)))
+		var a = _wu_anim.get(uid)
 		out.append({
-			"cell": Vector2i(int(u.get("col", 0)), int(u.get("row", 0))),
+			"from": (a["from"] if a != null else cur),
+			"to": (a["to"] if a != null else cur),
+			"t": (float(a["t"]) if a != null else 1.0),
 			"color": FactionDB.color(str(u.get("faction", ""))),
 			"glyph": str(t.get("glyph", "?")),
 			"hostile": FactionDB.hostile(ws, str(u.get("faction", ""))),
@@ -946,6 +994,8 @@ static func event_status(ev: Dictionary, ws) -> Dictionary:
 		return {"ready": false, "text": "无战役档"}
 	var when: Dictionary = ev.get("when", {}) if typeof(ev.get("when")) == TYPE_DICTIONARY else {}
 	var tid := str(ev.get("id", ""))
+	if ws.event_disabled.has(tid):
+		return {"ready": false, "text": "已禁用"}
 	var is_timer := str(when.get("event", "")) == "timer"
 	if bool(when.get("once", not is_timer)) and ws.event_fired.has(tid):
 		return {"ready": false, "text": "已触发"}
@@ -1009,8 +1059,19 @@ func _open_events_panel() -> void:
 	var ws = WorldState.current
 	var pool := EventDB.all_events()
 	var title := Label.new()
-	title.text = "📜 全局事件池（只读；移动/扎营/休整时自动评估）"
+	title.text = "📜 全局事件池（移动/扎营/休整时自动评估；勾选=启用）"
 	v.add_child(title)
+	if ws != null:
+		var combat_b := Button.new()
+		combat_b.focus_mode = Control.FOCUS_NONE
+		combat_b.text = "⚔ 大地图遭遇战：%s" % ("已关闭（安全模式）" if ws.overworld_combat_off else "开启")
+		combat_b.tooltip_text = "关闭＝无派系伏击、世界单位不主动追上开战（世界单位之间的摩擦战仍照常）"
+		combat_b.pressed.connect(func():
+			ws.overworld_combat_off = not ws.overworld_combat_off
+			_log_line("⚔ 大地图遭遇战已%s。" % ("关闭（安全模式）" if ws.overworld_combat_off else "开启"))
+			_autosave()
+			_open_events_panel())
+		v.add_child(combat_b)
 	var sec1 := Label.new()
 	sec1.text = "—— 当前可用（条件满足即触发）——"
 	sec1.add_theme_color_override("font_color", Color(0.55, 0.75, 0.55))
@@ -1031,13 +1092,29 @@ func _open_events_panel() -> void:
 	v.add_child(sec2)
 	for ev in pool:
 		if typeof(ev) == TYPE_DICTIONARY:
-			_add_event_row(v, ev, str(event_status(ev, ws).get("text", "")))
+			_add_event_row(v, ev, str(event_status(ev, ws).get("text", "")), true)
 	_events_popup.popup_centered()
 
 # 事件一行：名称（悬停出 desc）+ 条件/概率/CD 灰字；badge 非空＝完整池段（可用绿、其余暖灰）
-func _add_event_row(v: VBoxContainer, ev: Dictionary, badge: String) -> void:
+func _add_event_row(v: VBoxContainer, ev: Dictionary, badge: String, allow_toggle := false) -> void:
 	var when: Dictionary = ev.get("when", {}) if typeof(ev.get("when")) == TYPE_DICTIONARY else {}
+	var ws = WorldState.current
+	var tid := str(ev.get("id", ""))
 	var row := HBoxContainer.new()
+	# 启用勾选（仅完整池段）：取消＝禁用此事件（写 ws.event_disabled，引擎硬闸跳过，随档保存）
+	if allow_toggle and ws != null and tid != "":
+		var chk := CheckBox.new()
+		chk.focus_mode = Control.FOCUS_NONE
+		chk.button_pressed = not ws.event_disabled.has(tid)   # 先设值再连信号：程序化置位不触发 toggled
+		chk.tooltip_text = "取消勾选＝禁用此事件（随档保存）"
+		chk.toggled.connect(func(on: bool):
+			if on:
+				ws.event_disabled.erase(tid)
+			else:
+				ws.event_disabled[tid] = true
+			_autosave()
+			_open_events_panel())
+		row.add_child(chk)
 	var name_l := Label.new()
 	name_l.text = str(ev.get("label", ev.get("id", "?")))
 	name_l.tooltip_text = str(ev.get("desc", ""))
@@ -1051,7 +1128,12 @@ func _add_event_row(v: VBoxContainer, ev: Dictionary, badge: String) -> void:
 	if badge != "":
 		var b_l := Label.new()
 		b_l.text = badge
-		b_l.add_theme_color_override("font_color", Color(0.55, 0.8, 0.55) if badge == "可用" else Color(0.78, 0.68, 0.5))
+		var bc := Color(0.78, 0.68, 0.5)
+		if badge == "可用":
+			bc = Color(0.55, 0.8, 0.55)
+		elif badge == "已禁用":
+			bc = Color(0.72, 0.5, 0.5)
+		b_l.add_theme_color_override("font_color", bc)
 		row.add_child(b_l)
 	v.add_child(row)
 

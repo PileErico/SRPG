@@ -36,8 +36,9 @@ func _draw() -> void:
 		draw_location_marker(hex_center(cell2.x, cell2.y), str(loc.get("type", "")), loc["color"], str(loc["label"]), loc["active"], str(loc.get("icon", "")))
 	# 动态单位 token（WorldSim v1）：派系色圆 + 类型字形；敌对加红外环
 	for wu in editor.world_units_for_draw():
-		var wc: Vector2i = wu["cell"]
-		var wp := hex_center(wc.x, wc.y)
+		var wfrom: Vector2i = wu["from"]
+		var wto: Vector2i = wu["to"]
+		var wp := hex_center(wfrom.x, wfrom.y).lerp(hex_center(wto.x, wto.y), float(wu["t"]))
 		var wcol: Color = wu["color"]
 		draw_circle(wp, 8.0, wcol.darkened(0.15))
 		draw_arc(wp, 8.0, 0.0, TAU, 20, Color(0.12, 0.1, 0.06, 0.9), 1.8)
