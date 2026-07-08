@@ -1549,7 +1549,7 @@ func _build_derived_col(col: VBoxContainer, u) -> void:
 	head.add_theme_font_size_override("font_size", 12)
 	head.add_theme_color_override("font_color", Color(1, 1, 1, 0.55))
 	col.add_child(head)
-	col.add_child(_stat_kv_row("命中率", _fmt1(u.effective_stat_f("acc") + u.effective_stat_f("finesse")) + "%"))
+	col.add_child(_stat_kv_row("命中率", _fmt1(u.effective_stat_f("acc") + u.effective_stat_f("finesse") + u.morale_combat_mod()) + "%"))   # 含士气档位平加（🔒 §10.7）
 	col.add_child(_stat_kv_row("闪避率", _fmt1(u.effective_stat_f("eva") + u.effective_stat_f("agility")) + "%"))
 	col.add_child(_stat_kv_row("暴击率", _fmt1(u.effective_stat_f("crit_rate") + u.effective_stat_f("finesse") * 0.5) + "%"))
 	col.add_child(_stat_kv_row("暴击伤害", _fmt1(u.effective_stat_f("crit_dmg") + u.effective_stat_f("luck") * 0.5) + "%"))

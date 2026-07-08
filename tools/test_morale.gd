@@ -106,6 +106,29 @@ func _initialize() -> void:
 	ck(e1.morale == 28, "击败者 +3（重伤离场也算击败）")
 	ck(pa.morale == 28 and lone.morale == 25, "重伤离场≠挂了：无全场 −5")
 
+	# —— 4b) 档位战斗判定 🔒（§10.7 表，2026-07-08 接线）：命中平加 ±5/10 + 伤害 atk_eff 因子 ——
+	var atk_u = UnitFactory.make_unit(protos[0], "player", 3, 3)
+	var def_u = UnitFactory.make_unit(protos[0], "enemy", 4, 3)
+	s.units = [atk_u, def_u]
+	for pair in [[0, -10], [15, -5], [25, 0], [35, 5], [50, 10]]:
+		atk_u.morale = int(pair[0])
+		ck(atk_u.morale_combat_mod() == int(pair[1]), "档位判定值：士气 %d → %+d" % [int(pair[0]), int(pair[1])])
+	atk_u.morale = 25
+	var hc_base: int = s._hit_chance(atk_u, def_u)
+	atk_u.morale = 50
+	ck(s._hit_chance(atk_u, def_u) == hc_base + 10, "狂热：命中 +10（%d→%d）" % [hc_base, s._hit_chance(atk_u, def_u)])
+	atk_u.morale = 5
+	ck(s._hit_chance(atk_u, def_u) == hc_base - 10, "崩溃：命中 −10")
+	atk_u.stats["acc"] = 200.0   # 钳 95 内必命中，取 aeff 断言伤害因子
+	var rr := {}
+	for _i in range(64):
+		atk_u.morale = 50
+		rr = s._resolve_compute(atk_u, def_u, {"coeff": 1.0})
+		if rr.get("hit", false):
+			break
+		def_u.stats["HP"] = int(def_u.stats["HP_max"])
+	ck(rr.get("hit", false) and is_equal_approx(float(rr["aeff"]), 1.1), "狂热：atk_eff 因子 ×1.1（实际 %s）" % str(rr.get("aeff")))
+
 	# —— 5) 快照往返：morale 字段 ——
 	pa.morale = 37
 	var snap: Dictionary = UnitFactory.unit_to_battle_snapshot(pa)

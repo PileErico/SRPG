@@ -44,8 +44,10 @@ func mk(overrides: Dictionary):
 	return u
 
 # 确定化施放：每次施放前同 seed，命中/暴击/格挡结果恒定。
+# 士气钉回 25（稳定档＝档位判定 0，🔒 §10.7 已接线）：命中 +2 会连击滚档改 aeff——golden 只锁伤害数学。
 func hit(s, a, t, skill) -> Dictionary:
 	seed(SEED)
+	a.morale = 25
 	return s._resolve_compute(a, t, skill)
 
 func _initialize() -> void:

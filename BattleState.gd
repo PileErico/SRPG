@@ -449,7 +449,8 @@ func _terrain_eff_factor(u, bucket: String, gain_dir: bool) -> float:
 # 无效能修正 / 无地块效果时 =1.0（与旧行为一致）。地块贡献惰性读取，见 _terrain_eff_factor。
 func _hit_chance(attacker, target) -> int:
 	var base: int = int(round(attacker.effective_stat_f("acc") + attacker.effective_stat_f("finesse") \
-		- target.effective_stat_f("eva") - target.effective_stat_f("agility")))
+		- target.effective_stat_f("eva") - target.effective_stat_f("agility"))) \
+		+ attacker.morale_combat_mod()   # 士气档位 🔒 §10.7：命中平加 ±5/10（稳定 0）
 	var eff: float = attacker.eff_mult("hit_eff") * target.eff_reduce("eva_eff")
 	eff *= _terrain_eff_factor(attacker, "hit_eff", true)    # 攻方地块命中效能（增益向）
 	eff *= _terrain_eff_factor(target, "eva_eff", false)     # 守方地块闪避效能（森林掩蔽·减免向）
@@ -469,7 +470,8 @@ func _skill_bonus(attacker, skill) -> float:
 # 只改单位状态，不写日志/飘字；返回展示所需全部数值（未命中时只有 hit/roll/hc/acc/eva）。
 func _resolve_compute(attacker, target, skill) -> Dictionary:
 	# 命中（r 携带的 acc/eva ＝含技巧/灵活的合计口径，供战斗记录展示）
-	var acc := int(round(attacker.effective_stat_f("acc") + attacker.effective_stat_f("finesse")))
+	var acc: int = int(round(attacker.effective_stat_f("acc") + attacker.effective_stat_f("finesse"))) \
+		+ attacker.morale_combat_mod()   # 展示口径与 _hit_chance 同含士气档位平加（显式类型：attacker 无类型，Variant 不可推断）
 	var eva := int(round(target.effective_stat_f("eva") + target.effective_stat_f("agility")))
 	var hc := _hit_chance(attacker, target)   # 命中公式单一来源（见 _hit_chance）
 	var roll := int(randf() * 100.0)
@@ -486,7 +488,8 @@ func _resolve_compute(attacker, target, skill) -> Dictionary:
 	var coeff := float(skill.get("coeff", 1.0))
 	var cmult := ((float(attacker.effective_stat_f("crit_dmg")) \
 		+ float(attacker.effective_stat_f("luck")) * 0.5) / 100.0) if crit else 1.0
-	var aeff: float = attacker.eff_mult("atk_eff") * _terrain_eff_factor(attacker, "atk_eff", true)   # 攻击效能桶：面板 atk_eff/100 × Π效能修正 × 攻方地块攻击效能
+	var aeff: float = attacker.eff_mult("atk_eff") * _terrain_eff_factor(attacker, "atk_eff", true) \
+		* (1.0 + attacker.morale_combat_mod() / 100.0)   # 攻击效能桶：面板 atk_eff/100 × Π效能修正 × 攻方地块 × 士气档位因子（🔒 §10.7）
 	var atk := float(attacker.effective_stat_f("atk"))
 	var out := atk * coeff * cmult * aeff
 	# 伤害补正：额外 flat 伤害，不吃效能（如撕裂/抓取的 (力量+灵巧)×0.5）

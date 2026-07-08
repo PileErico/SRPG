@@ -249,6 +249,12 @@ func morale_band() -> int:
 func morale_band_name() -> String:
 	return MORALE_BANDS[morale_band()]
 
+# 档位战斗判定 🔒（§10.7 档位效果表，2026-07-08 接线）：崩溃/动摇/稳定/高昂/狂热 → −10/−5/0/+5/+10。
+# 同一个数两用：命中＝acc 平加（_hit_chance/面板命中率行）、伤害＝atk_eff 因子（_resolve_compute ×(1+n/100)）。
+const MORALE_BAND_COMBAT := [-10, -5, 0, 5, 10]
+func morale_combat_mod() -> int:
+	return MORALE_BAND_COMBAT[morale_band()]
+
 # —— 等级三轨 🔒（模块_属性成长_设计.md §10.1；2026-07-08 二次修订＝20 级整齐表）——
 # 天赋 Lv 1(默认)/3/6/9/12/14/18（7 个，18 满）· 技能槽 Lv 1/4/8/11/16（5 格，16 满）·
 # 属性点 Lv 2/5/7/10/13/15/17/19/20（9 节点 ×2＝18 点，**允许双点同投一属性**——配对约束已废除）
