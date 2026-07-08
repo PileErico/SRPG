@@ -301,9 +301,11 @@ func apply_attr_pick(key: String) -> bool:
 	attr_picks -= 1
 	return true
 
-# 回合序战斗速度 🔒（§10.6）：＝速度面板（装备/buff 修正落点，人底 0）＋ 灵活。出手排序/UI 显示都读这里。
+# 回合序战斗速度 🔒（§10.6；2026-07-08 修订＝灵活收益减半）：＝速度面板（装备/buff 修正落点，人底 0）
+# ＋ 灵活/2 **向下取整**——闪避仍吃满灵活、先攻只吃一半：压双重叠加、给 speed 装备词条留权重；
+# 向下取整＝加点 +1 灵活隔次才涨先攻（种族底值配偶数：鸟妖 14）。出手排序/UI 显示都读这里。
 func initiative() -> int:
-	return int(round(effective_stat_f("speed") + effective_stat_f("agility")))
+	return int(round(effective_stat_f("speed"))) + int(floorf(effective_stat_f("agility") * 0.5))
 
 # 能否装备：①特性限制（如「天性武者」no_weapon → 不能装带 attack 的武器；**天生武器 innate 豁免**）②物品 requires 的 tag 须全有。
 func can_equip(item: Dictionary) -> bool:

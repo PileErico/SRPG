@@ -79,10 +79,10 @@ func _initialize() -> void:
 	if r.get("hit", false):
 		ck(is_equal_approx(float(r.get("cr", -1)), 5.0), "技巧20：暴击率=10−5=5（实际 %s）" % str(r.get("cr")))
 	u.stats["finesse"] = 10
-	ck(u.initiative() == 10, "回合序＝speed0+灵活10")
+	ck(u.initiative() == 5, "回合序＝speed0＋灵活10/2 向下取整（🔒 2026-07-08 减半修订）")
 	u.modifiers.append({"stat": "agility", "op": "flat", "value": -3, "source": "equip:900:0"})
-	ck(u.initiative() == 7, "防具减灵活 → 回合序同降（10−3=7）")
-	ck(s._hit_chance(e, u) == 25 + 3, "灵活降 3 → 被命中 +3（实际 %d）" % s._hit_chance(e, u))
+	ck(u.initiative() == 3, "防具减灵活 → 回合序减半降（floor(7/2)=3）")
+	ck(s._hit_chance(e, u) == 25 + 3, "灵活降 3 → 被命中 +3（闪避仍吃满灵活）")
 	u.modifiers.pop_back()
 
 	# —— 4) 自动轨成长 + 17 级帽 + 加点（🔒 §10.1 2026-07-08 修订）——
@@ -132,8 +132,9 @@ func _initialize() -> void:
 		"蜥蜴人成长 HP+2/意志+1/肉体+2")
 	var hp = Unit.new("鸟候", "player", 0, 0)
 	RaceDB.apply_to(hp, "harpy")
-	ck(int(hp.stats["agility"]) == 15 and int(hp.stats["sight"]) == 6 and int(hp.stats["move"]) == 4,
-		"鸟妖底值 灵活15/视野6/移动4")
+	ck(int(hp.stats["agility"]) == 14 and int(hp.stats["sight"]) == 6 and int(hp.stats["move"]) == 4,
+		"鸟妖底值 灵活14/视野6/移动4（偶数配先攻减半取整）")
+	ck(hp.initiative() == 7, "鸟妖先攻 14/2=7")
 	ck(hp.move_allowance() == 4, "鸟妖步行移动 4")
 	hp.tags.append("flying")
 	ck(hp.move_allowance() == 6, "鸟妖飞行移动 6（when_self_tag）")

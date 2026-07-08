@@ -35,7 +35,7 @@
     "stats": {
       "HP_max": 35, "atk": 0, "acc": 0, "eva": 0,
       "crit_rate": 0, "crit_dmg": 160, "block_rate": 0, "block_power": 0,
-      "finesse": 10, "agility": 15, "luck": 5, "resolve": 0,
+      "finesse": 10, "agility": 14, "luck": 5, "resolve": 0,
       "AP_max": 2, "move": 4, "speed": 0, "sight": 6,
       "res_phys": 0, "res_nature": 0, "will_fort": 0, "body_fort": 0
     },
