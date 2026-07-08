@@ -22,10 +22,12 @@ class MockHost:
 	var aggros := []
 	var weathers := []
 	var spawns := []
+	var items := []
 	func event_log(t: String) -> void: logs.append(t)
 	func event_activate_aggro(g: String) -> void: aggros.append(g)
 	func event_set_weather(w: String, d: int) -> void: weathers.append([w, d])
 	func event_spawn_unit(pid: String, fac: String, c: int, r: int) -> void: spawns.append([pid, fac, c, r])
+	func event_give_item(iid: String, n: int) -> void: items.append([iid, n])
 
 class FakeUnit:
 	extends RefCounted
@@ -59,6 +61,10 @@ func _initialize() -> void:
 	ck(h.spawns.is_empty(), "spawn 缺 proto_id 不转发")
 	EventEngine.execute_action({"action": "spawn_unit", "proto_id": "p1", "col": 3, "row": 4}, h)
 	ck(h.spawns == [["p1", "", 3, 4]], "spawn 转发（faction 空=宿主兜底）")
+	EventEngine.execute_action({"action": "give_item", "item_id": "potion_a", "count": 3}, h)
+	ck(h.items == [["potion_a", 3]], "give_item 转发")
+	EventEngine.execute_action({"action": "give_item", "item_id": ""}, h)
+	ck(h.items.size() == 1, "give_item 缺 item_id 不转发")
 	EventEngine.execute_action({"action": "no_such_action"}, h)          # 未知动作：警告不炸
 	EventEngine.execute_action({"action": "show_message"}, RefCounted.new())   # 宿主缺能力：警告不炸
 	EventEngine.fire_trigger({"label": "乙", "do": [{"action": "show_message"}, {"action": "activate_aggro", "group": "g1"}]}, h)

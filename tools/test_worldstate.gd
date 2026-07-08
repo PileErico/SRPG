@@ -52,6 +52,14 @@ func _initialize() -> void:
 	ws.flags["met_smith"] = true
 	ws.reputation["empire"] = 10
 	ws.reputation["lizard"] = -5
+	# 背包（inventory）：入库累加 / 出库不够失败 / 扣减 / 扣到 0 抹键
+	ws.inv_add("potion_a", 3)
+	ws.inv_add("potion_a", 2)
+	ws.inv_add("herb", 1)
+	ck(ws.inv_count("potion_a") == 5, "inv_add 累加（potion_a=5）")
+	ck(not ws.inv_remove("potion_a", 9), "inv_remove 不够=失败不扣")
+	ck(ws.inv_remove("potion_a", 2) and ws.inv_count("potion_a") == 3, "inv_remove 扣减（→3）")
+	ck(ws.inv_remove("herb", 1) and ws.inv_count("herb") == 0 and not ws.inventory.has("herb"), "inv_remove 扣到 0 抹键")
 
 	# 4) 存 → 读 → 逐字段断言
 	ck(SaveIO.save_campaign(ws, SLOT), "save_campaign 成功")
@@ -66,6 +74,7 @@ func _initialize() -> void:
 		ck(ld.ironman == true, "ironman flag")
 		ck(int(ld.flags.get("chapter", 0)) == 2 and bool(ld.flags.get("met_smith", false)), "flags")
 		ck(int(ld.reputation.get("empire", 0)) == 10 and int(ld.reputation.get("lizard", 0)) == -5, "reputation")
+		ck(ld.inv_count("potion_a") == 3 and not ld.inventory.has("herb"), "inventory 往返（potion_a=3、herb 抹键）")
 		ck(ld.roster.size() == 2, "roster 数量")
 		var r1 = ld.roster_by_uid(u1.uid)
 		var r2 = ld.roster_by_uid(u2.uid)

@@ -31,6 +31,7 @@ var flags := {}          # 世界 flag {key: value}——任务/事件状态起�
 var reputation := {}     # 派系声望 {faction_id: int}
 var roster := []         # 花名册：活 Unit 对象列表（存档时经 unit_to_campaign 快照、读档重建）
 var item_instances := {} # 本档物品实例库 {uid(int): inst}——ItemInstances 门面在 current==self 时路由到这
+var inventory := {}      # 队伍背包：可堆叠消耗品/素材 {tpl_id: count(int)}——不进 item_instances（那装带个体状态的装备）；品质=分档 id
 var kill_stats := {}     # 击杀统计 {proto_id: 累计击杀数}——BattleIO 战后累计；情报解锁（图鉴）的输入源
 var camp_jobs := {}      # 营地职务指派 {job_id: unit_uid}（职务定义在 JobDB；0/缺键=空缺）
 var location_cleared_at := {}   # 据点上次肃清时刻 {loc_id: clock_hours}——刷新=LocationDB.site_ready 惰性判定（M7）
@@ -84,6 +85,28 @@ func roster_by_uid(uid: int):
 		if u.uid == uid:
 			return u
 	return null
+
+# ============ 队伍背包（inventory：可堆叠消耗品/素材 {tpl_id: count}；装备走 item_instances，两库不混）============
+
+# 入库 n 件（n>0）：撞已有则累加。tpl_id 空 / n≤0 ＝空操作。
+func inv_add(tpl_id: String, n := 1) -> void:
+	if tpl_id == "" or n <= 0:
+		return
+	inventory[tpl_id] = inv_count(tpl_id) + n
+
+# 出库 n 件：够才扣、返回是否成功；扣到 0 抹键（背包不留 0 计数条目）。
+func inv_remove(tpl_id: String, n := 1) -> bool:
+	var have := inv_count(tpl_id)
+	if n <= 0 or have < n:
+		return false
+	if have == n:
+		inventory.erase(tpl_id)
+	else:
+		inventory[tpl_id] = have - n
+	return true
+
+func inv_count(tpl_id: String) -> int:
+	return int(inventory.get(tpl_id, 0))
 
 # 职务在任者：uid 有效、人在册、且不在重伤休整中（重伤=无法参与任何活动 §1.11）才算在岗；否则 null。
 # 消费端按 job_id 读（首个＝WorldClock 恢复结算读 medic；加成承载=改每小时速率 🔒）。
@@ -168,6 +191,7 @@ func to_dict() -> Dictionary:
 		"event_cooldown_until": event_cooldown_until.duplicate(true),
 		"last_world_event_hours": last_world_event_hours,
 		"item_instances": items_json,
+		"inventory": inventory.duplicate(true),
 		"roster": roster_json,
 	}
 
@@ -200,6 +224,7 @@ static func from_dict(d: Dictionary):
 	ws.event_cooldown_until = _int_valued(d.get("event_cooldown_until", {}))
 	ws.last_world_event_hours = int(d.get("last_world_event_hours", -1000000))
 	ws.item_instances = ItemInstances.parse_json(d.get("item_instances", []))
+	ws.inventory = _int_valued(d.get("inventory", {}))
 	var prev = current
 	current = ws
 	var ro = d.get("roster", [])

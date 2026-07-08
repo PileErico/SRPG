@@ -17,6 +17,7 @@ const EnvDB := preload("res://EnvDB.gd")
 const WorldState := preload("res://WorldState.gd")
 const WorldClock := preload("res://WorldClock.gd")
 const EventEngine := preload("res://EventEngine.gd")
+const ItemDB := preload("res://ItemDB.gd")           # 背包：消耗品 tpl_id → 名/图标/on_use（give_item 授予、背包面板展示/使用）
 const EventDB := preload("res://EventDB.gd")         # 全局事件池（跨地图 when/do 事件，data/events.json）
 const SaveIO := preload("res://SaveIO.gd")
 const OverworldCanvas := preload("res://OverworldCanvas.gd")
@@ -548,6 +549,15 @@ func event_set_flag(key: String, value) -> void:
 		return
 	ws.flags[key] = value
 
+# 给予物品（do: give_item，M3 挂点）：入队伍背包（可堆叠 tpl_id→count）；事件「装水得道具」/烹饪食材获取共用。
+func event_give_item(item_id: String, count: int) -> void:
+	var ws = WorldState.current
+	if ws == null:
+		return
+	ws.inv_add(item_id, maxi(1, count))
+	var it = ItemDB.get_item(item_id)
+	_log_line("🎒 获得 %s ×%d" % [str(it.get("name", item_id)) if it != null else item_id, maxi(1, count)])
+
 # 开对话（do: dialogue）：模态覆盖大地图；行军中触发＝_tick_time 自动暂停（读完按空格续行）（M8）
 func event_dialogue(dialogue_id: String) -> void:
 	if _dialogue != null and is_instance_valid(_dialogue):
@@ -775,6 +785,10 @@ func _build_ui() -> void:
 	events_b.text = "📜 事件"
 	events_b.pressed.connect(_open_events_panel)
 	top.add_child(events_b)
+	var bag_b := Button.new()
+	bag_b.text = "🎒 背包"
+	bag_b.pressed.connect(_open_inventory_panel)
+	top.add_child(bag_b)
 	var menu_b := Button.new()
 	menu_b.text = "返回菜单"
 	menu_b.pressed.connect(_on_back_to_menu)
@@ -1040,6 +1054,133 @@ func _add_event_row(v: VBoxContainer, ev: Dictionary, badge: String) -> void:
 		b_l.add_theme_color_override("font_color", Color(0.55, 0.8, 0.55) if badge == "可用" else Color(0.78, 0.68, 0.5))
 		row.add_child(b_l)
 	v.add_child(row)
+
+# ============ 🎒 队伍背包（WorldState.inventory：可堆叠消耗品/素材）：查看 + 战外使用（回血类，施于花名册成员）============
+# 战斗内使用（回合动作 / 目标选取 / 敌对投掷 / AOE）＝后续切片，需战斗 UI 设计；本面板只做战外回血。
+
+var _bag_popup: PopupPanel
+
+# 背包面板：每条＝名×数量 + 效果摘要；战外可用回血消耗品给「使用」按钮。
+func _open_inventory_panel() -> void:
+	if not is_inside_tree():
+		return
+	if _bag_popup != null:
+		_bag_popup.queue_free()
+	_bag_popup = PopupPanel.new()
+	add_child(_bag_popup)
+	var v := VBoxContainer.new()
+	v.custom_minimum_size = Vector2(440, 0)
+	v.add_theme_constant_override("separation", 6)
+	_bag_popup.add_child(v)
+	var ws = WorldState.current
+	var title := Label.new()
+	title.text = "🎒 队伍背包"
+	v.add_child(title)
+	if ws == null or ws.inventory.is_empty():
+		var none := Label.new()
+		none.text = "（空——事件/烹饪/交易获得的消耗品会进这里）"
+		none.add_theme_color_override("font_color", Color(0.65, 0.68, 0.75))
+		v.add_child(none)
+	else:
+		for tpl_id in ws.inventory:
+			_add_inventory_row(v, str(tpl_id), ws.inv_count(str(tpl_id)))
+	_bag_popup.popup_centered()
+
+# 背包一行：名×数量 + 效果摘要（灰）；战外可用回血消耗品出「使用」按钮。
+func _add_inventory_row(v: VBoxContainer, tpl_id: String, count: int) -> void:
+	var it = ItemDB.get_item(tpl_id)
+	var row := HBoxContainer.new()
+	var name_l := Label.new()
+	name_l.text = "%s ×%d" % [(str(it.get("name", tpl_id)) if it != null else tpl_id), count]
+	name_l.custom_minimum_size = Vector2(160, 0)
+	row.add_child(name_l)
+	var eff_l := Label.new()
+	eff_l.text = _consumable_effect_text(it)
+	eff_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	eff_l.add_theme_color_override("font_color", Color(0.65, 0.68, 0.75))
+	row.add_child(eff_l)
+	if it != null and _usable_out_of_battle(it):
+		var use_b := Button.new()
+		use_b.text = "使用"
+		use_b.focus_mode = Control.FOCUS_NONE
+		use_b.pressed.connect(func(): _open_use_target_picker(tpl_id))
+		row.add_child(use_b)
+	v.add_child(row)
+
+# 战外可用＝usable ∧ 非敌对目标 ∧ on_use 含回血（回疲劳待系统、敌对投掷=战斗内，均不在战外用）
+func _usable_out_of_battle(it: Dictionary) -> bool:
+	if not (it.get("tags", []) as Array).has("usable"):
+		return false
+	if str(it.get("target", "ally")) == "enemy":
+		return false
+	var ou = it.get("on_use", {})
+	return typeof(ou) == TYPE_DICTIONARY and (ou.has("heal_flat") or ou.has("heal_pct_max_hp"))
+
+# 消耗品效果摘要（回疲劳标注未实装）
+func _consumable_effect_text(it) -> String:
+	if it == null:
+		return ""
+	var ou = it.get("on_use", {})
+	if typeof(ou) != TYPE_DICTIONARY or ou.is_empty():
+		return "（无使用效果）" if (it.get("tags", []) as Array).has("usable") else ""
+	var parts := []
+	if ou.has("heal_flat"):
+		parts.append("回血 %d" % int(ou["heal_flat"]))
+	if ou.has("heal_pct_max_hp"):
+		parts.append("回血 %d%% 上限" % int(ou["heal_pct_max_hp"]))
+	if ou.has("restore_fatigue_pct"):
+		parts.append("回疲劳 %d%%（待疲劳系统）" % int(ou["restore_fatigue_pct"]))
+	return "｜".join(parts)
+
+# 使用目标选择：列花名册（名 + HP/HP_max）→ 选中即施用；阵亡不可选（战外无复活）。
+func _open_use_target_picker(tpl_id: String) -> void:
+	var ws = WorldState.current
+	if ws == null or ws.inv_count(tpl_id) <= 0:
+		return
+	var pick := PopupPanel.new()
+	add_child(pick)
+	pick.popup_hide.connect(func(): pick.queue_free())
+	var v := VBoxContainer.new()
+	v.custom_minimum_size = Vector2(280, 0)
+	v.add_theme_constant_override("separation", 4)
+	pick.add_child(v)
+	var it = ItemDB.get_item(tpl_id)
+	var head := Label.new()
+	head.text = "对谁使用「%s」？" % (str(it.get("name", tpl_id)) if it != null else tpl_id)
+	v.add_child(head)
+	for u in ws.roster:
+		var hp := int(u.stats.get("HP", 0))
+		var hpmax := int(u.effective_stat("HP_max"))
+		var b := Button.new()
+		b.focus_mode = Control.FOCUS_NONE
+		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		b.text = "%s　%d/%d" % [str(u.unit_name), hp, hpmax]
+		b.disabled = hp <= 0
+		var target_u = u
+		b.pressed.connect(func():
+			pick.hide()
+			_use_consumable_on(tpl_id, target_u))
+		v.add_child(b)
+	pick.popup_centered()
+
+# 战外施用回血消耗品：扣一件 → 应用 on_use 回血（回疲劳待系统，暂跳过）→ 重建背包面板。
+func _use_consumable_on(tpl_id: String, unit) -> void:
+	var ws = WorldState.current
+	if ws == null or unit == null or not ws.inv_remove(tpl_id, 1):
+		return
+	var it = ItemDB.get_item(tpl_id)
+	var ou = (it.get("on_use", {}) if it != null else {})
+	var hpmax := int(unit.effective_stat("HP_max"))
+	var cur := int(unit.stats.get("HP", 0))
+	var heal := 0
+	if typeof(ou) == TYPE_DICTIONARY:
+		heal += int(ou.get("heal_flat", 0))
+		heal += int(round(hpmax * float(ou.get("heal_pct_max_hp", 0)) / 100.0))
+	var newhp := mini(hpmax, cur + heal)
+	unit.stats["HP"] = newhp
+	_log_line("🎒 %s 使用 %s：+%d 生命（%d/%d）" % [str(unit.unit_name), (str(it.get("name", tpl_id)) if it != null else tpl_id), newhp - cur, newhp, hpmax])
+	_autosave()
+	_open_inventory_panel()
 
 # 返回菜单：先自动存档（current 由 StartMenu._ready 统一清——「继续」从磁盘重读，保留只会泄漏进沙盒）
 func _on_back_to_menu() -> void:

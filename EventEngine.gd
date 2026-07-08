@@ -13,7 +13,7 @@ extends RefCounted
 ## 宿主原语约定（实现即支持该动作）：event_log(text) / event_activate_aggro(group)
 ##   / event_set_weather(weather, duration) / event_spawn_unit(proto_id, faction, col, row)
 ##   / event_start_battle(map_path) / event_dialogue(dialogue_id)
-##   / event_add_rep(faction_id, delta) / event_set_flag(key, value)。
+##   / event_add_rep(faction_id, delta) / event_set_flag(key, value) / event_give_item(item_id, count)。
 
 const GLOBAL_EVENT_GAP_HOURS := 24   # 全局事件间隔（BB 式防世界事件刷屏）：占位值，将来挪难度/设定层
 
@@ -50,6 +50,10 @@ const ACTIONS := [
 	{"id": "set_flag", "label": "设世界flag", "fields": [
 		{"key": "key", "label": "flag 键", "type": "text", "default": ""},
 		{"key": "value", "label": "值（true/false/文本）", "type": "text", "default": "true"},
+	]},
+	{"id": "give_item", "label": "给予物品", "fields": [
+		{"key": "item_id", "label": "物品id（data/items.json）", "type": "text", "default": ""},
+		{"key": "count", "label": "数量", "type": "int", "default": 1, "min": 1, "max": 999},
 	]},
 ]
 
@@ -117,6 +121,11 @@ static func execute_action(a: Dictionary, host, fallback_text := "") -> void:
 			var raw := str(a.get("value", "true"))
 			var val = true if raw == "true" else (false if raw == "false" else raw)
 			_host_call(host, "event_set_flag", [key, val])
+		"give_item":
+			var iid := str(a.get("item_id", ""))
+			if iid == "":
+				return
+			_host_call(host, "event_give_item", [iid, maxi(1, int(a.get("count", 1)))])
 		var unknown:
 			push_warning("EventEngine：未知动作「%s」跳过" % unknown)
 
