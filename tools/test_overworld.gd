@@ -105,13 +105,14 @@ func _initialize() -> void:
 	ck(ws2.event_timer_last.has("t_test"), "行军中 timer 事件被评估（timer_last 记账）")
 	ck(SandboxConfig.battle_setup == null, "受控环境无战斗排队（有＝遭伏没被中和）")
 	ck(SaveIO.list_slots().has("_test_m4_travel"), "抵达自动存档写入注入槽")
-	# 6b) 段内插值 + 半路改令：cost1 段＝2h，推 1h＝半段——token 半途、未落格、时钟已推 1 整点
+	# 6b) 段内插值 + 半路改令：道路段＝1h（cost1×HOURS_PER_COST1），推 0.5h＝半段——token 半途、未落格、整点未跨
 	var tb0: int = ws2.clock_hours
+	ow2._hour_acc = 0.0   # 清整点累加器零头，令下面整点断言干净
 	ow2._set_route(ow2.find_path(Vector2i(11, 8), Vector2i(8, 8)))
 	ow2._time_playing = true
-	ow2._tick_time(1.0)
+	ow2._tick_time(0.5)
 	ck(ws2.party_col == 11 and absf(ow2._seg_progress - 0.5) < 0.001, "半段：未落格、seg_progress=0.5")
-	ck(ws2.clock_hours == tb0 + 1, "半段已推 1 整点（clock_hours 恒整数）")
+	ck(ws2.clock_hours == tb0, "半段未跨整点（sub-hour 不进位，clock_hours 恒整数）")
 	var seg: Dictionary = ow2.party_seg()
 	ck(seg["from"] == Vector2i(11, 8) and seg["to"] == Vector2i(10, 8) and absf(float(seg["t"]) - 0.5) < 0.001, "party_seg 插值钩子透出半途段")
 	ow2.left_click_cell(10, 8)   # 半路改令：从当前格重新寻路（段内进度作废）
@@ -121,7 +122,7 @@ func _initialize() -> void:
 			break
 		ow2._tick_time(0.5)
 	ck(ws2.party_col == 10 and ws2.party_row == 8 and not ow2._time_playing, "改令后抵达新目的地并自动暂停")
-	ck(ws2.clock_hours == tb0 + 3, "改令重走整段（1h 半段作废 + 2h 新段，共 +3h）")
+	ck(ws2.clock_hours == tb0 + 1, "改令重走整段：累计跨 1 整点 → +1h（clock_hours 恒整数）")
 	# 6c) 原地等待：无路径播放＝时间照常流逝（WorldSim/timer 逐整点推进），不自动暂停
 	var tw0: int = ws2.clock_hours
 	ow2._time_playing = true

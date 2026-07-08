@@ -63,7 +63,7 @@ func _initialize() -> void:
 	ow.width = 6
 	ow.height = 6
 	ow.tiles = MapIO.grassland(6, 6)
-	ow.tiles[3][2] = {"terrain": "forest", "variant": "forest"}   # (col2,row3) 森林 cost2：道路折扣验证格
+	ow.tiles[3][2] = {"terrain": "forest", "variant": "forest"}   # (col2,row3) 森林（大世界成本 4）：道路折扣验证格
 	# 横贯全图的河（rows 2/3 之间全部分隔边）+ 唯一桥在 (4,2)-(4,3)
 	var pairs := []
 	for c in 6:
@@ -74,12 +74,12 @@ func _initialize() -> void:
 	ow._setup_line_features({"rivers": [{"id": "r", "label": "河", "pairs": pairs}],
 		"roads": [{"id": "d", "label": "路", "pairs": [[[2, 2], [2, 3]], [[1, 3], [2, 3]]]}],
 		"bridges": [[[4, 2], [4, 3]]]})
-	ck(ow._move_cost_at(2, 3) == 2, "森林格基础成本 2")
+	ck(ow._move_cost_at(2, 3) == 4, "森林格大世界成本 4（OVERWORLD_COST）")
 	ck(ow._move_cost_between(2, 2, 2, 3) == -1, "河边无桥＝硬阻断（道路也过不去）")
 	ck(ow._move_cost_between(4, 2, 4, 3) == 1, "桥豁免可跨（享道路折扣）")
-	ck(ow._move_cost_between(1, 3, 2, 3) == 1, "道路折扣：森林 2 → 1")
+	ck(ow._move_cost_between(1, 3, 2, 3) == 1, "道路折扣：森林 4 → 1")
 	ck(ow._move_cost_between(2, 3, 1, 3) == 1, "道路折扣无向")
-	ck(ow._move_cost_between(0, 0, 1, 0) == 1, "无线特征边＝格成本")
+	ck(ow._move_cost_between(0, 0, 1, 0) == 2, "无线特征边＝格成本（草原大世界 2）")
 	var p := ow.find_path(Vector2i(4, 1), Vector2i(4, 4))
 	ck(p.size() >= 4 and p.has(Vector2i(4, 2)) and p.has(Vector2i(4, 3)), "过河走桥")
 	var p2 := ow.find_path(Vector2i(0, 1), Vector2i(0, 4))

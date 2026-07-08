@@ -32,7 +32,15 @@ const WorldUnitDB := preload("res://WorldUnitDB.gd") # 动态单位类型注册�
 const MinHeap := preload("res://MinHeap.gd")         # 寻路优先队列（find_path；与 BattleState._dijkstra 共用实现）
 
 const MAP_PATH := "res://maps/overworld/world.json"
-const HOURS_PER_COST := 2    # 占位：1 点地形通行成本 ＝ 2 小时行程（数值层后调）
+const HOURS_PER_COST := 1    # 1 点通行成本 ＝ 1 小时（配合大世界成本表：道路 1h/格、平原 2h、山 6h）
+# 大世界地块通行成本（明显档 🔒 2026-07-08）：拉开地块差、道路(放置物)经 _move_cost_between min(_,1)=1 恒最低。
+# 战斗地图不受影响（战斗走 TerrainDB.move_cost 原 cost）；未列地形回退地形自身 cost。数值层后调。
+const OVERWORLD_COST := {
+	"grassland": 2, "wasteland": 2, "bush": 2,
+	"sand": 3, "snow": 3, "shallow_water": 3, "rubble": 3,
+	"forest": 4, "hill": 4,
+	"mountain": 6,
+}
 const CAMP_HOURS := 8        # 占位：扎营一次休整 8 小时（临时据点/职务＝M6）
 # 自动存档槽名单一源＝SaveIO.AUTO_SLOT（实例注入见 _save_slot）
 const TIME_RATE := 2.5       # 时间流速（游戏小时/真实秒，占位可调）：cost-1 格（2h）≈0.8 真实秒
@@ -295,11 +303,18 @@ func left_click_cell(col: int, row: int) -> void:
 func _cell_in_bounds(col: int, row: int) -> bool:
 	return col >= 0 and col < width and row >= 0 and row < height
 
-# 队伍在该格的通行成本（-1=不可通行）：覆盖合并 + 成本计算都走 TerrainDB 单一实现（与战斗侧同源）
+# 队伍在该格的通行成本（-1=不可通行）：通行性走 TerrainDB 单一实现（与战斗同源）；
+# 通行成本套大世界成本表 OVERWORLD_COST（拉开地块差、令道路最优），未列地形回退地形 cost。
 func _move_cost_at(col: int, row: int) -> int:
 	if not _cell_in_bounds(col, row):
 		return -1
-	return TerrainDB.move_cost(TerrainDB.effective_move(tiles[row][col], _map_terrain_overrides), PARTY_TAGS)
+	var tile = tiles[row][col]
+	var base := TerrainDB.move_cost(TerrainDB.effective_move(tile, _map_terrain_overrides), PARTY_TAGS)
+	if base < 0:
+		return -1   # 不可通行（深水/墙/资格不符）：保持
+	var e = TerrainDB.entry_for(tile)
+	var tid := str(e.get("id", "")) if e != null else ""
+	return int(OVERWORLD_COST.get(tid, base))
 
 # 跨边通行成本（from→to 相邻格；-1=不可跨）——线特征语义的单一实现：
 #   河边无桥＝硬阻断；有桥＝可跨且享道路折扣；道路边＝成本折为 min(目的格成本, 1)（穿林翻山的大道）。

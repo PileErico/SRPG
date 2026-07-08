@@ -138,7 +138,7 @@ static func _step_patrol(ws, u: Dictionary, t: Dictionary, world) -> void:
 	if prey != null:
 		_step_along_path(u, cur, _cell(prey), world)
 		return
-	if FactionDB.hostile(ws, str(u.get("faction", ""))) and HexGrid.distance(cur, _party_cell(ws)) <= sight \
+	if not ws.overworld_combat_off and FactionDB.hostile(ws, str(u.get("faction", ""))) and HexGrid.distance(cur, _party_cell(ws)) <= sight \
 			and ws.clock_hours >= int(u.get("calm_until", 0)):
 		_step_along_path(u, cur, _party_cell(ws), world)
 		return
@@ -147,7 +147,7 @@ static func _step_patrol(ws, u: Dictionary, t: Dictionary, world) -> void:
 # 游团：己方派系对玩家敌对且玩家进视野 → 追击；否则绕巢游荡
 static func _step_hunt(ws, u: Dictionary, t: Dictionary, world) -> void:
 	var cur := _cell(u)
-	if FactionDB.hostile(ws, str(u.get("faction", ""))) \
+	if not ws.overworld_combat_off and FactionDB.hostile(ws, str(u.get("faction", ""))) \
 			and HexGrid.distance(cur, _party_cell(ws)) <= int(t.get("sight", 4)) \
 			and ws.clock_hours >= int(u.get("calm_until", 0)):
 		_step_along_path(u, cur, _party_cell(ws), world)
