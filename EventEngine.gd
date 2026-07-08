@@ -5,7 +5,8 @@ extends RefCounted
 ##    加新动作只改本文件 ACTIONS + 宿主实现原语，编辑器 UI 自动跟上（治「编辑器/运行时动作表分叉」）。
 ## ② 执行：execute_action 解析参数（默认值/clamp 单一处）→ 转发宿主原语（event_* 鸭子类型，has_method 守卫）——
 ##    宿主没实现的能力＝警告跳过（大地图宿主可不支持战斗动作，反之亦然）。
-## ③ 评估：when 三事件 enter_region（战斗现状迁入）/ enter_tile / timer + 闸门（once / chance / 冷却 / 全局间隔）。
+## ③ 评估：when 三事件 enter_region（战斗现状迁入）/ enter_tile / timer + 闸门（once / chance / 冷却 / 全局间隔）；
+##    enter_tile 另支持 col/row/terrain 硬条件（terrain＝有效地形 id，调用方传入才参与匹配——不传＝带地形条件的事件不中）。
 ## fired/冷却状态分两层 🔒：战斗局部（宿主自持字典、每战清零）vs 世界持久（WorldState.event_* 字段随档落盘）；
 ## 冷却与全局间隔按世界时间（clock_hours）计，仅传入 ws 时生效——战斗侧 ws=null＝只有 once/chance 闸门。
 ## once 缺省值按事件类型：enter_region/enter_tile＝true（现状契约），timer＝false（周期语义）。
@@ -156,7 +157,9 @@ static func check_enter_region(triggers: Array, unit, region_cells: Dictionary, 
 		fire_trigger(trig, host)
 
 # enter_tile：抵达/经过地块（大地图 M4 主用；战斗侧亦可）。when.col/row 缺省＝任意格；chance＝BB 式概率事件。
-static func check_enter_tile(triggers: Array, cell: Vector2i, faction: String, fired: Dictionary, host, ws = null) -> void:
+# terrain＝落格的有效地形 id（terrains.json entry.id，可选）：when.terrain 只在两者相等时放行——
+# 旧调用方不传（""）＝带地形条件的事件一律不中，其余行为不变（向后兼容）。
+static func check_enter_tile(triggers: Array, cell: Vector2i, faction: String, fired: Dictionary, host, ws = null, terrain := "") -> void:
 	for i in triggers.size():
 		var trig = triggers[i]
 		if typeof(trig) != TYPE_DICTIONARY:
@@ -169,6 +172,8 @@ static func check_enter_tile(triggers: Array, cell: Vector2i, faction: String, f
 		if when.has("col") and int(when["col"]) != cell.x:
 			continue
 		if when.has("row") and int(when["row"]) != cell.y:
+			continue
+		if when.has("terrain") and str(when["terrain"]) != terrain:
 			continue
 		var tid := trigger_key(trig, i)
 		if not _gates_open(when, tid, fired, ws, true):

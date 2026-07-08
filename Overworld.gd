@@ -1,7 +1,8 @@
 extends Control
 ## 大地图场景（Overworld，M4）：战役层——队伍 token 在大地图上移动；**时间仅在移动/扎营时流动 🔒**。
 ## 复用底层：HexCanvas(经 OverworldCanvas)/MapIO/TerrainDB/HexGrid——与战斗地图同构（flat-top odd-q）。
-## 事件：每落一格评估 EventEngine 的 enter_tile + timer（fired/冷却＝WorldState.event_* 世界持久层）。
+## 事件：每落一格评估 EventEngine 的 enter_tile + timer（fired/冷却＝WorldState.event_* 世界持久层）——
+## 两路事件源并行：每图 triggers（地图 JSON）+ 全局事件池（EventDB，带地形限定 when.terrain）；📜 顶栏面板只读查看。
 ## 日夜：随时钟推导（WorldClock.time_of_day → 标签 + EnvDB tint 变暗叠层）；战斗侧日夜注入见 Sandbox._world_time。
 ## 宿主原语：event_log / event_start_battle / event_dialogue（大地图不支持战斗动作 spawn/aggro/set_weather——EventEngine 守卫警告跳过）。
 ## 存档：移动完成/扎营后自动写 AUTO_SLOT；「继续战役」从 StartMenu 读它。
@@ -14,6 +15,7 @@ const EnvDB := preload("res://EnvDB.gd")
 const WorldState := preload("res://WorldState.gd")
 const WorldClock := preload("res://WorldClock.gd")
 const EventEngine := preload("res://EventEngine.gd")
+const EventDB := preload("res://EventDB.gd")         # 全局事件池（跨地图 when/do 事件，data/events.json）
 const SaveIO := preload("res://SaveIO.gd")
 const OverworldCanvas := preload("res://OverworldCanvas.gd")
 const BattleIO := preload("res://BattleIO.gd")
@@ -373,12 +375,29 @@ func _advance_world(hours: int) -> void:
 			"caravan_arrive":
 				pass   # 商队到站：暂不播报（避免刷屏；交易接入后再表现）
 
-# 一格落位后的事件评估：地图触发器 enter_tile + 敌对派系遭伏（M9 伪触发器）+ timer（时钟刚被推进）
+# 一格落位后的事件评估：地图触发器 enter_tile + 全局事件池（带有效地形 id）+ 敌对派系遭伏（M9 伪触发器）+ timer（时钟刚被推进）
 func _check_cell_events(cell: Vector2i) -> void:
 	var ws = WorldState.current
 	EventEngine.check_enter_tile(_map_triggers, cell, "player", ws.event_fired, self, ws)
+	EventEngine.check_enter_tile(EventDB.all_events(), cell, "player", ws.event_fired, self, ws, _terrain_id_at(cell.x, cell.y))
 	EventEngine.check_enter_tile(_hostile_ambush_triggers(), cell, "player", ws.event_fired, self, ws)
+	_eval_all_timers()
+
+# 该格有效地形 id（全局事件池 when.terrain 匹配用）：图级覆盖（_map_terrain_overrides）只换 move/effects 块、
+# 不换地形身份（键＝terrain/variant，见 MapIO schema）——故 id 恒取地形表 entry.id，与 _move_cost_at 同源读 tiles。
+func _terrain_id_at(col: int, row: int) -> String:
+	if not _cell_in_bounds(col, row):
+		return ""
+	var e = TerrainDB.entry_for(tiles[row][col])
+	return str(e.get("id", "")) if e != null else ""
+
+# timer 事件统一评估口：每图触发器 + 全局事件池——推钟后的调用点（落格/扎营/休整）全走这里，防漏评全局池
+func _eval_all_timers() -> void:
+	var ws = WorldState.current
+	if ws == null:
+		return
 	EventEngine.check_timer(_map_triggers, ws, self)
+	EventEngine.check_timer(EventDB.all_events(), ws, self)
 
 # 敌对派系遭伏（M9）：把当前敌对的派系转成 enter_tile 伪触发器喂 EventEngine——
 # 复用同一套 chance/冷却闸门（tid 稳定＝"faction_ambush_<id>"，冷却随档持久）；参数全在 factions.json。
@@ -403,11 +422,10 @@ func _hostile_ambush_triggers() -> Array:
 func _on_camp() -> void:
 	if _moving:
 		return
-	var ws = WorldState.current
 	_advance_world(CAMP_HOURS)
 	_log_line("⛺ 扎营休整 %d 小时。" % CAMP_HOURS)
 	_refresh_time_ui()
-	EventEngine.check_timer(_map_triggers, ws, self)
+	_eval_all_timers()
 	if canvas != null:
 		canvas.queue_redraw()
 	_autosave()
@@ -492,7 +510,7 @@ func _do_rest(loc: Dictionary) -> bool:
 			u.stats["HP"] = u.effective_stat("HP_max")
 	_log_line("🛏 在「%s」休整 %d 小时（-%d💰）：全员生命回满。" % [str(loc.get("label", "")), int(svc.get("hours", 8)), cost])
 	_refresh_time_ui()
-	EventEngine.check_timer(_map_triggers, ws, self)
+	_eval_all_timers()
 	if canvas != null:
 		canvas.queue_redraw()
 	_autosave()
@@ -645,6 +663,10 @@ func _build_ui() -> void:
 	rep_b.text = "🚩 声望"
 	rep_b.pressed.connect(_open_rep_panel)
 	top.add_child(rep_b)
+	var events_b := Button.new()
+	events_b.text = "📜 事件"
+	events_b.pressed.connect(_open_events_panel)
+	top.add_child(events_b)
 	var menu_b := Button.new()
 	menu_b.text = "返回菜单"
 	menu_b.pressed.connect(_on_back_to_menu)
@@ -785,6 +807,126 @@ func _open_rep_panel() -> void:
 			row.add_child(host_l)
 		v.add_child(row)
 	_rep_popup.popup_centered()
+
+# ============ 📜 全局事件池（EventDB）只读面板：可用性判定/条件文案抽成静态纯函数（headless 直测）============
+
+var _events_popup: PopupPanel
+
+# 事件活状态（纯逻辑，不依赖节点）：ready＝硬闸全开「条件满足就触发」；text＝面板徽章文案。
+# 判定序与 EventEngine._gates_open 对齐：once（缺省按事件类型，同引擎）→ 冷却 → 全局间隔；timer 另看 every_hours 节拍。
+static func event_status(ev: Dictionary, ws) -> Dictionary:
+	if ws == null:
+		return {"ready": false, "text": "无战役档"}
+	var when: Dictionary = ev.get("when", {}) if typeof(ev.get("when")) == TYPE_DICTIONARY else {}
+	var tid := str(ev.get("id", ""))
+	var is_timer := str(when.get("event", "")) == "timer"
+	if bool(when.get("once", not is_timer)) and ws.event_fired.has(tid):
+		return {"ready": false, "text": "已触发"}
+	var cd_left: int = int(ws.event_cooldown_until.get(tid, -1)) - ws.clock_hours
+	if cd_left > 0:
+		return {"ready": false, "text": "冷却中（剩 %d 小时）" % cd_left}
+	if bool(when.get("global_gap", false)):
+		var gap_left: int = EventEngine.GLOBAL_EVENT_GAP_HOURS - (ws.clock_hours - ws.last_world_event_hours)
+		if gap_left > 0:
+			return {"ready": false, "text": "全局间隔中（剩 %d 小时）" % gap_left}
+	if is_timer:
+		var every := maxi(1, int(when.get("every_hours", 24)))
+		var beat_left: int = every - (ws.clock_hours - int(ws.event_timer_last.get(tid, 0)))
+		if beat_left > 0:
+			return {"ready": false, "text": "未到节拍（还需 %d 小时）" % beat_left}
+	return {"ready": true, "text": "可用"}
+
+# 触发条件中文文案（纯逻辑）：enter_tile+terrain→进入〈地形名〉/ +col·row→进入（c, r）/ 无限定→任意移动；
+# enter_region→进入区域〈id〉；timer→每 N 小时。
+static func event_when_text(when: Dictionary) -> String:
+	match str(when.get("event", "")):
+		"enter_tile":
+			if when.has("terrain"):
+				var e = TerrainDB.entry_by_id(str(when["terrain"]))
+				return "进入〈%s〉" % (str(e.get("label", when["terrain"])) if e != null else str(when["terrain"]))
+			if when.has("col") or when.has("row"):
+				var c := str(int(when["col"])) if when.has("col") else "＊"
+				var r := str(int(when["row"])) if when.has("row") else "＊"
+				return "进入（%s, %s）" % [c, r]
+			return "任意移动"
+		"enter_region":
+			return "进入区域〈%s〉" % str(when.get("region", "?"))
+		"timer":
+			return "每 %d 小时" % maxi(1, int(when.get("every_hours", 24)))
+	return "？（%s）" % str(when.get("event", ""))
+
+# 概率/CD 短文案（纯逻辑）：chance 缺省 100%；cooldown_hours 0/缺省＝无；once 缺省按事件类型（同引擎）
+static func event_gate_text(when: Dictionary) -> String:
+	var chance := float(when.get("chance", 100))
+	var chance_txt: String = ("%d%%" % int(chance)) if chance == floorf(chance) else ("%.1f%%" % chance)
+	var cd := int(when.get("cooldown_hours", 0))
+	var parts := ["概率 %s" % chance_txt, ("CD %d 小时" % cd) if cd > 0 else "CD 无"]
+	if bool(when.get("global_gap", false)):
+		parts.append("全局间隔")
+	if bool(when.get("once", str(when.get("event", "")) != "timer")):
+		parts.append("仅一次")
+	return "｜".join(parts)
+
+# 📜 事件面板（仿 _open_rep_panel，纯只读）：上段＝当前可用（硬闸全开，条件满足即触发）；下段＝完整池+活状态徽章。
+func _open_events_panel() -> void:
+	if not is_inside_tree():
+		return   # headless：面板纯 UI，判定/文案走 event_status/event_when_text 直测
+	if _events_popup != null:
+		_events_popup.queue_free()
+	_events_popup = PopupPanel.new()
+	add_child(_events_popup)
+	var v := VBoxContainer.new()
+	v.custom_minimum_size = Vector2(480, 0)
+	v.add_theme_constant_override("separation", 6)
+	_events_popup.add_child(v)
+	var ws = WorldState.current
+	var pool := EventDB.all_events()
+	var title := Label.new()
+	title.text = "📜 全局事件池（只读；移动/扎营/休整时自动评估）"
+	v.add_child(title)
+	var sec1 := Label.new()
+	sec1.text = "—— 当前可用（条件满足即触发）——"
+	sec1.add_theme_color_override("font_color", Color(0.55, 0.75, 0.55))
+	v.add_child(sec1)
+	var any_ready := false
+	for ev in pool:
+		if typeof(ev) == TYPE_DICTIONARY and bool(event_status(ev, ws).get("ready", false)):
+			_add_event_row(v, ev, "")
+			any_ready = true
+	if not any_ready:
+		var none := Label.new()
+		none.text = "（无——都在冷却/已触发/未到节拍）"
+		none.add_theme_color_override("font_color", Color(0.65, 0.68, 0.75))
+		v.add_child(none)
+	var sec2 := Label.new()
+	sec2.text = "—— 完整事件池（共 %d 条）——" % pool.size()
+	sec2.add_theme_color_override("font_color", Color(0.65, 0.68, 0.75))
+	v.add_child(sec2)
+	for ev in pool:
+		if typeof(ev) == TYPE_DICTIONARY:
+			_add_event_row(v, ev, str(event_status(ev, ws).get("text", "")))
+	_events_popup.popup_centered()
+
+# 事件一行：名称（悬停出 desc）+ 条件/概率/CD 灰字；badge 非空＝完整池段（可用绿、其余暖灰）
+func _add_event_row(v: VBoxContainer, ev: Dictionary, badge: String) -> void:
+	var when: Dictionary = ev.get("when", {}) if typeof(ev.get("when")) == TYPE_DICTIONARY else {}
+	var row := HBoxContainer.new()
+	var name_l := Label.new()
+	name_l.text = str(ev.get("label", ev.get("id", "?")))
+	name_l.tooltip_text = str(ev.get("desc", ""))
+	name_l.custom_minimum_size = Vector2(120, 0)
+	row.add_child(name_l)
+	var cond_l := Label.new()
+	cond_l.text = "%s｜%s" % [event_when_text(when), event_gate_text(when)]
+	cond_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	cond_l.add_theme_color_override("font_color", Color(0.65, 0.68, 0.75))
+	row.add_child(cond_l)
+	if badge != "":
+		var b_l := Label.new()
+		b_l.text = badge
+		b_l.add_theme_color_override("font_color", Color(0.55, 0.8, 0.55) if badge == "可用" else Color(0.78, 0.68, 0.5))
+		row.add_child(b_l)
+	v.add_child(row)
 
 # 返回菜单：先自动存档（current 由 StartMenu._ready 统一清——「继续」从磁盘重读，保留只会泄漏进沙盒）
 func _on_back_to_menu() -> void:

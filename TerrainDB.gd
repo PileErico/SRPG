@@ -57,6 +57,15 @@ static func entry_for(tile):
 		return _by_key.get(_key(tile.get("terrain"), tile.get("variant")))
 	return null
 
+# 按条目 id 查地形定义（如 events.json when.terrain 按 entry.id 引用地形），找不到返回 null。
+# 低频调用（事件面板/校验），O(n) 线扫百余条够用、不另建索引。
+static func entry_by_id(id: String):
+	_ensure()
+	for e in _palette:
+		if str(e.get("id", "")) == id:
+			return e
+	return null
+
 # 以下为画布常用的取值封装（找不到地形 → 品红/none/未知，便于发现数据异常）
 static func color_of(tile) -> Color:
 	var e = entry_for(tile)

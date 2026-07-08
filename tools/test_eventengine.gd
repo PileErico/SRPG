@@ -1,5 +1,6 @@
 extends SceneTree
-## M3 回归：EventEngine——动作注册表 / 执行转发 / enter_region·enter_tile·timer 评估 / 闸门(once·chance·冷却·全局间隔) / 事件状态存档往返。
+## M3 回归：EventEngine——动作注册表 / 执行转发 / enter_region·enter_tile·timer 评估 / 闸门(once·chance·冷却·全局间隔)
+## / enter_tile 地形条件(when.terrain，不传参数=旧行为) / 事件状态存档往返。
 ## 运行：..._console.exe --headless --path "D:/1战棋" -s res://tools/test_eventengine.gd（退出码 0=PASS）
 
 const EventEngine := preload("res://EventEngine.gd")
@@ -101,6 +102,22 @@ func _initialize() -> void:
 	h = MockHost.new()
 	EventEngine.check_enter_tile(tile_trigs, Vector2i(7, 8), "player", fired, h)
 	ck(h.logs == ["任意", "定点"], "enter_tile 定点格命中（once:false 任意格再触发）")
+
+	# 4b) enter_tile 地形条件：when.terrain 只在与传入有效地形 id 相等时放行；不传参数＝旧行为（带地形条件者不中）
+	var terr_trigs := [
+		{"id": "tt1", "when": {"event": "enter_tile", "terrain": "fh_spring", "once": false}, "do": [{"action": "show_message", "text": "泉"}]},
+		{"id": "tt2", "when": {"event": "enter_tile", "once": false}, "do": [{"action": "show_message", "text": "无谓"}]},
+	]
+	h = MockHost.new()
+	fired.clear()
+	EventEngine.check_enter_tile(terr_trigs, Vector2i(0, 0), "player", fired, h, null, "fh_spring")
+	ck(h.logs == ["泉", "无谓"], "terrain 匹配触发（无地形条件者照常）")
+	h = MockHost.new()
+	EventEngine.check_enter_tile(terr_trigs, Vector2i(0, 0), "player", fired, h, null, "plain")
+	ck(h.logs == ["无谓"], "terrain 不匹配不触发")
+	h = MockHost.new()
+	EventEngine.check_enter_tile(terr_trigs, Vector2i(0, 0), "player", fired, h)
+	ck(h.logs == ["无谓"], "不传 terrain＝旧行为（带地形条件者不中、其余不变）")
 
 	# 5) 冷却 + 全局间隔（世界层，需要 ws）
 	var ws = WorldState.new()

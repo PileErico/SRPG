@@ -1,0 +1,37 @@
+[
+  {
+    "id": "evt_fountain_whisper",
+    "label": "泉边小憩",
+    "desc": "「神秘的泉水」前身：暂为线性消息；饮用/装水等选择分支待背包+疲劳系统后实装。",
+    "when": {
+      "event": "enter_tile",
+      "terrain": "fh_fountain_of_youth",
+      "once": false,
+      "cooldown_hours": 48
+    },
+    "do": [
+      {
+        "action": "show_message",
+        "text": "队伍在一汪灵泉边驻足。泉水清冽泛光，掬一捧入口，旅途的疲惫仿佛消散了几分。"
+      }
+    ]
+  },
+  {
+    "id": "evt_road_rumor",
+    "label": "路遇旅人",
+    "desc": "低概率路遇（任意地形）：旅人闲谈传闻；global_gap 防世界事件刷屏。",
+    "when": {
+      "event": "enter_tile",
+      "once": false,
+      "chance": 4,
+      "cooldown_hours": 24,
+      "global_gap": true
+    },
+    "do": [
+      {
+        "action": "show_message",
+        "text": "迎面遇上一位赶路的旅人。他压低声音说：「最近道上不太平，夜里赶路千万当心。」"
+      }
+    ]
+  }
+]
