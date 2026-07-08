@@ -690,6 +690,7 @@ func _build_info(info: VBoxContainer, u) -> void:
 			ph.custom_minimum_size = Vector2(132, 150)
 			ph.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 			top.add_child(ph)
+	top.add_child(_attr_col(u))   # 头像右侧＝四属性列（🔒 2026-07-08 用户定布局；加点按钮整合在此）
 	info.add_child(HSeparator.new())
 
 	# ② 身份：姓名 / 特性 / 等级（整行铺开；编辑器＝可编辑）
@@ -951,7 +952,7 @@ func _build_trait_tooltip(t) -> Control:
 # 档位名/阈值读 ProfDB 单一源（STAGE_THRESHOLDS/STAGE_NAMES/MASTER_XP_CAP），本处只留 UI 配色。
 const PROF_STAGE_COLORS := ["#E0E0E0", "#4FAE5A", "#3A7BD5", "#9B59B6", "#EBBC04"]   # 生疏白/娴熟绿/老练蓝/专家紫/大师金
 const PROF_CELL_COUNT := 5                        # 装备技能格数（=技艺槽上限）
-const PROF_SLOT_LV := [1, 4, 7, 10, 13]           # 各格解锁等级 🔒（17 级三轨 b 节拍 §10.1 修订后不变，与 Unit.prof_slot_capacity 同源）
+const PROF_SLOT_LV := [1, 4, 8, 11, 16]           # 各格解锁等级 🔒（20 级表 §10.1 二次修订，与 Unit.prof_slot_capacity 同源）
 const PROF_CELL_SIZE := Vector2(64, 64)           # 单格边长
 const PROF_GAUGE_W := 12                          # 竖向计量槽宽度
 const PROF_GAUGE_TRACK := Color(1, 1, 1, 0.10)    # 槽底（暗）
@@ -1464,10 +1465,10 @@ func _build_stats(right: VBoxContainer, u) -> void:
 	split.add_child(col_l)
 	split.add_child(VSeparator.new())
 	var col_r := VBoxContainer.new()
-	col_r.size_flags_horizontal = Control.SIZE_EXPAND_FILL   # 右半（ratio 1）：属性提升区（无点数＝留白，常驻四属性显示归数据显示线）
+	col_r.size_flags_horizontal = Control.SIZE_EXPAND_FILL   # 右半（ratio 1）＝修正属性列（🔒 2026-07-08 用户定布局）
 	col_r.add_theme_constant_override("separation", 6)
 	split.add_child(col_r)
-	_build_attr_picks(col_r, u)
+	_build_derived_col(col_r, u)
 	# 血量/护甲＝读 stats（有 _max 上限）；士气＝Unit.morale（0..MORALE_MAX），图标随区间取 flag1-5。
 	col_l.add_child(_stat_bar_row(float(u.effective_stat("HP")), u.effective_stat_f("HP_max"),
 		ICON_DIR + "HP_16x16.png", Color("#9A2E22")))            # 血量＝深红
@@ -1475,58 +1476,89 @@ func _build_stats(right: VBoxContainer, u) -> void:
 		ICON_DIR + "护甲值_16x16.png", Color("#66707A")))          # 护甲＝深钢灰
 	col_l.add_child(_stat_bar_row(float(u.morale), float(u.MORALE_MAX),
 		_morale_icon(int(u.morale)), _morale_color(int(u.morale), int(u.MORALE_MAX))))   # 士气＝红→绿线性
+	# 绿区：计量条下方＝面板五行（🔒 用户定序：移动力/物理抗性/自然抗性/肉体强韧/意志强韧；百分比语义带 %）
+	col_l.add_child(HSeparator.new())
+	for key in ["move", "res_phys", "res_nature", "body_fort", "will_fort"]:
+		var suffix := "%" if StatMeta.is_pct(key) else ""
+		col_l.add_child(_stat_kv_row(StatMeta.label(key), str(u.effective_stat(key)) + suffix))
 
-# ============ 属性提升（加点 UI v1，🔒 §10.1/§10.6：c 节点每级 2 次四选二·战后结算）============
-# attr_picks>0 才浮现；成对约束（同节点两次限不同属性）判据＝Unit.can_attr_pick，不满足灰显；
-# 战斗中整区锁定只读（一切结算战后进行 🔒）。图标缺失（决心待画）静默空位。
+# ============ 属性三区（🔒 2026-07-08 用户定布局）============
+# 蓝区（头像右侧）＝四属性 技巧/灵活/决心/运气（加点 [+] 整合在行尾，attr_picks>0 才出、战斗锁定）；
+# 绿区（计量条下）＝移动力/双抗/双韧；右列＝修正属性（结算口径合成值）。图标缺失（决心待画）静默空位。
 const ATTR_PICK_ICONS := {"finesse": "技巧_16x16.png", "agility": "灵活_16x16.png",
 	"luck": "幸运_16x16.png", "resolve": "决心_16x16.png"}
 
-func _build_attr_picks(col: VBoxContainer, u) -> void:
-	if int(u.attr_picks) <= 0:
-		return
-	var in_battle: bool = host != null and "phase" in host and str(host.phase) == "battle"
-	var head := Label.new()
-	head.text = "属性提升：剩 %d 点%s" % [int(u.attr_picks), "（战斗中锁定）" if in_battle else ""]
-	head.add_theme_font_size_override("font_size", 13)
-	head.add_theme_color_override("font_color", Color("#EBBC04"))
-	col.add_child(head)
-	if int(u.attr_picks) % 2 == 1 and str(u.attr_pick_last) != "":
-		var hint := Label.new()
-		hint.text = "本对已选「%s」，第二点须选其他属性" % StatMeta.label(u.attr_pick_last)
-		hint.add_theme_font_size_override("font_size", 11)
-		hint.add_theme_color_override("font_color", Color(1, 1, 1, 0.45))
-		col.add_child(hint)
-	for key in ["finesse", "agility", "luck", "resolve"]:
-		col.add_child(_attr_pick_row(u, key, in_battle))
-
-func _attr_pick_row(u, key: String, locked: bool) -> Control:
+# 小字键值行：可选 16px 像素图标 + 左名右值
+func _stat_kv_row(label_text: String, value_text: String, icon_file := "") -> Control:
 	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 8)
-	var icon := TextureRect.new()
-	icon.texture = TextureCache.get_tex(ICON_DIR + str(ATTR_PICK_ICONS.get(key, "")))
-	icon.custom_minimum_size = Vector2(22, 22)
-	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	row.add_child(icon)
+	row.add_theme_constant_override("separation", 6)
+	if icon_file != "":
+		var icon := TextureRect.new()
+		icon.texture = TextureCache.get_tex(ICON_DIR + icon_file)
+		icon.custom_minimum_size = Vector2(18, 18)
+		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		row.add_child(icon)
 	var lab := Label.new()
-	lab.text = "%s  %d" % [StatMeta.label(key), int(u.effective_stat(key))]
+	lab.text = label_text
+	lab.add_theme_font_size_override("font_size", 13)
 	lab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(lab)
-	var btn := Button.new()
-	btn.text = "＋%d" % int(u.ATTR_PICK_INC[key])
-	btn.custom_minimum_size = Vector2(44, 0)
-	btn.disabled = locked or not u.can_attr_pick(key)
-	if btn.disabled:
-		btn.tooltip_text = "战斗中锁定（一切结算战后进行）" if locked else "本对第二点须选不同属性"
-	else:
-		btn.tooltip_text = "花 1 点：%s +%d" % [StatMeta.label(key), int(u.ATTR_PICK_INC[key])]
-	btn.pressed.connect(func():
-		if u.apply_attr_pick(key):
-			open(u))   # 重建面板：数值/剩余点数/按钮灰显一并刷新
-	row.add_child(btn)
+	var val := Label.new()
+	val.text = value_text
+	val.add_theme_font_size_override("font_size", 13)
+	row.add_child(val)
 	return row
+
+# 蓝区：四属性列（🔒 用户定序 技巧/灵活/决心/运气）
+func _attr_col(u) -> Control:
+	var col := VBoxContainer.new()
+	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	col.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	col.add_theme_constant_override("separation", 6)
+	var picks := int(u.attr_picks)
+	var in_battle: bool = host != null and "phase" in host and str(host.phase) == "battle"
+	if picks > 0:
+		var head := Label.new()
+		head.text = "属性点 ×%d%s" % [picks, "（战斗中锁定）" if in_battle else ""]
+		head.add_theme_font_size_override("font_size", 12)
+		head.add_theme_color_override("font_color", Color("#EBBC04"))
+		col.add_child(head)
+	for key in ["finesse", "agility", "resolve", "luck"]:
+		var row := _stat_kv_row(StatMeta.label(key), str(u.effective_stat(key)), str(ATTR_PICK_ICONS.get(key, "")))
+		if picks > 0:
+			var btn := Button.new()
+			btn.text = "＋"
+			btn.custom_minimum_size = Vector2(26, 0)
+			btn.disabled = in_battle or not u.can_attr_pick(key)
+			btn.tooltip_text = "战斗中锁定（一切结算战后进行）" if in_battle \
+				else "花 1 点：%s +1（可双点同投）" % StatMeta.label(key)
+			var k := str(key)
+			btn.pressed.connect(func():
+				if u.apply_attr_pick(k):
+					open(u))   # 重建面板：数值/剩余点数/按钮灰显一并刷新
+			row.add_child(btn)
+		col.add_child(row)
+	return col
+
+# 右列：修正属性（武器/装备/修正全叠加后的结算口径；格挡两行＝武器/盾面板承载，人身底 0 🔒）
+func _build_derived_col(col: VBoxContainer, u) -> void:
+	var head := Label.new()
+	head.text = "修正属性"
+	head.add_theme_font_size_override("font_size", 12)
+	head.add_theme_color_override("font_color", Color(1, 1, 1, 0.55))
+	col.add_child(head)
+	col.add_child(_stat_kv_row("命中率", _fmt1(u.effective_stat_f("acc") + u.effective_stat_f("finesse")) + "%"))
+	col.add_child(_stat_kv_row("闪避率", _fmt1(u.effective_stat_f("eva") + u.effective_stat_f("agility")) + "%"))
+	col.add_child(_stat_kv_row("暴击率", _fmt1(u.effective_stat_f("crit_rate") + u.effective_stat_f("finesse") * 0.5) + "%"))
+	col.add_child(_stat_kv_row("暴击伤害", _fmt1(u.effective_stat_f("crit_dmg") + u.effective_stat_f("luck") * 0.5) + "%"))
+	col.add_child(_stat_kv_row("暴击防御", _fmt1(u.effective_stat_f("luck")) + "%"))   # 运气压对方暴击（−1%/点）
+	col.add_child(_stat_kv_row("格挡率", _fmt1(u.effective_stat_f("block_rate")) + "%"))
+	col.add_child(_stat_kv_row("格挡性能", _fmt1(u.effective_stat_f("block_power")) + "%"))
+
+func _fmt1(v: float) -> String:
+	return str(int(v)) if is_equal_approx(v, floorf(v)) else String.num(v, 1)
 
 # 士气图标：按当前值五档 → flag1-5（<10 / 10-19 / 20-29 / 30-39 / ≥40）；与 Unit.morale_band() 一致，默认 25 落 flag3。
 func _morale_icon(morale: int) -> String:

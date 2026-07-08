@@ -31,15 +31,15 @@ func _initialize() -> void:
 	ck(int(ProfDB.MASTER_XP_CAP) == 1500, "大师计量满值 1500")
 	ck(ProfDB.stage_name(3) == "老练" and ProfDB.stage_name(5) == "大师", "阶段名")
 
-	# 2) 槽位容量=等级解锁节拍 1/4/7/10/13（🔒 §10.1 三轨 b）
+	# 2) 槽位容量=等级解锁节拍 1/4/8/11/16（🔒 §10.1 二次修订 20 级表）
 	var u = Unit.new("练习生", "player", -1, -1)
 	ck(u.prof_slot_capacity() == 1, "1 级容量 1")
 	u.level = 9
-	ck(u.prof_slot_capacity() == 3, "9 级容量 3（1/4/7）")
-	u.level = 12
-	ck(u.prof_slot_capacity() == 4, "12 级容量 4（13 未到）")
-	u.level = 13
-	ck(u.prof_slot_capacity() == 5, "13 级容量 5（满）")
+	ck(u.prof_slot_capacity() == 3, "9 级容量 3（1/4/8）")
+	u.level = 15
+	ck(u.prof_slot_capacity() == 4, "15 级容量 4（16 未到）")
+	u.level = 16
+	ck(u.prof_slot_capacity() == 5, "16 级容量 5（满）")
 
 	# 3) 学习/装载/卸载：未学不可装；装载挂阶段补正、卸载全摘（装载=总开关）；熟练度冻结保留
 	u.level = 1

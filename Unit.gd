@@ -73,7 +73,7 @@ var stats := {
 	"acc": 0,                     # 命中面板＝武器侧承载（武器 mods 落点）；人身命中＝技巧（🔒 §10.6 命中=武器命中+技巧−闪避−灵活）
 	"eva": 0,                     # 闪避面板＝修正落点；人身闪避＝灵活（同上）
 	"crit_rate": 0,               # 暴击率(%)：无人身底率 🔒——暴击＝招式/武器 + 技巧×0.5 − 对方运气
-	"crit_dmg": 160,              # 暴击威力(%)＝全招式默认值（🔒 归招式），未暴击=100
+	"crit_dmg": 120,              # 暴击威力(%)＝全招式默认值（🔒 二次修订 2026-07-08：160→120），未暴击=100
 	"block_rate": 0,              # 格挡率(%)：人底 0 🔒 §10.3——纯物品承载（盾天生激活/武器须格挡域）
 	"block_power": 0,             # 格挡性能(%)：同上
 	# 抗性四轨 🔒（docs/模块_属性成长_设计.md §5）：抗性=百分比减伤（人/甲分算）；强韧=异常豁免掷（防具永不提供＋等级自动曲线）
@@ -240,7 +240,7 @@ func move_allowance(tile_tags: Array = []) -> int:
 func init_vitals() -> void:
 	stats["HP"] = effective_stat("HP_max")
 	stats["armor"] = effective_stat("armor_max")
-	morale = clampi(MORALE_BASELINE + 2 * effective_stat("resolve"), 0, MORALE_MAX)   # 🔒 §10.7
+	morale = clampi(MORALE_BASELINE + effective_stat("resolve"), 0, MORALE_MAX)   # 🔒 §10.7（二次修订：+1/点）
 
 # 当前士气档位 0~4（崩溃/动摇/稳定/高昂/狂热；档界 🔒 每 10 一档、50 归狂热）与档位名。
 func morale_band() -> int:
@@ -249,18 +249,16 @@ func morale_band() -> int:
 func morale_band_name() -> String:
 	return MORALE_BANDS[morale_band()]
 
-# —— 等级三轨 🔒（模块_属性成长_设计.md §10.1；2026-07-08 修订＝17 级制，补回漏算的一级天赋）——
-# a 天赋层 Lv 1(默认A0)/3/6/9/12/15/17 · b 技能槽 Lv 1/4/7/10/13 · c 加点 Lv 2/5/8/11/14/16
-const LEVEL_CAP := 17
-const ATTR_PICK_LEVELS := [2, 5, 8, 11, 14, 16]   # c 节点：每到一级得 2 次加点（四选二——同节点两次限不同属性 🔒）
-const ATTR_PICK_INC := {"finesse": 2, "agility": 1, "luck": 1, "resolve": 1}   # 每次加点增量 🔒
+# —— 等级三轨 🔒（模块_属性成长_设计.md §10.1；2026-07-08 二次修订＝20 级整齐表）——
+# 天赋 Lv 1(默认)/3/6/9/12/14/18（7 个，18 满）· 技能槽 Lv 1/4/8/11/16（5 格，16 满）·
+# 属性点 Lv 2/5/7/10/13/15/17/19/20（9 节点 ×2＝18 点，**允许双点同投一属性**——配对约束已废除）
+const LEVEL_CAP := 20
+const ATTR_PICK_LEVELS := [2, 5, 7, 10, 13, 15, 17, 19, 20]
+const ATTR_PICK_INC := {"finesse": 1, "agility": 1, "luck": 1, "resolve": 1}   # 增量统一 +1（强弱在每点效果，不在增量）🔒
 var attr_picks := 0                            # 待分配加点次数（战后结算）
-# 「同节点两次限不同属性」的成对约束：点数按对花（每节点恰 +2 → 余点偶数=对首、奇数=对尾）。
-# attr_pick_last＝对首选了啥（对尾须异于此；对尾花完清空）。随 attr_picks 一起序列化，中途存档不破约束。
-var attr_pick_last := ""
 
 # 获得经验（🔒 战后结算：战中静默记录、BattleIO 回写主档后才走到这里）：升级循环。返回升了几级。
-# 每级＝种族自动轨成长（growth 块：HP 小幅+双强韧，种族分化 🔒 2026-07-08）；c 节点另得加点次数；17 级封顶。
+# 每级＝种族自动轨成长（growth 块，种族分化 🔒 2026-07-08）；属性点节点另得 2 点；20 级封顶。
 func gain_exp(n: int) -> int:
 	var levels := 0
 	exp += maxi(0, n)
@@ -276,28 +274,37 @@ func gain_exp(n: int) -> int:
 		exp = mini(exp, exp_max)   # 毕业：经验冻结在条内，不再滚级
 	return levels
 
-# 种族自动轨成长 🔒（§10.6）：growth 块逐键落面板；HP 上限涨多少、当前 HP 顺势补多少（升级回气）。
+# 种族自动轨成长 🔒（§10.6 二次修订：成长节奏分化）：growth 值＝数字（每级固定）或**数组**（按
+# 新等级 % 数组长 取节奏——人 HP [1,0]＝逢双升、鸟妖 [1,0,0]＝逢三升、蜥蜴人 [1,2]＝1/2 交替）。
+# HP 上限涨多少、当前 HP 顺势补多少（升级回气）。⚠️ 依赖 self.level＝刚升到的等级（调用方先置 level）。
 func _apply_level_growth() -> void:
 	var g = RaceDB.get_race(race_id).get("growth", {})
 	if typeof(g) != TYPE_DICTIONARY:
 		return
 	for k in g:
-		stats[str(k)] = round1(float(stats.get(str(k), 0)) + float(g[k]))
+		var amt := _growth_amount(g[k])
+		if amt != 0.0:
+			stats[str(k)] = round1(float(stats.get(str(k), 0)) + amt)
 	if g.has("HP_max") and stats.has("HP"):
-		stats["HP"] = round1(float(stats.get("HP", 0)) + float(g["HP_max"]))
+		var hp_amt := _growth_amount(g["HP_max"])
+		if hp_amt != 0.0:
+			stats["HP"] = round1(float(stats.get("HP", 0)) + hp_amt)
 
-# 该属性现在可否加点（UI 灰显判据）：有余点 + 合法键 + 成对约束（对尾不得重复对首）。
+func _growth_amount(v) -> float:
+	if typeof(v) == TYPE_ARRAY:
+		var arr := v as Array
+		return float(arr[level % arr.size()]) if not arr.is_empty() else 0.0
+	return float(v)
+
+# 该属性现在可否加点（UI 灰显判据）：有余点 + 合法键。双点可同投一属性（🔒 二次修订，配对约束废除）。
 func can_attr_pick(key: String) -> bool:
-	if attr_picks <= 0 or not ATTR_PICK_INC.has(key):
-		return false
-	return attr_picks % 2 == 0 or key != attr_pick_last
+	return attr_picks > 0 and ATTR_PICK_INC.has(key)
 
 # 花 1 次待分配加点、给指定属性固定增量（战后 UI 消费）。成功 true。
 func apply_attr_pick(key: String) -> bool:
 	if not can_attr_pick(key):
 		return false
 	stats[key] = round1(float(stats.get(key, 0)) + float(ATTR_PICK_INC[key]))
-	attr_pick_last = key if attr_picks % 2 == 0 else ""   # 对首记住选择；对尾花完清空
 	attr_picks -= 1
 	return true
 
@@ -600,7 +607,7 @@ func reset_skill_charges() -> void:
 # 技艺槽容量：等级 1/4/7/10/13 各解锁 1 格（共 5；🔒 §10.1 十五级三轨轮转 2026-07-07 定案）。
 func prof_slot_capacity() -> int:
 	var c := 1
-	for lv in [4, 7, 10, 13]:
+	for lv in [4, 8, 11, 16]:   # 🔒 §10.1 二次修订（20 级表）：槽 1/4/8/11/16，16 满
 		if level >= int(lv):
 			c += 1
 	return c

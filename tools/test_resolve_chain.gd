@@ -41,8 +41,9 @@ func _initialize() -> void:
 			break
 		d.stats["HP"] = int(d.stats["HP_max"])   # 失手不掉血，防御性重置
 	ck(bool(r.get("hit", false)), "64 次内必出命中（hc=95）")
-	ck(not bool(r["crit"]) or is_equal_approx(float(r["cmult"]), float(a.stats["crit_dmg"]) / 100.0),
-		"暴击时 cmult=crit_dmg/100")
+	ck(not bool(r["crit"]) or is_equal_approx(float(r["cmult"]),
+		(float(a.stats["crit_dmg"]) + float(a.stats["luck"]) * 0.5) / 100.0),
+		"暴击时 cmult=(crit_dmg+运气×0.5)/100（🔒 运气加爆伤）")
 	ck(is_equal_approx(float(r["cr"]), 0.0) and not bool(r["crit"]), "基线 cr=0 必不暴击")
 	ck(not bool(r["blocked"]) and is_equal_approx(float(r["bp"]), 0.0), "block_rate 0 必不格挡（bp=0）")
 	ck(int(r["morale_att"]) == 2 and a.morale == 27, "命中未格挡：攻方士气 +2")

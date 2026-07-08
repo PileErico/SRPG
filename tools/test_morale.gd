@@ -32,8 +32,8 @@ func _initialize() -> void:
 	var pb = UnitFactory.make_unit(protos[0], "player", nbs[0].x, nbs[0].y)   # 友军贴脸
 	pb.stats["resolve"] = 3
 	pb.init_vitals()
-	ck(pb.morale == 31, "决心 3 → 初始 25+6=31（实际 %d）" % pb.morale)
-	ck(pb.morale_band_name() == "高昂", "31 落高昂档（档界 30~39）")
+	ck(pb.morale == 28, "决心 3 → 初始 25+3=28（🔒 二次修订 +1/点，实际 %d）" % pb.morale)
+	ck(pb.morale_band_name() == "稳定", "28 落稳定档（档界 20~29）")
 	# 档界全边界（🔒 每 10 一档：0~9/10~19/20~29/30~39/40~50）
 	var edges := {0: "崩溃", 9: "崩溃", 10: "动摇", 19: "动摇", 20: "稳定", 29: "稳定",
 		30: "高昂", 39: "高昂", 40: "狂热", 50: "狂热"}
@@ -47,7 +47,7 @@ func _initialize() -> void:
 	var e2 = UnitFactory.make_unit(protos[0], "enemy", 7, 6)                  # 敌远处
 	s.units = [pa, pb, e1, e2]
 	ck(s._morale_add(pa, -5) == -5 and pa.morale == 20, "决心 0：−5 全额（→20）")
-	ck(s._morale_add(pb, -5) == -2 and pb.morale == 29, "决心 3：−5 抵消 3 → −2（→29）")
+	ck(s._morale_add(pb, -5) == -4 and pb.morale == 27, "决心 3：抵 floor(1.5)=1 → −4（→27，🔒 0.5/点）")
 	ck(s._morale_add(pb, -1) == -1, "决心 3：−1 保底仍 −1")
 	pa.morale = 1
 	ck(s._morale_add(pa, -5) == -1 and pa.morale == 0, "下限钳 0")

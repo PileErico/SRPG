@@ -482,9 +482,10 @@ func _resolve_compute(attacker, target, skill) -> Dictionary:
 	var cr := maxf(0.0, float(attacker.effective_stat_f("crit_rate")) \
 		+ float(attacker.effective_stat_f("finesse")) * 0.5 - float(target.effective_stat_f("luck")))
 	var crit := randf() * 100.0 < cr
-	# 伤害 = 攻击 × 系数 [× 暴击] [× 效能≠100%]
+	# 伤害 = 攻击 × 系数 [× 暴击] [× 效能≠100%]；暴击威力＝crit_dmg ＋ 运气×0.5（🔒 §10.6 二次修订：运气加爆伤）
 	var coeff := float(skill.get("coeff", 1.0))
-	var cmult := (float(attacker.effective_stat_f("crit_dmg")) / 100.0) if crit else 1.0
+	var cmult := ((float(attacker.effective_stat_f("crit_dmg")) \
+		+ float(attacker.effective_stat_f("luck")) * 0.5) / 100.0) if crit else 1.0
 	var aeff: float = attacker.eff_mult("atk_eff") * _terrain_eff_factor(attacker, "atk_eff", true)   # 攻击效能桶：面板 atk_eff/100 × Π效能修正 × 攻方地块攻击效能
 	var atk := float(attacker.effective_stat_f("atk"))
 	var out := atk * coeff * cmult * aeff
@@ -847,7 +848,8 @@ func _morale_add(u, delta: int) -> int:
 		return 0
 	var d := delta
 	if d < 0:
-		d = -maxi(1, -d - int(u.effective_stat("resolve")))
+		# 决心抵消 🔒（二次修订 2026-07-08）：每点抵 0.5 向下取整；单次损失保底 1
+		d = -maxi(1, -d - int(floorf(u.effective_stat_f("resolve") * 0.5)))
 	var before: int = u.morale
 	u.morale = clampi(before + d, 0, u.MORALE_MAX)
 	return u.morale - before

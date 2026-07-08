@@ -136,8 +136,12 @@ func _initialize() -> void:
 	var exp_before: int = src.exp
 	var lvl_before: int = src.level
 	BattleIO.apply_result(ws, result)
-	# 保底 1 + 战后经验升级的种族成长回气（每级 HP+1，🔒 §10.6 自动轨）——升几级补几点
-	ck(int(src.stats["HP"]) == 1 + (src.level - lvl_before), "重伤离场者回写 HP=保底1+升级回气（原 %d，升 %d 级 → %d）" % [hp_before, src.level - lvl_before, int(src.stats["HP"])])
+	# 保底 1 + 战后经验升级的种族成长回气（人类 HP 成长 [1,0]＝逢双升，🔒 §10.6 二次修订）
+	var hp_expect := 1
+	for l in range(lvl_before + 1, src.level + 1):
+		if l % 2 == 0:
+			hp_expect += 1
+	ck(int(src.stats["HP"]) == hp_expect, "重伤离场者回写 HP=保底1+升级回气（原 %d，升 %d 级 → %d）" % [hp_before, src.level - lvl_before, int(src.stats["HP"])])
 	ck(src.injured_until == ws.clock_hours + BattleIO.INJURY_HOURS, "injured_until＝时钟+%d" % BattleIO.INJURY_HOURS)
 	ck(not src.tags.has("injured"), "injured tag 转持久字段后清掉")
 	ck(src.exp != exp_before or src.level > 1, "经验已入账")

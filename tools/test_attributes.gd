@@ -1,7 +1,7 @@
 extends SceneTree
 ## 四属性+成长定案回归（🔒 模块_属性成长_设计.md §10.1/§10.4/§10.6，2026-07-07 数值定案）：
 ## 种族重基（HP40/四属性底值）/ 命中=武器命中+技巧−闪避−灵活 / 暴击=招式+技巧×0.5−对方运气 /
-## 回合序=speed+灵活 / 自动轨成长（种族分化）/ 17 级帽 / c 节点加点（四选二×6=12 次，幅度各异）/ 水生·条件移动力 /
+## 回合序=speed+floor(灵活/2) / 自动轨成长（种族节奏数组）/ 20 级帽 / 属性点 9 节点 18 点（可同投）/ 水生·条件移动力 /
 ## 天生武器实装（拳脚入位/被顶替/回位/proto 不序列化）/ 格挡装备取高 / 条件 mod requires_prof。
 ## 运行：..._console.exe --headless --path "D:/1战棋" -s res://tools/test_attributes.gd（退出码 0=PASS）
 
@@ -85,55 +85,60 @@ func _initialize() -> void:
 	ck(s._hit_chance(e, u) == 25 + 3, "灵活降 3 → 被命中 +3（闪避仍吃满灵活）")
 	u.modifiers.pop_back()
 
-	# —— 4) 自动轨成长 + 17 级帽 + 加点（🔒 §10.1 2026-07-08 修订）——
+	# —— 4) 自动轨成长（节奏数组）+ 20 级帽 + 加点（🔒 §10.1 二次修订 2026-07-08）——
 	var g = UnitFactory.make_unit(inf, "player", 0, 0)
 	var hp0 := float(g.stats["HP"])
-	g.gain_exp(100)   # → 2 级（c 节点）
+	g.gain_exp(100)   # → 2 级（属性点节点）
 	ck(g.level == 2, "升到 2 级")
-	ck(int(g.effective_stat("HP_max")) == 41, "HP_max 40→41（种族曲线 +1）")
+	ck(int(g.effective_stat("HP_max")) == 41, "HP_max 40→41（人类逢双升 [1,0]）")
 	ck(is_equal_approx(float(g.stats["HP"]), hp0 + 1.0), "当前 HP 随上限 +1")
 	ck(int(g.stats["will_fort"]) == 2 and int(g.stats["body_fort"]) == 2, "双强韧每级 +2")
-	ck(g.attr_picks == 2, "c 节点得 2 次加点")
-	ck(g.apply_attr_pick("finesse") and int(g.stats["finesse"]) == 12, "技巧加点 +2/次")
-	ck(g.attr_pick_last == "finesse" and not g.can_attr_pick("finesse"), "成对约束：对尾不得重复对首（🔒 同节点两次限不同属性）")
-	ck(not g.apply_attr_pick("finesse"), "重复对首被拒")
-	ck(g.apply_attr_pick("luck") and int(g.stats["luck"]) == 6, "运气加点 +1/次（对尾异属性放行）")
-	ck(g.attr_pick_last == "", "对花完清空对首记录")
-	ck(not g.apply_attr_pick("luck"), "加点次数用尽")
+	ck(g.attr_picks == 2, "属性点节点得 2 点")
+	ck(g.apply_attr_pick("finesse") and int(g.stats["finesse"]) == 11, "技巧加点 +1/点（增量统一）")
+	ck(g.can_attr_pick("finesse") and g.apply_attr_pick("finesse") and int(g.stats["finesse"]) == 12,
+		"双点可同投一属性（🔒 配对约束已废除）")
+	ck(not g.apply_attr_pick("luck"), "点数用尽")
 	g.gain_exp(10000000)
-	ck(g.level == 17, "等级帽 17（实际 %d）" % g.level)
-	ck(int(g.effective_stat("HP_max")) == 40 + 16, "满级 HP_max=56（40+16 级成长）")
-	ck(int(g.stats["will_fort"]) == 32, "满级意志强韧 32（16 级×2）")
-	ck(g.attr_picks == 2 * 6 - 2, "满级累计加点 12 次（C1~C6；已花 2）")
-	ck(g.prof_slot_capacity() == 5, "满级技艺槽 5（1/4/7/10/13 不变）")
+	ck(g.level == 20, "等级帽 20（实际 %d）" % g.level)
+	ck(int(g.effective_stat("HP_max")) == 50, "满级 HP_max=50（40+逢双升×10）")
+	ck(int(g.stats["will_fort"]) == 38, "满级意志强韧 38（19 级×2）")
+	ck(g.attr_picks == 9 * 2 - 2, "满级累计 18 点（9 节点；已花 2）")
+	ck(g.prof_slot_capacity() == 5, "满级技艺槽 5（1/4/8/11/16）")
 	var g2 = UnitFactory.make_unit(inf, "player", 0, 0)
 	g2.gain_exp(100 + 120 + 144)   # → 4 级
 	ck(g2.prof_slot_capacity() == 2, "4 级技艺槽 2 格")
-	# level>1 原型的自动轨追溯（review 修复）：比路兹 level 5 → 鸟妖 35 + 4 级成长
-	# （🔒 2026-07-08 种族成长分化：鸟妖 意志+2/肉体+1）
+	# level>1 原型的自动轨追溯（逐级行走）：比路兹 level 5 → 鸟妖 35 + 仅 3 级那次 +1（[1,0,0] 逢三升）
 	var bel := proto_by_id(protos, "belooz")
 	if not bel.is_empty():
 		var b5 = UnitFactory.make_unit(bel, "player", 0, 0)
-		ck(int(b5.stats["HP_max"]) == 35 + 4, "5 级鸟妖原型面板 HP_max=39（追溯成长；effective 另含特性 +15）")
+		ck(int(b5.stats["HP_max"]) == 36, "5 级鸟妖原型面板 HP_max=36（逢三升；effective 另含特性 +15）")
 		ck(int(b5.stats["will_fort"]) == 8 and int(b5.stats["body_fort"]) == 4, "5 级鸟妖双韧追溯 意志+8/肉体+4")
 
-	# —— 4b) 种族数值修订 + 条件移动力（🔒 2026-07-08：水生/飞行）——
+	# —— 4b) 种族终表 + 条件移动力（🔒 2026-07-08 二次修订：中庸/敏捷/坚韧三人设）——
 	var liz = Unit.new("蜥候", "player", 0, 0)
 	RaceDB.apply_to(liz, "lizardmen")
 	ck(int(liz.stats["HP_max"]) == 45 and int(liz.stats["move"]) == 3 and int(liz.stats["sight"]) == 4,
 		"蜥蜴人底值 HP45/移动3/视野4")
-	ck(int(liz.stats["finesse"]) == 6 and int(liz.stats["agility"]) == 6 and int(liz.stats["body_fort"]) == 5,
-		"蜥蜴人 技巧6/灵活6/肉韧5")
+	ck(int(liz.stats["finesse"]) == 8 and int(liz.stats["agility"]) == 6 and int(liz.stats["luck"]) == 3
+		and int(liz.stats["resolve"]) == 4 and int(liz.stats["body_fort"]) == 5,
+		"蜥蜴人 技巧8/灵活6/运气3/决心4/肉韧5（坚韧）")
 	ck(liz.tags.has("aquatic"), "蜥蜴人种族自带〈水生动物〉tag")
 	ck(liz.move_allowance() == 3 and liz.move_allowance(["water", "shallow"]) == 4,
 		"蜥蜴人条件移动力：陆 3 / 水域 4（when_tile_tag）")
+	liz.init_vitals()
+	ck(liz.morale == 29, "决心4 → 初始士气 25+4=29（🔒 +1/点）")
+	liz.level = 2
 	liz._apply_level_growth()
-	ck(int(liz.stats["HP_max"]) == 47 and int(liz.stats["will_fort"]) == 1 and int(liz.stats["body_fort"]) == 7,
-		"蜥蜴人成长 HP+2/意志+1/肉体+2")
+	ck(int(liz.stats["HP_max"]) == 46 and int(liz.stats["will_fort"]) == 1 and int(liz.stats["body_fort"]) == 7,
+		"蜥蜴人 2 级：HP+1（交替从1起）/意志+1/肉体+2")
+	liz.level = 3
+	liz._apply_level_growth()
+	ck(int(liz.stats["HP_max"]) == 48, "蜥蜴人 3 级：HP+2（1/2 交替）")
 	var hp = Unit.new("鸟候", "player", 0, 0)
 	RaceDB.apply_to(hp, "harpy")
-	ck(int(hp.stats["agility"]) == 14 and int(hp.stats["sight"]) == 6 and int(hp.stats["move"]) == 4,
-		"鸟妖底值 灵活14/视野6/移动4（偶数配先攻减半取整）")
+	ck(int(hp.stats["finesse"]) == 12 and int(hp.stats["agility"]) == 14 and int(hp.stats["luck"]) == 3,
+		"鸟妖 技巧12/灵活14/运气3（敏捷）")
+	ck(int(hp.stats["sight"]) == 6 and int(hp.stats["move"]) == 4, "鸟妖 视野6/移动4")
 	ck(hp.initiative() == 7, "鸟妖先攻 14/2=7")
 	ck(hp.move_allowance() == 4, "鸟妖步行移动 4")
 	hp.tags.append("flying")
@@ -170,15 +175,13 @@ func _initialize() -> void:
 	ck(is_equal_approx(d.effective_stat_f("block_rate"), 15.0) and is_equal_approx(d.effective_stat_f("block_power"), 35.0),
 		"盾格挡天生激活（15/35）")
 
-	# —— 6) attr_picks / attr_pick_last 序列化往返（对中断档不破成对约束）——
+	# —— 6) attr_picks 序列化往返 ——
 	g.attr_picks = 7
-	g.attr_pick_last = "agility"
 	var snap: Dictionary = UnitFactory.unit_to_battle_snapshot(g)
 	var back = UnitFactory.unit_from_battle_snapshot(JSON.parse_string(JSON.stringify(snap)))
-	ck(back.attr_picks == 7 and back.attr_pick_last == "agility", "battle 快照 attr_picks/对首 往返")
-	ck(not back.can_attr_pick("agility") and back.can_attr_pick("luck"), "载回后成对约束仍生效")
+	ck(back.attr_picks == 7, "battle 快照 attr_picks 往返")
 	var p2 := UnitFactory.unit_to_proto(g)
-	ck(int(p2.get("attr_picks", 0)) == 7 and str(p2.get("attr_pick_last", "")) == "agility", "proto 层 attr_picks/对首 保留")
+	ck(int(p2.get("attr_picks", 0)) == 7, "proto 层 attr_picks 保留")
 
 	if _fail == 0:
 		print("=== 四属性/成长定案 全 PASS ===")
