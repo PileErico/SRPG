@@ -63,7 +63,7 @@ var stats := {
 	"armor_max": 0, "armor": 0,   # 护甲值（承伤池，来自防具，默认 0）
 	# 行动
 	"AP_max": 2,                  # AP 上限：每 turn 开始刷新到此值（行动经济基础 2）
-	"move": 6,                    # 移动力：一次「移动动作」（花 1 AP）获得的移动点数
+	"move": 4,                    # 移动力：一次「移动动作」（花 1 AP）获得的移动点数（🔒 2026-07-08 人类基线 4；种族条件覆盖见 move_allowance）
 	"speed": 0,                   # 速度面板（装备/buff 修正落点）；回合序＝speed+灵活（🔒 §10.6，读 initiative()）
 	"sight": 5,                   # 视野半径：能看多远（六边形距离）；被 LOS 裁剪。夜/天气等环境挂修正。见 docs/感知系统.md
 	# 进攻 / 防御（默认=人类基线，与 data/races.json human 一致；武器/熟练度/perk 经修正管线叠加）
@@ -221,8 +221,20 @@ func effective_stat(key: String) -> int:
 
 # 一次「移动动作」（1 AP）获得的移动点——**唯一口径＝effective**（含装备/词条/buff 修正）。
 # 预览范围(_dijkstra)与实际购点(玩家/AI/_move_budget)都必须读这里，禁止再读裸 stats["move"]。
-func move_allowance() -> int:
-	return int(effective_stat("move"))
+# 🔒 2026-07-08 种族条件移动力（races.json move_overrides）：条件命中＝**替换种族基础值**、修正差量照叠——
+#   when_self_tag 查自身 tag（鸟妖 flying→6）；when_tile_tag 查脚下地块 tag（蜥蜴人 water→4），
+#   地块 tags 由战斗侧调用方传入（BattleState._tile_tags_at；无战场上下文缺省 []＝只按自身 tag 判）。
+func move_allowance(tile_tags: Array = []) -> int:
+	var base := int(stats.get("move", 0))
+	var eff := int(effective_stat("move"))
+	for o in RaceDB.get_race(race_id).get("move_overrides", []):
+		if typeof(o) != TYPE_DICTIONARY:
+			continue
+		var st := str(o.get("when_self_tag", ""))
+		var tt := str(o.get("when_tile_tag", ""))
+		if (st != "" and tags.has(st)) or (tt != "" and tile_tags.has(tt)):
+			return maxi(0, int(o.get("move", base)) + (eff - base))   # 覆盖基础值＋保留修正差量
+	return eff
 
 # 把当前生命/护甲注满到上限（生成时调用；上限 = effective，含装备/特性）。士气一并归初始值。
 func init_vitals() -> void:
@@ -237,9 +249,10 @@ func morale_band() -> int:
 func morale_band_name() -> String:
 	return MORALE_BANDS[morale_band()]
 
-# —— 等级三轨 🔒（模块_属性成长_设计.md §10.1/§10.6，2026-07-07 数值定案）——
-const LEVEL_CAP := 15                          # 15 级毕业（三轨轮转：天赋 1/3/6/9/12/15·技能槽 1/4/7/10/13·加点 2/5/8/11/14）
-const ATTR_PICK_LEVELS := [2, 5, 8, 11, 14]    # c 节点：每到一级得 2 次加点（四选二——同节点两次限不同属性 🔒）
+# —— 等级三轨 🔒（模块_属性成长_设计.md §10.1；2026-07-08 修订＝17 级制，补回漏算的一级天赋）——
+# a 天赋层 Lv 1(默认A0)/3/6/9/12/15/17 · b 技能槽 Lv 1/4/7/10/13 · c 加点 Lv 2/5/8/11/14/16
+const LEVEL_CAP := 17
+const ATTR_PICK_LEVELS := [2, 5, 8, 11, 14, 16]   # c 节点：每到一级得 2 次加点（四选二——同节点两次限不同属性 🔒）
 const ATTR_PICK_INC := {"finesse": 2, "agility": 1, "luck": 1, "resolve": 1}   # 每次加点增量 🔒
 var attr_picks := 0                            # 待分配加点次数（战后结算）
 # 「同节点两次限不同属性」的成对约束：点数按对花（每节点恰 +2 → 余点偶数=对首、奇数=对尾）。
@@ -247,7 +260,7 @@ var attr_picks := 0                            # 待分配加点次数（战后�
 var attr_pick_last := ""
 
 # 获得经验（🔒 战后结算：战中静默记录、BattleIO 回写主档后才走到这里）：升级循环。返回升了几级。
-# 每级＝种族自动轨成长（growth 块：HP 小幅+双强韧固定）；c 节点另得加点次数；15 级封顶。
+# 每级＝种族自动轨成长（growth 块：HP 小幅+双强韧，种族分化 🔒 2026-07-08）；c 节点另得加点次数；17 级封顶。
 func gain_exp(n: int) -> int:
 	var levels := 0
 	exp += maxi(0, n)

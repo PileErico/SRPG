@@ -1216,7 +1216,7 @@ func _ai_step_toward(unit, target) -> bool:
 		if unit.ap <= 0:
 			return false
 		unit.ap -= 1
-		unit.move_points += unit.move_allowance()   # effective 口径（与预览范围 _dijkstra 一致）
+		unit.move_points += unit.move_allowance(_state._tile_tags_at(unit.col, unit.row))   # effective 口径＋脚下地块条件（与预览范围 _dijkstra 一致）
 	# ZOC 借机：离开起点前判定（敌方离开我方控制区也会被借机）；被钉住则本次没走成
 	if _zoc_on_leave(unit):
 		unit.move_points = 0
@@ -1712,7 +1712,7 @@ func _move_budget(u) -> int:
 	if u.move_points > 0:
 		return u.move_points
 	if u.ap > 0:
-		return u.move_allowance()   # effective 口径（与预览范围一致）
+		return u.move_allowance(_state._tile_tags_at(u.col, u.row))   # effective 口径＋脚下地块条件（与预览范围一致）
 	return 0
 
 # Dijkstra：算 unit 在 budget 内可达的格 + 前驱树（实现迁 BattleState._dijkstra）。
@@ -1809,8 +1809,8 @@ func _ranges_cached(u) -> Dictionary:
 		stamp.append(x.row)
 	# 键含被预览单位自身 tags 指纹＋武器射程（对抗审查修复：起飞/降落换 tag、换武器改射程都不动坐标——
 	# 少这两维会命中过期缓存，飞行 tag_cost/深水通行/攻击圈全会算错）
-	var key := [u.get_instance_id(), u.move_allowance(), int(u.basic_attack().get("range", 1)),
-		u.tags.duplicate(), round_num, stamp]
+	var key := [u.get_instance_id(), u.move_allowance(_state._tile_tags_at(u.col, u.row)),
+		int(u.basic_attack().get("range", 1)), u.tags.duplicate(), round_num, stamp]
 	if _range_memo.get("key", null) != key:
 		_range_memo = {"key": key, "r": _compute_ranges(u)}
 	return _range_memo["r"]
@@ -2106,7 +2106,7 @@ func _commit_move(col: int, row: int) -> void:
 		if u.ap <= 0:
 			return
 		u.ap -= 1
-		u.move_points += u.move_allowance()   # effective 口径（与预览范围 _dijkstra 一致）
+		u.move_points += u.move_allowance(_state._tile_tags_at(u.col, u.row))   # effective 口径＋脚下地块条件（与预览范围 _dijkstra 一致）
 	# ZOC 借机：离开起点前判定（起点在敌对控制区内才触发）；命中被钉住则本次移动作废
 	if _zoc_on_leave(u):
 		u.move_points = 0

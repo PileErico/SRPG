@@ -6,6 +6,7 @@
 
   {"id": "ground", "cn": "地面", "cat": "movement", "status": "in_use", "desc": "默认兵种；按地块基础成本，不可进深水"},
   {"id": "flying", "cn": "飞行", "cat": "movement", "status": "in_use", "desc": "地块成本恒1、可进深水、森林掩蔽不享受"},
+  {"id": "aquatic", "cn": "水生动物", "cat": "movement", "status": "in_use", "desc": "常驻（无需切换）：可进深水、深/浅水成本恒1；蜥蜴人种族自带；水域面板移动力另走 races.json move_overrides"},
   {"id": "spectral", "cn": "灵体", "cat": "movement", "status": "planned"},
 
   {"id": "open", "cn": "开阔", "cat": "terrain", "status": "in_use"},

@@ -148,6 +148,7 @@
         "cost": 2.0,
         "passable_by": "all",
         "tag_cost": {
+          "aquatic": 1.0,
           "flying": 1.0
         }
       },
@@ -173,7 +174,8 @@
       "move": {
         "cost": 1.0,
         "passable_by": [
-          "flying"
+          "flying",
+          "aquatic"
         ]
       },
       "scope": "both",
@@ -437,6 +439,7 @@
         "cost": 2.0,
         "passable_by": "all",
         "tag_cost": {
+          "aquatic": 1.0,
           "flying": 1.0
         }
       },

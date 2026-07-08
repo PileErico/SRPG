@@ -178,6 +178,13 @@ func _is_hostile(a, b) -> bool:
 
 # ============ 移动力 / 寻路 ============
 
+# 单位脚下（任意格）地块的 tags——种族条件移动力（move_overrides when_tile_tag）等地形判据用；越界=[]。
+func _tile_tags_at(col: int, row: int) -> Array:
+	if not _cell_in_bounds(col, row):
+		return []
+	var e = TerrainDB.entry_for(tiles[row][col])
+	return e.get("tags", []) if e != null else []
+
 # 单位进入该地块的移动消耗（tag 驱动）：-1 = 不可进入。
 func _move_cost_at(col: int, row: int, unit) -> int:
 	if not _cell_in_bounds(col, row):
@@ -237,7 +244,7 @@ func _dijkstra(unit, budget: int) -> Dictionary:
 # 单位的「理论最远」移动 + 攻击范围（预览用）。
 func _compute_ranges(unit) -> Dictionary:
 	var start := Vector2i(unit.col, unit.row)
-	var data := _dijkstra(unit, unit.move_allowance())
+	var data := _dijkstra(unit, unit.move_allowance(_tile_tags_at(unit.col, unit.row)))
 	var best: Dictionary = data["best"]
 	best.erase(start)
 	var reach := best

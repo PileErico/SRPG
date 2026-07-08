@@ -1,7 +1,7 @@
 extends SceneTree
 ## 四属性+成长定案回归（🔒 模块_属性成长_设计.md §10.1/§10.4/§10.6，2026-07-07 数值定案）：
 ## 种族重基（HP40/四属性底值）/ 命中=武器命中+技巧−闪避−灵活 / 暴击=招式+技巧×0.5−对方运气 /
-## 回合序=speed+灵活 / 自动轨成长（HP+1·双韧+2）/ 15 级帽 / c 节点加点（四选二×5=10 次，幅度各异）/
+## 回合序=speed+灵活 / 自动轨成长（种族分化）/ 17 级帽 / c 节点加点（四选二×6=12 次，幅度各异）/ 水生·条件移动力 /
 ## 天生武器实装（拳脚入位/被顶替/回位/proto 不序列化）/ 格挡装备取高 / 条件 mod requires_prof。
 ## 运行：..._console.exe --headless --path "D:/1战棋" -s res://tools/test_attributes.gd（退出码 0=PASS）
 
@@ -9,6 +9,8 @@ const BattleState := preload("res://BattleState.gd")
 const UnitFactory := preload("res://UnitFactory.gd")
 const ItemInstances := preload("res://ItemInstances.gd")
 const WorldState := preload("res://WorldState.gd")
+const Unit := preload("res://Unit.gd")
+const RaceDB := preload("res://RaceDB.gd")
 
 var _fail := 0
 
@@ -83,7 +85,7 @@ func _initialize() -> void:
 	ck(s._hit_chance(e, u) == 25 + 3, "灵活降 3 → 被命中 +3（实际 %d）" % s._hit_chance(e, u))
 	u.modifiers.pop_back()
 
-	# —— 4) 自动轨成长 + 15 级帽 + 加点（🔒 §10.1/§10.6）——
+	# —— 4) 自动轨成长 + 17 级帽 + 加点（🔒 §10.1 2026-07-08 修订）——
 	var g = UnitFactory.make_unit(inf, "player", 0, 0)
 	var hp0 := float(g.stats["HP"])
 	g.gain_exp(100)   # → 2 级（c 节点）
@@ -99,20 +101,56 @@ func _initialize() -> void:
 	ck(g.attr_pick_last == "", "对花完清空对首记录")
 	ck(not g.apply_attr_pick("luck"), "加点次数用尽")
 	g.gain_exp(10000000)
-	ck(g.level == 15, "等级帽 15（实际 %d）" % g.level)
-	ck(int(g.effective_stat("HP_max")) == 40 + 14, "满级 HP_max=54（40+14 级成长）")
-	ck(int(g.stats["will_fort"]) == 28, "满级意志强韧 28（14 级×2）")
-	ck(g.attr_picks == 2 * 5 - 2, "满级累计加点 10 次（已花 2）")
-	ck(g.prof_slot_capacity() == 5, "满级技艺槽 5（1/4/7/10/13）")
+	ck(g.level == 17, "等级帽 17（实际 %d）" % g.level)
+	ck(int(g.effective_stat("HP_max")) == 40 + 16, "满级 HP_max=56（40+16 级成长）")
+	ck(int(g.stats["will_fort"]) == 32, "满级意志强韧 32（16 级×2）")
+	ck(g.attr_picks == 2 * 6 - 2, "满级累计加点 12 次（C1~C6；已花 2）")
+	ck(g.prof_slot_capacity() == 5, "满级技艺槽 5（1/4/7/10/13 不变）")
 	var g2 = UnitFactory.make_unit(inf, "player", 0, 0)
 	g2.gain_exp(100 + 120 + 144)   # → 4 级
 	ck(g2.prof_slot_capacity() == 2, "4 级技艺槽 2 格")
 	# level>1 原型的自动轨追溯（review 修复）：比路兹 level 5 → 鸟妖 35 + 4 级成长
+	# （🔒 2026-07-08 种族成长分化：鸟妖 意志+2/肉体+1）
 	var bel := proto_by_id(protos, "belooz")
 	if not bel.is_empty():
 		var b5 = UnitFactory.make_unit(bel, "player", 0, 0)
 		ck(int(b5.stats["HP_max"]) == 35 + 4, "5 级鸟妖原型面板 HP_max=39（追溯成长；effective 另含特性 +15）")
-		ck(int(b5.stats["will_fort"]) == 8 and int(b5.stats["body_fort"]) == 8, "5 级原型双强韧追溯 +8")
+		ck(int(b5.stats["will_fort"]) == 8 and int(b5.stats["body_fort"]) == 4, "5 级鸟妖双韧追溯 意志+8/肉体+4")
+
+	# —— 4b) 种族数值修订 + 条件移动力（🔒 2026-07-08：水生/飞行）——
+	var liz = Unit.new("蜥候", "player", 0, 0)
+	RaceDB.apply_to(liz, "lizardmen")
+	ck(int(liz.stats["HP_max"]) == 45 and int(liz.stats["move"]) == 3 and int(liz.stats["sight"]) == 4,
+		"蜥蜴人底值 HP45/移动3/视野4")
+	ck(int(liz.stats["finesse"]) == 6 and int(liz.stats["agility"]) == 6 and int(liz.stats["body_fort"]) == 5,
+		"蜥蜴人 技巧6/灵活6/肉韧5")
+	ck(liz.tags.has("aquatic"), "蜥蜴人种族自带〈水生动物〉tag")
+	ck(liz.move_allowance() == 3 and liz.move_allowance(["water", "shallow"]) == 4,
+		"蜥蜴人条件移动力：陆 3 / 水域 4（when_tile_tag）")
+	liz._apply_level_growth()
+	ck(int(liz.stats["HP_max"]) == 47 and int(liz.stats["will_fort"]) == 1 and int(liz.stats["body_fort"]) == 7,
+		"蜥蜴人成长 HP+2/意志+1/肉体+2")
+	var hp = Unit.new("鸟候", "player", 0, 0)
+	RaceDB.apply_to(hp, "harpy")
+	ck(int(hp.stats["agility"]) == 15 and int(hp.stats["sight"]) == 6 and int(hp.stats["move"]) == 4,
+		"鸟妖底值 灵活15/视野6/移动4")
+	ck(hp.move_allowance() == 4, "鸟妖步行移动 4")
+	hp.tags.append("flying")
+	ck(hp.move_allowance() == 6, "鸟妖飞行移动 6（when_self_tag）")
+	hp.modifiers.append({"stat": "move", "op": "flat", "value": 1, "source": "equip:900:0"})
+	ck(hp.move_allowance() == 7, "条件覆盖后修正差量照叠（6+1）")
+	# 深水通行：普通人不可进、水生/飞行可进且成本 1；浅水 水生 1（普通人 2）
+	var s6 = BattleState.new()
+	s6._new_grassland(5, 5)
+	s6.tiles[2][2] = {"terrain": "water", "variant": "deep"}
+	s6.tiles[2][3] = {"terrain": "water", "variant": "shallow"}
+	var walker = UnitFactory.make_unit(inf, "player", 1, 2)
+	s6.units = [walker]
+	ck(s6._move_cost_at(2, 2, walker) == -1, "深水：普通人不可进")
+	ck(s6._move_cost_at(3, 2, walker) == 2, "浅水：普通人成本 2")
+	var lz2 = UnitFactory.make_unit({"id": "lz", "name": "蜥兵", "race": "lizardmen"}, "player", 1, 1)
+	s6.units.append(lz2)
+	ck(s6._move_cost_at(2, 2, lz2) == 1 and s6._move_cost_at(3, 2, lz2) == 1, "水生：深/浅水成本恒 1")
 
 	# —— 5) 格挡装备取高 + 条件 mod（🔒 §10.3）——
 	var b = UnitFactory.make_unit(inf, "player", 0, 0)

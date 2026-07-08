@@ -7,23 +7,26 @@
       "HP_max": 40, "atk": 0, "acc": 0, "eva": 0,
       "crit_rate": 0, "crit_dmg": 160, "block_rate": 0, "block_power": 0,
       "finesse": 10, "agility": 10, "luck": 5, "resolve": 0,
-      "AP_max": 2, "move": 6, "speed": 0, "sight": 5,
+      "AP_max": 2, "move": 4, "speed": 0, "sight": 5,
       "res_phys": 0, "res_nature": 0, "will_fort": 0, "body_fort": 0
     },
     "growth": { "HP_max": 1, "will_fort": 2, "body_fort": 2 }
   },
   "lizardmen": {
     "name": "蜥蜴人",
-    "tags": [],
+    "tags": ["aquatic"],
     "natural_weapon": "unarmed_fists",
     "stats": {
-      "HP_max": 40, "atk": 0, "acc": 0, "eva": 0,
+      "HP_max": 45, "atk": 0, "acc": 0, "eva": 0,
       "crit_rate": 0, "crit_dmg": 160, "block_rate": 0, "block_power": 0,
-      "finesse": 10, "agility": 10, "luck": 5, "resolve": 0,
-      "AP_max": 2, "move": 6, "speed": 0, "sight": 5,
+      "finesse": 6, "agility": 6, "luck": 5, "resolve": 0,
+      "AP_max": 2, "move": 3, "speed": 0, "sight": 4,
       "res_phys": 0, "res_nature": 0, "will_fort": 0, "body_fort": 5
     },
-    "growth": { "HP_max": 1, "will_fort": 2, "body_fort": 2 }
+    "growth": { "HP_max": 2, "will_fort": 1, "body_fort": 2 },
+    "move_overrides": [
+      { "when_tile_tag": "water", "move": 4 }
+    ]
   },
   "harpy": {
     "name": "鸟妖",
@@ -32,10 +35,13 @@
     "stats": {
       "HP_max": 35, "atk": 0, "acc": 0, "eva": 0,
       "crit_rate": 0, "crit_dmg": 160, "block_rate": 0, "block_power": 0,
-      "finesse": 10, "agility": 10, "luck": 5, "resolve": 0,
-      "AP_max": 2, "move": 6, "speed": 0, "sight": 5,
+      "finesse": 10, "agility": 15, "luck": 5, "resolve": 0,
+      "AP_max": 2, "move": 4, "speed": 0, "sight": 6,
       "res_phys": 0, "res_nature": 0, "will_fort": 0, "body_fort": 0
     },
-    "growth": { "HP_max": 1, "will_fort": 2, "body_fort": 2 }
+    "growth": { "HP_max": 1, "will_fort": 2, "body_fort": 1 },
+    "move_overrides": [
+      { "when_self_tag": "flying", "move": 6 }
+    ]
   }
 }
