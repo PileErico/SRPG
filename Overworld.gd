@@ -18,6 +18,7 @@ const WorldState := preload("res://WorldState.gd")
 const WorldClock := preload("res://WorldClock.gd")
 const EventEngine := preload("res://EventEngine.gd")
 const ItemDB := preload("res://ItemDB.gd")           # 背包：消耗品 tpl_id → 名/图标/on_use（give_item 授予、背包面板展示/使用）
+const CampaignUI := preload("res://CampaignUI.gd")   # 战役面板 UI 工厂（弹窗脚手架/语义色/行样式，仿 EditorUI）
 const EventDB := preload("res://EventDB.gd")         # 全局事件池（跨地图 when/do 事件，data/events.json）
 const SaveIO := preload("res://SaveIO.gd")
 const OverworldCanvas := preload("res://OverworldCanvas.gd")
@@ -682,12 +683,10 @@ func _open_location_panel(loc: Dictionary) -> void:
 		return   # headless：面板纯 UI，逻辑走 _do_rest/_challenge_site 直测
 	if _loc_popup != null:
 		_loc_popup.queue_free()
-	_loc_popup = PopupPanel.new()
+	var ui = CampaignUI.popup(380)
+	_loc_popup = ui["popup"]
 	add_child(_loc_popup)
-	var v := VBoxContainer.new()
-	v.custom_minimum_size = Vector2(380, 0)
-	v.add_theme_constant_override("separation", 6)
-	_loc_popup.add_child(v)
+	var v: VBoxContainer = ui["box"]
 	var type_id := str(loc.get("type", ""))
 	var title := Label.new()
 	title.text = "📍 %s（%s）" % [str(loc.get("label", "")), LocationDB.type_label(type_id)]
@@ -697,7 +696,7 @@ func _open_location_panel(loc: Dictionary) -> void:
 	var desc := Label.new()
 	desc.text = str(LocationDB.type_def(type_id).get("desc", ""))
 	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	desc.add_theme_color_override("font_color", Color(0.65, 0.68, 0.75))
+	desc.add_theme_color_override("font_color", CampaignUI.MUTED)
 	v.add_child(desc)
 	if LocationDB.is_site(type_id):
 		_build_site_rows(v, loc)
@@ -893,12 +892,10 @@ var _jobs_popup: PopupPanel
 func _open_jobs_panel() -> void:
 	if _jobs_popup != null:
 		_jobs_popup.queue_free()
-	_jobs_popup = PopupPanel.new()
+	var ui = CampaignUI.popup(360)
+	_jobs_popup = ui["popup"]
 	add_child(_jobs_popup)
-	var v := VBoxContainer.new()
-	v.custom_minimum_size = Vector2(360, 0)
-	v.add_theme_constant_override("separation", 6)
-	_jobs_popup.add_child(v)
+	var v: VBoxContainer = ui["box"]
 	var title := Label.new()
 	title.text = "营地职务（一人一职；重伤休整者视为不在岗）"
 	v.add_child(title)
@@ -931,7 +928,7 @@ func _open_jobs_panel() -> void:
 		v.add_child(row)
 	var hint := Label.new()
 	hint.text = "⏳＝效果待接入（加成数值待定）；医生已生效：全队恢复速率提升"
-	hint.add_theme_color_override("font_color", Color(0.65, 0.68, 0.75))
+	hint.add_theme_color_override("font_color", CampaignUI.MUTED)
 	v.add_child(hint)
 	_jobs_popup.popup_centered()
 
@@ -956,12 +953,10 @@ var _rep_popup: PopupPanel
 func _open_rep_panel() -> void:
 	if _rep_popup != null:
 		_rep_popup.queue_free()
-	_rep_popup = PopupPanel.new()
+	var ui = CampaignUI.popup(300)
+	_rep_popup = ui["popup"]
 	add_child(_rep_popup)
-	var v := VBoxContainer.new()
-	v.custom_minimum_size = Vector2(300, 0)
-	v.add_theme_constant_override("separation", 6)
-	_rep_popup.add_child(v)
+	var v: VBoxContainer = ui["box"]
 	var title := Label.new()
 	title.text = "派系声望（低于阈值＝敌对，大地图会遭袭击）"
 	v.add_child(title)
@@ -981,7 +976,7 @@ func _open_rep_panel() -> void:
 		if FactionDB.hostile(ws, fid):
 			var host_l := Label.new()
 			host_l.text = "⚔ 敌对"
-			host_l.add_theme_color_override("font_color", Color(0.9, 0.45, 0.4))
+			host_l.add_theme_color_override("font_color", CampaignUI.HOSTILE)
 			row.add_child(host_l)
 		v.add_child(row)
 	_rep_popup.popup_centered()
@@ -1053,12 +1048,10 @@ func _open_events_panel() -> void:
 		return   # headless：面板纯 UI，判定/文案走 event_status/event_when_text 直测
 	if _events_popup != null:
 		_events_popup.queue_free()
-	_events_popup = PopupPanel.new()
+	var ui = CampaignUI.popup(480)
+	_events_popup = ui["popup"]
 	add_child(_events_popup)
-	var v := VBoxContainer.new()
-	v.custom_minimum_size = Vector2(480, 0)
-	v.add_theme_constant_override("separation", 6)
-	_events_popup.add_child(v)
+	var v: VBoxContainer = ui["box"]
 	var ws = WorldState.current
 	var pool := EventDB.all_events()
 	var title := Label.new()
@@ -1087,11 +1080,11 @@ func _open_events_panel() -> void:
 	if not any_ready:
 		var none := Label.new()
 		none.text = "（无——都在冷却/已触发/未到节拍）"
-		none.add_theme_color_override("font_color", Color(0.65, 0.68, 0.75))
+		none.add_theme_color_override("font_color", CampaignUI.MUTED)
 		v.add_child(none)
 	var sec2 := Label.new()
 	sec2.text = "—— 完整事件池（共 %d 条）——" % pool.size()
-	sec2.add_theme_color_override("font_color", Color(0.65, 0.68, 0.75))
+	sec2.add_theme_color_override("font_color", CampaignUI.MUTED)
 	v.add_child(sec2)
 	for ev in pool:
 		if typeof(ev) == TYPE_DICTIONARY:
@@ -1126,16 +1119,16 @@ func _add_event_row(v: VBoxContainer, ev: Dictionary, badge: String, allow_toggl
 	var cond_l := Label.new()
 	cond_l.text = "%s｜%s" % [event_when_text(when), event_gate_text(when)]
 	cond_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	cond_l.add_theme_color_override("font_color", Color(0.65, 0.68, 0.75))
+	cond_l.add_theme_color_override("font_color", CampaignUI.MUTED)
 	row.add_child(cond_l)
 	if badge != "":
 		var b_l := Label.new()
 		b_l.text = badge
-		var bc := Color(0.78, 0.68, 0.5)
+		var bc := CampaignUI.WARN
 		if badge == "可用":
-			bc = Color(0.55, 0.8, 0.55)
+			bc = CampaignUI.READY
 		elif badge == "已禁用":
-			bc = Color(0.72, 0.5, 0.5)
+			bc = CampaignUI.DANGER
 		b_l.add_theme_color_override("font_color", bc)
 		row.add_child(b_l)
 	v.add_child(row)
@@ -1151,12 +1144,10 @@ func _open_inventory_panel() -> void:
 		return
 	if _bag_popup != null:
 		_bag_popup.queue_free()
-	_bag_popup = PopupPanel.new()
+	var ui = CampaignUI.popup(440)
+	_bag_popup = ui["popup"]
 	add_child(_bag_popup)
-	var v := VBoxContainer.new()
-	v.custom_minimum_size = Vector2(440, 0)
-	v.add_theme_constant_override("separation", 6)
-	_bag_popup.add_child(v)
+	var v: VBoxContainer = ui["box"]
 	var ws = WorldState.current
 	var title := Label.new()
 	title.text = "🎒 队伍背包"
@@ -1164,7 +1155,7 @@ func _open_inventory_panel() -> void:
 	if ws == null or ws.inventory.is_empty():
 		var none := Label.new()
 		none.text = "（空——事件/烹饪/交易获得的消耗品会进这里）"
-		none.add_theme_color_override("font_color", Color(0.65, 0.68, 0.75))
+		none.add_theme_color_override("font_color", CampaignUI.MUTED)
 		v.add_child(none)
 	else:
 		for tpl_id in ws.inventory:
@@ -1182,7 +1173,7 @@ func _add_inventory_row(v: VBoxContainer, tpl_id: String, count: int) -> void:
 	var eff_l := Label.new()
 	eff_l.text = _consumable_effect_text(it)
 	eff_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	eff_l.add_theme_color_override("font_color", Color(0.65, 0.68, 0.75))
+	eff_l.add_theme_color_override("font_color", CampaignUI.MUTED)
 	row.add_child(eff_l)
 	if it != null and _usable_out_of_battle(it):
 		var use_b := Button.new()
@@ -1222,13 +1213,11 @@ func _open_use_target_picker(tpl_id: String) -> void:
 	var ws = WorldState.current
 	if ws == null or ws.inv_count(tpl_id) <= 0:
 		return
-	var pick := PopupPanel.new()
+	var ui = CampaignUI.popup(280, 4)
+	var pick: PopupPanel = ui["popup"]
 	add_child(pick)
 	pick.popup_hide.connect(func(): pick.queue_free())
-	var v := VBoxContainer.new()
-	v.custom_minimum_size = Vector2(280, 0)
-	v.add_theme_constant_override("separation", 4)
-	pick.add_child(v)
+	var v: VBoxContainer = ui["box"]
 	var it = ItemDB.get_item(tpl_id)
 	var head := Label.new()
 	head.text = "对谁使用「%s」？" % (str(it.get("name", tpl_id)) if it != null else tpl_id)
