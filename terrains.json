@@ -26,6 +26,7 @@
       "label": "草原",
       "move": {
         "cost": 1.0,
+        "overworld_cost": 2,
         "passable_by": "all"
       },
       "scope": "both",
@@ -49,6 +50,7 @@
       "label": "稀疏草原",
       "move": {
         "cost": 1.0,
+        "overworld_cost": 2,
         "passable_by": "all"
       },
       "scope": "both",
@@ -90,6 +92,7 @@
       "label": "森林",
       "move": {
         "cost": 2.0,
+        "overworld_cost": 4,
         "passable_by": "all",
         "tag_cost": {
           "flying": 1.0
@@ -118,6 +121,7 @@
       "label": "山",
       "move": {
         "cost": 3.0,
+        "overworld_cost": 6,
         "passable_by": "all",
         "tag_cost": {
           "flying": 1.0
@@ -146,6 +150,7 @@
       "label": "浅水",
       "move": {
         "cost": 2.0,
+        "overworld_cost": 3,
         "passable_by": "all",
         "tag_cost": {
           "aquatic": 1.0,
@@ -217,6 +222,7 @@
       "label": "灌木",
       "move": {
         "cost": 1.0,
+        "overworld_cost": 2,
         "passable_by": "all"
       },
       "scope": "battle",
@@ -238,6 +244,7 @@
       "label": "丘陵",
       "move": {
         "cost": 2.0,
+        "overworld_cost": 4,
         "passable_by": "all",
         "tag_cost": {
           "flying": 1.0
@@ -265,6 +272,7 @@
       "label": "沙地",
       "move": {
         "cost": 2.0,
+        "overworld_cost": 3,
         "passable_by": "all",
         "tag_cost": {
           "flying": 1.0
@@ -292,6 +300,7 @@
       "label": "雪地",
       "move": {
         "cost": 2.0,
+        "overworld_cost": 3,
         "passable_by": "all",
         "tag_cost": {
           "flying": 1.0
@@ -316,6 +325,7 @@
       "label": "废墟",
       "move": {
         "cost": 2.0,
+        "overworld_cost": 3,
         "passable_by": "all",
         "tag_cost": {
           "flying": 1.0
@@ -1383,7 +1393,7 @@
         {
           "desc": "每回合末回复5点生命（飞行/亡灵单位不享受）",
           "grant": {
-            "amount": 5,
+            "amount": 5.0,
             "kind": "heal",
             "layer": "tick"
           },

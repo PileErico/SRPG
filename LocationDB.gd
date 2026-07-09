@@ -4,6 +4,7 @@ extends RefCounted
 ## （与 units/triggers 同级，MapIO 透传）；运行时状态（据点上次肃清时刻）＝WorldState.location_cleared_at（随档）。
 ## 据点刷新 🔒 语义＝惰性判定（site_ready 读时算），不占 WorldClock 每小时调度——无状态可漏算。
 
+const JsonRegistry := preload("res://JsonRegistry.gd")
 const PATH := "res://data/locations.json"
 
 static var _types := []          # 有序类型定义
@@ -11,28 +12,25 @@ static var _type_by_id := {}     # type_id -> entry
 static var _services := []       # 有序服务定义
 static var _service_by_id := {}  # service_id -> entry
 static var _loaded := false
+static var _path_override := ""   # 测试注入缝
+
+static func _path() -> String:
+	return _path_override if _path_override != "" else PATH
 
 static func _ensure() -> void:
 	if _loaded:
 		return
 	_loaded = true
-	_types = []
-	_type_by_id = {}
-	_services = []
-	_service_by_id = {}
-	if FileAccess.file_exists(PATH):
-		var f = FileAccess.open(PATH, FileAccess.READ)
-		var data = JSON.parse_string(f.get_as_text())
-		f.close()
-		if typeof(data) == TYPE_DICTIONARY:
-			for e in data.get("types", []):
-				if typeof(e) == TYPE_DICTIONARY and e.has("id"):
-					_types.append(e)
-					_type_by_id[str(e["id"])] = e
-			for e in data.get("services", []):
-				if typeof(e) == TYPE_DICTIONARY and e.has("id"):
-					_services.append(e)
-					_service_by_id[str(e["id"])] = e
+	var rt = JsonRegistry.load_indexed(_path(), "types")
+	_types = rt["list"]
+	_type_by_id = rt["by_id"]
+	var rs = JsonRegistry.load_indexed(_path(), "services")
+	_services = rs["list"]
+	_service_by_id = rs["by_id"]
+
+static func reload_data() -> void:
+	_loaded = false
+	_ensure()
 
 static func all_types() -> Array:
 	_ensure()

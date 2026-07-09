@@ -7,6 +7,7 @@ extends RefCounted
 ## （DB 范式同 ItemDB/TerrainDB：preload + static，无 class_name；刷新＝reload_data，绝不叫 reload——命中原生 Script.reload()。）
 
 const EVENTS_PATH := "res://data/events.json"
+const JsonRegistry := preload("res://JsonRegistry.gd")
 
 static var _events := []       # 有序事件列表（面板按此顺序展示）
 static var _by_id := {}        # id -> event，O(1) 查表
@@ -20,25 +21,9 @@ static func _ensure() -> void:
 	if _loaded:
 		return
 	_loaded = true
-	_events = []
-	_by_id = {}
-	if not FileAccess.file_exists(_path()):
-		push_warning("EventDB：%s 缺失——全局事件池为空" % _path())
-		return
-	var f = FileAccess.open(_path(), FileAccess.READ)
-	if f == null:
-		return
-	var data = JSON.parse_string(f.get_as_text())
-	f.close()
-	if typeof(data) != TYPE_ARRAY:
-		push_warning("EventDB：%s 解析失败/非数组——全局事件池为空" % _path())
-		return
-	for e in data:
-		if typeof(e) == TYPE_DICTIONARY and str(e.get("id", "")) != "":
-			_events.append(e)
-			_by_id[str(e["id"])] = e
-		else:
-			push_warning("EventDB：跳过无 id/非法条目（世界持久状态按 id 记档，无 id 不收）")
+	var r = JsonRegistry.load_indexed(_path(), "")   # events.json 顶层即数组
+	_events = r["list"]
+	_by_id = r["by_id"]
 
 # 全部事件（有序；引擎/面板直接消费）
 static func all_events() -> Array:

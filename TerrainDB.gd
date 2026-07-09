@@ -200,7 +200,8 @@ static func effective_move(tile, overrides: Dictionary = {}) -> Dictionary:
 
 # move 块 → 对带 tags 单位的通行成本；-1＝不可通行（战斗寻路与大地图移动共用的单一实现）。
 # passable_by："all"＝任意 / "none"＝禁行 / [tag…]＝含其一可进；cost＝基础成本；tag_cost 按单位 tag 取更优（最小）。
-static func move_cost(mv, tags: Array) -> int:
+# overworld=true（仅大地图侧传）：地形有 overworld_cost 则用它替 cost——大世界拉开地块差、令道路最优；战斗侧不传＝用 cost。
+static func move_cost(mv, tags: Array, overworld := false) -> int:
 	if typeof(mv) != TYPE_DICTIONARY:
 		return -1
 	var pb = mv.get("passable_by", "all")
@@ -215,6 +216,8 @@ static func move_cost(mv, tags: Array) -> int:
 	elif pb == "none":
 		return -1
 	var cost := int(mv.get("cost", 1))
+	if overworld and mv.has("overworld_cost"):
+		cost = int(mv["overworld_cost"])
 	var tag_cost = mv.get("tag_cost", {})
 	if typeof(tag_cost) == TYPE_DICTIONARY:
 		for tg in tags:

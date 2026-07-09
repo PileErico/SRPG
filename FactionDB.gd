@@ -4,6 +4,7 @@ extends RefCounted
 ## 本类是唯一读写口（rep_of 兜 start_rep 默认、add_rep 钳制 [-100,100]），WorldState 保持纯存储不识派系。
 ## 敌对遭伏的评估不在这里：Overworld 把敌对派系转成 enter_tile 伪触发器喂 EventEngine（冷却随档持久）。
 
+const JsonRegistry := preload("res://JsonRegistry.gd")
 const PATH := "res://data/factions.json"
 const REP_MIN := -100
 const REP_MAX := 100
@@ -11,22 +12,23 @@ const REP_MAX := 100
 static var _factions := []   # 有序派系定义（声望面板按此顺序）
 static var _by_id := {}      # id -> entry
 static var _loaded := false
+static var _path_override := ""   # 测试注入缝：非空则读此路径（仿 EventDB）
+
+static func _path() -> String:
+	return _path_override if _path_override != "" else PATH
 
 static func _ensure() -> void:
 	if _loaded:
 		return
 	_loaded = true
-	_factions = []
-	_by_id = {}
-	if FileAccess.file_exists(PATH):
-		var f = FileAccess.open(PATH, FileAccess.READ)
-		var data = JSON.parse_string(f.get_as_text())
-		f.close()
-		if typeof(data) == TYPE_DICTIONARY:
-			for e in data.get("factions", []):
-				if typeof(e) == TYPE_DICTIONARY and e.has("id"):
-					_factions.append(e)
-					_by_id[str(e["id"])] = e
+	var r = JsonRegistry.load_indexed(_path(), "factions")
+	_factions = r["list"]
+	_by_id = r["by_id"]
+
+# 丢弃内存表、下次查询重读磁盘（外部改数据时用）——DB 范式统一 reload_data，绝不叫 reload。
+static func reload_data() -> void:
+	_loaded = false
+	_ensure()
 
 static func all_factions() -> Array:
 	_ensure()
