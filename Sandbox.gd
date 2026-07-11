@@ -1564,7 +1564,7 @@ func _build_skill_submenu(u) -> void:
 	for id in _learned_active_skills(u):
 		var def = SkillDB.get_skill(id)
 		var silenced: bool = u.has_state("silenced") and (def.get("tags", []) as Array).has("verbal")
-		var ready: bool = u.skill_ready(id) and u.ap >= int(def.get("ap_cost", 1)) and not silenced
+		var ready: bool = u.skill_ready(id) and u.ap >= SkillDB.skill_ap_cost(def) and not silenced
 		var label := str(def.get("name", id))
 		var cd := int(u.skills[id].get("cd", 0))
 		var uses := int(u.skills[id].get("uses", 0))
@@ -1591,7 +1591,7 @@ func _enter_skill_mode(skill_id: String) -> void:
 	var def = SkillDB.get_skill(skill_id)
 	if u == null or def == null:
 		return
-	if not u.skill_ready(skill_id) or u.ap < int(def.get("ap_cost", 1)):
+	if not u.skill_ready(skill_id) or u.ap < SkillDB.skill_ap_cost(def):
 		return
 	if u.has_state("silenced") and (def.get("tags", []) as Array).has("verbal"):
 		return   # 失语：verbal 技能禁施（与子菜单灰显同门槛；🔒 §5.2 决策12）
@@ -1609,15 +1609,20 @@ func _enter_skill_mode(skill_id: String) -> void:
 		skill_cells[c] = true
 	_update_overlays()
 
-# 技能目标合法性：非敌方（己方/友方）；自己按 self_target 开关。
+# 技能目标资格（🔒 §2.7 三旗 {enemy,ally,self} 正交自由组合）：判 target 相对 caster 归哪类、查对应旗。
+# 旧 self_target 枚举废弃（语义并入三旗）；字段缺省＝{ally:true,self:true}（≈旧行为：非敌方+可自身）。
 func _valid_skill_target(caster, def, target) -> bool:
 	if target == null or def == null:
 		return false
+	var t = def.get("target", {"enemy": false, "ally": true, "self": true})
+	if typeof(t) != TYPE_DICTIONARY:
+		return false
 	if target == caster:
-		return def.get("self_target", true)
-	return not _is_hostile(caster, target)
+		return bool(t.get("self", false))
+	return bool(t.get("enemy", false)) if _is_hostile(caster, target) else bool(t.get("ally", false))
 
-# 释放技能到目标格（已确保格在范围内）。当前实现：治疗类（heal_pct_max_hp 按等级档 + cleanse_tags）。
+# 释放技能到目标格（已确保格在范围内）：结算全在模型层 BattleState.apply_skill（阶段2 下沉 🔒），
+# 本函数只做 目标资格校验 → 委托模型 → 渲染结构化事件（与 _resolve_attack 同范式）。
 func _do_skill(caster, skill_id: String, cell: Vector2i) -> void:
 	var def = SkillDB.get_skill(skill_id)
 	if def == null:
@@ -1626,25 +1631,20 @@ func _do_skill(caster, skill_id: String, cell: Vector2i) -> void:
 	if not _valid_skill_target(caster, def, target):
 		_clear_selection()
 		return
-	caster.ap -= int(def.get("ap_cost", 1))
-	caster.consume_skill(skill_id, caster.skill_cooldown_max(def))
 	var lines := ["%s 对 %s 使用 %s" % [_cname(caster), _cname(target), _hl(str(def.get("name", skill_id)))]]
-	# 治疗：按目标最大生命百分比（取技能当前等级档）
-	var heals = def.get("heal_pct_max_hp", [])
-	var lvl: int = caster.skill_level(skill_id)
-	if typeof(heals) == TYPE_ARRAY and heals.size() > 0:
-		var idx := clampi(lvl - 1, 0, heals.size() - 1)
-		var pct := float(heals[idx])
-		var maxhp := int(target.effective_stat("HP_max"))
-		var before := int(target.stats.get("HP", 0))
-		var healed := mini(int(round(maxhp * pct / 100.0)), maxhp - before)
-		target.stats["HP"] = before + maxi(0, healed)
-		lines.append("　治疗 %s（最大生命%s%%）：%d → %d" % [_hl(maxi(0, healed)), _numf(pct), before, int(target.stats["HP"])])
-	# 清除指定 tag 的效果（流血等）
-	for tag in def.get("cleanse_tags", []):
-		var n := _cleanse_effects_with_tag(target, str(tag))
-		if n > 0:
-			lines.append("　清除 %d 个「%s」效果" % [n, str(tag)])
+	for ev in _state.apply_skill(caster, skill_id, target):
+		match str(ev.get("type", "")):
+			"heal":
+				lines.append("　治疗 %s（最大生命%s%%）：%d → %d" % [_hl(int(ev["heal"])), _numf(float(ev["pct"])), int(ev["before"]), int(ev["after"])])
+			"cleanse":
+				lines.append("　清除 %d 个「%s」效果" % [int(ev["count"]), str(ev["tag"])])
+			"inflict":
+				if bool(ev.get("applied", false)):
+					lines.append("　施加「%s」" % str(ev.get("name", "")))
+				elif bool(ev.get("shrugged", false)):
+					lines.append("　[color=#7FD5A0]%s 凭强韧挣脱了「%s」[/color]" % [_cname(target), str(ev.get("name", ""))])
+				else:
+					lines.append("　「%s」未命中" % str(ev.get("name", "")))
 	_push_log(lines)
 	_clear_selection()
 	_refresh_info()
@@ -1699,7 +1699,7 @@ func _can_move(u) -> bool:
 	return u != null and (u.move_points > 0 or u.ap > 0)
 
 func _can_attack(u) -> bool:
-	return u != null and u.ap >= int(u.basic_attack().get("ap_cost", 1))
+	return u != null and u.ap >= SkillDB.skill_ap_cost(u.basic_attack())
 
 func _is_friendly(u) -> bool:
 	return _state._is_friendly(u)
@@ -1936,7 +1936,7 @@ func _do_attack(attacker, cell: Vector2i) -> void:
 	if targets.is_empty() and typeof(aoe) != TYPE_DICTIONARY:
 		_clear_selection()
 		return
-	attacker.ap -= int(skill.get("ap_cost", 1))
+	attacker.ap -= SkillDB.skill_ap_cost(skill)
 	_resolve_attack(attacker, skill, targets)
 	_handle_deaths()
 	_play_attack_anim(attacker, cell, targets)   # 撞击 + 受击闪红 + 音效（cosmetic）

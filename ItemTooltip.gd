@@ -9,6 +9,7 @@ const StatMeta := preload("res://StatMeta.gd")
 const TextureCache := preload("res://TextureCache.gd")
 const EquipSlots := preload("res://EquipSlots.gd")
 const ItemDB := preload("res://ItemDB.gd")
+const SkillDB := preload("res://SkillDB.gd")   # skill_ap_cost 双键桥（attack 块 AP 显示，§2.1）
 
 # 修正行语义色（与 Sandbox.OK_GREEN/BAD_RED、UnitStatusPanel.STAT_GREEN/RED 同 hex——语义色全局统一待 D8 拍板）
 const MOD_GREEN := Color("#6FCF6F")
@@ -118,7 +119,7 @@ static func render(item: Dictionary) -> Control:
 		_tags(v, atk.get("tags", []))
 		v.add_child(_kv("距离", "%d" % int(atk.get("range", 1))))
 		v.add_child(_kv("伤害系数", "%d%%" % int(round(float(atk.get("coeff", 1.0)) * 100.0))))
-		v.add_child(_kv("AP 消耗", "%d" % int(atk.get("ap_cost", 1))))
+		v.add_child(_kv("AP 消耗", "%d" % SkillDB.skill_ap_cost(atk)))
 		var dk := str(atk.get("damage_kind", ""))
 		if dk != "":
 			v.add_child(_kv("伤害类型", dk))

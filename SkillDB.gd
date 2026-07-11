@@ -46,3 +46,108 @@ static func by_seq(seq: int):
 static func all() -> Dictionary:
 	_ensure()
 	return _skills
+
+# ============ 统一读取器（🔒 模块_技能_设计 §2.1/§2.4，阶段2）============
+
+# AP 消耗单一读取口：costs.ap（新 schema）↔ 顶层 ap_cost（旧/BAS attack 块）双键桥。
+# 全项目读技能/攻击 AP 一律走这里——否则 costs.ap 落地后未改点会静默当 AP=1（§2.1 ⚠️）。
+static func skill_ap_cost(def) -> int:
+	if typeof(def) != TYPE_DICTIONARY:
+		return 1
+	var costs = def.get("costs", {})
+	if typeof(costs) == TYPE_DICTIONARY and costs.has("ap"):
+		return maxi(0, int(floor(float(costs["ap"]))))
+	return maxi(0, int(floor(float(def.get("ap_cost", 1)))))
+
+# 统一数值求值器（🔒 §2.4 数值边界）：标量与公式对象 {base, per_stat:{stat:w}, per_level:[...]} 两吃。
+# 求值 = base + Σ(unit.effective_stat_f(k)×w) + per_level[clamp(level-1)]；
+# level==0（未学/被动载体）取第 1 档、越界取末档（clamp）；null/缺失/空对象 → default（按各字段文档默认值由调用方给）。
+# 取整口径由调用方按字段语义做（浮点字段 coeff/概率/百分比不取整；整数字段 floor）；负值钳制同理在调用方（mods 允许负）。
+static func resolve_num(v, unit = null, level: int = 1, default: float = 0.0) -> float:
+	match typeof(v):
+		TYPE_INT, TYPE_FLOAT:
+			return float(v)
+		TYPE_DICTIONARY:
+			if not (v.has("base") or v.has("per_stat") or v.has("per_level")):
+				return default   # 空对象/异形 → 默认值（§2.4 缺省条）
+			var out := float(v.get("base", 0.0))
+			var per = v.get("per_stat", {})
+			if typeof(per) == TYPE_DICTIONARY and unit != null:
+				for k in per:
+					out += float(unit.effective_stat_f(str(k))) * float(per[k])
+			var pl = v.get("per_level", [])
+			if typeof(pl) == TYPE_ARRAY and pl.size() > 0:
+				out += float(pl[clampi(maxi(level, 1) - 1, 0, pl.size() - 1)])
+			return out
+	return default
+
+# ============ 写盘口（阶段2；仿 EffectDB/ItemDB 范式——SkillEditor/迁移脚本的唯一写侧）============
+
+# 读某文件的原始数组（写路径用；读侧走 _ensure/JsonRegistry）
+static func _read_array(path: String) -> Array:
+	if not FileAccess.file_exists(path):
+		return []
+	var f = FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return []
+	var data = JSON.parse_string(f.get_as_text())
+	f.close()
+	return data if typeof(data) == TYPE_ARRAY else []
+
+static func _write_array(path: String, arr: Array) -> bool:
+	var f = FileAccess.open(path, FileAccess.WRITE)
+	if f == null:
+		push_warning("SkillDB：写入失败（%s）——文件被占用/只读？" % path)
+		return false
+	f.store_string(JSON.stringify(_intify(arr), "  "))
+	f.close()
+	return true
+
+# 递归把「值为整数的 float」还原 int（1.0→1，防 diff 噪音；同 EffectDB._intify）
+static func _intify(v):
+	match typeof(v):
+		TYPE_FLOAT:
+			return int(v) if v == floorf(v) else v
+		TYPE_ARRAY:
+			var out := []
+			for e in v:
+				out.append(_intify(e))
+			return out
+		TYPE_DICTIONARY:
+			var out := {}
+			for k in v:
+				out[k] = _intify(v[k])
+			return out
+	return v
+
+# 按 id upsert 进主文件（FILES[0]）；replace_id=改名语义（旧条目全移除，改名≠复制）。写盘后 reload_data。
+static func save_skill(skill: Dictionary, replace_id := "") -> bool:
+	if not skill.has("id") or str(skill["id"]) == "":
+		return false
+	var id := str(skill["id"])
+	var path: String = _paths()[0]
+	var arr := _read_array(path)
+	if replace_id != "" and replace_id != id:
+		arr = arr.filter(func(e): return not (typeof(e) == TYPE_DICTIONARY and str(e.get("id", "")) == replace_id))
+	var replaced := false
+	for i in arr.size():
+		if typeof(arr[i]) == TYPE_DICTIONARY and str(arr[i].get("id", "")) == id:
+			arr[i] = skill
+			replaced = true
+			break
+	if not replaced:
+		arr.append(skill)
+	var ok := _write_array(path, arr)
+	reload_data()
+	return ok
+
+static func delete_skill(id: String) -> bool:
+	_ensure()
+	if not _skills.has(id):
+		return false
+	var path: String = _paths()[0]
+	var out := _read_array(path).filter(func(e): return not (typeof(e) == TYPE_DICTIONARY and str(e.get("id", "")) == id))
+	if not _write_array(path, out):
+		return false
+	reload_data()
+	return true

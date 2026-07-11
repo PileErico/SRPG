@@ -11,10 +11,15 @@ extends SceneTree
 ##     （未知种别在 CombatResolver 会告警回退物理轨；数据侧在此挡住）。
 ##  6) tag 引用完整性（🔒 tag 统一词表）：data/*.json 与 terrains.json 里任意 "tags" 数组的字符串
 ##     必须 ∈ tags.json——防「用了没注册」的词表漂移（曾漏 cold/road/wall）。
+##  7) skills.json 阶段2 形状闸门（🔒 设计 §10 护栏#1 机械执法）：BAS 约束（usable_as_bas⇒cd0/无级/无手门槛）/
+##     target 三旗不得全 false / seq 撞格 / per_level 长度==max_level / costs.ap 与顶层 ap_cost 禁双写 /
+##     阶段6 前 hits.size()>1 或 riders 出现即 FAIL（防「可编不可跑」内容入库）。
+##  8) weapons.json 的 bas 引用（阶段3 预备）：值必须在 SkillDB 且 usable_as_bas。
 ## 运行：..._console.exe --headless --path "D:/1战棋" -s res://tools/test_data_lint.gd（退出码 0=PASS）
 
 const EffectDB := preload("res://EffectDB.gd")
 const TagDB := preload("res://TagDB.gd")
+const SkillDB := preload("res://SkillDB.gd")
 const StatMeta := preload("res://StatMeta.gd")
 const CombatResolver := preload("res://CombatResolver.gd")
 
@@ -97,6 +102,30 @@ func _collect_effect_refs(v, refs: Array) -> void:
 		TYPE_ARRAY:
 			for e in v:
 				_collect_effect_refs(e, refs)
+
+# 递归收集某 key 下的数组值（如 per_level/hits——校验长度/条数）
+func _collect_key_arrays(v, key: String, out: Array) -> void:
+	match typeof(v):
+		TYPE_DICTIONARY:
+			for k in v:
+				if str(k) == key and typeof(v[k]) == TYPE_ARRAY:
+					out.append(v[k])
+				_collect_key_arrays(v[k], key, out)
+		TYPE_ARRAY:
+			for e in v:
+				_collect_key_arrays(e, key, out)
+
+# 递归收集某 key 的字符串值（如 bas 引用）
+func _collect_key_strings(v, key: String, out: Array) -> void:
+	match typeof(v):
+		TYPE_DICTIONARY:
+			for k in v:
+				if str(k) == key and typeof(v[k]) == TYPE_STRING and str(v[k]) != "":
+					out.append(str(v[k]))
+				_collect_key_strings(v[k], key, out)
+		TYPE_ARRAY:
+			for e in v:
+				_collect_key_strings(e, key, out)
 
 # 递归收集所有 "tags" 数组里的字符串成员（tag 用点；去重）
 func _collect_tag_uses(v, out: Array) -> void:
@@ -182,6 +211,52 @@ func _initialize() -> void:
 		_collect_tag_uses(data, used)
 		for t in used:
 			ck(TagDB.get_tag(t) != null, "%s 使用的 tag 已注册：%s" % [path.get_file(), t])
+
+	# 7) skills.json 阶段2 形状闸门（护栏#1 机械执法）
+	var sk = _read_json("res://data/skills.json")
+	if typeof(sk) == TYPE_ARRAY:
+		var seqs := {}
+		for s in sk:
+			if typeof(s) != TYPE_DICTIONARY:
+				continue
+			var sid := str(s.get("id", "?"))
+			var costs = s.get("costs", {})
+			ck(not (s.has("ap_cost") and typeof(costs) == TYPE_DICTIONARY and costs.has("ap")),
+				"%s：costs.ap 与顶层 ap_cost 禁双写（双键桥在读取器，数据侧只留一个）" % sid)
+			if bool(s.get("usable_as_bas", false)):
+				ck(int((s.get("cooldown", {}) as Dictionary).get("base", 0)) == 0, "%s：BAS 冷却必须 0" % sid)
+				ck(int(s.get("max_level", 1)) == 1, "%s：BAS 无级（max_level=1）" % sid)
+				ck((s.get("requires_hands", []) as Array).is_empty(), "%s：BAS requires_hands 必须空" % sid)
+			var tg = s.get("target", null)
+			if typeof(tg) == TYPE_DICTIONARY:
+				ck(bool(tg.get("enemy", false)) or bool(tg.get("ally", false)) or bool(tg.get("self", false)),
+					"%s：target 三旗不得全 false（永不可施放）" % sid)
+			if s.has("seq"):
+				var q := int(s["seq"])
+				ck(not seqs.has(q), "%s：seq %d 与 %s 撞格" % [sid, q, str(seqs.get(q, ""))])
+				seqs[q] = sid
+			var pls := []
+			_collect_key_arrays(s, "per_level", pls)
+			for pl in pls:
+				ck((pl as Array).size() == maxi(1, int(s.get("max_level", 1))),
+					"%s：per_level 长度(%d)==max_level(%d)" % [sid, (pl as Array).size(), int(s.get("max_level", 1))])
+			var riders := []
+			_find_key(s, "riders", sid, riders)
+			ck(riders.is_empty(), "%s：riders 属阶段6（护栏#1）——现禁入库" % sid)
+			var hits := []
+			_collect_key_arrays(s, "hits", hits)
+			for h in hits:
+				ck((h as Array).size() <= 1, "%s：hits>1 属阶段6（护栏#1）——现禁入库" % sid)
+
+	# 8) weapons.json 的 bas 引用（阶段3 预备；现无引用＝空过）
+	var wd = _read_json("res://data/weapons.json")
+	if wd != null:
+		var bas_refs := []
+		_collect_key_strings(wd, "bas", bas_refs)
+		for b in bas_refs:
+			var bdef = SkillDB.get_skill(b)
+			ck(bdef != null, "weapons 引用的 BAS 技能存在：%s" % b)
+			ck(bdef != null and bool(bdef.get("usable_as_bas", false)), "%s：被引用为 BAS 须 usable_as_bas" % b)
 
 	if _fail == 0:
 		print("=== 数据 lint 全 PASS ===")

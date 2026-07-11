@@ -569,23 +569,29 @@ func _build_skill_tooltip(def, u) -> Control:
 	v.add_child(flow)
 
 	v.add_child(_tip_line("距离", "%d" % int(def.get("range", 1))))
-	v.add_child(_tip_line("AP 消耗", "%d" % int(def.get("ap_cost", 1))))
-	# 各级治疗档（已学则标出当前级实际值）
-	var heals = def.get("heal_pct_max_hp", [])
-	if typeof(heals) == TYPE_ARRAY and heals.size() > 0:
+	v.add_child(_tip_line("AP 消耗", "%d" % SkillDB.skill_ap_cost(def)))   # 双键桥（costs.ap↔ap_cost，§2.1）
+	# 各级治疗档（新 schema：effects[] 里的 heal 块；已学则标出当前级实际值——按施加者=本人求值）
+	var maxl := maxi(1, int(def.get("max_level", 1)))
+	for block in def.get("effects", []):
+		if typeof(block) != TYPE_DICTIONARY or str(block.get("kind", "")) != "heal":
+			continue
+		var hv = block.get("heal_pct_max_hp", 0)
 		var parts := []
-		for i in heals.size():
-			parts.append("%d%%" % int(heals[i]))
+		for i in maxl:
+			parts.append("%d%%" % int(round(SkillDB.resolve_num(hv, u, i + 1, 0.0))))
 		var t := " / ".join(parts)
 		if learned:
-			t += "　→ 当前 %s：%d%%" % [ROMAN[clampi(lvl, 0, ROMAN.size() - 1)], int(heals[clampi(lvl - 1, 0, heals.size() - 1)])]
+			t += "　→ 当前 %s：%d%%" % [ROMAN[clampi(lvl, 0, ROMAN.size() - 1)], int(round(SkillDB.resolve_num(hv, u, lvl, 0.0)))]
 		v.add_child(_tip_line("治疗(最大生命)", t))
+		var ct = block.get("cleanse_tags", [])
+		if typeof(ct) == TYPE_ARRAY and ct.size() > 0:
+			var cns := []
+			for tg in ct:
+				cns.append(TagDB.cn(str(tg)))
+			v.add_child(_tip_line("附带", "立即清除目标的「%s」效果" % "、".join(cns)))
 	v.add_child(_tip_line("冷却", "%d 回合" % int(u.skill_cooldown_max(def))))
 	var um := int(u.skill_uses_max(def))
 	v.add_child(_tip_line("本战次数", "不限" if um < 0 else "%d 次" % um))   # -1=无限（决策18）
-	var ct = def.get("cleanse_tags", [])
-	if typeof(ct) == TYPE_ARRAY and ct.size() > 0:
-		v.add_child(_tip_line("附带", "立即清除目标的流血类效果"))
 
 	var desc := str(def.get("desc", ""))
 	if desc != "":

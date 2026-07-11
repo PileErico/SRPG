@@ -11,6 +11,7 @@ const HexGrid := preload("res://HexGrid.gd")
 const TerrainDB := preload("res://TerrainDB.gd")
 const WorldState := preload("res://WorldState.gd")
 const EffectDB := preload("res://EffectDB.gd")
+const SkillDB := preload("res://SkillDB.gd")   # 技能施放（apply_skill：def/skill_ap_cost/resolve_num）
 const ProfDB := preload("res://ProfDB.gd")   # 技能（熟练度域）注册表——战斗涨值挂钩用（🔒 模块_属性成长_设计.md §2.4）
 const MinHeap := preload("res://MinHeap.gd") # 寻路优先队列（_dijkstra；与 Overworld.find_path 共用实现）
 
@@ -623,6 +624,49 @@ func _try_inflict_state(target, skill) -> Dictionary:
 			_add_effect(target, inf)
 	return {"name": nm, "base_ch": base_ch, "roll": iroll, "applied": applied and not shrugged,
 		"fort": fort, "fort_roll": fort_roll, "shrugged": shrugged}
+
+# ============ 技能施放（阶段2 下沉 🔒 模块_技能_设计 §3/§10）：模型算+结构化事件出，宿主只渲染 ============
+# 修「heal 逻辑违例在宿主」（§3 注*）：AP/冷却/次数消耗与效果块结算全在模型层，Sandbox._do_skill 退成薄渲染壳。
+# v1 可跑块：heal（heal_pct_max_hp 标量/公式/逐级 + cleanse_tags）/ apply_effect（{effect,chance} 对象形，
+# 复用 _try_inflict_state＝chance 掷 + 强韧豁免单一路径）。attack 块＝阶段3（BAS 统一）后接；
+# 未知 kind 警告跳过（「可编≠可跑」护栏——编辑器侧另拦）。
+func apply_skill(caster, skill_id: String, target) -> Array:
+	var events := []
+	var def = SkillDB.get_skill(skill_id)
+	if def == null or caster == null or target == null:
+		return events
+	var lvl := int(caster.skill_level(skill_id))
+	caster.ap -= SkillDB.skill_ap_cost(def)
+	caster.consume_skill(skill_id, caster.skill_cooldown_max(def))
+	for block in def.get("effects", []):
+		if typeof(block) != TYPE_DICTIONARY:
+			continue
+		match str(block.get("kind", "")):
+			"heal":
+				# 治疗 % 最大生命：resolve_num 两吃标量/公式；治疗语义钳 ≥0（§2.4 负值钳制）
+				var pct := maxf(0.0, SkillDB.resolve_num(block.get("heal_pct_max_hp", 0), caster, lvl, 0.0))
+				if pct > 0.0:
+					var maxhp := int(target.effective_stat("HP_max"))
+					var before := int(target.stats.get("HP", 0))
+					var healed := maxi(0, mini(int(round(maxhp * pct / 100.0)), maxhp - before))
+					target.stats["HP"] = before + healed
+					events.append({"type": "heal", "heal": healed, "pct": pct, "before": before, "after": before + healed})
+				for tag in block.get("cleanse_tags", []):
+					var n := _cleanse_effects_with_tag(target, str(tag))
+					if n > 0:
+						events.append({"type": "cleanse", "tag": str(tag), "count": n})
+			"apply_effect":
+				var eid := str(block.get("effect", ""))
+				if eid == "":
+					continue
+				var ch := clampf(SkillDB.resolve_num(block.get("chance", 100), caster, lvl, 100.0), 0.0, 100.0)
+				var r := _try_inflict_state(target, {"inflict": {"effect": eid, "chance": ch,
+					"ignore_fort": bool(block.get("ignore_fort", false))}})
+				events.append({"type": "inflict", "effect": eid, "name": str(r.get("name", eid)),
+					"applied": bool(r.get("applied", false)), "shrugged": bool(r.get("shrugged", false))})
+			var unknown:
+				push_warning("apply_skill：技能「%s」效果块 kind「%s」引擎尚不支持（可编≠可跑）——跳过" % [skill_id, unknown])
+	return events
 
 # 强韧豁免的维度归轨 🔒（§5）：效果 tags 带 fort_will→意志强韧 / fort_body→肉体强韧；
 # 无维度 tag（一切 buff、纯机制效果如死门/重伤）＝"" ＝不参与豁免。tag 真值见 data/tags.json + 标签词典。
