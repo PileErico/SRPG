@@ -2,8 +2,8 @@ extends "res://ListEditorShell.gd"
 ## 效果库编辑器：编 data/effects.json 条目（有 id 的 buff/debuff），写盘走 EffectDB.save_effect。
 ## 🔒 设计真值＝docs/模块_技能_设计.md §2.2（schema）/§2.8（duration_model 两模型）/决策20（on_expire_apply 两段式）。
 ## 与技能编辑器成对（标题栏分段互切）：技能 apply_effect / 武器 inflict 引用这里的效果 id。
-## 「可编不可跑」警示：expire_timing=round_end tick 点未实现（🔒 §2.2 round 过渡序已定义、引擎未落）；
-##   duration.per_stat 现引擎只读 base；sustain_by_caster 预留——均黄条，字段保留原样。
+## 「可编不可跑」警示：duration.per_stat 现引擎只读 base；sustain_by_caster 预留——均黄条，字段保留原样。
+## （round_end tick 已实现 2026-07-11：BattleState._wrap_round 先 tick 再重排出手序，🔒 §2.2 过渡序。）
 
 const EffectDB := preload("res://EffectDB.gd")
 const TagDB := preload("res://TagDB.gd")
@@ -14,7 +14,7 @@ const KINDS := [["buff", "增益 buff"], ["debuff", "减益 debuff"]]
 const DURATION_MODELS := [["fixed", "固定时长 fixed（按施加者求值、逐回合 −1）"],
 	["resist", "强韧豁免 resist（按 fort_* tag 归轨；遭受时+每回合掷豁免）"]]
 const EXPIRE_TIMINGS := [["turn_end", "回合末 turn_end（默认）"], ["turn_start", "回合开始 turn_start"],
-	["round_end", "大回合末 round_end（⚠ tick 点未实现）"]]
+	["round_end", "大回合末 round_end（集中攻势层/鼓舞倒计时；到期先于新 round 排序）"]]
 const WARN_COLOR := Color(0.95, 0.8, 0.35)
 
 # —— 状态 ——
@@ -35,7 +35,6 @@ var _w_dmodel: OptionButton
 var _w_duration: SpinBox
 var _w_perm: CheckBox
 var _w_timing: OptionButton
-var _timing_warn: Label
 var _w_stackable: CheckBox
 var _w_maxstacks: SpinBox
 var _w_dot: SpinBox
@@ -196,10 +195,6 @@ func _build_form() -> void:
 		_form.add_child(_warn("duration.per_stat 非空——现引擎只读 base（公式求值待接 resolve_num），字段保留原样"))
 	_w_perm = EditorUI.add_check(_form, "永久 permanent（不递减不到期）", bool(_current.get("permanent", false)), _mark_dirty)
 	_w_timing = _dropdown_pairs("到期时点 expire_timing", EXPIRE_TIMINGS, str(_current.get("expire_timing", "turn_end")))
-	_timing_warn = _warn("round_end 的 tick 点引擎未实现——该时点效果现不会递减/到期")
-	_form.add_child(_timing_warn)
-	_w_timing.item_selected.connect(func(_i): _sync_timing_warn())
-	_sync_timing_warn()
 
 	_form.add_child(EditorUI.section_title("叠层 / 每回合结算"))
 	_w_stackable = EditorUI.add_check(_form, "可叠层 stackable（关＝同 id 重置时长不叠）", bool(_current.get("stackable", false)), _mark_dirty)
@@ -241,11 +236,6 @@ func _build_form() -> void:
 		_form.add_child(_warn("sustain_by_caster 预留（光环轮）——现不生效，字段保留原样"))
 
 	_dirty = false   # 建表单信号可能置脏——载入完成＝干净基线
-
-func _sync_timing_warn() -> void:
-	if _timing_warn != null and is_instance_valid(_timing_warn):
-		_timing_warn.visible = str(_w_timing.get_selected_metadata()) == "round_end"
-	_mark_dirty()
 
 func _warn(text: String) -> Label:
 	var l := Label.new()

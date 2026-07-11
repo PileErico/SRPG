@@ -49,6 +49,8 @@ func _initialize() -> void:
 		{"id": "t_boom", "name": "爆发", "kind": "debuff", "duration": {"base": 2}, "mods": [{"stat": "eva", "op": "flat", "value": -5}]},
 		{"id": "t_ts", "name": "架势", "kind": "buff", "duration": {"base": 1}, "expire_timing": "turn_start"},
 		{"id": "t_stun", "name": "眩晕", "kind": "debuff", "duration": {"base": 2}, "tags": ["incapacitated"]},
+		{"id": "t_haste", "name": "鼓舞疾速", "kind": "buff", "duration": {"base": 1}, "expire_timing": "round_end",
+			"mods": [{"stat": "speed", "op": "flat", "value": 50}], "on_expire_apply": "t_boom"},
 	], "  "))
 	f.close()
 	EffectDB.reload_data()
@@ -121,6 +123,33 @@ func _initialize() -> void:
 	ck(_fx_of(u7, "t_ts") != null and int(_fx_of(u7, "t_ts").get("duration", 0)) == 1, "turn_start 效果：回合末不递减（duration 仍 1）")
 	s._apply_turn_start_effects(u7)
 	ck(_fx_of(u7, "t_ts") == null, "turn_start 效果：回合开始 tick 到期移除")
+
+	# 8b) expire_timing round_end（2026-07-11 tick 落地）：turn 两侧不递减、_wrap_round 才到期；
+	#     🔒 §2.2 过渡序＝到期（摘 mods+连锁）先于 _rebuild_turn_order——速度 buff 不污染新 round 排序
+	var fast = mk()
+	var slow = mk()
+	slow.stats["speed"] = 20   # 基础比 fast(5) 快；fast 靠 round_end buff 暂时反超
+	s._add_effect(fast, {"id": "t_haste"})
+	s.units = [fast, slow]
+	s._rebuild_turn_order()
+	ck(s.turn_order[0] == fast, "鼓舞疾速期内：fast(5+50) 排 slow(20) 前")
+	s._apply_turn_end_effects(fast)
+	s._apply_turn_start_effects(fast)
+	ck(_fx_of(fast, "t_haste") != null and int(_fx_of(fast, "t_haste").get("duration", 0)) == 1,
+		"round_end 效果：turn 两侧 tick 均不递减")
+	var round_evs: Array = s._wrap_round()
+	ck(_fx_of(fast, "t_haste") == null, "round_end 效果：_wrap_round tick 到期移除")
+	ck(fast.effective_stat("speed") == 5, "到期连带摘 speed mods")
+	ck(s.turn_order[0] == slow, "🔒 过渡序：到期先于重排 → 新 round slow 回到首位")
+	ck(_fx_of(fast, "t_boom") != null, "round_end 到期的 on_expire_apply 两段连锁照常施加")
+	var has_exp := false
+	var has_chain := false
+	for ev in round_evs:
+		if str(ev.get("type", "")) == "expired" and ev.get("who") == fast:
+			has_exp = true
+		if str(ev.get("type", "")) == "chain":
+			has_chain = true
+	ck(has_exp and has_chain, "_wrap_round 返回 expired+chain 事件且带 who 归属（宿主日志用）")
 
 	# 9) has_state：扫活跃 effects tags（失能/失语状态机查询）
 	var u8 = mk()

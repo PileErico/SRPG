@@ -1275,6 +1275,7 @@ func _handle_deaths() -> void:
 			_log_line("[color=#D5453A]%s 之死撼动同侧全军：士气 −5（波及 %d 人，决心可抵）[/color]" % [
 				_cname(mev["victim"]), int(mev["count"])])
 	if res["new_round"]:
+		_log_round_events(res.get("round_events", []))   # 行动者阵亡越界并轮转 → round_end tick 事件同样入日志
 		_tick_weather()   # 新 round：天气计时 −1，到期重摇
 	_check_battle_over()
 	if res["active_died"] and not battle_over:
@@ -1457,9 +1458,21 @@ func end_turn() -> void:
 			return
 	active_index += 1
 	if active_index >= turn_order.size():   # 全员走完一轮 → 新 round（轮转逻辑单一实现＝模型 _wrap_round）
-		_state._wrap_round()
+		_log_round_events(_state._wrap_round())   # round_end 效果 tick（集中攻势/鼓舞倒计时族）→ 日志
 		_tick_weather()      # 新 round：天气计时 −1，到期重摇（表现层 tick 留宿主）
 	_begin_active_turn()
+
+# round_end tick 事件渲染（事件带 who＝跨单位归属；类型集与 turn 侧一致：expired/chain）
+func _log_round_events(evs: Array) -> void:
+	for ev in evs:
+		var who = ev.get("who")
+		match str(ev.get("type", "")):
+			"expired":
+				_log_line("%s %s 结束" % [_cname(who), str(ev.get("name", ""))])
+			"chain":
+				var cid := str(ev.get("id", ""))
+				var cdef = EffectDB.get_effect(cid)
+				_log_line("%s 触发「%s」" % [_cname(who), str(cdef.get("name", cid)) if cdef != null else cid])
 
 # 单位自己 turn 末：结算个人 DoT（按最大生命百分比直接掉 HP，无视护甲）+ 时长递减（按 round）+ 到期移除，
 # 再结算所站地块 tick（灵泉回血/岩浆掉血等，_state._apply_terrain_ticks）。返回是否造成伤害（触发死亡检查）。

@@ -316,12 +316,38 @@ func _rebuild_turn_order() -> void:
 	turn_order = _sorted_by_speed(units)
 
 # round 轮转（唯一实现处；调用方＝宿主 end_turn 走完一轮 / _handle_deaths_state 行动者阵亡越界）：
-# 序列重排 + 借机去重清空。宿主侧的天气计时等表现层 tick 不在此（模型不管表现）。
-func _wrap_round() -> void:
+# round_end 效果 tick → 序列重排 + 借机去重清空。宿主侧的天气计时等表现层 tick 不在此（模型不管表现）。
+# 🔒 §2.2 round 过渡序锁定：到期递减+连锁施加 **先于** _rebuild_turn_order——
+# 速度类 buff 在 round_end 到期后不再污染新 round 排序。返回 tick 事件（带 who），宿主渲染。
+func _wrap_round() -> Array:
+	var events := _apply_round_end_effects()
 	active_index = 0
 	round_num += 1
 	_rebuild_turn_order()
 	zoc_triggered = {}
+	return events
+
+# 大回合末对称 tick（§2.2 第三时点）：只递减/到期 expire_timing=="round_end" 的效果
+# （集中攻势层/鼓舞倒计时族）。不结算 DoT/HoT（恒 turn_end）、不掷豁免（恒 turn_start）。
+func _apply_round_end_effects() -> Array:
+	var events := []
+	for u in units:
+		if u == null or not ("effects" in u) or u.effects.is_empty():
+			continue
+		var keep := []
+		var chains := []
+		var uev := []
+		for e in u.effects:
+			if e.get("permanent", false) or str(e.get("expire_timing", "turn_end")) != "round_end":
+				keep.append(e)
+			else:
+				_countdown_and_expire(u, e, keep, uev, chains)
+		u.effects = keep
+		_apply_expire_chains(u, chains, uev)
+		for ev in uev:
+			ev["who"] = u   # round tick 跨单位，事件补归属供宿主 _cname
+		events.append_array(uev)
+	return events
 
 # 按速度（effective_stat，含修正）大→小排序；同速我方/友方优先。
 func _sorted_by_speed(arr: Array) -> Array:
@@ -1059,7 +1085,7 @@ func _handle_deaths_state() -> Dictionary:
 						hit_n += 1
 			if hit_n > 0:
 				morale_events.append({"kind": "ally_death", "victim": u, "count": hit_n})
-	var res := {"dead": dead, "entered_door": entered_door, "active_died": false, "new_round": false, "morale": morale_events}
+	var res := {"dead": dead, "entered_door": entered_door, "active_died": false, "new_round": false, "morale": morale_events, "round_events": []}
 	if dead.is_empty():
 		return res
 	var cur = active_unit()
@@ -1071,7 +1097,7 @@ func _handle_deaths_state() -> Dictionary:
 	if res["active_died"]:
 		# 行动者阵亡 → 其 turn 结束；下一个已被 filter 前移到同下标（越界则进新 round）
 		if active_index >= turn_order.size():
-			_wrap_round()
+			res["round_events"] = _wrap_round()
 			res["new_round"] = true
 	else:
 		var idx: int = turn_order.find(cur)
