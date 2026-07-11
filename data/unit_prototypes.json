@@ -165,5 +165,77 @@
       "ground"
     ],
     "trait": ""
+  },
+  {
+    "_preset": true,
+    "ai_threat": true,
+    "default_faction": "enemy",
+    "equip": [
+      "wooden_club"
+    ],
+    "exp": 0,
+    "exp_max": 100,
+    "icon": "",
+    "id": "bandit_footpad",
+    "level": 1,
+    "name": "流寇小卒",
+    "portrait": "",
+    "race": "human",
+    "skills": {},
+    "tags": [
+      "ground",
+      "human",
+      "camp_bandits"
+    ],
+    "trait": ""
+  },
+  {
+    "_preset": true,
+    "ai_threat": true,
+    "default_faction": "enemy",
+    "equip": [
+      "rusty_dagger"
+    ],
+    "exp": 0,
+    "exp_max": 100,
+    "icon": "",
+    "id": "bandit_cutthroat",
+    "level": 2,
+    "name": "流寇割喉手",
+    "portrait": "",
+    "race": "human",
+    "skills": {},
+    "tags": [
+      "ground",
+      "human",
+      "camp_bandits"
+    ],
+    "trait": ""
+  },
+  {
+    "_preset": true,
+    "ai_threat": true,
+    "default_faction": "enemy",
+    "equip": [
+      "long_sword",
+      "wood_kite_shield",
+      "breast_plate"
+    ],
+    "exp": 0,
+    "exp_max": 100,
+    "icon": "",
+    "id": "bandit_boss",
+    "level": 3,
+    "name": "流寇头目",
+    "portrait": "",
+    "race": "human",
+    "skills": {},
+    "tags": [
+      "ground",
+      "human",
+      "elite",
+      "camp_bandits"
+    ],
+    "trait": ""
   }
 ]

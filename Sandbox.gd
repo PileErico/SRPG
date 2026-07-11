@@ -1334,12 +1334,14 @@ func _end_battle(win: bool) -> void:
 		_finish_campaign_battle(win)   # 结果出：此刻幸存者/击杀全可得，必须早于 exit_battle 的 init_vitals 回满 🔒
 	_show_banner(msg, win)
 
-# 战役战斗结算（BattleIO 结果出）：收集 → 回写 campaign（HP/经验/重伤/真死/击杀统计）→ 自动存档
+# 战役战斗结算（BattleIO 结果出）：收集 → 回写 campaign（HP/经验/重伤/真死/击杀统计/讨伐赏金）→ 自动存档
 func _finish_campaign_battle(win: bool) -> void:
 	var ws = WorldState.current
 	if ws == null:
 		return
-	BattleIO.apply_result(ws, BattleIO.collect_result(roster, _battle_kills, win, _battle_context))
+	var bounty := BattleIO.apply_result(ws, BattleIO.collect_result(roster, _battle_kills, win, _battle_context))
+	if bounty > 0:
+		_log_line("[color=%s]💰 讨伐赏金 +%d（已入账，现有 %d）[/color]" % [OK_GREEN, bounty, ws.gold])
 	SaveIO.save_campaign(ws, SaveIO.AUTO_SLOT)
 	_log_line("战果已结算并存档（经验 / 战损 / 重伤休整 / 击杀统计已回写战役）。")
 

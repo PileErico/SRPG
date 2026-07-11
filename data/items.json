@@ -12,5 +12,26 @@
       "heal_pct_max_hp": 50,
       "restore_fatigue_pct": 50
     }
+  },
+  {
+    "id": "herb_pouch",
+    "name": "草药包",
+    "kind": "item",
+    "icon": "",
+    "tags": ["common", "usable", "medical"],
+    "target": "ally",
+    "range": 1,
+    "stack": true,
+    "on_use": {
+      "heal_pct_max_hp": 25
+    }
+  },
+  {
+    "id": "ration_dried_meat",
+    "name": "风干肉",
+    "kind": "item",
+    "icon": "",
+    "tags": ["common", "consumable", "food"],
+    "stack": true
   }
 ]

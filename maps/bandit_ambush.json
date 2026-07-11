@@ -1,0 +1,1113 @@
+{
+  "bridges": [],
+  "environment": {
+    "time": "night",
+    "weather_table": [
+      {
+        "max_rounds": 4.0,
+        "min_rounds": 1.0,
+        "weather": "snow",
+        "weight": 10.0
+      }
+    ]
+  },
+  "format_version": 4,
+  "grid": "hex_flat_oddq",
+  "height": 15,
+  "locations": [],
+  "map_type": "battle",
+  "regions": [
+    {
+      "cells": [
+        [
+          0.0,
+          13.0
+        ],
+        [
+          1.0,
+          13.0
+        ],
+        [
+          0.0,
+          14.0
+        ],
+        [
+          1.0,
+          14.0
+        ],
+        [
+          2.0,
+          14.0
+        ]
+      ],
+      "color": "#3a7ad5",
+      "id": "region_1",
+      "kind": "deploy",
+      "label": "区域1"
+    }
+  ],
+  "rivers": [],
+  "roads": [],
+  "terrain_overrides": {
+
+  },
+  "tiles": [
+    [
+      {
+        "terrain": "rubble",
+        "variant": "rubble"
+      },
+      {
+        "terrain": "road",
+        "variant": "road"
+      },
+      {
+        "terrain": "rubble",
+        "variant": "rubble"
+      },
+      {
+        "terrain": "rubble",
+        "variant": "rubble"
+      },
+      {
+        "terrain": "rubble",
+        "variant": "rubble"
+      },
+      {
+        "terrain": "rubble",
+        "variant": "rubble"
+      },
+      {
+        "terrain": "rubble",
+        "variant": "rubble"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      }
+    ],
+    [
+      {
+        "terrain": "rubble",
+        "variant": "rubble"
+      },
+      {
+        "terrain": "road",
+        "variant": "road"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      }
+    ],
+    [
+      {
+        "terrain": "rubble",
+        "variant": "rubble"
+      },
+      {
+        "terrain": "road",
+        "variant": "road"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      }
+    ],
+    [
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "road",
+        "variant": "road"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      }
+    ],
+    [
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "road",
+        "variant": "road"
+      },
+      {
+        "terrain": "road",
+        "variant": "road"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      }
+    ],
+    [
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "road",
+        "variant": "road"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      }
+    ],
+    [
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "road",
+        "variant": "road"
+      },
+      {
+        "terrain": "road",
+        "variant": "road"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      }
+    ],
+    [
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "rubble",
+        "variant": "rubble"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "road",
+        "variant": "road"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      }
+    ],
+    [
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "rubble",
+        "variant": "rubble"
+      },
+      {
+        "terrain": "rubble",
+        "variant": "rubble"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "road",
+        "variant": "road"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      }
+    ],
+    [
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "road",
+        "variant": "road"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      }
+    ],
+    [
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "road",
+        "variant": "road"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      }
+    ],
+    [
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "road",
+        "variant": "road"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      },
+      {
+        "terrain": "wall",
+        "variant": "wall"
+      }
+    ],
+    [
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "road",
+        "variant": "road"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "hill",
+        "variant": "hill"
+      },
+      {
+        "terrain": "hill",
+        "variant": "hill"
+      }
+    ],
+    [
+      {
+        "terrain": "snow",
+        "variant": "snow"
+      },
+      {
+        "terrain": "snow",
+        "variant": "snow"
+      },
+      {
+        "terrain": "snow",
+        "variant": "snow"
+      },
+      {
+        "terrain": "snow",
+        "variant": "snow"
+      },
+      {
+        "terrain": "snow",
+        "variant": "snow"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "road",
+        "variant": "road"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "hill",
+        "variant": "hill"
+      },
+      {
+        "terrain": "hill",
+        "variant": "hill"
+      },
+      {
+        "terrain": "mountain",
+        "variant": "mountain"
+      },
+      {
+        "terrain": "mountain",
+        "variant": "mountain"
+      }
+    ],
+    [
+      {
+        "terrain": "snow",
+        "variant": "snow"
+      },
+      {
+        "terrain": "snow",
+        "variant": "snow"
+      },
+      {
+        "terrain": "snow",
+        "variant": "snow"
+      },
+      {
+        "terrain": "snow",
+        "variant": "snow"
+      },
+      {
+        "terrain": "snow",
+        "variant": "snow"
+      },
+      {
+        "terrain": "road",
+        "variant": "road"
+      },
+      {
+        "terrain": "road",
+        "variant": "road"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "bush",
+        "variant": "bush"
+      },
+      {
+        "terrain": "hill",
+        "variant": "hill"
+      },
+      {
+        "terrain": "hill",
+        "variant": "hill"
+      },
+      {
+        "terrain": "mountain",
+        "variant": "mountain"
+      },
+      {
+        "terrain": "mountain",
+        "variant": "mountain"
+      }
+    ]
+  ],
+  "triggers": [],
+  "units": [
+    {
+      "col": 11,
+      "faction": "enemy",
+      "proto": {
+        "_preset": true,
+        "ai_threat": true,
+        "default_faction": "enemy",
+        "equip": [
+          "wooden_club"
+        ],
+        "exp": 0.0,
+        "exp_max": 100.0,
+        "icon": "",
+        "id": "bandit_footpad",
+        "level": 1.0,
+        "name": "流寇小卒",
+        "portrait": "",
+        "race": "human",
+        "skills": {
+
+        },
+        "tags": [
+          "ground",
+          "human",
+          "camp_bandits"
+        ],
+        "trait": ""
+      },
+      "row": 12
+    },
+    {
+      "col": 12,
+      "faction": "enemy",
+      "proto": {
+        "_preset": true,
+        "ai_threat": true,
+        "default_faction": "enemy",
+        "equip": [
+          "wooden_club"
+        ],
+        "exp": 0.0,
+        "exp_max": 100.0,
+        "icon": "",
+        "id": "bandit_footpad",
+        "level": 1.0,
+        "name": "流寇小卒",
+        "portrait": "",
+        "race": "human",
+        "skills": {
+
+        },
+        "tags": [
+          "ground",
+          "human",
+          "camp_bandits"
+        ],
+        "trait": ""
+      },
+      "row": 13
+    },
+    {
+      "col": 12,
+      "faction": "enemy",
+      "proto": {
+        "_preset": true,
+        "ai_threat": true,
+        "default_faction": "enemy",
+        "equip": [
+          "rusty_dagger"
+        ],
+        "exp": 0.0,
+        "exp_max": 100.0,
+        "icon": "",
+        "id": "bandit_cutthroat",
+        "level": 2.0,
+        "name": "流寇割喉手",
+        "portrait": "",
+        "race": "human",
+        "skills": {
+
+        },
+        "tags": [
+          "ground",
+          "human",
+          "camp_bandits"
+        ],
+        "trait": ""
+      },
+      "row": 11
+    },
+    {
+      "col": 13,
+      "faction": "enemy",
+      "proto": {
+        "_preset": true,
+        "ai_threat": true,
+        "default_faction": "enemy",
+        "equip": [
+          "long_sword",
+          "wood_kite_shield",
+          "breast_plate"
+        ],
+        "exp": 0.0,
+        "exp_max": 100.0,
+        "icon": "",
+        "id": "bandit_boss",
+        "level": 3.0,
+        "name": "流寇头目",
+        "portrait": "",
+        "race": "human",
+        "skills": {
+
+        },
+        "tags": [
+          "ground",
+          "human",
+          "elite",
+          "camp_bandits"
+        ],
+        "trait": ""
+      },
+      "row": 12
+    }
+  ],
+  "width": 15
+}

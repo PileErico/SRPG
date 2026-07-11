@@ -10,6 +10,6 @@
     {"id": "lizardmen", "label": "蜥蜴人部落", "color": "#7FA84F", "start_rep": 0, "hostile_below": -20,
       "ambush": {"chance": 10, "cooldown_hours": 48, "battle_map": "res://maps/sandbox.json", "text": "草丛里窜出几名蜥蜴人猎手，斥骂着扑了上来！"}},
     {"id": "bandits", "label": "流寇", "color": "#C25B4E", "start_rep": -50, "hostile_below": -20,
-      "ambush": {"chance": 12, "cooldown_hours": 24, "battle_map": "res://maps/sandbox.json", "text": "流寇盯上了你们的行囊！"}}
+      "ambush": {"chance": 12, "cooldown_hours": 24, "battle_map": "res://maps/bandit_ambush.json", "text": "流寇盯上了你们的行囊！"}}
   ]
 }

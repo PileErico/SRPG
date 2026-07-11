@@ -58,6 +58,9 @@ const ACTIONS := [
 		{"key": "item_id", "label": "物品id（data/items.json）", "type": "text", "default": ""},
 		{"key": "count", "label": "数量", "type": "int", "default": 1, "min": 1, "max": 999},
 	]},
+	{"id": "give_gold", "label": "给予金钱", "fields": [
+		{"key": "amount", "label": "数额（负=损失；余额钳 0）", "type": "int", "default": 0, "min": -999, "max": 999},
+	]},
 ]
 
 static func action_defs() -> Array:
@@ -129,6 +132,11 @@ static func execute_action(a: Dictionary, host, fallback_text := "") -> void:
 			if iid == "":
 				return
 			_host_call(host, "event_give_item", [iid, maxi(1, int(a.get("count", 1)))])
+		"give_gold":
+			var amt := int(a.get("amount", 0))
+			if amt == 0:
+				return
+			_host_call(host, "event_give_gold", [amt])
 		var unknown:
 			push_warning("EventEngine：未知动作「%s」跳过" % unknown)
 

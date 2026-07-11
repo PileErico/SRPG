@@ -72,14 +72,14 @@ func _initialize() -> void:
 		{"id": "ow_dawn", "label": "每日", "when": {"event": "timer", "every_hours": 24},
 			"do": [{"action": "show_message", "text": "又是新的一天。"}]},
 		{"id": "ow_ambush", "label": "劫道者", "when": {"event": "enter_tile", "col": 14, "row": 8, "once": false, "cooldown_hours": 24},
-			"do": [{"action": "show_message", "text": "劫道者从路旁的灌木里窜了出来！"}, {"action": "start_battle", "map": "res://maps/sandbox.json"}]},
+			"do": [{"action": "show_message", "text": "劫道者从路旁的灌木里窜了出来！"}, {"action": "start_battle", "map": "res://maps/bandit_ambush.json"}]},
 	]
 	# 地点实例（M7；类型定义在 data/locations.json，运行时状态在 WorldState.location_cleared_at）。
 	var locations := [
 		{"id": "city_astra", "type": "city", "label": "阿斯特拉", "col": 8, "row": 8, "dialogue_id": "dlg_elder_astra"},
 		{"id": "village_luowei", "type": "village", "label": "洛苇村", "col": 15, "row": 5},
 		{"id": "ruin_sand", "type": "ruin", "label": "沙没之殿", "col": 20, "row": 14, "battle_map": "res://maps/sandbox.json"},
-		{"id": "lair_bandit", "type": "lair", "label": "劫道者营地", "col": 11, "row": 11, "battle_map": "res://maps/sandbox.json"},
+		{"id": "lair_bandit", "type": "lair", "label": "劫道者营地", "col": 11, "row": 11, "battle_map": "res://maps/bandit_ambush.json"},
 	]
 	DirAccess.make_dir_recursive_absolute("res://maps/overworld")
 	# environment 留空＝日夜不显式指定 → 消费端走「战役时钟推导」（M2 优先级的正确演示）

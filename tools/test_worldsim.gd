@@ -108,9 +108,12 @@ func _initialize() -> void:
 	SandboxConfig.battle_setup = null
 	ow._advance_world(2)
 	ck(SandboxConfig.battle_setup != null and int((SandboxConfig.battle_setup.get("context", {}) as Dictionary).get("world_unit_uid", 0)) == int(mar["uid"]), "engage → battle_setup 带 world_unit_uid")
-	# 战胜回写：单位覆灭
-	BattleIO.apply_result(ws, BattleIO.collect_result([], [], true, SandboxConfig.battle_setup["context"]))
+	ck(int((SandboxConfig.battle_setup.get("context", {}) as Dictionary).get("bounty", 0)) == 40, "engage context 带类型赏金（marauders=40）")
+	# 战胜回写：单位覆灭 + 讨伐赏金入账（apply_result 返回入账额）
+	var gold_before := int(ws.gold)
+	var bounty: int = BattleIO.apply_result(ws, BattleIO.collect_result([], [], true, SandboxConfig.battle_setup["context"]))
 	ck(ws.world_unit_by_uid(int(mar["uid"])) == null, "战胜 → 世界单位移除")
+	ck(bounty == 40 and int(ws.gold) == gold_before + 40, "战胜 → 讨伐赏金 40 入账（apply_result 单点）")
 	SandboxConfig.battle_setup = null
 
 	# 7) 中立不追不打：商队/兽群贴脸玩家也无 engage

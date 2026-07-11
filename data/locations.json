@@ -4,8 +4,8 @@
   "types": [
     {"id": "city", "label": "城市", "color": "#E8C15A", "services": ["rest", "trade", "recruit", "smith"], "desc": "补给、交易、招募、装备维护一应俱全的大城。"},
     {"id": "village", "label": "村落", "color": "#A8C878", "services": ["rest", "trade"], "desc": "可休整补给的小村落。"},
-    {"id": "ruin", "label": "遗迹", "color": "#9A8FB8", "site": true, "respawn_hours": 0, "desc": "野外遗迹：可进入探索；肃清后不再刷新。"},
-    {"id": "lair", "label": "野外据点", "color": "#C25B4E", "site": true, "respawn_hours": 72, "desc": "敌对据点：定期聚集人手，可重复讨伐。"}
+    {"id": "ruin", "label": "遗迹", "color": "#9A8FB8", "site": true, "respawn_hours": 0, "bounty": 80, "desc": "野外遗迹：可进入探索；肃清后不再刷新。"},
+    {"id": "lair", "label": "野外据点", "color": "#C25B4E", "site": true, "respawn_hours": 72, "bounty": 60, "desc": "敌对据点：定期聚集人手，可重复讨伐。"}
   ],
   "services": [
     {"id": "rest", "label": "休整（旅店）", "status": "in_use", "gold": 20, "hours": 8, "desc": "花钱住店：推进时间并回满全员生命（重伤休整照旧按时计）。"},

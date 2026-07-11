@@ -8,9 +8,9 @@
       "hours_per_cell": 2, "per_city": 1, "radius": 4, "sight": 3, "power": 5, "hunts": ["bandits"],
       "battle_map": "res://maps/sandbox.json"},
     {"id": "herd", "label": "兽群", "faction": "wildlife", "glyph": "●", "behavior": "wander",
-      "hours_per_cell": 4, "count": 2, "power": 1},
+      "hours_per_cell": 4, "count": 2, "power": 1, "bounty": 20},
     {"id": "marauders", "label": "劫道者游团", "faction": "bandits", "glyph": "✕", "behavior": "hunt",
       "hours_per_cell": 2, "count": 2, "home": "lair_bandit", "radius": 5, "sight": 4, "power": 3,
-      "battle_map": "res://maps/sandbox.json"}
+      "battle_map": "res://maps/bandit_ambush.json", "bounty": 40}
   ]
 }

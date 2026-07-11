@@ -285,5 +285,81 @@
       "shield_medium"
     ],
     "two_handed": false
+  },
+  {
+    "attack": {
+      "ap_cost": 1,
+      "coeff": 0.8,
+      "damage_kind": "physical",
+      "icon": "",
+      "name": "刺击",
+      "range": 1,
+      "tags": [
+        "single_target"
+      ]
+    },
+    "icon": "",
+    "id": "rusty_dagger",
+    "innate": false,
+    "mods": [
+      {
+        "op": "flat",
+        "stat": "atk",
+        "value": 3
+      },
+      {
+        "op": "flat",
+        "stat": "acc",
+        "value": 35
+      }
+    ],
+    "name": "锈匕首",
+    "requires": [],
+    "slot": "main_hand",
+    "tags": [
+      "common",
+      "melee",
+      "weapon_dagger",
+      "one_handed"
+    ],
+    "two_handed": false
+  },
+  {
+    "attack": {
+      "ap_cost": 1,
+      "coeff": 1.1,
+      "damage_kind": "physical",
+      "icon": "",
+      "name": "重击",
+      "range": 1,
+      "tags": [
+        "single_target"
+      ]
+    },
+    "icon": "",
+    "id": "wooden_club",
+    "innate": false,
+    "mods": [
+      {
+        "op": "flat",
+        "stat": "atk",
+        "value": 4
+      },
+      {
+        "op": "flat",
+        "stat": "acc",
+        "value": 20
+      }
+    ],
+    "name": "木棒",
+    "requires": [],
+    "slot": "main_hand",
+    "tags": [
+      "common",
+      "melee",
+      "weapon_hammer",
+      "one_handed"
+    ],
+    "two_handed": false
   }
 ]

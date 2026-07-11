@@ -33,5 +33,196 @@
         "text": "迎面遇上一位赶路的旅人。他压低声音说：「最近道上不太平，夜里赶路千万当心。」"
       }
     ]
+  },
+  {
+    "id": "evt_forest_herbs",
+    "label": "林间采药",
+    "desc": "林地采集：拾得草药包（可使用回血）。",
+    "when": {
+      "event": "enter_tile",
+      "terrain": "forest",
+      "once": false,
+      "chance": 8,
+      "cooldown_hours": 24
+    },
+    "do": [
+      {
+        "action": "show_message",
+        "text": "林间的阴影里长着几株药草。队里懂行的人蹲下身，麻利地扎了一小包。"
+      },
+      {
+        "action": "give_item",
+        "item_id": "herb_pouch",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "id": "evt_shallow_catch",
+    "label": "浅滩收获",
+    "desc": "浅水摸鱼：拾得干粮。",
+    "when": {
+      "event": "enter_tile",
+      "terrain": "shallow_water",
+      "once": false,
+      "chance": 10,
+      "cooldown_hours": 24
+    },
+    "do": [
+      {
+        "action": "show_message",
+        "text": "过浅滩时有人眼疾手快，从石缝里摸出几条肥鱼。当晚烤干装袋，又是几顿口粮。"
+      },
+      {
+        "action": "give_item",
+        "item_id": "ration_dried_meat",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "id": "evt_lost_purse",
+    "label": "路边钱袋",
+    "desc": "低概率拾金（任意地形）。",
+    "when": {
+      "event": "enter_tile",
+      "once": false,
+      "chance": 3,
+      "cooldown_hours": 48,
+      "global_gap": true
+    },
+    "do": [
+      {
+        "action": "show_message",
+        "text": "草丛里躺着一只被雨水泡旧的钱袋，主人早已不知去向。"
+      },
+      {
+        "action": "give_gold",
+        "amount": 15
+      }
+    ]
+  },
+  {
+    "id": "evt_bandit_toll",
+    "label": "流寇勒索",
+    "desc": "低概率损财（任意地形）：破财免灾；金额固定占位、数值轮再调。",
+    "when": {
+      "event": "enter_tile",
+      "once": false,
+      "chance": 3,
+      "cooldown_hours": 72,
+      "global_gap": true
+    },
+    "do": [
+      {
+        "action": "show_message",
+        "text": "几个蒙面流寇从道旁树后闪出，横着刀要「借」点买路钱。人数不多不少，正好让人不想动手。"
+      },
+      {
+        "action": "give_gold",
+        "amount": -20
+      }
+    ]
+  },
+  {
+    "id": "evt_traveling_merchant",
+    "label": "行脚商人",
+    "desc": "低概率路遇商人：开 dlg_merchant 对话（模态自动暂停时间）。",
+    "when": {
+      "event": "enter_tile",
+      "once": false,
+      "chance": 3,
+      "cooldown_hours": 72,
+      "global_gap": true
+    },
+    "do": [
+      {
+        "action": "dialogue",
+        "dialogue_id": "dlg_merchant"
+      }
+    ]
+  },
+  {
+    "id": "evt_mountain_vista",
+    "label": "山巅远眺",
+    "desc": "山地风味文案。",
+    "when": {
+      "event": "enter_tile",
+      "terrain": "mountain",
+      "once": false,
+      "chance": 20,
+      "cooldown_hours": 48
+    },
+    "do": [
+      {
+        "action": "show_message",
+        "text": "翻上山脊，云层就在脚下翻涌。有人指着远处叫了一声——整片大地在暮色里铺展开来。"
+      }
+    ]
+  },
+  {
+    "id": "evt_hill_lookout",
+    "label": "丘上瞭望",
+    "desc": "丘陵风味文案。",
+    "when": {
+      "event": "enter_tile",
+      "terrain": "hill",
+      "once": false,
+      "chance": 12,
+      "cooldown_hours": 36
+    },
+    "do": [
+      {
+        "action": "show_message",
+        "text": "站上土丘顶端，四野一览无余。趁着歇脚，有人把远处的炊烟和路口一一记进了行军图。"
+      }
+    ]
+  },
+  {
+    "id": "evt_abandoned_camp",
+    "label": "废弃营地",
+    "desc": "草原拾荒：捡到干粮（global_gap 防刷屏）。",
+    "when": {
+      "event": "enter_tile",
+      "terrain": "grassland",
+      "once": false,
+      "chance": 4,
+      "cooldown_hours": 48,
+      "global_gap": true
+    },
+    "do": [
+      {
+        "action": "show_message",
+        "text": "熄灭的火堆、割断的绳套——一处仓促废弃的营地。翻检之下还留有些没带走的口粮。"
+      },
+      {
+        "action": "give_item",
+        "item_id": "ration_dried_meat",
+        "count": 2
+      }
+    ]
+  },
+  {
+    "id": "evt_empire_courier",
+    "label": "帝国信使",
+    "desc": "低概率路遇帝国信使：指路问询、帝国声望 +1。",
+    "when": {
+      "event": "enter_tile",
+      "once": false,
+      "chance": 3,
+      "cooldown_hours": 72,
+      "global_gap": true
+    },
+    "do": [
+      {
+        "action": "show_message",
+        "text": "一名帝国信使勒马问路。队伍如实指了方向，他抱拳致谢，扬鞭而去——帝国的人记下了这份善意。"
+      },
+      {
+        "action": "add_rep",
+        "faction_id": "empire",
+        "delta": 1
+      }
+    ]
   }
 ]

@@ -486,8 +486,10 @@ func _advance_world(hours: int) -> void:
 				var u: Dictionary = e["unit"]
 				var t = WorldUnitDB.type_def(str(u.get("type", "")))
 				_log_line("⚔ [b]%s[/b] 追上了你们！" % WorldUnitDB.label(str(u.get("type", ""))))
+				# 讨伐赏金（波2 收入闭环）：开战点解析、随 context 走、胜后 BattleIO.apply_result 单点入账
 				_start_battle_with(str(t.get("battle_map", DEFAULT_BATTLE_MAP)) if t != null else DEFAULT_BATTLE_MAP,
-					{"world_unit_uid": int(u.get("uid", 0)), "faction_id": str(u.get("faction", ""))})
+					{"world_unit_uid": int(u.get("uid", 0)), "faction_id": str(u.get("faction", "")),
+						"bounty": int(t.get("bounty", 0)) if t != null else 0})
 			"skirmish":
 				var hunter := WorldUnitDB.label(str((e["hunter"] as Dictionary).get("type", "")))
 				var prey := WorldUnitDB.label(str((e["prey"] as Dictionary).get("type", "")))
@@ -607,6 +609,14 @@ func event_give_item(item_id: String, count: int) -> void:
 	var it = ItemDB.get_item(item_id)
 	_log_line("🎒 获得 %s ×%d" % [str(it.get("name", item_id)) if it != null else item_id, maxi(1, count)])
 
+# 给予/扣除金钱（do: give_gold；讨伐奖励同走此口）：余额钳 0、顶栏 💰 随 _ui_sig 自动刷新
+func event_give_gold(amount: int) -> void:
+	var ws = WorldState.current
+	if ws == null or amount == 0:
+		return
+	ws.gold = maxi(0, int(ws.gold) + amount)
+	_log_line(("💰 获得 %d 金币" % amount) if amount > 0 else "[color=#E07A5A]💰 失去 %d 金币[/color]" % -amount)
+
 # 开对话（do: dialogue）：模态覆盖大地图；行军中触发＝_tick_time 自动暂停（读完按空格续行）（M8）
 func event_dialogue(dialogue_id: String) -> void:
 	if _dialogue != null and is_instance_valid(_dialogue):
@@ -671,12 +681,16 @@ func _do_rest(loc: Dictionary) -> bool:
 	_autosave()
 	return true
 
-# 讨伐据点：可挑战才开打（带 location_id 上下文——胜后 BattleIO 落肃清账、按类型 respawn_hours 刷新）
+# 讨伐据点：可挑战才开打（带 location_id 上下文——胜后 BattleIO 落肃清账、按类型 respawn_hours 刷新；
+# 赏金按地点类型解析进 context，胜后 apply_result 单点入账）
 func _challenge_site(loc: Dictionary) -> void:
 	if not LocationDB.site_ready(loc, WorldState.current):
 		_log_line("此处已被肃清，暂无敌踪。")
 		return
-	_start_battle_with(str(loc.get("battle_map", DEFAULT_BATTLE_MAP)), {"location_id": str(loc.get("id", ""))})
+	var tdef = LocationDB.type_def(str(loc.get("type", "")))
+	_start_battle_with(str(loc.get("battle_map", DEFAULT_BATTLE_MAP)),
+		{"location_id": str(loc.get("id", "")),
+			"bounty": int(tdef.get("bounty", 0)) if tdef != null else 0})
 
 # 地点面板：城市/村落＝服务列表（rest 已接入；planned 灰显 ⏳）+ 可选交谈；遗迹/据点＝状态 + 进攻。
 func _open_location_panel(loc: Dictionary) -> void:
