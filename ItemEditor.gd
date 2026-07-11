@@ -616,8 +616,8 @@ func _build_weapon_skills_section() -> void:
 		warn.add_theme_font_size_override("font_size", 12)
 		warn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		_form.add_child(warn)
-	# EWS 额外技能位：装备授予、达标解锁、以能力形式使用（🔒 决策26）
-	_form.add_child(EditorUI.section_title("额外技能 EWS（装备授予；每条可配复数 AND 解锁条件〔技艺+熟练度裸数值〕）"))
+	# EWS 额外技能位：装备授予、达标解锁、以能力形式使用（🔒 决策26；运行时恒读主手——决策28）
+	_form.add_child(EditorUI.section_title("额外技能 EWS（装备授予；每条可配复数 AND 解锁条件〔技艺+熟练度裸数值〕；运行时恒读主手）"))
 	_ews_rows = []
 	_ews_box = VBoxContainer.new()
 	_ews_box.add_theme_constant_override("separation", 6)

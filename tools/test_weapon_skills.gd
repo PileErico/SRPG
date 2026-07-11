@@ -5,8 +5,8 @@ extends SceneTree
 ##  · ews_state 生命周期：就绪→consume→冷却随 turn 递减→次数用尽→战斗开始重置
 ##  · apply_skill EWS 分支：非已学消耗走 ews_state（skills 不受污染、AP 扣减一致）
 ##  · 战斗快照：ews_state 往返（护栏#3 白名单同 PR 扩展）
-##  · 审查修复回归：flatten_bws 无 attack 块→{}（防幻影攻击）/ apply_skill 无可跑块拒发零消耗 /
-##    ews_entries 同 id 去重已解锁优先（ItemDB._paths_override 注入临时武器库）
+##  · 审查修复回归：flatten_bws 无 attack 块→{}（防幻影攻击）/ apply_skill 无可跑块拒发零消耗
+##  · EWS 恒读主手（🔒 决策28）：副手不供给能力表（ItemDB._paths_override 注入临时武器库）
 ## SkillDB 经 _path_override 注入 user:// 临时库，不碰真数据。
 ## 运行：..._console.exe --headless --path "D:/1战棋" -s res://tools/test_weapon_skills.gd（退出码 0=PASS）
 
@@ -112,7 +112,7 @@ func _initialize() -> void:
 	st.apply_skill(brute2, "t_bws", target)
 	ck(brute2.ap == 3 and brute2.ews_state.is_empty(), "EWS 分支同守卫：零消耗、ews_state 干净")
 
-	# 7) ews_entries 同 id 去重＝已解锁优先（审查确认项5 最小口径；「跨源 OR vs 按手位」＝3b 待问）
+	# 7) ews_entries 恒读主手（🔒 决策28）：副手武器不供给能力表（双持型攻击＝perk 授予，非武器 EWS）
 	var weapons := [
 		{"id": "t_axe", "name": "试斧", "slot": "main_hand",
 			"ews": [{"skill": "t_ews_heal", "requires": [{"prof": "wp_axe", "value": 600}]}]},
@@ -129,9 +129,13 @@ func _initialize() -> void:
 	holder.equipment["main_hand"] = ItemInstances.create("t_axe")
 	holder.equipment["off_hand"] = ItemInstances.create("t_kit")
 	var ents: Array = holder.ews_entries()
-	ck(ents.size() == 1, "同 id 两武器授予 → 去重仍单条")
-	ck(ents.size() == 1 and bool(ents[0]["unlocked"]) and str(ents[0]["slot"]) == "off_hand",
-		"主手锁（斧600未达）+ 副手无条件 → 已解锁条目顶上（勿被主手锁条目遮蔽）")
+	ck(ents.size() == 1 and str(ents[0]["slot"]) == "main_hand" and not bool(ents[0]["unlocked"]),
+		"副手无条件授予被忽略——主手条目（锁：斧600未达）是唯一条目")
+	holder.equipment["main_hand"] = int(holder.equipment["off_hand"])   # t_kit 换上主手
+	ents = holder.ews_entries()
+	ck(ents.size() == 1 and bool(ents[0]["unlocked"]), "换到主手 → 无条件条目供给且解锁")
+	holder.equipment["main_hand"] = 0
+	ck(holder.ews_entries().is_empty(), "主手空 → 能力表无 EWS（副手仍持械也不读）")
 	ItemDB._paths_override = {}
 	ItemDB.reload_data()
 	ItemInstances.clear()

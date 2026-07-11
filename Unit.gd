@@ -641,35 +641,29 @@ func reset_skill_charges() -> void:
 
 var ews_state := {}   # skill_id -> {cd, uses}（战斗运行态；懒初始化——无表项=就绪满次数）
 
-# 装备武器们的 EWS 条目汇总：[{id, requires, slot, unlocked}]（主手→副手序）。
-# 同 id 去重＝已解锁条目优先（主手锁而副手达标 → 副手条目顶上；「跨源 OR vs 按手位」语义＝3b 待问用户）。
-# 键形（🔒 决策26）：对象 {skill, requires:[{prof,value},…]}；决策22 兼容裸字符串＝无条件 EWS。
+# 主手武器的 EWS 条目（🔒 决策28 恒读主手——与决策2「普攻恒读主手」同族绝对规则）：[{id, requires, slot, unlocked}]。
+# 副手武器/盾不供给能力表；双持型攻击能力＝「双武器」域熟练度解锁的 perk 授予（非武器 EWS，阶段4/5）。
+# 键形（🔒 决策26）：对象 {skill, requires:[{prof,value},…]}；决策22 兼容裸字符串＝无条件 EWS。同表同 id 首见去重。
 func ews_entries() -> Array:
 	var out := []
-	var seen := {}   # sid -> out 索引
-	for slot in ["main_hand", "off_hand"]:
-		var item = ItemInstances.view(int(equipment.get(slot, 0)))
-		if item == null:
+	var seen := {}
+	var item = ItemInstances.view(int(equipment.get("main_hand", 0)))
+	if item == null:
+		return out
+	for e in item.get("ews", []):
+		var sid := ""
+		var req := []
+		if typeof(e) == TYPE_DICTIONARY:
+			sid = str(e.get("skill", ""))
+			var r = e.get("requires", [])
+			if typeof(r) == TYPE_ARRAY:
+				req = r
+		else:
+			sid = str(e)
+		if sid == "" or seen.has(sid):
 			continue
-		for e in item.get("ews", []):
-			var sid := ""
-			var req := []
-			if typeof(e) == TYPE_DICTIONARY:
-				sid = str(e.get("skill", ""))
-				var r = e.get("requires", [])
-				if typeof(r) == TYPE_ARRAY:
-					req = r
-			else:
-				sid = str(e)
-			if sid == "":
-				continue
-			var entry := {"id": sid, "requires": req, "slot": slot, "unlocked": ews_requires_met(req)}
-			if seen.has(sid):
-				if bool(entry["unlocked"]) and not bool(out[seen[sid]]["unlocked"]):
-					out[seen[sid]] = entry
-				continue
-			seen[sid] = out.size()
-			out.append(entry)
+		seen[sid] = true
+		out.append({"id": sid, "requires": req, "slot": "main_hand", "unlocked": ews_requires_met(req)})
 	return out
 
 # EWS 解锁判定（🔒 决策26）：requires 复数 AND——每条〔技艺域 prof + 裸数值阈值 value〕都须 prof_xp 达标。
