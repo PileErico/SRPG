@@ -76,6 +76,7 @@ func _initialize() -> void:
 		ck(ld.ironman == true, "ironman flag")
 		ck(int(ld.flags.get("chapter", 0)) == 2 and bool(ld.flags.get("met_smith", false)), "flags")
 		ck(int(ld.reputation.get("empire", 0)) == 10 and int(ld.reputation.get("lizard", 0)) == -5, "reputation")
+		ck(typeof(ld.reputation.get("empire")) == TYPE_INT, "reputation 值 int 化（SERIAL_FIELDS dict_int——修 JSON float 直通不一致）")
 		ck(ld.inv_count("potion_a") == 3 and not ld.inventory.has("herb"), "inventory 往返（potion_a=3、herb 抹键）")
 		ck(ld.overworld_combat_off == true and ld.event_disabled.has("evt_x"), "遭遇战开关 / 禁用事件 往返")
 		ck(ld.roster.size() == 2, "roster 数量")

@@ -161,9 +161,43 @@ func _adopt_equipment(u) -> void:
 
 # ============ 序列化（SaveIO 调用） ============
 
-# 导出＝**roster 可达的实例才落盘**（GC：换装顶掉的孤儿/战斗临时单位造的实例不进档，防存档单调膨胀）。
-# 将来加背包/仓库容器时，把它们的引用并进 reachable 即可。
+# 声明式字段清单：常规字段的三处维护（var 声明 / to_dict / from_dict）收敛为一处——**新增可存字段＝var 声明 + 此表加一行**。
+# kind：int/bool＝标量（default 兜底）；dict＝字典透传（typeof 校验）；dict_int＝字典且值 int 化（JSON 数字回读 float）；
+#       dict_arr＝字典数组逐条深拷（坏项丢弃）。roster / item_instances 需专门重建（GC 可达 / current 域切换），单列手写。
+const SERIAL_FIELDS := [
+	{"key": "save_version", "kind": "int", "default": SAVE_VERSION},
+	{"key": "next_uid", "kind": "int", "default": 1},
+	{"key": "clock_hours", "kind": "int", "default": 0},
+	{"key": "party_col", "kind": "int", "default": -1},
+	{"key": "party_row", "kind": "int", "default": -1},
+	{"key": "ironman", "kind": "bool", "default": false},
+	{"key": "gold", "kind": "int", "default": 0},
+	{"key": "flags", "kind": "dict"},
+	{"key": "reputation", "kind": "dict_int"},
+	{"key": "kill_stats", "kind": "dict_int"},
+	{"key": "camp_jobs", "kind": "dict_int"},
+	{"key": "location_cleared_at", "kind": "dict_int"},
+	{"key": "world_units", "kind": "dict_arr"},
+	{"key": "event_fired", "kind": "dict"},
+	{"key": "event_timer_last", "kind": "dict_int"},
+	{"key": "event_cooldown_until", "kind": "dict_int"},
+	{"key": "last_world_event_hours", "kind": "int", "default": -1000000},
+	{"key": "event_disabled", "kind": "dict"},
+	{"key": "overworld_combat_off", "kind": "bool", "default": false},
+	{"key": "inventory", "kind": "dict_int"},
+]
+
+# 导出＝表驱动搬运 + 两个手写特例。**roster 可达的实例才落盘**（GC：换装顶掉的孤儿/战斗临时单位造的实例
+# 不进档，防存档单调膨胀）。将来加背包/仓库容器时，把它们的引用并进 reachable 即可。
 func to_dict() -> Dictionary:
+	var out := {}
+	for f in SERIAL_FIELDS:
+		var key := str(f["key"])
+		match str(f["kind"]):
+			"dict", "dict_int", "dict_arr":
+				out[key] = get(key).duplicate(true)
+			_:
+				out[key] = get(key)
 	var roster_json := []
 	var reachable := {}
 	for u in roster:
@@ -174,64 +208,36 @@ func to_dict() -> Dictionary:
 	for iuid in item_instances:
 		if reachable.has(int(iuid)):
 			items_json.append((item_instances[iuid] as Dictionary).duplicate(true))
-	return {
-		"save_version": save_version,
-		"next_uid": next_uid,
-		"clock_hours": clock_hours,
-		"party_col": party_col,
-		"party_row": party_row,
-		"ironman": ironman,
-		"gold": gold,
-		"flags": flags.duplicate(true),
-		"reputation": reputation.duplicate(true),
-		"kill_stats": kill_stats.duplicate(true),
-		"camp_jobs": camp_jobs.duplicate(true),
-		"location_cleared_at": location_cleared_at.duplicate(true),
-		"world_units": world_units.duplicate(true),
-		"event_fired": event_fired.duplicate(true),
-		"event_timer_last": event_timer_last.duplicate(true),
-		"event_cooldown_until": event_cooldown_until.duplicate(true),
-		"last_world_event_hours": last_world_event_hours,
-		"event_disabled": event_disabled.duplicate(true),
-		"overworld_combat_off": overworld_combat_off,
-		"item_instances": items_json,
-		"inventory": inventory.duplicate(true),
-		"roster": roster_json,
-	}
+	out["item_instances"] = items_json
+	out["roster"] = roster_json
+	return out
 
 # 只构建、不激活：库装进 ws 自己的成员（不碰全局/当前档）。roster 重建期间临时把 current 指向 ws
 # ——单位重挂装备/旧档回退造新件的 mint 与实例路由都落在本档域（结束即还原，不违反「不自动写 current」契约）。
 static func from_dict(d: Dictionary):
+	d = _migrate(d)
 	var ws = new()
-	ws.save_version = int(d.get("save_version", SAVE_VERSION))
-	ws.next_uid = int(d.get("next_uid", 1))
-	ws.clock_hours = int(d.get("clock_hours", 0))
-	ws.party_col = int(d.get("party_col", -1))
-	ws.party_row = int(d.get("party_row", -1))
-	ws.ironman = bool(d.get("ironman", false))
-	ws.gold = int(d.get("gold", 0))
-	var fl = d.get("flags", {})
-	ws.flags = fl if typeof(fl) == TYPE_DICTIONARY else {}
-	var rep = d.get("reputation", {})
-	ws.reputation = rep if typeof(rep) == TYPE_DICTIONARY else {}
-	ws.kill_stats = _int_valued(d.get("kill_stats", {}))
-	ws.camp_jobs = _int_valued(d.get("camp_jobs", {}))
-	ws.location_cleared_at = _int_valued(d.get("location_cleared_at", {}))
-	var wu = d.get("world_units", [])
-	if typeof(wu) == TYPE_ARRAY:
-		for e in wu:
-			if typeof(e) == TYPE_DICTIONARY:
-				ws.world_units.append(e.duplicate(true))
-	var ef = d.get("event_fired", {})
-	ws.event_fired = ef if typeof(ef) == TYPE_DICTIONARY else {}
-	ws.event_timer_last = _int_valued(d.get("event_timer_last", {}))
-	ws.event_cooldown_until = _int_valued(d.get("event_cooldown_until", {}))
-	ws.last_world_event_hours = int(d.get("last_world_event_hours", -1000000))
-	var ed2 = d.get("event_disabled", {})
-	ws.event_disabled = ed2 if typeof(ed2) == TYPE_DICTIONARY else {}
-	ws.overworld_combat_off = bool(d.get("overworld_combat_off", false))
+	for f in SERIAL_FIELDS:
+		var key := str(f["key"])
+		match str(f["kind"]):
+			"int":
+				ws.set(key, int(d.get(key, f.get("default", 0))))
+			"bool":
+				ws.set(key, bool(d.get(key, f.get("default", false))))
+			"dict":
+				var v = d.get(key, {})
+				ws.set(key, v if typeof(v) == TYPE_DICTIONARY else {})
+			"dict_int":
+				ws.set(key, _int_valued(d.get(key, {})))
+			"dict_arr":
+				var arr := []
+				var raw = d.get(key, [])
+				if typeof(raw) == TYPE_ARRAY:
+					for e in raw:
+						if typeof(e) == TYPE_DICTIONARY:
+							arr.append(e.duplicate(true))
+				ws.set(key, arr)
 	ws.item_instances = ItemInstances.parse_json(d.get("item_instances", []))
-	ws.inventory = _int_valued(d.get("inventory", {}))
 	var prev = current
 	current = ws
 	var ro = d.get("roster", [])
@@ -250,6 +256,14 @@ static func from_dict(d: Dictionary):
 		mx = maxi(mx, int(u.get("uid", 0)) + 1)
 	ws.next_uid = mx
 	return ws
+
+# 存档迁移缝：按 save_version 逐级 vN→vN+1 升级（现无历史版本差异＝空实现留位，首次破坏性字段变更前就位）。
+# 未来版本护栏：档比代码新（来自更新的游戏版本）→ 警告后按已知字段容错读（.get 缺省兜底），不静默装懂。
+static func _migrate(d: Dictionary) -> Dictionary:
+	var v := int(d.get("save_version", SAVE_VERSION))
+	if v > SAVE_VERSION:
+		push_warning("WorldState：存档版本 %d 新于当前代码 %d——按已知字段读取，未知字段忽略" % [v, SAVE_VERSION])
+	return d
 
 # 值 int 化的字典兜底（JSON 数字一律 float；键是 tid 字符串、天然无损）
 static func _int_valued(v) -> Dictionary:
