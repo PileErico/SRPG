@@ -10,6 +10,7 @@ const WorldState := preload("res://WorldState.gd")
 const SaveIO := preload("res://SaveIO.gd")
 const EnvDB := preload("res://EnvDB.gd")
 const OverworldScript := preload("res://Overworld.gd")
+const EventDB := preload("res://EventDB.gd")   # 全局事件池：行军测试须整池禁用（chance 类=非确定性）
 
 const SandboxConfig := preload("res://SandboxConfig.gd")
 
@@ -91,6 +92,10 @@ func _initialize() -> void:
 	ow2._map_triggers = [{"id": "t_test", "when": {"event": "timer", "every_hours": 1}, "do": [{"action": "show_message", "text": "tick"}]}]
 	# 受控环境：中和开局敌对派系（流寇 start_rep=-50）——遭伏概率触发会按新语义正当地中停行军，测试要确定性
 	ws2.reputation["bandits"] = 0
+	# 受控环境②：全局事件池整池禁用（event_disabled 硬闸）——chance 事件随机开火会打断行军
+	# （商人对话=模态自动暂停；波2 起池子持续扩容，逐条豁免不可维护）。本测试只验每图 triggers 钩子。
+	for pe in EventDB.all_events():
+		ws2.event_disabled[str(pe.get("id", ""))] = true
 	SandboxConfig.battle_setup = null   # 静态跨场景通道：清残留，防误判「战斗待切」暂停
 	ws2.party_col = 8
 	ws2.party_row = 8
