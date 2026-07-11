@@ -1,12 +1,13 @@
 extends SceneTree
 ## EventDB 回归：真池读取（all_events/event/id 唯一/when·do 齐/terrain 引用在地形表）/ _path_override 注入 +
-## reload_data / 缺文件·坏 JSON·非数组 优雅兜底 / Overworld 事件面板纯逻辑（event_status 徽章 / event_when_text 条件文案）。
+## reload_data / 缺文件·坏 JSON·非数组 优雅兜底 / EventEngine ④ schema 描述层（event_status 徽章 / when_text 条件文案——
+## 闸门单一源 gate_status，评估与面板同实现）。
 ## 运行：..._console.exe --headless --path "D:/1战棋" -s res://tools/test_eventdb.gd（退出码 0=PASS）
 
 const EventDB := preload("res://EventDB.gd")
 const TerrainDB := preload("res://TerrainDB.gd")
 const WorldState := preload("res://WorldState.gd")
-const OverworldScript := preload("res://Overworld.gd")
+const EventEngine := preload("res://EventEngine.gd")
 
 const P := "user://_test_events.json"
 
@@ -66,40 +67,47 @@ func _initialize() -> void:
 	EventDB.reload_data()
 	ck(EventDB.event("evt_fountain_whisper") != null, "还原后真池回归")
 
-	# 4) 事件面板纯逻辑（Overworld 静态函数，不建节点）：活状态徽章
+	# 4) 事件面板纯逻辑（EventEngine ④ 描述层，不建节点）：活状态徽章
 	var ws = WorldState.new()
 	ws.clock_hours = 100
 	var ev_tile := {"id": "s1", "when": {"event": "enter_tile", "once": false, "cooldown_hours": 48}, "do": []}
-	ck(bool(OverworldScript.event_status(ev_tile, ws).get("ready", false)), "无记录 → 可用")
+	ck(bool(EventEngine.event_status(ev_tile, ws).get("ready", false)), "无记录 → 可用")
 	ws.event_cooldown_until["s1"] = 130
-	var st: Dictionary = OverworldScript.event_status(ev_tile, ws)
+	var st: Dictionary = EventEngine.event_status(ev_tile, ws)
 	ck(not bool(st.get("ready")) and str(st.get("text")).contains("30"), "冷却中（剩 30 小时）")
 	ws.clock_hours = 130
-	ck(bool(OverworldScript.event_status(ev_tile, ws).get("ready", false)), "冷却到期 → 可用")
+	ck(bool(EventEngine.event_status(ev_tile, ws).get("ready", false)), "冷却到期 → 可用")
 	var ev_once := {"id": "s2", "when": {"event": "enter_tile"}, "do": []}
 	ws.event_fired["s2"] = true
-	ck(str(OverworldScript.event_status(ev_once, ws).get("text")) == "已触发", "once 消费 → 已触发（enter_tile 缺省 once=true）")
+	ck(str(EventEngine.event_status(ev_once, ws).get("text")) == "已触发", "once 消费 → 已触发（enter_tile 缺省 once=true）")
 	var ev_tm := {"id": "s3", "when": {"event": "timer", "every_hours": 24}, "do": []}
 	ws.event_timer_last["s3"] = 120
-	var st2: Dictionary = OverworldScript.event_status(ev_tm, ws)
+	var st2: Dictionary = EventEngine.event_status(ev_tm, ws)
 	ck(not bool(st2.get("ready")) and str(st2.get("text")).contains("14"), "timer 未到节拍（还需 14 小时）")
 	ws.clock_hours = 144
-	ck(bool(OverworldScript.event_status(ev_tm, ws).get("ready", false)), "timer 到节拍 → 可用")
+	ck(bool(EventEngine.event_status(ev_tm, ws).get("ready", false)), "timer 到节拍 → 可用")
 	var ev_gap := {"id": "s4", "when": {"event": "enter_tile", "once": false, "global_gap": true}, "do": []}
 	ws.last_world_event_hours = ws.clock_hours - 1
-	ck(not bool(OverworldScript.event_status(ev_gap, ws).get("ready")), "全局间隔未满 → 不可用")
-	ck(not bool(OverworldScript.event_status(ev_tile, null).get("ready")), "ws=null 守卫不崩")
+	ck(not bool(EventEngine.event_status(ev_gap, ws).get("ready")), "全局间隔未满 → 不可用")
+	ck(not bool(EventEngine.event_status(ev_tile, null).get("ready")), "ws=null 守卫不崩")
+	# 4b) 禁用徽章 + gate_status 单一源（评估与面板共用同一实现——reason 语义）
+	ws.event_disabled["s1"] = true
+	ck(str(EventEngine.event_status(ev_tile, ws).get("text")) == "已禁用", "禁用 → 已禁用徽章")
+	var gs: Dictionary = EventEngine.gate_status(ev_tile["when"], "s1", ws.event_fired, ws, true)
+	ck(not bool(gs["ready"]) and str(gs["reason"]) == "disabled", "gate_status：disabled reason")
+	ws.event_disabled.clear()
+	ck(str(EventEngine.gate_status(ev_tile["when"], "s1", ws.event_fired, ws, true)["reason"]) == "", "gate_status：解禁后就绪 reason 空")
 
 	# 5) 条件/概率文案（纯逻辑）
-	ck(OverworldScript.event_when_text({"event": "enter_tile", "terrain": "fh_fountain_of_youth"}) == "进入〈灵泉〉", "文案：进入〈灵泉〉（label_of 经 entry_by_id）")
-	ck(OverworldScript.event_when_text({"event": "enter_tile", "terrain": "no_such_terrain"}) == "进入〈no_such_terrain〉", "文案：未知地形回退 id")
-	ck(OverworldScript.event_when_text({"event": "enter_tile", "col": 7, "row": 8}) == "进入（7, 8）", "文案：定点")
-	ck(OverworldScript.event_when_text({"event": "enter_tile"}) == "任意移动", "文案：任意移动")
-	ck(OverworldScript.event_when_text({"event": "enter_region", "region": "r9"}) == "进入区域〈r9〉", "文案：区域")
-	ck(OverworldScript.event_when_text({"event": "timer", "every_hours": 12}) == "每 12 小时", "文案：timer")
-	ck(OverworldScript.event_gate_text({"event": "enter_tile", "once": false, "chance": 4, "cooldown_hours": 24}).contains("4%"), "文案：概率")
-	ck(OverworldScript.event_gate_text({"event": "enter_tile", "once": false}).contains("100%"), "文案：概率缺省 100%")
-	ck(OverworldScript.event_gate_text({"event": "enter_tile", "once": false}).contains("CD 无"), "文案：无 CD")
+	ck(EventEngine.when_text({"event": "enter_tile", "terrain": "fh_fountain_of_youth"}) == "进入〈灵泉〉", "文案：进入〈灵泉〉（label_of 经 entry_by_id）")
+	ck(EventEngine.when_text({"event": "enter_tile", "terrain": "no_such_terrain"}) == "进入〈no_such_terrain〉", "文案：未知地形回退 id")
+	ck(EventEngine.when_text({"event": "enter_tile", "col": 7, "row": 8}) == "进入（7, 8）", "文案：定点")
+	ck(EventEngine.when_text({"event": "enter_tile"}) == "任意移动", "文案：任意移动")
+	ck(EventEngine.when_text({"event": "enter_region", "region": "r9"}) == "进入区域〈r9〉", "文案：区域")
+	ck(EventEngine.when_text({"event": "timer", "every_hours": 12}) == "每 12 小时", "文案：timer")
+	ck(EventEngine.gate_text({"event": "enter_tile", "once": false, "chance": 4, "cooldown_hours": 24}).contains("4%"), "文案：概率")
+	ck(EventEngine.gate_text({"event": "enter_tile", "once": false}).contains("100%"), "文案：概率缺省 100%")
+	ck(EventEngine.gate_text({"event": "enter_tile", "once": false}).contains("CD 无"), "文案：无 CD")
 
 	if _fail == 0:
 		print("=== 全 PASS ===")

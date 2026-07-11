@@ -984,71 +984,14 @@ func _open_rep_panel() -> void:
 		v.add_child(row)
 	_rep_popup.popup_centered()
 
-# ============ 📜 全局事件池（EventDB）只读面板：可用性判定/条件文案抽成静态纯函数（headless 直测）============
+# ============ 📜 全局事件池（EventDB）面板：判定/文案全消费 EventEngine ④ schema 描述层（单一源，本场景不复述）============
 
 var _events_popup: PopupPanel
-
-# 事件活状态（纯逻辑，不依赖节点）：ready＝硬闸全开「条件满足就触发」；text＝面板徽章文案。
-# 判定序与 EventEngine._gates_open 对齐：once（缺省按事件类型，同引擎）→ 冷却 → 全局间隔；timer 另看 every_hours 节拍。
-static func event_status(ev: Dictionary, ws) -> Dictionary:
-	if ws == null:
-		return {"ready": false, "text": "无战役档"}
-	var when: Dictionary = ev.get("when", {}) if typeof(ev.get("when")) == TYPE_DICTIONARY else {}
-	var tid := str(ev.get("id", ""))
-	if ws.event_disabled.has(tid):
-		return {"ready": false, "text": "已禁用"}
-	var is_timer := str(when.get("event", "")) == "timer"
-	if bool(when.get("once", not is_timer)) and ws.event_fired.has(tid):
-		return {"ready": false, "text": "已触发"}
-	var cd_left: int = int(ws.event_cooldown_until.get(tid, -1)) - ws.clock_hours
-	if cd_left > 0:
-		return {"ready": false, "text": "冷却中（剩 %d 小时）" % cd_left}
-	if bool(when.get("global_gap", false)):
-		var gap_left: int = EventEngine.GLOBAL_EVENT_GAP_HOURS - (ws.clock_hours - ws.last_world_event_hours)
-		if gap_left > 0:
-			return {"ready": false, "text": "全局间隔中（剩 %d 小时）" % gap_left}
-	if is_timer:
-		var every := maxi(1, int(when.get("every_hours", 24)))
-		var beat_left: int = every - (ws.clock_hours - int(ws.event_timer_last.get(tid, 0)))
-		if beat_left > 0:
-			return {"ready": false, "text": "未到节拍（还需 %d 小时）" % beat_left}
-	return {"ready": true, "text": "可用"}
-
-# 触发条件中文文案（纯逻辑）：enter_tile+terrain→进入〈地形名〉/ +col·row→进入（c, r）/ 无限定→任意移动；
-# enter_region→进入区域〈id〉；timer→每 N 小时。
-static func event_when_text(when: Dictionary) -> String:
-	match str(when.get("event", "")):
-		"enter_tile":
-			if when.has("terrain"):
-				var e = TerrainDB.entry_by_id(str(when["terrain"]))
-				return "进入〈%s〉" % (str(e.get("label", when["terrain"])) if e != null else str(when["terrain"]))
-			if when.has("col") or when.has("row"):
-				var c := str(int(when["col"])) if when.has("col") else "＊"
-				var r := str(int(when["row"])) if when.has("row") else "＊"
-				return "进入（%s, %s）" % [c, r]
-			return "任意移动"
-		"enter_region":
-			return "进入区域〈%s〉" % str(when.get("region", "?"))
-		"timer":
-			return "每 %d 小时" % maxi(1, int(when.get("every_hours", 24)))
-	return "？（%s）" % str(when.get("event", ""))
-
-# 概率/CD 短文案（纯逻辑）：chance 缺省 100%；cooldown_hours 0/缺省＝无；once 缺省按事件类型（同引擎）
-static func event_gate_text(when: Dictionary) -> String:
-	var chance := float(when.get("chance", 100))
-	var chance_txt: String = ("%d%%" % int(chance)) if chance == floorf(chance) else ("%.1f%%" % chance)
-	var cd := int(when.get("cooldown_hours", 0))
-	var parts := ["概率 %s" % chance_txt, ("CD %d 小时" % cd) if cd > 0 else "CD 无"]
-	if bool(when.get("global_gap", false)):
-		parts.append("全局间隔")
-	if bool(when.get("once", str(when.get("event", "")) != "timer")):
-		parts.append("仅一次")
-	return "｜".join(parts)
 
 # 📜 事件面板（仿 _open_rep_panel，纯只读）：上段＝当前可用（硬闸全开，条件满足即触发）；下段＝完整池+活状态徽章。
 func _open_events_panel() -> void:
 	if not is_inside_tree():
-		return   # headless：面板纯 UI，判定/文案走 event_status/event_when_text 直测
+		return   # headless：面板纯 UI，判定/文案走 EventEngine.event_status/when_text 直测
 	if _events_popup != null:
 		_events_popup.queue_free()
 	var ui = CampaignUI.popup(480)
@@ -1077,7 +1020,7 @@ func _open_events_panel() -> void:
 	v.add_child(sec1)
 	var any_ready := false
 	for ev in pool:
-		if typeof(ev) == TYPE_DICTIONARY and bool(event_status(ev, ws).get("ready", false)):
+		if typeof(ev) == TYPE_DICTIONARY and bool(EventEngine.event_status(ev, ws).get("ready", false)):
 			_add_event_row(v, ev, "")
 			any_ready = true
 	if not any_ready:
@@ -1091,7 +1034,7 @@ func _open_events_panel() -> void:
 	v.add_child(sec2)
 	for ev in pool:
 		if typeof(ev) == TYPE_DICTIONARY:
-			_add_event_row(v, ev, str(event_status(ev, ws).get("text", "")), true)
+			_add_event_row(v, ev, str(EventEngine.event_status(ev, ws).get("text", "")), true)
 	_events_popup.popup_centered()
 
 # 事件一行：名称（悬停出 desc）+ 条件/概率/CD 灰字；badge 非空＝完整池段（可用绿、其余暖灰）
@@ -1120,7 +1063,7 @@ func _add_event_row(v: VBoxContainer, ev: Dictionary, badge: String, allow_toggl
 	name_l.custom_minimum_size = Vector2(120, 0)
 	row.add_child(name_l)
 	var cond_l := Label.new()
-	cond_l.text = "%s｜%s" % [event_when_text(when), event_gate_text(when)]
+	cond_l.text = "%s｜%s" % [EventEngine.when_text(when), EventEngine.gate_text(when)]
 	cond_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	cond_l.add_theme_color_override("font_color", CampaignUI.MUTED)
 	row.add_child(cond_l)
