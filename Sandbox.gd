@@ -1558,11 +1558,54 @@ func _learned_active_skills(u) -> Array:
 		return int(SkillDB.get_skill(a).get("seq", 99)) < int(SkillDB.get_skill(b).get("seq", 99)))
 	return out
 
-# 填「技能」子菜单：每个已学主动技能一项；冷却中/用尽 → 灰显(disabled) + 名后用阿拉伯数字标剩余冷却。
+# 装备武器授予的主动 EWS 条目（🔒 决策26；排除已学同名——已学走 skills 路径）：[{id, requires, unlocked}]
+func _ews_active_entries(u) -> Array:
+	var out := []
+	if u == null:
+		return out
+	for e in u.ews_entries():
+		var def = SkillDB.get_skill(str(e["id"]))
+		if def == null or not def.get("active", false) or u.has_skill(str(e["id"])):
+			continue
+		out.append(e)
+	return out
+
+# EWS 解锁条件人话（灰显提示）：「剑 300（老练）∧ 投掷 100」
+func _ews_req_text(requires: Array) -> String:
+	var parts := []
+	for r in requires:
+		if typeof(r) == TYPE_DICTIONARY:
+			var pid := str(r.get("prof", ""))
+			var v := int(r.get("value", 0))
+			parts.append("%s %d（%s）" % [ProfDB.prof_name(pid), v, ProfDB.stage_name(ProfDB.stage_of(v))])
+	return " ∧ ".join(parts)
+
+# 填「能力」子菜单：EWS 置顶（🔒 决策25 排序 EWS→其他）→ 已学主动技能。
+# 冷却中/用尽 → 灰显+标注；EWS 未解锁 → 灰显+条件提示（装备即出现、达标才亮，决策22/26）。
 func _build_skill_submenu(u) -> void:
 	_skill_submenu.clear()
 	_skill_menu_map = {}
 	var i := 0
+	for e in _ews_active_entries(u):
+		var id := str(e["id"])
+		var def = SkillDB.get_skill(id)
+		var silenced: bool = u.has_state("silenced") and (def.get("tags", []) as Array).has("verbal")
+		var unlocked := bool(e["unlocked"])
+		var ready: bool = unlocked and u.ews_ready(id) and u.ap >= SkillDB.skill_ap_cost(def) and not silenced
+		var label := "🗡 " + str(def.get("name", id))
+		var st = u.ews_state.get(id, {})
+		if not unlocked:
+			label += "（需 %s）" % _ews_req_text(e["requires"])
+		elif int(st.get("cd", 0)) > 0:
+			label += "（冷却 %d）" % int(st.get("cd", 0))
+		elif int(st.get("uses", -1)) == 0:
+			label += "（本战已用尽）"
+		elif silenced:
+			label += "（沉默中）"
+		_skill_submenu.add_item(label, i)
+		_skill_submenu.set_item_disabled(i, not ready)
+		_skill_menu_map[i] = id
+		i += 1
 	for id in _learned_active_skills(u):
 		var def = SkillDB.get_skill(id)
 		var silenced: bool = u.has_state("silenced") and (def.get("tags", []) as Array).has("verbal")
@@ -1588,12 +1631,15 @@ func _on_skill_chosen(id: int) -> void:
 		_enter_skill_mode(skill_id)
 
 # 进入技能目标模式：标出范围（绿），点范围内合法目标释放。
+# 就绪判定分两路：已学走 skill_ready；EWS（装备授予非已学，🔒 决策26）走 解锁+ews_ready。
 func _enter_skill_mode(skill_id: String) -> void:
 	var u = selected_unit
 	var def = SkillDB.get_skill(skill_id)
 	if u == null or def == null:
 		return
-	if not u.skill_ready(skill_id) or u.ap < SkillDB.skill_ap_cost(def):
+	var ready: bool = u.skill_ready(skill_id) if u.has_skill(skill_id) \
+		else (u.ews_unlocked(skill_id) and u.ews_ready(skill_id))
+	if not ready or u.ap < SkillDB.skill_ap_cost(def):
 		return
 	if u.has_state("silenced") and (def.get("tags", []) as Array).has("verbal"):
 		return   # 失语：verbal 技能禁施（与子菜单灰显同门槛；🔒 §5.2 决策12）
@@ -1665,7 +1711,7 @@ func open_context_menu() -> void:
 	if controllable:
 		if _can_attack(u):
 			_context_menu.add_item("攻击", 3)
-		if _learned_active_skills(u).size() > 0 and u.ap > 0:   # 能力（主动招式，术语🔒）：插在攻击后、移动前
+		if (_learned_active_skills(u).size() > 0 or _ews_active_entries(u).size() > 0) and u.ap > 0:   # 能力（主动招式，术语🔒）：插在攻击后、移动前
 			_build_skill_submenu(u)
 			_context_menu.add_submenu_item("能力", "SkillSubmenu")
 		if _can_move(u):

@@ -637,7 +637,10 @@ func apply_skill(caster, skill_id: String, target) -> Array:
 		return events
 	var lvl := int(caster.skill_level(skill_id))
 	caster.ap -= SkillDB.skill_ap_cost(def)
-	caster.consume_skill(skill_id, caster.skill_cooldown_max(def))
+	if caster.has_skill(skill_id):
+		caster.consume_skill(skill_id, caster.skill_cooldown_max(def))
+	else:
+		caster.consume_ews(skill_id, caster.skill_cooldown_max(def))   # EWS＝装备授予非已学，运行态走 ews_state（🔒 决策26）
 	for block in def.get("effects", []):
 		if typeof(block) != TYPE_DICTIONARY:
 			continue

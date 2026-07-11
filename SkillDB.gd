@@ -81,6 +81,29 @@ static func resolve_num(v, unit = null, level: int = 1, default: float = 0.0) ->
 			return out
 	return default
 
+# BWS 扁平化（🔒 §6.2 blocker + 决策26 阶段3a）：BWS 技能条目 → legacy attack dict——
+# 保下游 _resolve_compute / Sandbox / 借机 / AI 的顶层读点零改动。
+# 顶层字段从技能级取（name/icon/range/ap_cost〔经 skill_ap_cost 双键桥〕/tags）；
+# attack 块 hits[0] 其余键全部透传（coeff/damage_kind/aoe/inflict/armor_pen/sure_hit…）。
+static func flatten_bws(def: Dictionary) -> Dictionary:
+	var out := {}
+	for b in def.get("effects", []):
+		if typeof(b) == TYPE_DICTIONARY and str(b.get("kind", "")) == "attack":
+			var hits = b.get("hits", [])
+			if typeof(hits) == TYPE_ARRAY and hits.size() >= 1 and typeof(hits[0]) == TYPE_DICTIONARY:
+				out = (hits[0] as Dictionary).duplicate(true)
+			break
+	out["name"] = str(def.get("name", ""))
+	out["icon"] = str(def.get("icon", ""))
+	out["range"] = int(def.get("range", 1))
+	out["ap_cost"] = skill_ap_cost(def)
+	var tags := []
+	for t in def.get("tags", []):
+		tags.append(str(t))
+	out["tags"] = tags
+	return out
+
+
 # ============ 写盘口（阶段2；仿 EffectDB/ItemDB 范式——SkillEditor/迁移脚本的唯一写侧）============
 
 # 读某文件的原始数组（写路径用；读侧走 _ensure/JsonRegistry）

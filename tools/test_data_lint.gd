@@ -22,6 +22,7 @@ const TagDB := preload("res://TagDB.gd")
 const SkillDB := preload("res://SkillDB.gd")
 const StatMeta := preload("res://StatMeta.gd")
 const CombatResolver := preload("res://CombatResolver.gd")
+const ProfDB := preload("res://ProfDB.gd")   # 规则8：EWS requires.prof 引用完整性（决策26）
 
 var _fail := 0
 func ck(cond: bool, msg: String) -> void:
@@ -248,15 +249,41 @@ func _initialize() -> void:
 			for h in hits:
 				ck((h as Array).size() <= 1, "%s：hits>1 属阶段6（护栏#1）——现禁入库" % sid)
 
-	# 8) weapons.json 的 bas 引用（阶段3 预备；现无引用＝空过）
+	# 8) weapons.json 的武器技能引用（🔒 决策25/26 阶段3a）：
+	#    bws/bas（双键桥）→ 技能存在 + usable_as_bas；ews → 技能存在+主动、requires 的 prof/value 合法；
+	#    内联 attack 残留＝窗口期提示（迁移后应为 0；收口后改 FAIL）。
 	var wd = _read_json("res://data/weapons.json")
 	if wd != null:
 		var bas_refs := []
 		_collect_key_strings(wd, "bas", bas_refs)
+		_collect_key_strings(wd, "bws", bas_refs)
 		for b in bas_refs:
 			var bdef = SkillDB.get_skill(b)
-			ck(bdef != null, "weapons 引用的 BAS 技能存在：%s" % b)
-			ck(bdef != null and bool(bdef.get("usable_as_bas", false)), "%s：被引用为 BAS 须 usable_as_bas" % b)
+			ck(bdef != null, "weapons 引用的 BWS 技能存在：%s" % b)
+			ck(bdef != null and bool(bdef.get("usable_as_bas", false)), "%s：被引用为 BWS 须 usable_as_bas（形状声明）" % b)
+		var inline_left := 0
+		if typeof(wd) == TYPE_ARRAY:
+			for w in wd:
+				if typeof(w) != TYPE_DICTIONARY:
+					continue
+				var wid := str(w.get("id", "?"))
+				if w.has("attack") and str(w.get("bws", w.get("bas", ""))) == "":
+					inline_left += 1
+				for e in w.get("ews", []):
+					var sid := str(e.get("skill", "")) if typeof(e) == TYPE_DICTIONARY else str(e)
+					var sdef = SkillDB.get_skill(sid)
+					ck(sdef != null, "%s：ews 引用的技能存在：%s" % [wid, sid])
+					ck(sdef == null or bool(sdef.get("active", false)), "%s：ews「%s」须为主动技能（被动 EWS＝阶段4）" % [wid, sid])
+					if typeof(e) == TYPE_DICTIONARY:
+						for r in e.get("requires", []):
+							if typeof(r) != TYPE_DICTIONARY:
+								ck(false, "%s：ews「%s」requires 条目须为对象 {prof,value}" % [wid, sid])
+								continue
+							var pid := str(r.get("prof", ""))
+							ck(not ProfDB.get_prof(pid).is_empty(), "%s：ews「%s」条件域存在于 ProfDB：%s" % [wid, sid, pid])
+							ck(int(r.get("value", -1)) >= 0, "%s：ews「%s」条件阈值须 ≥0（裸数值，决策26）" % [wid, sid])
+		if inline_left > 0:
+			print("  ⚠ 窗口期提示：%d 件武器仍用内联 attack（无 bws 引用）——迁移收口后此项改 FAIL" % inline_left)
 
 	if _fail == 0:
 		print("=== 数据 lint 全 PASS ===")

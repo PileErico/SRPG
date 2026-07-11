@@ -484,11 +484,14 @@ func _sync_hands_to_state() -> void:
 		equipment["main_hand"] = equipment.get("off_hand", 0)
 		equipment["off_hand"] = tmp
 
-# 读某槽武器的 attack.prefer（"ground"/"air"）；无武器/无 attack/无 prefer → 空串。
+# 读某槽武器的地/空偏好（"ground"/"air"）；无武器/无偏好 → 空串。
+# 键位：武器顶层 "prefer"（BAS 迁移后归宿）双读旧 attack.prefer（窗口期兼容）。
 func _weapon_prefer(iuid: int) -> String:
 	var item = ItemInstances.view(iuid)
 	if item == null:
 		return ""
+	if item.has("prefer"):
+		return str(item.get("prefer", ""))
 	var atk = item.get("attack", null)
 	if typeof(atk) != TYPE_DICTIONARY:
 		return ""
@@ -499,14 +502,30 @@ func current_main_weapon_name() -> String:
 	var item = ItemInstances.view(int(equipment.get("main_hand", 0)))
 	return str(item.get("name", "")) if item != null else ""
 
-# 基础攻击 ＝ 恒读主手武器的 attack🔒（§6.2）：主手无武器/无 attack → 徒手 UNARMED（不退副手）。
-# 比路兹起降已把活跃爪换进主手，故此处天然正确、无需 airborne 分支。
-# 经合成视图取（深拷）——调用方拿到的 attack 不再是共享模板引用。
-func basic_attack() -> Dictionary:
+# 主手武器的攻击定义单一取处（🔒 §6.2 + 决策26 阶段3a）：
+#   ① 武器 "bws"（旧键 "bas" 双键桥）→ SkillDB 条目 → flatten_bws 扁平 legacy attack dict；
+#   ② 双读窗口：无 bws 键 → 回退旧内联 attack（迁移后正式数据不应走到；lint 收口后删此分支）；
+#   ③ 无武器攻击 = {}（调用方兜 UNARMED）。悬空 bws 引用＝警告后走回退链。
+func _main_weapon_attack() -> Dictionary:
 	var item = ItemInstances.view(int(equipment.get("main_hand", 0)))
-	if item != null and item.has("attack"):
-		return item["attack"]
-	return UNARMED_ATTACK
+	if item == null:
+		return {}
+	var bws := str(item.get("bws", item.get("bas", "")))
+	if bws != "":
+		var def = SkillDB.get_skill(bws)
+		if def != null:
+			return SkillDB.flatten_bws(def)
+		push_warning("Unit：武器「%s」bws 引用悬空（%s）——回退内联/徒手" % [str(item.get("name", "")), bws])
+	var atk = item.get("attack", null)
+	if typeof(atk) == TYPE_DICTIONARY:
+		return atk
+	return {}
+
+# 基础攻击 ＝ 恒读主手武器 🔒（§6.2）：主手无武器攻击 → 徒手 UNARMED（不退副手）。
+# 比路兹起降已把活跃爪换进主手，故此处天然正确、无需 airborne 分支。
+func basic_attack() -> Dictionary:
+	var atk := _main_weapon_attack()
+	return atk if not atk.is_empty() else UNARMED_ATTACK
 
 # 挂装备修正：每条 mod 唯一 source（"equip:<实例iuid>:<序号>"）——同件装备的模板 mod 与词条 mod
 # 即使同 stat 同 op 也各自生效（effective_stat 的「同 source 去重取高」只该压重复 buff，不该吃词条）。
@@ -603,7 +622,7 @@ func consume_skill(id: String, cd: int) -> void:
 	if us > 0:
 		skills[id]["uses"] = us - 1
 
-# 战斗开始：所有已学技能冷却清零、本战次数重置
+# 战斗开始：所有已学技能冷却清零、本战次数重置；EWS 运行态整表清空（懒初始化，清即全就绪）
 func reset_skill_charges() -> void:
 	for id in skills:
 		var def = SkillDB.get_skill(id)
@@ -611,6 +630,72 @@ func reset_skill_charges() -> void:
 			continue
 		skills[id]["cd"] = 0
 		skills[id]["uses"] = skill_uses_max(def)
+	ews_state = {}
+
+# ============ EWS 武器额外技能（🔒 决策26：装备授予、熟练度解锁、以能力形式使用）============
+# EWS 非「已学」（不入 skills/不随 campaign 档）；cd/uses 运行态＝ews_state（战斗开始重置、
+# 进战斗快照白名单——护栏#3，见 UnitFactory.unit_to_battle_snapshot）。
+
+var ews_state := {}   # skill_id -> {cd, uses}（战斗运行态；懒初始化——无表项=就绪满次数）
+
+# 装备武器们的 EWS 条目汇总：[{id, requires, slot, unlocked}]（主手→副手序；同 id 首见优先）。
+# 键形（🔒 决策26）：对象 {skill, requires:[{prof,value},…]}；决策22 兼容裸字符串＝无条件 EWS。
+func ews_entries() -> Array:
+	var out := []
+	var seen := {}
+	for slot in ["main_hand", "off_hand"]:
+		var item = ItemInstances.view(int(equipment.get(slot, 0)))
+		if item == null:
+			continue
+		for e in item.get("ews", []):
+			var sid := ""
+			var req := []
+			if typeof(e) == TYPE_DICTIONARY:
+				sid = str(e.get("skill", ""))
+				var r = e.get("requires", [])
+				if typeof(r) == TYPE_ARRAY:
+					req = r
+			else:
+				sid = str(e)
+			if sid == "" or seen.has(sid):
+				continue
+			seen[sid] = true
+			out.append({"id": sid, "requires": req, "slot": slot, "unlocked": ews_requires_met(req)})
+	return out
+
+# EWS 解锁判定（🔒 决策26）：requires 复数 AND——每条〔技艺域 prof + 裸数值阈值 value〕都须 prof_xp 达标。
+# 空/缺省 requires＝装备即用（决策22 旧语义子集）。资格看 prof_xp、与技艺是否装载无关（同资格闸门先例）。
+func ews_requires_met(requires: Array) -> bool:
+	for r in requires:
+		if typeof(r) != TYPE_DICTIONARY:
+			continue
+		if int(prof_xp.get(str(r.get("prof", "")), 0)) < int(r.get("value", 0)):
+			return false
+	return true
+
+# 某 EWS 当前是否已解锁（装备中的武器提供且条件满足）
+func ews_unlocked(id: String) -> bool:
+	for e in ews_entries():
+		if str(e["id"]) == id:
+			return bool(e["unlocked"])
+	return false
+
+# EWS 可否立即施放（对应 skill_ready；不含 AP/解锁，调用方另查）：冷却就绪 + 次数未尽。
+func ews_ready(id: String) -> bool:
+	var st = ews_state.get(id, null)
+	if st == null:
+		return true   # 未入表＝本战未用过＝就绪
+	return int(st.get("cd", 0)) <= 0 and int(st.get("uses", -1)) != 0
+
+# EWS 施放后（对应 consume_skill）：进冷却 + 扣次数（-1=无限不扣）。首用按 def 初始化次数。
+func consume_ews(id: String, cd: int) -> void:
+	if not ews_state.has(id):
+		var def = SkillDB.get_skill(id)
+		ews_state[id] = {"cd": 0, "uses": skill_uses_max(def) if def != null else -1}
+	ews_state[id]["cd"] = maxi(0, cd)
+	var us := int(ews_state[id].get("uses", -1))
+	if us > 0:
+		ews_state[id]["uses"] = us - 1
 
 # ============ 技艺（熟练度域）🔒 模块_属性成长_设计.md §2 ============
 
@@ -714,21 +799,21 @@ func _apply_prof_mods(id: String) -> void:
 		modifiers.append(mod)
 
 # 当前主手武器的 tags + attack tags（徒手=UNARMED 的 tags）——技艺喂养的行为匹配输入。
-# 判据与 basic_attack 完全一致（item.has("attack")）：主手物品无 attack 块＝实际打徒手 → 喂体术、
+# 判据与 basic_attack 完全一致（同读 _main_weapon_attack）：主手无武器攻击＝实际打徒手 → 喂体术、
 # 不喂物品 tags（对抗 review 发现：两处判据不一致会喂错域）。
 func current_attack_tags() -> Array:
 	var out := []
+	var atk := _main_weapon_attack()
+	if atk.is_empty():
+		for t in UNARMED_ATTACK.get("tags", []):
+			out.append(str(t))
+		return out
 	var item = ItemInstances.view(int(equipment.get("main_hand", 0)))
-	if item != null and item.has("attack"):
+	if item != null:
 		for t in item.get("tags", []):
 			out.append(str(t))
-		var atk = item.get("attack", null)
-		if typeof(atk) == TYPE_DICTIONARY:
-			for t in atk.get("tags", []):
-				if not out.has(str(t)):
-					out.append(str(t))
-	else:
-		for t in UNARMED_ATTACK.get("tags", []):
+	for t in atk.get("tags", []):
+		if not out.has(str(t)):
 			out.append(str(t))
 	return out
 
@@ -739,7 +824,7 @@ func _init(p_name := "新兵", p_faction := "player", p_col := 0, p_row := 0) ->
 	row = p_row
 	init_vitals()
 
-# turn 开始：AP 刷新到上限，移动点清零（上一 turn 零头作废），技能冷却各 −1（按本单位 turn 计）。
+# turn 开始：AP 刷新到上限，移动点清零（上一 turn 零头作废），技能/EWS 冷却各 −1（按本单位 turn 计）。
 func refresh_for_turn() -> void:
 	ap = effective_stat("AP_max")   # 走 effective：+AP_max buff/装备须刷满有效上限（裸读会少给 AP）
 	move_points = 0
@@ -747,3 +832,7 @@ func refresh_for_turn() -> void:
 		var c := int(skills[id].get("cd", 0))
 		if c > 0:
 			skills[id]["cd"] = c - 1
+	for id in ews_state:
+		var c2 := int(ews_state[id].get("cd", 0))
+		if c2 > 0:
+			ews_state[id]["cd"] = c2 - 1

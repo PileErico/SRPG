@@ -217,6 +217,7 @@ static func unit_to_battle_snapshot(u) -> Dictionary:
 		"modifiers": u.modifiers.duplicate(true),   # 整份含 trait/equip 烘焙条 + buff:/env: 临时条（source 配对保真 🔒）
 		"equipment": u.equipment.duplicate(),        # slot -> 实例 uid（实例本体：战役随档；沙盒 _transient 不落盘 ⚠️）
 		"skills": u.skills.duplicate(true),          # 含 cd/uses 运行态
+		"ews_state": u.ews_state.duplicate(true),    # EWS cd/uses 运行态（🔒 决策26 护栏#3：新运行态同 PR 扩白名单）
 		"ai_threat": u.ai_threat, "ai_region": u.ai_region, "ai_group": u.ai_group, "ai_aggroed": u.ai_aggroed,
 	}
 
@@ -284,6 +285,14 @@ static func unit_from_battle_snapshot(d: Dictionary):
 			if typeof(e) == TYPE_DICTIONARY:
 				skills[str(sid)] = {"level": int(e.get("level", 1)), "cd": int(e.get("cd", 0)), "uses": int(e.get("uses", 0))}
 	u.skills = skills
+	var ews := {}
+	var esrc2 = d.get("ews_state", {})
+	if typeof(esrc2) == TYPE_DICTIONARY:
+		for sid in esrc2:
+			var e2 = esrc2[sid]
+			if typeof(e2) == TYPE_DICTIONARY:
+				ews[str(sid)] = {"cd": int(e2.get("cd", 0)), "uses": int(e2.get("uses", -1))}
+	u.ews_state = ews   # EWS 运行态往返（🔒 决策26 护栏#3；旧快照缺省＝空表安全）
 	u.ai_threat = bool(d.get("ai_threat", true))
 	u.ai_region = str(d.get("ai_region", ""))
 	u.ai_group = str(d.get("ai_group", ""))
