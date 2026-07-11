@@ -83,8 +83,9 @@ func _initialize() -> void:
 		var def = SkillDB.get_skill(id)
 		if not bool(def.get("active", true)):
 			continue
-		if not SkillDB.has_runnable_block(def):
-			continue   # 无可跑块（纯 attack 形＝BWS 们）：apply_skill 守卫拒发零消耗，冒烟归 test_basic_attack/test_combat_golden
+		if SkillDB.has_attack_block(def) and not SkillDB.has_runnable_block(def):
+			continue   # 纯 attack 形（BWS 们）＝阶段6 能力路径时限，冒烟归 test_basic_attack/test_combat_golden；
+			# 其余主动技能一律强制施放（护栏#2）——「主动但无可跑块」的死内容（kind 打错/scripted-only）会在此响亮 FAIL
 		n += 1
 		var c = UnitFactory.make_unit(BARE, "player", 0, 0)
 		c.learn_skill(str(id))

@@ -262,7 +262,7 @@ func _initialize() -> void:
 			var bdef = SkillDB.get_skill(b)
 			ck(bdef != null, "weapons 引用的 BWS 技能存在：%s" % b)
 			ck(bdef == null or SkillDB.is_bas_shaped(bdef),
-				"%s：被引为 BWS 须 BAS 形（含 attack 块·冷却0·无级·无手门槛——攻击路径不结算冷却/次数/等级）" % b)
+				"%s：被引为 BWS 须 BAS 形（含 attack 块·冷却0·无级·无手门槛·次数无限——攻击路径不结算冷却/次数/等级）" % b)
 		var inline_left := 0
 		if typeof(wd) == TYPE_ARRAY:
 			for w in wd:

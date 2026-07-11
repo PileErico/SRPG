@@ -603,7 +603,7 @@ func _build_weapon_skills_section() -> void:
 	_ensure_meta_option(_w_bws, cur_bws)
 	_select_meta(_w_bws, cur_bws)
 	_w_bws.item_selected.connect(func(_i): _refresh_preview())
-	_form.add_child(EditorUI.field_row("普攻 BWS（装备即用；列 BAS 形＝含攻击块·无冷却·无级·无手门槛）", _w_bws))
+	_form.add_child(EditorUI.field_row("普攻 BWS（装备即用；列 BAS 形＝含攻击块·无冷却·无级·无手门槛·次数无限）", _w_bws))
 	# prefer 初值双读 attack.prefer（同 Unit._weapon_prefer 口径）：未迁移武器打开不丢偏好
 	var atk0 = _current.get("attack", {})
 	var prefer0 := str(_current.get("prefer", atk0.get("prefer", "") if typeof(atk0) == TYPE_DICTIONARY else ""))

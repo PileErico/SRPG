@@ -55,6 +55,27 @@ func _initialize() -> void:
 	ck(SkillDB.flatten_bws({"name": "空壳"}).is_empty(), "无 attack 块 → 空 dict（勿造幻影攻击；basic_attack 兜 UNARMED）")
 	ck(SkillDB.flatten_bws(SkillDB.get_skill("t_ews_heal")).is_empty(), "heal 技能被引用为 BWS → 空 dict（审查确认项2）")
 
+	# 1b) is_bas_shaped 正反两向（🔒 决策27；FAIL 方向＝lint 规则8/ItemEditor 过滤的守卫本体）
+	var bas_ok := {"cooldown": {"base": 0}, "max_level": 1, "requires_hands": [], "uses_per_battle": {"base": 0},
+		"effects": [{"kind": "attack", "hits": [{"coeff": 1.0}]}]}
+	ck(SkillDB.is_bas_shaped(bas_ok), "标准 BAS 形 → true")
+	var v: Dictionary
+	v = bas_ok.duplicate(true); v["cooldown"] = {"base": 2}
+	ck(not SkillDB.is_bas_shaped(v), "冷却≠0 → 非 BAS 形")
+	v = bas_ok.duplicate(true); v["max_level"] = 3
+	ck(not SkillDB.is_bas_shaped(v), "有级 → 非 BAS 形")
+	v = bas_ok.duplicate(true); v["requires_hands"] = [{"slot": "main_hand"}]
+	ck(not SkillDB.is_bas_shaped(v), "有手门槛 → 非 BAS 形")
+	v = bas_ok.duplicate(true); v["uses_per_battle"] = {"base": 2}
+	ck(not SkillDB.is_bas_shaped(v), "限次 → 非 BAS 形（攻击路径不结算次数——决策18 BAS 无次数限制）")
+	v = bas_ok.duplicate(true); v["effects"] = [{"kind": "heal"}]
+	ck(not SkillDB.is_bas_shaped(v), "无 attack 块 → 非 BAS 形")
+	# 1c) 多 attack 块口径同一：gate 放行 ⇔ flatten 有产出（首个异形块跳过继续扫，勿分叉）
+	v = bas_ok.duplicate(true)
+	v["effects"] = [{"kind": "attack", "hits": []}, {"kind": "attack", "hits": [{"coeff": 0.5}]}]
+	ck(SkillDB.is_bas_shaped(v) and absf(float(SkillDB.flatten_bws(v).get("coeff", 0)) - 0.5) < 0.0001,
+		"首块异形+次块合法 → gate 放行且 flatten 取到合法块（口径同一）")
+
 	# 2) EWS 解锁判定（🔒 决策26：复数 AND + 裸数值）
 	var u = Unit.new("试兵", "player", 0, 0)
 	ck(u.ews_requires_met([]), "空 requires＝装备即用（决策22 兼容）")
