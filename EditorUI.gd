@@ -6,6 +6,8 @@ extends RefCounted
 ## （不用 class_name：与 *DB / EditorTheme 同理，headless 扫描找不到全局类。）
 
 const EditorTheme := preload("res://EditorTheme.gd")
+const TagDB := preload("res://TagDB.gd")       # 自由 tag 区 chip 中文标签（tag 单一词表）
+const StatMeta := preload("res://StatMeta.gd") # 修正行 stat 中文标签
 
 # —— 基础构件 ——
 
@@ -203,3 +205,170 @@ static func confirm_discard(host: Node, dirty: bool, on_ok: Callable, on_cancel 
 			on_ok.call()
 		return
 	confirm(host, text, ok_text, on_ok, on_cancel, "未保存的改动", cancel_text)
+
+
+# —— 自由 tag 清单区（🔒 技能设计 §10 阶段2.4 抽通用：Item/Skill/Effect 编辑器共用一份）——
+# arr 被就地增删（调用方持有同一数组）；options=[["sep",分组标题] | [id] | [id,显示文本], ...]，
+# 空/只有分隔 ⇒ 不显下拉、只留手动输入。on_change＝任何增删后回调（刷新预览/置脏）。
+static func add_tag_list(parent: Node, label_text: String, arr: Array, options: Array, on_change := Callable()) -> void:
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 3)
+	var adder := HBoxContainer.new()
+	adder.add_theme_constant_override("separation", 6)
+	var pick := OptionButton.new()
+	pick.custom_minimum_size = Vector2(170, 0)
+	pick.add_item("（下拉添加…）")
+	pick.set_item_metadata(0, "")
+	for o in options:
+		if typeof(o) != TYPE_ARRAY or o.is_empty():
+			continue
+		if str(o[0]) == "sep":
+			pick.add_separator(str(o[1]) if o.size() > 1 else "")
+		else:
+			pick.add_item(str(o[1]) if o.size() > 1 else str(o[0]))
+			pick.set_item_metadata(pick.item_count - 1, str(o[0]))
+	var has_presets := false
+	for i in pick.item_count:
+		if not pick.is_item_disabled(i) and str(pick.get_item_metadata(i)) != "":
+			has_presets = true
+			break
+	if has_presets:
+		pick.item_selected.connect(func(idx):
+			var tg = pick.get_item_metadata(idx)
+			if tg != null and str(tg) != "" and not arr.has(str(tg)):
+				arr.append(str(tg))
+				_rebuild_tag_box(box, arr, on_change)
+				if on_change.is_valid():
+					on_change.call()
+			pick.select(0))
+		adder.add_child(pick)
+	else:
+		pick.queue_free()
+	var manual := LineEdit.new()
+	manual.placeholder_text = "手动 tag"
+	manual.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	adder.add_child(manual)
+	var addb := Button.new()
+	addb.text = "＋"
+	addb.pressed.connect(func():
+		var tt := manual.text.strip_edges()
+		if tt != "" and not arr.has(tt):
+			arr.append(tt)
+			_rebuild_tag_box(box, arr, on_change)
+			if on_change.is_valid():
+				on_change.call()
+		manual.clear())
+	adder.add_child(addb)
+	parent.add_child(field_row(label_text, adder))
+	parent.add_child(box)
+	_rebuild_tag_box(box, arr, on_change)
+
+static func _rebuild_tag_box(box: VBoxContainer, arr: Array, on_change: Callable) -> void:
+	if box == null or not is_instance_valid(box):
+		return
+	for c in box.get_children():
+		c.queue_free()   # ⚠ 必须 queue_free：常由行内 ✕ 的 pressed 触发，free() 会当场释放发信号中的按钮
+	if arr.is_empty():
+		var l := Label.new()
+		l.text = "（无）"
+		l.add_theme_color_override("font_color", Color(0.55, 0.6, 0.66))
+		l.add_theme_font_size_override("font_size", 12)
+		box.add_child(l)
+		return
+	for t in arr:
+		var row := HBoxContainer.new()
+		var l := Label.new()
+		l.text = "%s（%s）" % [TagDB.cn(str(t)), str(t)]
+		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(l)
+		var rm := Button.new()
+		rm.text = "✕"
+		var tag := str(t)
+		rm.pressed.connect(func():
+			arr.erase(tag)
+			_rebuild_tag_box(box, arr, on_change)
+			if on_change.is_valid():
+				on_change.call())
+		row.add_child(rm)
+		box.add_child(row)
+
+
+# —— 修正行（stat 下拉 + 固定/百分比 + 数值 + ✕）——技能被动块 / 效果 mods 共用；
+# ItemEditor 的修正行含 vision_state 特型不并入。stat_keys＝可选 stat 键序（中文经 StatMeta）。
+# 返回 {row, stat, op, value}；entries＝调用方的行数组（✕ 时自动 erase 本 entry）。
+static func add_mod_row(parent: Node, entries: Array, stat_keys: Array, stat: String, op: String, value: float, on_change := Callable()) -> Dictionary:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	var st := OptionButton.new()
+	st.custom_minimum_size = Vector2(180, 0)
+	for key in stat_keys:
+		st.add_item("%s %s" % [key, StatMeta.label(str(key))])
+		st.set_item_metadata(st.item_count - 1, str(key))
+	for i in st.item_count:
+		if str(st.get_item_metadata(i)) == stat:
+			st.select(i)
+			break
+	if on_change.is_valid():
+		st.item_selected.connect(func(_i): on_change.call())
+	row.add_child(st)
+	var opb := OptionButton.new()
+	opb.custom_minimum_size = Vector2(110, 0)
+	for o in [["flat", "固定"], ["pct", "百分比%"]]:
+		opb.add_item(str(o[1]))
+		opb.set_item_metadata(opb.item_count - 1, str(o[0]))
+	for i in opb.item_count:
+		if str(opb.get_item_metadata(i)) == op:
+			opb.select(i)
+			break
+	if on_change.is_valid():
+		opb.item_selected.connect(func(_i): on_change.call())
+	row.add_child(opb)
+	var val := SpinBox.new()
+	val.min_value = -9999
+	val.max_value = 9999
+	val.step = 0.5
+	val.value = value
+	val.custom_minimum_size = Vector2(110, 0)
+	if on_change.is_valid():
+		val.value_changed.connect(func(_v): on_change.call())
+	row.add_child(val)
+	var rm := Button.new()
+	rm.text = "✕"
+	var entry := {"row": row, "stat": st, "op": opb, "value": val}
+	rm.pressed.connect(func():
+		entries.erase(entry)
+		row.queue_free()
+		if on_change.is_valid():
+			on_change.call())
+	row.add_child(rm)
+	parent.add_child(row)
+	entries.append(entry)
+	return entry
+
+
+# —— 通用分段场景切换（workshop_switch 的参数化版）——
+# pairs=[[id, 按钮文字, 场景路径], ...]；current＝高亮禁点；guard 有效则切换前先过守卫
+# （编辑器传脏守卫 _confirm_discard，防切场景静默丢未保存改动）。
+static func scene_switch(host: Node, current: String, pairs: Array, guard := Callable()) -> Control:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 4)
+	for d in pairs:
+		var id := str(d[0])
+		var scene := str(d[2])
+		var b := Button.new()
+		b.text = str(d[1])
+		b.focus_mode = Control.FOCUS_NONE
+		if id == current:
+			var hl := EditorTheme.sb(Color(0.24, 0.36, 0.52), Color(0.46, 0.62, 0.85))
+			b.add_theme_stylebox_override("normal", hl)
+			b.add_theme_stylebox_override("disabled", hl)
+			b.disabled = true
+		else:
+			var go := func(): host.get_tree().change_scene_to_file(scene)
+			b.pressed.connect(func():
+				if guard.is_valid():
+					guard.call(go)
+				else:
+					go.call())
+		row.add_child(b)
+	return row

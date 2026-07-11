@@ -54,6 +54,7 @@ func _ready() -> void:
 	title.add_theme_font_size_override("font_size", 26)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	titlebar.add_child(title)
+	_shell_titlebar_extras(titlebar)   # 子类可注入切换器等（返回按钮之前）
 	var back := Button.new()
 	back.text = "返回主菜单"
 	back.custom_minimum_size = Vector2(120, 0)
@@ -243,6 +244,8 @@ func _on_save() -> void:
 	if not _shell_has_entry():
 		return
 	var entry := _shell_collect()
+	if entry.is_empty():
+		return   # 收集/校验失败——子类已 _err 报因，此处静默中止
 	var id := str(entry.get("id", ""))
 	if id == "":
 		_err("id 不能为空")
@@ -291,6 +294,8 @@ func _on_duplicate() -> void:
 	if not _shell_has_entry():
 		return
 	var entry := _shell_collect()
+	if entry.is_empty():
+		return   # 收集/校验失败——子类已 _err 报因
 	entry["id"] = _unique_copy_id(str(entry.get("id", "entry")))
 	entry["name"] = str(entry.get("name", "")) + "（副本）"
 	_shell_open_as_new(entry)
@@ -391,6 +396,9 @@ func _shell_left_min_width() -> int:                          # 左清单最小�
 
 func _shell_discard_text() -> String:                         # 脏守卫提示语
 	return "当前条目有未保存的修改，继续将丢弃。"
+
+func _shell_titlebar_extras(_titlebar: HBoxContainer) -> void: # 标题栏附加控件（切换器等）
+	pass
 
 func _shell_build_right(_split: HSplitContainer) -> void:     # 右侧内容（表单/预览/卡片）
 	push_error("ListEditorShell 子类须实现 _shell_build_right")

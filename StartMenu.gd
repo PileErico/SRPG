@@ -43,6 +43,7 @@ func _ready() -> void:
 	box.add_child(_menu_button("地图编辑", _on_map_editor, false))
 	box.add_child(_menu_button("物品编辑器", _on_item_editor, false))
 	box.add_child(_menu_button("角色编辑器", _on_char_editor, false))
+	box.add_child(_menu_button("技能编辑器（能力 · 效果）", _on_skill_editor, false))
 	box.add_child(_menu_button("外观工坊（换装换色）", _on_appearance_workshop, false))
 	box.add_child(_menu_button("地块绘制工坊", _on_terrain_workshop, false))
 	box.add_child(_menu_button("设置", _on_settings, false))
@@ -89,6 +90,9 @@ func _on_item_editor() -> void:
 
 func _on_char_editor() -> void:
 	get_tree().change_scene_to_file("res://CharacterEditor.tscn")
+
+func _on_skill_editor() -> void:
+	get_tree().change_scene_to_file("res://SkillEditor.tscn")
 
 func _on_appearance_workshop() -> void:
 	get_tree().change_scene_to_file("res://AppearanceWorkshop.tscn")

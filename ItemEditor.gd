@@ -659,78 +659,12 @@ func _fill_cat_dropdown(ob: OptionButton, cat: String, exclude: Array, with_none
 		ob.set_item_metadata(ob.item_count - 1, id)
 
 
-# —— 通用：自由标签 UI（下拉选中即加 + 手动输入需确认）——
+# —— 自由标签 UI → 公共件 EditorUI.add_tag_list（🔒 技能设计 §10 阶段2.4 抽通用）——
+# 本类只出「该 mode 下拉给哪些预设」（_tag_offered 过滤 + 按类别分隔）。
 func _build_free_tag_ui(parent: VBoxContainer, mode: String, label: String, arr: Array) -> void:
-	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 3)
-	var adder := HBoxContainer.new()
-	adder.add_theme_constant_override("separation", 6)
-	var pick := OptionButton.new()
-	pick.custom_minimum_size = Vector2(170, 0)
-	_fill_all_tags(pick, mode)
-	if pick.item_count > 1:   # 有合规预设才显示下拉；否则只留手动输入（该分区当前无预设可选）
-		pick.item_selected.connect(func(idx):
-			var tg = pick.get_item_metadata(idx)
-			if tg != null and str(tg) != "" and not arr.has(str(tg)):
-				arr.append(str(tg))
-				_rebuild_free_box(box, arr)
-				_refresh_preview()
-			pick.select(0))
-		adder.add_child(pick)
-	else:
-		pick.queue_free()
-	var manual := LineEdit.new()
-	manual.placeholder_text = "手动 tag"
-	manual.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	adder.add_child(manual)
-	var addb := Button.new()
-	addb.text = "＋"
-	addb.pressed.connect(func():
-		var tt := manual.text.strip_edges()
-		if tt != "" and not arr.has(tt):
-			arr.append(tt)
-			_rebuild_free_box(box, arr)
-			_refresh_preview()
-		manual.clear())
-	adder.add_child(addb)
-	parent.add_child(EditorUI.field_row(label, adder))
-	parent.add_child(box)
-	_rebuild_free_box(box, arr)
+	EditorUI.add_tag_list(parent, label, arr, _tag_options(mode), _refresh_preview)
 
-
-func _rebuild_free_box(box: VBoxContainer, arr: Array) -> void:
-	if box == null or not is_instance_valid(box):
-		return
-	for c in box.get_children():
-		c.queue_free()   # ⚠ 必须 queue_free：本函数常由行内 ✕ 的 pressed 触发，free() 会当场释放正在发信号的按钮
-	if arr.is_empty():
-		var l := Label.new()
-		l.text = "（无）"
-		l.add_theme_color_override("font_color", Color(0.55, 0.6, 0.66))
-		l.add_theme_font_size_override("font_size", 12)
-		box.add_child(l)
-		return
-	for t in arr:
-		var row := HBoxContainer.new()
-		var l := Label.new()
-		l.text = "%s（%s）" % [TagDB.cn(t), t]
-		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		row.add_child(l)
-		var rm := Button.new()
-		rm.text = "✕"
-		var tag: String = str(t)
-		rm.pressed.connect(func():
-			arr.erase(tag)
-			_rebuild_free_box(box, arr)
-			_refresh_preview())
-		row.add_child(rm)
-		box.add_child(row)
-
-
-# 下拉填全部 tag（首项占位 + 按类别分隔），供「其他标签 / 攻击标签」挑
-func _fill_all_tags(ob: OptionButton, mode: String) -> void:
-	ob.add_item("（下拉添加…）")
-	ob.set_item_metadata(ob.item_count - 1, "")
+func _tag_options(mode: String) -> Array:
 	var cats := {}
 	var all := TagDB.all()
 	for id in all:
@@ -740,11 +674,12 @@ func _fill_all_tags(ob: OptionButton, mode: String) -> void:
 		if not cats.has(c):
 			cats[c] = []
 		cats[c].append(id)
+	var out := []
 	for c in cats:
-		ob.add_separator(str(CATEGORY_CN.get(c, c)))
+		out.append(["sep", str(CATEGORY_CN.get(c, c))])
 		for id in cats[c]:
-			ob.add_item("%s（%s）" % [TagDB.cn(id), id])
-			ob.set_item_metadata(ob.item_count - 1, id)
+			out.append([id, "%s（%s）" % [TagDB.cn(id), id]])
+	return out
 
 
 # 某 tag 是否该出现在指定 mode 的自定义下拉里（据类别 + 是否已被上方专门控件管）。
