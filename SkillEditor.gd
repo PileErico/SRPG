@@ -3,8 +3,8 @@ extends "res://ListEditorShell.gd"
 ## 🔒 设计真值＝docs/模块_技能_设计.md（schema §2.1 / 效果块调色盘 §3 / 公式 §2.4 / 护栏 §10）。
 ## 本质＝用预设「效果块」模板拼装技能（非通用 DSL）；复杂专属逻辑走 scripted 逃生舱。
 ## v1 可编块：attack(单 hit+公式) / heal / passive_stat_mods / apply_effect / scripted。
-## 「可编不可跑」护栏（§10）：多 hits / riders＝阶段6 禁入库（块锁定只读）；weapon_source＝阶段3、
-##   passive_stat_mods 运行时挂载＝阶段4、scripted 需代码注册——均黄条警示；未编辑的高级字段保存原样保留。
+## 「可编不可跑」护栏（§10）：多 hits / riders＝阶段6 禁入库（块锁定只读）；weapon_source＝3b 已生效（绿条说明）；
+##   passive_stat_mods 运行时挂载＝阶段4、scripted 需代码注册——黄条警示；未编辑的高级字段保存原样保留。
 ## 存盘校验与 test_data_lint 规则7 对齐（编辑器先拦，别让 lint 红）：BAS 约束 / target 三旗全 false /
 ##   seq 撞格 / per_level 长度==max_level / costs.ap 与顶层 ap_cost 禁双写（收集时剥旧键）。
 ## 效果库（EffectDB）＝独立 EffectEditor 场景，标题栏分段切换（仿工坊切换器，脏守卫接管）。
@@ -25,6 +25,7 @@ const BLOCK_KINDS := [["attack", "攻击 attack"], ["heal", "治疗 heal"],
 const SKILL_TAG_CATS := ["skill_type", "target", "damage"]
 const WARN_COLOR := Color(0.95, 0.8, 0.35)    # 黄＝可编不可跑警示
 const LOCK_COLOR := Color(0.92, 0.5, 0.45)    # 红＝阶段6 前禁入库（块锁定）
+const HINT_COLOR := Color(0.55, 0.75, 0.55)   # 绿＝纯说明（字段已生效，非警示）
 
 # —— 状态 ——
 var _current: Dictionary = {}
@@ -477,7 +478,7 @@ func _build_attack_block(box: VBoxContainer, entry: Dictionary) -> void:
 		return
 	var hit: Dictionary = hits[0] if hits.size() == 1 and typeof(hits[0]) == TYPE_DICTIONARY else {}
 	if hit.has("weapon_source"):
-		box.add_child(_warn("weapon_source 结算＝阶段3——字段保留但现不生效", WARN_COLOR))
+		box.add_child(_warn("weapon_source=off_hand：结算吃副手惩罚 ×offhand_eff/100（🔒 决策5 阶段3b 已生效；盾豁免）", HINT_COLOR))
 	entry["coeff"] = _add_formula(box, "伤害系数 coeff", hit.get("coeff", 1.0))
 	var dk := OptionButton.new()
 	for d in DAMAGE_KINDS:

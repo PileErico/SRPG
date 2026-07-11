@@ -7,6 +7,7 @@ extends SceneTree
 
 const BattleState := preload("res://BattleState.gd")
 const Unit := preload("res://Unit.gd")
+const ItemInstances := preload("res://ItemInstances.gd")   # 副手惩罚盾豁免用例（阶段3b）
 
 var _fail := 0
 
@@ -84,6 +85,54 @@ func _initialize() -> void:
 		d3.stats["armor"] = 10.0
 	ck(int(r3["hp_loss"]) == 10 and int(r3["armor_loss"]) == 10,
 		"穿甲 0.5：血甲各失 10（实际 %d/%d）" % [int(r3["hp_loss"]), int(r3["armor_loss"])])
+
+	# 副手惩罚（🔒 决策5/§7.1 阶段3b）：weapon_source=off_hand → out ×offhand_eff/100；offhand_factor 再乘；盾豁免
+	var d5 = mk("副手靶", "enemy", 5, 4)
+	d5.stats["block_rate"] = 0.0
+	s.units = [a, d5]
+	var r5 := {}
+	for _i in range(64):
+		a.morale = 25
+		r5 = s._resolve_compute(a, d5, {"coeff": 1.0, "weapon_source": "off_hand"})
+		if r5.get("hit", false):
+			break
+		d5.stats["HP"] = int(d5.stats["HP_max"])
+	ck(is_equal_approx(float(r5["offhand"]), 0.5) and is_equal_approx(float(r5["out"]), 10.0),
+		"off_hand 无盾：×offhand_eff 50/100 → out=10")
+	a.modifiers.append({"stat": "offhand_eff", "op": "flat", "value": 25, "source": "perk:单手精通"})
+	for _i in range(64):
+		a.morale = 25
+		r5 = s._resolve_compute(a, d5, {"coeff": 1.0, "weapon_source": "off_hand"})
+		if r5.get("hit", false):
+			break
+		d5.stats["HP"] = int(d5.stats["HP_max"])
+	ck(is_equal_approx(float(r5["offhand"]), 0.75), "单手精通 perk flat+25 → ×0.75（走修正管线）")
+	for _i in range(64):
+		a.morale = 25
+		r5 = s._resolve_compute(a, d5, {"coeff": 1.0, "weapon_source": "off_hand", "offhand_factor": 0.5})
+		if r5.get("hit", false):
+			break
+		d5.stats["HP"] = int(d5.stats["HP_max"])
+	ck(is_equal_approx(float(r5["offhand"]), 0.375), "偷击 offhand_factor 0.5 再乘 → 0.75×0.5=0.375（§7.1 恒定 1.5 倍关系）")
+	a.modifiers.clear()
+	for _i in range(64):
+		a.morale = 25
+		r5 = s._resolve_compute(a, d5, {"coeff": 1.0})
+		if r5.get("hit", false):
+			break
+		d5.stats["HP"] = int(d5.stats["HP_max"])
+	ck(is_equal_approx(float(r5["offhand"]), 1.0), "无 weapon_source（主手/缺省）→ 不吃惩罚")
+	ItemInstances.clear()
+	a.equipment["off_hand"] = ItemInstances.create("wood_kite_shield")
+	for _i in range(64):
+		a.morale = 25
+		r5 = s._resolve_compute(a, d5, {"coeff": 1.0, "weapon_source": "off_hand"})
+		if r5.get("hit", false):
+			break
+		d5.stats["HP"] = int(d5.stats["HP_max"])
+	ck(is_equal_approx(float(r5["offhand"]), 1.0), "副手持盾 → 豁免副手惩罚（§7.1 非盾条件）")
+	a.equipment["off_hand"] = 0
+	ItemInstances.clear()
 
 	# 未命中分支：eva 拉满 → hc 钳 5，等第一次失手
 	var dodge = mk("闪客", "enemy", 4, 2)

@@ -10,7 +10,7 @@ extends RefCounted
 const LABELS := {
 	"HP": "生命", "HP_max": "生命上限", "armor": "护甲", "armor_max": "护甲上限",
 	"AP_max": "AP上限", "move": "移动力", "speed": "速度", "sight": "视野",
-	"atk": "攻击", "atk_eff": "攻击效能", "def_eff": "防御效能",
+	"atk": "攻击", "atk_eff": "攻击效能", "def_eff": "防御效能", "offhand_eff": "副手效能",
 	"acc": "命中", "eva": "闪避", "crit_rate": "暴击率", "crit_dmg": "暴击威力",
 	"block_rate": "格挡率", "block_power": "格挡性能",
 	"res_phys": "物理抗性", "res_nature": "自然抗性",
@@ -28,7 +28,7 @@ const LABELS := {
 const SERIALIZABLE_BASE_STATS := ["HP_max", "atk", "acc", "eva",
 	"crit_rate", "crit_dmg", "block_rate", "block_power",
 	"move", "speed", "sight", "AP_max", "armor_max",
-	"atk_eff", "def_eff",
+	"atk_eff", "def_eff", "offhand_eff",
 	"res_phys", "res_nature", "will_fort", "body_fort",
 	"finesse", "agility", "luck", "resolve",
 	"armor_res_phys", "armor_res_nature",
@@ -38,7 +38,7 @@ const SERIALIZABLE_BASE_STATS := ["HP_max", "atk", "acc", "eva",
 const EDITOR_STATS := ["HP_max", "atk", "acc", "eva",
 	"crit_rate", "crit_dmg", "block_rate", "block_power",
 	"move", "speed", "sight", "AP_max", "armor_max",
-	"atk_eff", "def_eff",
+	"atk_eff", "def_eff", "offhand_eff",
 	"res_phys", "res_nature", "will_fort", "body_fort",
 	"finesse", "agility", "luck", "resolve"]
 

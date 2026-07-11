@@ -13,6 +13,7 @@ const WorldState := preload("res://WorldState.gd")
 const EffectDB := preload("res://EffectDB.gd")
 const SkillDB := preload("res://SkillDB.gd")   # 技能施放（apply_skill：def/skill_ap_cost/resolve_num）
 const ProfDB := preload("res://ProfDB.gd")   # 技能（熟练度域）注册表——战斗涨值挂钩用（🔒 模块_属性成长_设计.md §2.4）
+const ItemInstances := preload("res://ItemInstances.gd")   # 副手惩罚盾豁免查装备（§7.1 阶段3b）
 const MinHeap := preload("res://MinHeap.gd") # 寻路优先队列（_dijkstra；与 Overworld.find_path 共用实现）
 
 const DEFAULT_TERRAIN := "plain"
@@ -501,6 +502,11 @@ func _skill_bonus(attacker, skill) -> float:
 
 # 单次攻击完整结算——命中/暴击/格挡掷骰、伤害分量落血、死门条 −1+结算、异常施加。
 # 只改单位状态，不写日志/飘字；返回展示所需全部数值（未命中时只有 hit/roll/hc/acc/eva）。
+# 副手是否持盾（🔒 §7.1：盾上的 off_hand 攻击不吃副手惩罚——盾击类语义另算）
+func _offhand_is_shield(u) -> bool:
+	var item = ItemInstances.view(int(u.equipment.get("off_hand", 0)))
+	return item != null and (item.get("tags", []) as Array).has("shield")
+
 func _resolve_compute(attacker, target, skill) -> Dictionary:
 	# 命中（r 携带的 acc/eva ＝含技巧/灵活的合计口径，供战斗记录展示）
 	var acc: int = int(round(attacker.effective_stat_f("acc") + attacker.effective_stat_f("finesse"))) \
@@ -523,8 +529,14 @@ func _resolve_compute(attacker, target, skill) -> Dictionary:
 		+ float(attacker.effective_stat_f("luck")) * 0.5) / 100.0) if crit else 1.0
 	var aeff: float = attacker.eff_mult("atk_eff") * _terrain_eff_factor(attacker, "atk_eff", true) \
 		* (1.0 + attacker.morale_combat_mod() / 100.0)   # 攻击效能桶：面板 atk_eff/100 × Π效能修正 × 攻方地块 × 士气档位因子（🔒 §10.7）
+	# 副手惩罚（🔒 决策5/§7.1 阶段3b）：hit 带 weapon_source=="off_hand" 且副手非盾 → ×offhand_eff/100
+	# （基础 50、单手精通 perk 经修正管线 ≤75）；offhand_factor（偷击类 hit 自带再乘，per-round 账本＝阶段6 反应侧）
+	var ohf := 1.0
+	if str(skill.get("weapon_source", "")) == "off_hand" and not _offhand_is_shield(attacker):
+		ohf = maxf(0.0, attacker.effective_stat_f("offhand_eff") / 100.0)
+	ohf *= maxf(0.0, float(skill.get("offhand_factor", 1.0)))
 	var atk := float(attacker.effective_stat_f("atk"))
-	var out := atk * coeff * cmult * aeff
+	var out := atk * coeff * cmult * aeff * ohf
 	# 伤害补正：额外 flat 伤害，不吃效能（如撕裂/抓取的 (力量+灵巧)×0.5）
 	var bonus := _skill_bonus(attacker, skill)
 	if bonus > 0.0:
@@ -563,6 +575,7 @@ func _resolve_compute(attacker, target, skill) -> Dictionary:
 	r["coeff"] = coeff
 	r["cmult"] = cmult
 	r["aeff"] = aeff
+	r["offhand"] = ohf
 	r["bonus"] = bonus
 	r["out"] = out
 	r["blocked"] = blocked
