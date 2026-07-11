@@ -31,6 +31,8 @@ const FactionDB := preload("res://FactionDB.gd")     # 派系/声望注册表（
 const WorldSim := preload("res://WorldSim.gd")       # 大地图动态单位模拟（🟡 v1：玩家移动=世界回合）
 const WorldUnitDB := preload("res://WorldUnitDB.gd") # 动态单位类型注册表
 const MinHeap := preload("res://MinHeap.gd")         # 寻路优先队列（find_path；与 BattleState._dijkstra 共用实现）
+const UnitStatusPanel := preload("res://UnitStatusPanel.gd")   # 👥 角色状态卡（与战斗侧同一份；宿主契约见 _open_status_panel）
+const TextureCache := preload("res://TextureCache.gd")         # 队伍面板成员立绘缩略
 
 const MAP_PATH := "res://maps/overworld/world.json"
 const HOURS_PER_COST := 1    # 1 点通行成本 ＝ 1 小时（大世界成本＝terrains.json move.overworld_cost：道路 1h/格、平原 2h、山 6h）
@@ -818,6 +820,10 @@ func _build_ui() -> void:
 	_time_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_time_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	top.add_child(_time_label)
+	var party_b := Button.new()
+	party_b.text = "👥 队伍"
+	party_b.pressed.connect(_open_party_panel)
+	top.add_child(party_b)
 	var camp_b := Button.new()
 	camp_b.text = "⛺ 扎营（+%d 小时）" % CAMP_HOURS
 	camp_b.pressed.connect(_on_camp)
@@ -1201,6 +1207,108 @@ func _use_consumable_on(tpl_id: String, unit) -> void:
 	_log_line("🎒 %s 使用 %s：+%d 生命（%d/%d）" % [str(unit.unit_name), (str(it.get("name", tpl_id)) if it != null else tpl_id), newhp - cur, newhp, hpmax])
 	_autosave()
 	_open_inventory_panel()
+
+# ============ 👥 队伍（波2 垂直切片首环：大地图看得见自己的人）============
+
+var _party_popup: PopupPanel
+var _status_panel        # UnitStatusPanel 实例（懒建；非模态浮卡，ESC 关）
+
+# 队伍面板：花名册逐人一行（立绘缩略 + 名/等级 + HP + 重伤徽章），点行 → 角色状态卡。
+func _open_party_panel() -> void:
+	var ws = WorldState.current
+	if ws == null:
+		return
+	if _party_popup != null and is_instance_valid(_party_popup):
+		_party_popup.queue_free()
+	var ui = CampaignUI.popup(400)
+	_party_popup = ui["popup"]
+	add_child(_party_popup)
+	var v: VBoxContainer = ui["box"]
+	var title := Label.new()
+	title.text = "👥 队伍（%d 人）——点成员看角色状态页" % ws.roster.size()
+	v.add_child(title)
+	if ws.roster.is_empty():
+		var none := Label.new()
+		none.text = "（花名册为空）"
+		none.add_theme_color_override("font_color", CampaignUI.MUTED)
+		v.add_child(none)
+	for u in ws.roster:
+		v.add_child(_party_row(u))
+	_party_popup.popup_centered()
+
+func _party_row(u) -> Control:
+	var b := Button.new()
+	b.custom_minimum_size = Vector2(0, 52)
+	b.focus_mode = Control.FOCUS_NONE
+	b.clip_contents = true
+	var member = u
+	b.pressed.connect(func():
+		if _party_popup != null and is_instance_valid(_party_popup):
+			_party_popup.hide()
+		_open_status_panel(member))
+	var margin := MarginContainer.new()
+	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	margin.add_theme_constant_override("margin_left", 6)
+	margin.add_theme_constant_override("margin_right", 6)
+	b.add_child(margin)
+	var hb := HBoxContainer.new()
+	hb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hb.add_theme_constant_override("separation", 10)
+	margin.add_child(hb)
+	var icon := TextureRect.new()
+	icon.custom_minimum_size = Vector2(40, 46)
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var tex = TextureCache.get_tex(str(u.portrait))
+	if tex == null:
+		tex = TextureCache.get_tex(str(u.icon))
+	if tex != null:
+		icon.texture = tex
+	else:
+		icon.modulate = Color(1, 1, 1, 0.2)
+	hb.add_child(icon)
+	var name_l := Label.new()
+	name_l.text = "%s　Lv%d" % [str(u.unit_name), int(u.level)]
+	name_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hb.add_child(name_l)
+	var ws = WorldState.current
+	if ws != null and int(u.injured_until) > ws.clock_hours:
+		var inj := Label.new()
+		inj.text = "🤕 重伤休整"
+		inj.add_theme_color_override("font_color", CampaignUI.WARN)
+		inj.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		hb.add_child(inj)
+	var hp := int(u.stats.get("HP", 0))
+	var hpmax := int(u.effective_stat("HP_max"))
+	var hp_l := Label.new()
+	hp_l.text = "❤ %d/%d" % [hp, hpmax]
+	hp_l.add_theme_color_override("font_color",
+		CampaignUI.DANGER if hp * 2 < hpmax else Color(0.72, 0.82, 0.72))
+	hp_l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hb.add_child(hp_l)
+	return b
+
+# 打开角色状态卡（战斗侧同一份 UnitStatusPanel，非模态浮卡/ESC 关/<> 翻页）。
+# 宿主契约（面板 host 只要这两口）：board_units()＝翻页集合（大地图＝花名册）；set_viewed_unit＝棋子高亮（大地图无＝空转）。
+func _open_status_panel(u) -> void:
+	if _status_panel == null or not is_instance_valid(_status_panel):
+		_status_panel = UnitStatusPanel.new()
+		_status_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+		_status_panel.host = self
+		add_child(_status_panel)
+	_status_panel.open(u)
+
+func board_units() -> Array:
+	var ws = WorldState.current
+	return ws.roster if ws != null else []
+
+func set_viewed_unit(_u) -> void:
+	pass   # 大地图无棋子查看高亮（面板 close/open 回调口）
+
 
 # 返回菜单：先自动存档（current 由 StartMenu._ready 统一清——「继续」从磁盘重读，保留只会泄漏进沙盒）
 func _on_back_to_menu() -> void:
