@@ -507,7 +507,7 @@ func current_main_weapon_name() -> String:
 # 主手武器的攻击定义单一取处（🔒 §6.2 + 决策26 阶段3a）：
 #   ① 武器 "bws"（旧键 "bas" 双键桥）→ SkillDB 条目 → flatten_bws 扁平 legacy attack dict；
 #   ② 双读窗口：无 bws 键 → 回退旧内联 attack（迁移后正式数据不应走到；lint 收口后删此分支）；
-#   ③ 无武器攻击 = {}（调用方兜 UNARMED）。悬空 bws 引用＝警告后走回退链。
+#   ③ 无武器攻击 = {}（调用方兜 UNARMED）。悬空 bws 引用 / flatten 空（引用了无 attack 块技能，lint 另拦）＝警告后走回退链。
 func _main_weapon_attack() -> Dictionary:
 	var item = ItemInstances.view(int(equipment.get("main_hand", 0)))
 	if item == null:
@@ -515,9 +515,10 @@ func _main_weapon_attack() -> Dictionary:
 	var bws := str(item.get("bws", item.get("bas", "")))
 	if bws != "":
 		var def = SkillDB.get_skill(bws)
-		if def != null:
-			return SkillDB.flatten_bws(def)
-		push_warning("Unit：武器「%s」bws 引用悬空（%s）——回退内联/徒手" % [str(item.get("name", "")), bws])
+		var flat: Dictionary = SkillDB.flatten_bws(def) if def != null else {}
+		if not flat.is_empty():
+			return flat
+		push_warning("Unit：武器「%s」bws 引用无效（%s：悬空或无 attack 块）——回退内联/徒手" % [str(item.get("name", "")), bws])
 	var atk = item.get("attack", null)
 	if typeof(atk) == TYPE_DICTIONARY:
 		return atk
@@ -640,11 +641,12 @@ func reset_skill_charges() -> void:
 
 var ews_state := {}   # skill_id -> {cd, uses}（战斗运行态；懒初始化——无表项=就绪满次数）
 
-# 装备武器们的 EWS 条目汇总：[{id, requires, slot, unlocked}]（主手→副手序；同 id 首见优先）。
+# 装备武器们的 EWS 条目汇总：[{id, requires, slot, unlocked}]（主手→副手序）。
+# 同 id 去重＝已解锁条目优先（主手锁而副手达标 → 副手条目顶上；「跨源 OR vs 按手位」语义＝3b 待问用户）。
 # 键形（🔒 决策26）：对象 {skill, requires:[{prof,value},…]}；决策22 兼容裸字符串＝无条件 EWS。
 func ews_entries() -> Array:
 	var out := []
-	var seen := {}
+	var seen := {}   # sid -> out 索引
 	for slot in ["main_hand", "off_hand"]:
 		var item = ItemInstances.view(int(equipment.get(slot, 0)))
 		if item == null:
@@ -659,10 +661,15 @@ func ews_entries() -> Array:
 					req = r
 			else:
 				sid = str(e)
-			if sid == "" or seen.has(sid):
+			if sid == "":
 				continue
-			seen[sid] = true
-			out.append({"id": sid, "requires": req, "slot": slot, "unlocked": ews_requires_met(req)})
+			var entry := {"id": sid, "requires": req, "slot": slot, "unlocked": ews_requires_met(req)}
+			if seen.has(sid):
+				if bool(entry["unlocked"]) and not bool(out[seen[sid]]["unlocked"]):
+					out[seen[sid]] = entry
+				continue
+			seen[sid] = out.size()
+			out.append(entry)
 	return out
 
 # EWS 解锁判定（🔒 决策26）：requires 复数 AND——每条〔技艺域 prof + 裸数值阈值 value〕都须 prof_xp 达标。

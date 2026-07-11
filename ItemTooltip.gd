@@ -108,7 +108,9 @@ static func render(item: Dictionary) -> Control:
 	if bws != "":
 		var bdef = SkillDB.get_skill(bws)
 		if bdef != null:
-			atk = SkillDB.flatten_bws(bdef)
+			var flat := SkillDB.flatten_bws(bdef)
+			if not flat.is_empty():   # flatten 空（引用无 attack 块）→ 保持内联回退，勿渲染空壳攻击段
+				atk = flat
 	if typeof(atk) == TYPE_DICTIONARY:
 		v.add_child(HSeparator.new())
 		var hb := HBoxContainer.new()

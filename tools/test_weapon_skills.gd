@@ -5,6 +5,8 @@ extends SceneTree
 ##  · ews_state 生命周期：就绪→consume→冷却随 turn 递减→次数用尽→战斗开始重置
 ##  · apply_skill EWS 分支：非已学消耗走 ews_state（skills 不受污染、AP 扣减一致）
 ##  · 战斗快照：ews_state 往返（护栏#3 白名单同 PR 扩展）
+##  · 审查修复回归：flatten_bws 无 attack 块→{}（防幻影攻击）/ apply_skill 无可跑块拒发零消耗 /
+##    ews_entries 同 id 去重已解锁优先（ItemDB._paths_override 注入临时武器库）
 ## SkillDB 经 _path_override 注入 user:// 临时库，不碰真数据。
 ## 运行：..._console.exe --headless --path "D:/1战棋" -s res://tools/test_weapon_skills.gd（退出码 0=PASS）
 
@@ -12,6 +14,8 @@ const SkillDB := preload("res://SkillDB.gd")
 const Unit := preload("res://Unit.gd")
 const UnitFactory := preload("res://UnitFactory.gd")
 const BattleState := preload("res://BattleState.gd")
+const ItemDB := preload("res://ItemDB.gd")
+const ItemInstances := preload("res://ItemInstances.gd")
 
 var _fail := 0
 func ck(c: bool, m: String) -> void:
@@ -48,7 +52,8 @@ func _initialize() -> void:
 	ck(absf(float(flat.get("coeff", 0)) - 0.9) < 0.0001 and str(flat.get("damage_kind")) == "fire"
 		and int(flat.get("armor_pen", 0)) == 5, "flatten hit 键透传（coeff/damage_kind/armor_pen）")
 	ck((flat.get("tags") as Array) == ["single_target"], "flatten tags 从技能级取")
-	ck(SkillDB.flatten_bws({"name": "空壳"}).get("name") == "空壳", "无 attack 块＝只出顶层字段（不崩）")
+	ck(SkillDB.flatten_bws({"name": "空壳"}).is_empty(), "无 attack 块 → 空 dict（勿造幻影攻击；basic_attack 兜 UNARMED）")
+	ck(SkillDB.flatten_bws(SkillDB.get_skill("t_ews_heal")).is_empty(), "heal 技能被引用为 BWS → 空 dict（审查确认项2）")
 
 	# 2) EWS 解锁判定（🔒 决策26：复数 AND + 裸数值）
 	var u = Unit.new("试兵", "player", 0, 0)
@@ -93,6 +98,43 @@ func _initialize() -> void:
 		"★ ews_state 战斗快照往返（护栏#3 白名单）")
 	var old = UnitFactory.unit_from_battle_snapshot({"uid": 1})
 	ck(typeof(old.ews_state) == TYPE_DICTIONARY and old.ews_state.is_empty(), "旧快照无 ews_state 键 → 空表安全")
+
+	# 6) apply_skill 前置守卫（审查确认项1）：纯 attack 块技能经能力路径 → 拒发且零消耗
+	var brute = Unit.new("莽兵", "player", 2, 0)
+	brute.ap = 3
+	brute.learn_skill("t_bws")
+	var guard_evs: Array = st.apply_skill(brute, "t_bws", target)
+	ck(guard_evs.is_empty(), "无可跑块（纯 attack）→ 拒发空事件")
+	ck(brute.ap == 3, "守卫零消耗：AP 不扣")
+	ck(int((brute.skills["t_bws"] as Dictionary).get("cd", 0)) == 0, "守卫零消耗：冷却不置位")
+	var brute2 = Unit.new("莽兵·未学", "player", 3, 0)
+	brute2.ap = 3
+	st.apply_skill(brute2, "t_bws", target)
+	ck(brute2.ap == 3 and brute2.ews_state.is_empty(), "EWS 分支同守卫：零消耗、ews_state 干净")
+
+	# 7) ews_entries 同 id 去重＝已解锁优先（审查确认项5 最小口径；「跨源 OR vs 按手位」＝3b 待问）
+	var weapons := [
+		{"id": "t_axe", "name": "试斧", "slot": "main_hand",
+			"ews": [{"skill": "t_ews_heal", "requires": [{"prof": "wp_axe", "value": 600}]}]},
+		{"id": "t_kit", "name": "试包", "slot": "off_hand",
+			"ews": [{"skill": "t_ews_heal"}]},
+	]
+	var wf = FileAccess.open("user://test_ws_weapons.json", FileAccess.WRITE)
+	wf.store_string(JSON.stringify(weapons, "  "))
+	wf.close()
+	ItemDB._paths_override = {"weapon": "user://test_ws_weapons.json"}
+	ItemDB.reload_data()
+	ItemInstances.clear()
+	var holder = Unit.new("持械", "player", 4, 0)
+	holder.equipment["main_hand"] = ItemInstances.create("t_axe")
+	holder.equipment["off_hand"] = ItemInstances.create("t_kit")
+	var ents: Array = holder.ews_entries()
+	ck(ents.size() == 1, "同 id 两武器授予 → 去重仍单条")
+	ck(ents.size() == 1 and bool(ents[0]["unlocked"]) and str(ents[0]["slot"]) == "off_hand",
+		"主手锁（斧600未达）+ 副手无条件 → 已解锁条目顶上（勿被主手锁条目遮蔽）")
+	ItemDB._paths_override = {}
+	ItemDB.reload_data()
+	ItemInstances.clear()
 
 	SkillDB._path_override = ""
 	SkillDB.reload_data()

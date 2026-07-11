@@ -81,27 +81,38 @@ static func resolve_num(v, unit = null, level: int = 1, default: float = 0.0) ->
 			return out
 	return default
 
+# 能力路径可跑块白名单（护栏#1「可编≠可跑」的判定口）：apply_skill 当前只会执行这些 kind；
+# attack 块不在内（普攻走攻击路径、经能力施放＝阶段6）——BattleState 守卫 / ItemEditor 过滤 / lint 规则8 共用此口。
+const RUNNABLE_KINDS := ["heal", "apply_effect"]
+
+static func has_runnable_block(def: Dictionary) -> bool:
+	for b in def.get("effects", []):
+		if typeof(b) == TYPE_DICTIONARY and RUNNABLE_KINDS.has(str(b.get("kind", ""))):
+			return true
+	return false
+
 # BWS 扁平化（🔒 §6.2 blocker + 决策26 阶段3a）：BWS 技能条目 → legacy attack dict——
 # 保下游 _resolve_compute / Sandbox / 借机 / AI 的顶层读点零改动。
 # 顶层字段从技能级取（name/icon/range/ap_cost〔经 skill_ap_cost 双键桥〕/tags）；
 # attack 块 hits[0] 其余键全部透传（coeff/damage_kind/aoe/inflict/armor_pen/sure_hit…）。
+# 无 attack 块/空 hits → 返回 {}（勿凭顶层字段造「幻影全额物理攻击」；basic_attack 自然兜 UNARMED）。
 static func flatten_bws(def: Dictionary) -> Dictionary:
-	var out := {}
 	for b in def.get("effects", []):
 		if typeof(b) == TYPE_DICTIONARY and str(b.get("kind", "")) == "attack":
 			var hits = b.get("hits", [])
-			if typeof(hits) == TYPE_ARRAY and hits.size() >= 1 and typeof(hits[0]) == TYPE_DICTIONARY:
-				out = (hits[0] as Dictionary).duplicate(true)
-			break
-	out["name"] = str(def.get("name", ""))
-	out["icon"] = str(def.get("icon", ""))
-	out["range"] = int(def.get("range", 1))
-	out["ap_cost"] = skill_ap_cost(def)
-	var tags := []
-	for t in def.get("tags", []):
-		tags.append(str(t))
-	out["tags"] = tags
-	return out
+			if not (typeof(hits) == TYPE_ARRAY and hits.size() >= 1 and typeof(hits[0]) == TYPE_DICTIONARY):
+				break
+			var out := (hits[0] as Dictionary).duplicate(true)
+			out["name"] = str(def.get("name", ""))
+			out["icon"] = str(def.get("icon", ""))
+			out["range"] = int(def.get("range", 1))
+			out["ap_cost"] = skill_ap_cost(def)
+			var tags := []
+			for t in def.get("tags", []):
+				tags.append(str(t))
+			out["tags"] = tags
+			return out
+	return {}
 
 
 # ============ 写盘口（阶段2；仿 EffectDB/ItemDB 范式——SkillEditor/迁移脚本的唯一写侧）============

@@ -958,9 +958,10 @@ func _weapon_skills(item) -> Array:
 	var out := []
 	var bws := str(item.get("bws", item.get("bas", "")))
 	var bdef = SkillDB.get_skill(bws) if bws != "" else null
-	if bdef != null:
-		out.append(SkillDB.flatten_bws(bdef))
-	else:
+	var flat: Dictionary = SkillDB.flatten_bws(bdef) if bdef != null else {}
+	if not flat.is_empty():
+		out.append(flat)
+	else:   # 悬空/无 attack 块 → 内联回退（与 Unit._main_weapon_attack 同链）
 		var atk = item.get("attack", null)
 		if typeof(atk) == TYPE_DICTIONARY:
 			out.append(atk)
@@ -1558,8 +1559,12 @@ func _learned_active_skills(u) -> Array:
 		return out
 	for id in u.skills:
 		var def = SkillDB.get_skill(id)
-		if def != null and def.get("active", false):
-			out.append(id)
+		if def == null or not def.get("active", false):
+			continue
+		# BWS/纯 attack 块技能不进能力菜单：普攻走攻击路径，attack 经能力施放＝阶段6（apply_skill 有同口守卫）
+		if bool(def.get("usable_as_bas", false)) or not SkillDB.has_runnable_block(def):
+			continue
+		out.append(id)
 	out.sort_custom(func(a, b):
 		return int(SkillDB.get_skill(a).get("seq", 99)) < int(SkillDB.get_skill(b).get("seq", 99)))
 	return out

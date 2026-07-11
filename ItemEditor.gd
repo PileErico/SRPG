@@ -598,10 +598,15 @@ func _build_weapon_skills_section() -> void:
 		if bool(def.get("usable_as_bas", false)):
 			_w_bws.add_item("%s（%s）" % [str(def.get("name", id)), str(id)])
 			_w_bws.set_item_metadata(_w_bws.item_count - 1, str(id))
-	_select_meta(_w_bws, str(_current.get("bws", _current.get("bas", ""))))
+	var cur_bws := str(_current.get("bws", _current.get("bas", "")))
+	_ensure_meta_option(_w_bws, cur_bws)
+	_select_meta(_w_bws, cur_bws)
 	_w_bws.item_selected.connect(func(_i): _refresh_preview())
 	_form.add_child(EditorUI.field_row("普攻 BWS（装备即用）", _w_bws))
-	_w_prefer = _dropdown_pairs(_form, "地/空偏好 prefer（比路兹式起降换手）", PREFER_PAIRS, str(_current.get("prefer", "")))
+	# prefer 初值双读 attack.prefer（同 Unit._weapon_prefer 口径）：未迁移武器打开不丢偏好
+	var atk0 = _current.get("attack", {})
+	var prefer0 := str(_current.get("prefer", atk0.get("prefer", "") if typeof(atk0) == TYPE_DICTIONARY else ""))
+	_w_prefer = _dropdown_pairs(_form, "地/空偏好 prefer（比路兹式起降换手）", PREFER_PAIRS, prefer0)
 	# 旧内联 attack 残留（未迁移数据）：提示——未选 BWS 时保存原样保留、选了 BWS 保存即移除（被引用取代）
 	if typeof(_current.get("attack", null)) == TYPE_DICTIONARY:
 		var warn := Label.new()
@@ -628,7 +633,19 @@ func _build_weapon_skills_section() -> void:
 		_refresh_preview())
 	_form.add_child(addews)
 
-# 一条 EWS：技能下拉（主动技能全库）+ ✕；下挂条件行列表 + ＋添加条件
+# 载入引用不在下拉（技能被删/被新过滤规则挡）→ 补「⚠ 悬空引用」项保值：
+# 否则 _select_meta 静默回退首项，随手保存＝剥掉数据里的引用（审查确认项3）。lint 会另行标红悬空数据。
+func _ensure_meta_option(ob: OptionButton, key: String) -> void:
+	if key == "":
+		return
+	for i in ob.item_count:
+		var m = ob.get_item_metadata(i)
+		if m != null and str(m) == key:
+			return
+	ob.add_item("⚠ 悬空引用：%s" % key)
+	ob.set_item_metadata(ob.item_count - 1, key)
+
+# 一条 EWS：技能下拉（主动+可跑块过滤）+ ✕；下挂条件行列表 + ＋添加条件
 func _add_ews_row(skill_id: String, requires) -> void:
 	var panel := PanelContainer.new()
 	var sb := EditorTheme.sb(Color(0.14, 0.15, 0.19), Color(0.3, 0.34, 0.42))
@@ -645,9 +662,11 @@ func _add_ews_row(skill_id: String, requires) -> void:
 	pick.set_item_metadata(0, "")
 	for id in SkillDB.all():
 		var def = SkillDB.get_skill(id)
-		if bool(def.get("active", false)):
+		# 纯 attack 块技能排除：能力路径跑不了（apply_skill 守卫拒发）——attack 类 EWS＝阶段6 放开；lint 规则8 同闸
+		if bool(def.get("active", false)) and SkillDB.has_runnable_block(def):
 			pick.add_item("%s（%s）" % [str(def.get("name", id)), str(id)])
 			pick.set_item_metadata(pick.item_count - 1, str(id))
+	_ensure_meta_option(pick, skill_id)
 	_select_meta(pick, skill_id)
 	pick.item_selected.connect(func(_i): _refresh_preview())
 	head.add_child(pick)
@@ -688,6 +707,7 @@ func _add_ews_req_row(entry: Dictionary, prof: String, value: int) -> void:
 	for pid in ProfDB.all_ids():
 		pf.add_item("%s（%s）" % [ProfDB.prof_name(str(pid)), str(pid)])
 		pf.set_item_metadata(pf.item_count - 1, str(pid))
+	_ensure_meta_option(pf, prof)
 	_select_meta(pf, prof)
 	pf.item_selected.connect(func(_i): _refresh_preview())
 	row.add_child(pf)

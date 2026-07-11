@@ -635,6 +635,11 @@ func apply_skill(caster, skill_id: String, target) -> Array:
 	var def = SkillDB.get_skill(skill_id)
 	if def == null or caster == null or target == null:
 		return events
+	# 前置守卫（护栏#1 可编≠可跑）：effects 无可跑块 → 拒发且零消耗——
+	# 否则纯 attack 块技能经能力路径＝白烧 AP/冷却/次数（attack 经能力施放＝阶段6 再放开）。
+	if not SkillDB.has_runnable_block(def):
+		push_warning("apply_skill：技能「%s」无可跑效果块（%s）——拒发零消耗（可编≠可跑）" % [skill_id, "/".join(SkillDB.RUNNABLE_KINDS)])
+		return events
 	var lvl := int(caster.skill_level(skill_id))
 	caster.ap -= SkillDB.skill_ap_cost(def)
 	if caster.has_skill(skill_id):
