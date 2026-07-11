@@ -534,6 +534,16 @@ func _offhand_is_shield(u) -> bool:
 	return item != null and (item.get("tags", []) as Array).has("shield")
 
 func _resolve_compute(attacker, target, skill) -> Dictionary:
+	# 交互语境（🔒 §4.2 阶段4）：结算期内两侧互挂 combat_ctx，when 条件（target_tag/skill_tag/target_effect）
+	# 惰性读取（屠龙者 triple_vs / 受击向条件同口）；出结算即清——结算外交互条件恒不满足。
+	attacker.combat_ctx = {"target": target, "skill_tags": skill.get("tags", [])}
+	target.combat_ctx = {"target": attacker, "skill_tags": skill.get("tags", [])}
+	var r := _resolve_compute_body(attacker, target, skill)
+	attacker.combat_ctx = {}
+	target.combat_ctx = {}
+	return r
+
+func _resolve_compute_body(attacker, target, skill) -> Dictionary:
 	# 命中（r 携带的 acc/eva ＝含技巧/灵活的合计口径，供战斗记录展示）
 	var acc: int = int(round(attacker.effective_stat_f("acc") + attacker.effective_stat_f("finesse"))) \
 		+ attacker.morale_combat_mod()   # 展示口径与 _hit_chance 同含士气档位平加（显式类型：attacker 无类型，Variant 不可推断）

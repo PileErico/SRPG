@@ -101,6 +101,11 @@ const MORALE_BASELINE := 25
 const MORALE_BANDS := ["崩溃", "动摇", "稳定", "高昂", "狂热"]
 var morale := MORALE_BASELINE
 
+# —— 交互语境（🔒 §4.2 阶段4）：一次攻击/技能结算期内由 BattleState._resolve_compute 设置、出结算即清——
+# {target: Unit, skill_tags: Array}。when 条件（target_tag/skill_tag/target_effect）惰性读此；
+# 结算外恒空＝交互条件不满足。纯瞬态：不入快照白名单、不序列化。
+var combat_ctx := {}
+
 # —— 挂在身上的效果 / buff（修正对象的载体；将来由修正管线填充，见 docs 装备/修正管线）——
 # 每条形如 {name, kind:"buff"/"debuff", permanent:bool, duration:int(按 round)}；状态页右下列表读它。
 var effects := []
@@ -144,7 +149,64 @@ const BLOCK_MAX_KEYS := ["block_rate", "block_power"]   # 装备来源取高聚�
 # （首例＝武器格挡须装载「格挡」域；triple_vs 等条件修正将来同走此口）。无字段＝无条件生效。
 func _mod_active(m: Dictionary) -> bool:
 	var req := str(m.get("requires_prof", ""))
-	return req == "" or prof_slots.has(req)
+	if req != "" and not prof_slots.has(req):
+		return false
+	var when = m.get("when", null)
+	if typeof(when) == TYPE_ARRAY:
+		for c in when:
+			if typeof(c) != TYPE_DICTIONARY or not _when_met(c):
+				return false
+	return true
+
+# 条件词表 v1（🔒 §4 阶段4；when 数组内 AND）。递归防护锁定（§4.3）：一律读**裸 stats**，
+# 不进 effective_stat 读链（stat_threshold 在 effective_stat_f 内求值，读 effective 会成环）。
+# 单位语境：stat_threshold{stat,op,value,pct_of?} / equip_state{slot,empty?|has_tag?} / self_tag{tag,has?}；
+# 交互语境（combat_ctx 结算期内有效，结算外恒 false）：target_tag{tag|any[]} / skill_tag{tag} / target_effect{effect}。
+# time_of_day / nearby_units＝光环轮（共用空间查询基建，§4.3 性能警示）；未知类型 fail-closed。
+func _when_met(c: Dictionary) -> bool:
+	match str(c.get("type", "")):
+		"stat_threshold":
+			var v := float(stats.get(str(c.get("stat", "")), 0))
+			var pof := str(c.get("pct_of", ""))
+			if pof != "":
+				var denom := float(stats.get(pof, 0))
+				v = (v / denom * 100.0) if denom > 0.0 else 0.0
+			var thr := float(c.get("value", 0))
+			return v <= thr if str(c.get("op", ">=")) == "<=" else v >= thr
+		"equip_state":
+			var iuid := int(equipment.get(str(c.get("slot", "main_hand")), 0))
+			if bool(c.get("empty", false)):
+				return iuid == 0
+			var tag := str(c.get("has_tag", ""))
+			if tag == "":
+				return iuid != 0
+			var item = ItemInstances.view(iuid)
+			return item != null and (item.get("tags", []) as Array).has(tag)
+		"self_tag":
+			return tags.has(str(c.get("tag", ""))) == bool(c.get("has", true))
+		"target_tag":
+			var tgt = combat_ctx.get("target")
+			if tgt == null:
+				return false
+			if c.has("any"):
+				for t in c.get("any", []):
+					if (tgt.tags as Array).has(str(t)):
+						return true
+				return false
+			return (tgt.tags as Array).has(str(c.get("tag", "")))
+		"skill_tag":
+			return (combat_ctx.get("skill_tags", []) as Array).has(str(c.get("tag", "")))
+		"target_effect":
+			var tgt2 = combat_ctx.get("target")
+			if tgt2 == null:
+				return false
+			var eid := str(c.get("effect", ""))
+			for e in tgt2.effects:
+				if typeof(e) == TYPE_DICTIONARY and str(e.get("id", "")) == eid:
+					return true
+			return false
+	push_warning("Unit：when 条件类型「%s」未实现（time_of_day/nearby_units＝光环轮）——按不满足处理" % str(c.get("type", "")))
+	return false
 
 # 有效属性（保留 1 位小数）= 基础面板 + 修正：base + Σflat + base×Σpct%。面板显示用这个。
 # 去重规则 🔒：同一 source（同名 buff/技能）对同一 (stat, op) 只算一次、**取高**（重复挂不叠加、数值不同取大）；
@@ -339,16 +401,27 @@ func can_equip_in(item: Dictionary, slot: String) -> bool:
 
 # 设定特性（按 id）：换特性先清旧特性的修正，再把新特性的属性加成挂进修正管线（source="trait"）。
 func set_trait(id: String) -> void:
-	remove_modifiers_by_source("trait")
+	remove_modifiers_by_source_prefix("trait")   # 前缀摘：连带 trait_triple（三倍条件条）
 	trait_id = id
 	var t = TraitDB.get_trait(id)
 	if t == null:
 		return
+	var tv = t.get("triple_vs", [])
 	for m in t.get("mods", []):
-		var mod: Dictionary = m.duplicate()
+		var mod: Dictionary = m.duplicate(true)
 		mod["source"] = "trait"
 		mod["source_label"] = str(t.get("name", id))
 		modifiers.append(mod)
+		# triple_vs 兑现（🔒 §4.2 阶段4，屠龙者族）：对带指定 tag 的敌人加成三倍
+		# ＝再挂一条 ×2 的条件条（5+10=15），when=target_tag 惰性判（结算外恒不生效）。
+		# 独立 source：同 source 同 (stat,op) 会去重取高，拆源才能 5+10 相加。
+		if typeof(tv) == TYPE_ARRAY and not tv.is_empty() and typeof(m.get("value", 0)) != TYPE_STRING:
+			var extra: Dictionary = m.duplicate(true)
+			extra["value"] = float(m.get("value", 0)) * 2.0
+			extra["source"] = "trait_triple"
+			extra["source_label"] = str(t.get("name", id)) + "（三倍）"
+			extra["when"] = [{"type": "target_tag", "any": (tv as Array).duplicate()}]
+			modifiers.append(extra)
 
 # 装备（模板 id 便捷入口）：从模板**造新实例**再装——原型/预设/沙盒路径零改动。
 # 装失败回收孤儿实例。成功 true。target_slot 非空＝指定目标槽（单手武器装进副手等，见 equip_instance）。
@@ -600,6 +673,8 @@ func skill_uses_max(def) -> int:
 	return base if base > 0 else -1
 
 # 学习 / 升级一个技能（按 def.max_level 封顶）；首学初始化冷却=0、本战次数=满。返回新等级（0=失败）。
+# 被动桥挂载在本体 🔒（§10 阶段4）＝一切获取路径（原型直灌/升级授予/编辑器）都生效；
+# 获取门槛（技能点/等级）绝不塞进来——「结算式学习＝校验+扣点」vs「直灌」两条 API 拆分（既有决议）。
 func learn_skill(id: String) -> int:
 	var def = SkillDB.get_skill(id)
 	if def == null:
@@ -609,7 +684,43 @@ func learn_skill(id: String) -> int:
 		skills[id]["level"] = mini(int(skills[id]["level"]) + 1, maxl)
 	else:
 		skills[id] = {"level": 1, "cd": 0, "uses": skill_uses_max(def)}
+	_hang_skill_passives(id, def, int(skills[id]["level"]))
 	return int(skills[id]["level"])
+
+# 被动桥（🔒 §10 阶段4）：passive_stat_mods / conditional_mod 块 → modifiers（source="skill:<id>"）。
+# 升级＝按源重挂（数值经 resolve_num 随 level 取档，替换不叠加）；遗忘侧（阶段5 树重置）同摘此源。
+# conditional_mod 的 when 原样带上，_mod_active 惰性判（§4.3 读裸 stats 锁定）。
+func _hang_skill_passives(id: String, def: Dictionary, level: int) -> void:
+	var hp0 := effective_stat_f("HP_max")
+	var ar0 := effective_stat_f("armor_max")
+	remove_modifiers_by_source("skill:" + id)
+	for b in def.get("effects", []):
+		if typeof(b) != TYPE_DICTIONARY:
+			continue
+		var kind := str(b.get("kind", ""))
+		if kind != "passive_stat_mods" and kind != "conditional_mod":
+			continue
+		for m in b.get("mods", []):
+			if typeof(m) != TYPE_DICTIONARY:
+				continue
+			var mod: Dictionary = m.duplicate(true)
+			mod["value"] = SkillDB.resolve_num(m.get("value", 0), self, level, 0.0)
+			mod["source"] = "skill:" + id
+			mod["source_label"] = str(def.get("name", id))
+			if kind == "conditional_mod" and typeof(b.get("when", null)) == TYPE_ARRAY:
+				mod["when"] = (b.get("when") as Array).duplicate(true)
+			modifiers.append(mod)
+	_rescale_vitals(hp0, ar0)
+
+# §7.4 scale 🔒：HP_max/armor_max 上限变化 → 当前值按比例缩放（保百分比——杜绝穿脱刷血/残血自杀）。
+# refill（变身回满）＝scripted 侧另走，非此默认路径。
+func _rescale_vitals(hp0: float, ar0: float) -> void:
+	var hp1 := effective_stat_f("HP_max")
+	if not is_equal_approx(hp1, hp0) and hp0 > 0.0:
+		stats["HP"] = maxi(0, int(round(float(stats.get("HP", 0)) * hp1 / hp0)))
+	var ar1 := effective_stat_f("armor_max")
+	if not is_equal_approx(ar1, ar0) and ar0 > 0.0:
+		stats["armor"] = maxi(0, int(round(float(stats.get("armor", 0)) * ar1 / ar0)))
 
 # 是否可立即施放：已学 + 冷却就绪 + 本战还有次数（-1=无限恒有；不含 AP，AP 由调用方另查）
 func skill_ready(id: String) -> bool:

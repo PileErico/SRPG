@@ -3,8 +3,9 @@ extends "res://ListEditorShell.gd"
 ## 🔒 设计真值＝docs/模块_技能_设计.md（schema §2.1 / 效果块调色盘 §3 / 公式 §2.4 / 护栏 §10）。
 ## 本质＝用预设「效果块」模板拼装技能（非通用 DSL）；复杂专属逻辑走 scripted 逃生舱。
 ## v1 可编块：attack(单 hit+公式) / heal / passive_stat_mods / apply_effect / scripted。
-## 「可编不可跑」护栏（§10）：多 hits / riders＝阶段6 禁入库（块锁定只读）；weapon_source＝3b 已生效（绿条说明）；
-##   passive_stat_mods 运行时挂载＝阶段4、scripted 需代码注册——黄条警示；未编辑的高级字段保存原样保留。
+## 「可编不可跑」护栏（§10）：多 hits / riders＝阶段6 禁入库（块锁定只读）；weapon_source＝3b、
+##   passive_stat_mods＝阶段4 均已生效（绿条说明）；scripted 需代码注册——黄条警示；未编辑高级字段保存原样保留。
+##   conditional_mod 块＝阶段4 引擎可跑（when 词表 §4 v1），编辑器表单待做——现存原样保留（未知块黄条）。
 ## 存盘校验与 test_data_lint 规则7 对齐（编辑器先拦，别让 lint 红）：BAS 约束 / target 三旗全 false /
 ##   seq 撞格 / per_level 长度==max_level / costs.ap 与顶层 ap_cost 禁双写（收集时剥旧键）。
 ## 效果库（EffectDB）＝独立 EffectEditor 场景，标题栏分段切换（仿工坊切换器，脏守卫接管）。
@@ -505,7 +506,7 @@ func _build_heal_block(box: VBoxContainer, entry: Dictionary) -> void:
 	EditorUI.add_tag_list(box, "清除效果 tag cleanse_tags", ct, opts, _mark_dirty)
 
 func _build_passive_block(box: VBoxContainer, entry: Dictionary) -> void:
-	box.add_child(_warn("被动运行时挂载＝阶段4——现可编入库，单位学得后暂不生效", WARN_COLOR))
+	box.add_child(_warn("被动桥已生效（🔒 阶段4 2026-07-11）：学得即挂修正 source=skill:<id>，升级重挂、数值可用公式随级", HINT_COLOR))
 	var rows := []
 	entry["mods"] = rows
 	var mods_box := VBoxContainer.new()
