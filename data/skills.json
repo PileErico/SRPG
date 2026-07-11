@@ -37,7 +37,6 @@
       "enemy": false,
       "self": true
     },
-    "usable_as_bas": false,
     "uses_per_battle": {
       "base": 0
     }
@@ -84,7 +83,6 @@
       "enemy": true,
       "self": false
     },
-    "usable_as_bas": true,
     "uses_per_battle": {
       "base": 0
     }
@@ -130,7 +128,6 @@
       "enemy": true,
       "self": false
     },
-    "usable_as_bas": true,
     "uses_per_battle": {
       "base": 0
     }
@@ -173,7 +170,6 @@
       "enemy": true,
       "self": false
     },
-    "usable_as_bas": true,
     "uses_per_battle": {
       "base": 0
     }
@@ -215,7 +211,6 @@
       "enemy": true,
       "self": false
     },
-    "usable_as_bas": true,
     "uses_per_battle": {
       "base": 0
     }
@@ -255,7 +250,6 @@
       "enemy": true,
       "self": false
     },
-    "usable_as_bas": true,
     "uses_per_battle": {
       "base": 0
     }
@@ -296,7 +290,6 @@
       "enemy": true,
       "self": false
     },
-    "usable_as_bas": true,
     "uses_per_battle": {
       "base": 0
     }
@@ -336,7 +329,6 @@
       "enemy": true,
       "self": false
     },
-    "usable_as_bas": true,
     "uses_per_battle": {
       "base": 0
     }
@@ -376,7 +368,6 @@
       "enemy": true,
       "self": false
     },
-    "usable_as_bas": true,
     "uses_per_battle": {
       "base": 0
     }

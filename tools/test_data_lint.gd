@@ -226,6 +226,8 @@ func _initialize() -> void:
 			var costs = s.get("costs", {})
 			ck(not (s.has("ap_cost") and typeof(costs) == TYPE_DICTIONARY and costs.has("ap")),
 				"%s：costs.ap 与顶层 ap_cost 禁双写（双键桥在读取器，数据侧只留一个）" % sid)
+			# 禁键（决策27 关系制，同 element 先例）：BWS 身份由武器引用决定，技能库不做角色声明
+			ck(not s.has("usable_as_bas"), "%s：usable_as_bas 已废（决策27）——禁回流，BAS 形＝is_bas_shaped 计算判定" % sid)
 			var tg = s.get("target", null)
 			if typeof(tg) == TYPE_DICTIONARY:
 				ck(bool(tg.get("enemy", false)) or bool(tg.get("ally", false)) or bool(tg.get("self", false)),
