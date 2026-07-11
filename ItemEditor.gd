@@ -1,6 +1,6 @@
-extends Control
+extends "res://ListEditorShell.gd"
 ## 物品编辑器：创作游戏正式物品（武器 / 防具 / 饰品），写回 res://data/*.json。
-## 入口 StartMenu →「物品编辑器」；自包含 procedural 面板。
+## 入口 StartMenu →「物品编辑器」；CRUD 外壳（清单/行卡/保存删除流程/脏守卫）＝ListEditorShell 基类，本类只管表单+预览。
 ## tag 设计（用户校准）：槽位非物品 tag、自动派生；类型/种类等用「分类下拉」（读 TagDB.by_cat）。
 ##  武器：先选【类型】(近战/投掷/远程/触媒/盾，单选互斥) → 类型级联决定【种类】可选项；投掷无种类、盾不显握持。
 ##  防具：部位(头盔/身甲)+种类(轻/中/重)。其他标签：下拉(选中即加)+手动(确认)。只「天生武器」需勾选。
@@ -8,11 +8,9 @@ extends Control
 const ItemDB := preload("res://ItemDB.gd")
 const EquipSlots := preload("res://EquipSlots.gd")
 const TagDB := preload("res://TagDB.gd")
-const TextureCache := preload("res://TextureCache.gd")   # 图标加载 + 缓存单一入口
 const ItemTooltip := preload("res://ItemTooltip.gd")     # 物品富 tooltip 通用渲染组件（与角色状态页共用）
 const StatMeta := preload("res://StatMeta.gd")           # stat 键→中文单一源（本编辑器不再自带并行对照表）
-const EditorTheme := preload("res://EditorTheme.gd")     # 编辑器统一深色主题（与地图编辑器共用）
-const EditorUI := preload("res://EditorUI.gd")           # 编辑器公共 UI 控件工厂（分节/字段行/确认框/文件对话框，与地图编辑器共用）
+# EditorTheme / EditorUI / TextureCache 由 ListEditorShell 继承
 
 const ICON_DIR := {
 	"weapon": "res://icons/Items/Weapons",
@@ -61,25 +59,15 @@ const VISION_STATES := [
 	["blind", "无视力（视野 ×0）"],
 ]
 
-# —— 状态 ——
+# —— 状态（外壳态 _is_new/_loaded_id/_dirty/_rows/_selected_id 等在 ListEditorShell）——
 var _rarities: Array = []
 var _managed_tag_set: Dictionary = {}
 var _current: Dictionary = {}
 var _current_kind: String = ""
-var _is_new: bool = false
-var _loaded_id: String = ""   # 载入时的 id（改名判定：保存时 id≠此值 → 走 replace_id 换名而非复制）
-var _dirty: bool = false      # 有未保存改动（切换/新建/删除前确认；表单任何变化置真、build/save 清零）
 var _free_tags: Array = []
 var _atk_tags: Array = []
 var _requires: Array = []   # 装备需求 tag（装备者须全部具备，如 char_desmond）
 
-# —— 控件 ——
-var _list_scroll: ScrollContainer         # 分类清单滚动区
-var _list_root: VBoxContainer             # 三大分类折叠组的容器
-var _rows: Dictionary = {}                # id -> 物品行 Button（选中高亮 / 滚动定位）
-var _selected_id: String = ""            # 当前高亮的物品 id（"" = 无）
-var _cat_collapsed: Dictionary = {"weapon": false, "armor": false, "accessory": false, "item": false}   # 各分类折叠态（跨刷新保留）
-var _search: LineEdit
 # —— 物品（可使用/道具）表单控件 ——
 var _w_kind: OptionButton                # 基础区「物品大类」下拉（kind 选择器）
 var _w_usable: CheckBox                   # 可使用（=usable tag，门控 on_use 段）
@@ -91,12 +79,8 @@ var _range_row                            # 距离字段行（作用对象=自�
 var _w_stack: CheckBox
 var _ou_rows_box: VBoxContainer           # 使用效果行容器（动态·仿武器 mods）
 var _ou_rows: Array = []                  # 效果行：[{type:OptionButton, value:SpinBox, row}]
-var _msg: Label
 var _form: VBoxContainer
 var _preview: VBoxContainer
-var _save_btn: Button
-var _dup_btn: Button
-var _del_btn: Button
 var _file_dialog: FileDialog
 var _icon_thumb: TextureRect
 
@@ -130,46 +114,34 @@ var _bas_box: VBoxContainer      # BAS 字段容器（随 _w_has_bas 显隐）
 var _building: bool = false      # _build_form 进行中（抑制「选盾自动关 BAS」等用户动作专属逻辑）
 
 
-func _ready() -> void:
-	set_anchors_preset(Control.PRESET_FULL_RECT)
-	theme = EditorTheme.build()   # 统一深色主题（公共层，与地图编辑器共用）
-	add_child(EditorUI.background())   # 深色背景铺满垫底，去引擎默认灰
+# —— 外壳钩子（ListEditorShell）——
+
+func _shell_init() -> void:
 	_rarities = TagDB.ids_in_cat("rarity")
 	if _rarities.is_empty():
 		_rarities = ["common", "uncommon", "rare", "epic", "legendary", "special"]
 	_build_managed_set()
 
-	var root := VBoxContainer.new()
-	root.set_anchors_preset(Control.PRESET_FULL_RECT)
-	root.offset_left = 20
-	root.offset_top = 14
-	root.offset_right = -20
-	root.offset_bottom = -14
-	root.add_theme_constant_override("separation", 10)
-	add_child(root)
+func _shell_title() -> String:
+	return "物品编辑器"
 
-	var titlebar := HBoxContainer.new()
-	titlebar.add_theme_constant_override("separation", 12)
-	var title := Label.new()
-	title.text = "物品编辑器"
-	title.add_theme_font_size_override("font_size", 26)
-	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	titlebar.add_child(title)
-	var back := Button.new()
-	back.text = "返回主菜单"
-	back.custom_minimum_size = Vector2(120, 0)
-	# 返回也走未保存守卫（切换/新建已有，唯独这里漏了会静默丢改动）
-	back.pressed.connect(func(): _confirm_discard(func(): get_tree().change_scene_to_file("res://StartMenu.tscn")))
-	titlebar.add_child(back)
-	root.add_child(titlebar)
+func _shell_new_label() -> String:
+	return "＋ 新建（大类在表单里选）"
 
-	var split := HSplitContainer.new()
-	split.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	split.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	split.split_offset = 300
-	root.add_child(split)
-	split.add_child(_build_left_pane())
+func _shell_new_entry() -> void:
+	_do_new_item("weapon")   # 默认武器；基础区「物品大类」下拉可改成防具/饰品/物品
 
+func _shell_load(id: String) -> void:
+	_load_item(id)
+
+func _shell_discard_text() -> String:
+	return "当前物品有未保存的修改，继续将丢弃。"
+
+func _shell_has_entry() -> bool:
+	return _w_id != null and is_instance_valid(_w_id)
+
+# 右侧＝再一道 HSplit：表单（中）+ 即时预览（右）
+func _shell_build_right(split: HSplitContainer) -> void:
 	var right_split := HSplitContainer.new()
 	right_split.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	right_split.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -194,30 +166,6 @@ func _ready() -> void:
 	prev_scroll.add_child(_preview)
 	right_split.add_child(prev_scroll)
 
-	var bottom := HBoxContainer.new()
-	bottom.add_theme_constant_override("separation", 12)
-	_msg = Label.new()
-	_msg.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_msg.add_theme_color_override("font_color", Color(0.72, 0.78, 0.86))
-	bottom.add_child(_msg)
-	_dup_btn = Button.new()
-	_dup_btn.text = "另存副本"
-	_dup_btn.custom_minimum_size = Vector2(110, 38)
-	_dup_btn.disabled = true
-	_dup_btn.tooltip_text = "以当前表单内容复制出一件新物品（id 自动加 _copy）"
-	_dup_btn.pressed.connect(_on_duplicate)
-	bottom.add_child(_dup_btn)
-	_save_btn = Button.new()
-	_save_btn.text = "保存 ⤓ (Ctrl+S)"
-	_save_btn.custom_minimum_size = Vector2(140, 38)
-	_save_btn.disabled = true
-	_save_btn.pressed.connect(_on_save)
-	bottom.add_child(_save_btn)
-	root.add_child(bottom)
-
-	_refresh_list()
-	_show_empty_form()
-
 
 func _build_managed_set() -> void:
 	_managed_tag_set = {}
@@ -228,45 +176,8 @@ func _build_managed_set() -> void:
 		_managed_tag_set[s] = true
 
 
-func _build_left_pane() -> Control:
-	var box := VBoxContainer.new()
-	box.custom_minimum_size = Vector2(300, 0)
-	box.add_theme_constant_override("separation", 8)
-	var newbtn := Button.new()
-	newbtn.text = "＋ 新建（大类在表单里选）"
-	newbtn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	newbtn.pressed.connect(_new_item.bind("weapon"))   # 默认武器；基础区「物品大类」下拉可改成防具/饰品/物品
-	box.add_child(newbtn)
-	_search = LineEdit.new()
-	_search.placeholder_text = "🔍 搜 id / 名字"
-	_search.clear_button_enabled = true
-	_search.text_changed.connect(func(_t): _refresh_list())
-	box.add_child(_search)
-	_list_scroll = ScrollContainer.new()
-	_list_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_list_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_list_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	_list_root = VBoxContainer.new()
-	_list_root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_list_root.add_theme_constant_override("separation", 4)
-	_list_scroll.add_child(_list_root)
-	box.add_child(_list_scroll)
-	_del_btn = Button.new()
-	_del_btn.text = "删除选中"
-	_del_btn.disabled = true
-	_del_btn.pressed.connect(_on_delete)
-	box.add_child(_del_btn)
-	return box
-
-
 # 分类清单：三大折叠组（武器/防具/饰品）+ 组内按 类型→种类→名字 排序 + 类型分隔标签。
-func _refresh_list() -> void:
-	if _list_root == null or not is_instance_valid(_list_root):
-		return
-	for c in _list_root.get_children():
-		c.queue_free()
-	_rows = {}
-	var q := (_search.text.strip_edges().to_lower() if _search != null else "")
+func _shell_populate_list(q: String) -> void:
 	var searching := q != ""
 	var items := ItemDB.all()
 	var by_kind := {"weapon": [], "armor": [], "accessory": [], "item": []}
@@ -290,7 +201,8 @@ func _refresh_list() -> void:
 			if dk != "" and dk != last_div:
 				section.add_child(_type_divider(dk))   # 类型变化处插分隔（仅标示排序，不可折叠）
 			last_div = dk
-			var row := _make_item_row(id, it)
+			var row := _make_row_card(id, TextureCache.get_tex(str(it.get("icon", ""))),
+				str(it.get("name", id)), _rarity_color(_rarity_of(it)), 42, Vector2(32, 32), _row_tooltip(it))
 			section.add_child(row)
 			_rows[id] = row
 		if ids.is_empty():
@@ -299,12 +211,7 @@ func _refresh_list() -> void:
 			hint.add_theme_color_override("font_color", Color(0.5, 0.54, 0.6))
 			hint.add_theme_font_size_override("font_size", 12)
 			section.add_child(hint)
-		var collapsed := false if searching else bool(_cat_collapsed.get(kind, false))
-		var fold := EditorUI.make_foldable("%s (%d)" % [ItemDB.kind_cn(kind), ids.size()], section, collapsed, false,
-			func(open): _cat_collapsed[kind] = not open)
-		_list_root.add_child(fold)
-	if _selected_id != "" and _rows.has(_selected_id):
-		_apply_row_selected(_rows[_selected_id], true)
+		_add_fold_group(kind, "%s (%d)" % [ItemDB.kind_cn(kind), ids.size()], section, searching)
 
 
 # 组内排序键：类型 rank → 种类 rank → 名字（拼字符串比较，避免 Array 比较不确定性）
@@ -347,59 +254,6 @@ func _type_divider(text: String) -> Control:
 	l.add_theme_font_size_override("font_size", 11)
 	return l
 
-# 物品行卡片：图标 + 名字（稀有度色）/ id（灰小字）两行；悬停微亮、选中金框。
-func _make_item_row(id: String, item) -> Button:
-	var b := Button.new()
-	b.custom_minimum_size = Vector2(0, 42)
-	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	b.clip_contents = true
-	b.tooltip_text = _row_tooltip(item)
-	b.pressed.connect(func(): _on_row_click(id))
-	var margin := MarginContainer.new()
-	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
-	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	margin.add_theme_constant_override("margin_left", 6)
-	margin.add_theme_constant_override("margin_right", 6)
-	var hb := HBoxContainer.new()
-	hb.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hb.add_theme_constant_override("separation", 8)
-	var icon := TextureRect.new()
-	icon.custom_minimum_size = Vector2(32, 32)
-	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	var tex = TextureCache.get_tex(str(item.get("icon", "")))
-	if tex != null:
-		icon.texture = tex
-	else:
-		icon.modulate = Color(1, 1, 1, 0.2)   # 无图标：占位淡显
-	hb.add_child(icon)
-	var vb := VBoxContainer.new()
-	vb.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	vb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	vb.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	vb.add_theme_constant_override("separation", 0)
-	var nm := Label.new()
-	nm.text = str(item.get("name", id))
-	nm.add_theme_color_override("font_color", _rarity_color(_rarity_of(item)))
-	nm.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	nm.clip_text = true
-	vb.add_child(nm)
-	var idl := Label.new()
-	idl.text = id
-	idl.add_theme_color_override("font_color", Color(0.55, 0.58, 0.64))
-	idl.add_theme_font_size_override("font_size", 10)
-	idl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	idl.clip_text = true
-	vb.add_child(idl)
-	hb.add_child(vb)
-	margin.add_child(hb)
-	b.add_child(margin)
-	_apply_row_selected(b, false)
-	return b
-
 func _row_tooltip(item) -> String:
 	var parts := []
 	var rar := _rarity_of(item)
@@ -422,41 +276,6 @@ func _row_tooltip(item) -> String:
 			parts.append(TagDB.cn(w))
 	return "%s\n%s · slot=%s" % [str(item.get("name", "")), " · ".join(parts), str(item.get("slot", ""))]
 
-# 行选中/非选中样式（选中＝金框亮底；非选中＝中性深底 + 悬停微亮）。
-func _apply_row_selected(b: Button, selected: bool) -> void:
-	if b == null or not is_instance_valid(b):
-		return
-	if selected:
-		var sel := EditorTheme.sb(Color(0.26, 0.30, 0.36), Color(1.0, 0.82, 0.30))
-		sel.set_border_width_all(2)
-		for s in ["normal", "hover", "pressed", "focus"]:
-			b.add_theme_stylebox_override(s, sel)
-	else:
-		b.add_theme_stylebox_override("normal", EditorTheme.sb(Color(0.16, 0.17, 0.20), Color(0, 0, 0, 0)))
-		b.add_theme_stylebox_override("hover", EditorTheme.sb(Color(0.22, 0.24, 0.28), Color(0, 0, 0, 0)))
-		b.add_theme_stylebox_override("pressed", EditorTheme.sb(Color(0.24, 0.27, 0.32), Color(0, 0, 0, 0)))
-		b.add_theme_stylebox_override("focus", EditorTheme.sb(Color(0.16, 0.17, 0.20), Color(0, 0, 0, 0)))
-
-# 点击物品行：已在编辑它＝忽略；否则守卫后加载（取消丢弃＝旧高亮原地保留）。
-func _on_row_click(id: String) -> void:
-	if id == _selected_id:
-		return
-	_confirm_discard(_load_item.bind(id))
-
-# 移动选中高亮到某 id（""＝清空），并滚动到可见。
-func _select_row(id: String) -> void:
-	if _selected_id != id and _rows.has(_selected_id):
-		_apply_row_selected(_rows[_selected_id], false)
-	_selected_id = id
-	if id != "" and _rows.has(id):
-		_apply_row_selected(_rows[id], true)
-		if _list_scroll != null and is_instance_valid(_list_scroll):
-			_list_scroll.ensure_control_visible(_rows[id])
-
-
-func _new_item(kind: String) -> void:
-	_confirm_discard(_do_new_item.bind(kind))
-
 func _do_new_item(kind: String) -> void:
 	_current = _skeleton(kind)
 	_current_kind = kind
@@ -464,9 +283,7 @@ func _do_new_item(kind: String) -> void:
 	_loaded_id = ""
 	_select_row("")
 	_build_form()
-	_save_btn.disabled = false
-	_dup_btn.disabled = true
-	_del_btn.disabled = true
+	_update_buttons()
 	_info("新建%s——填好后点保存（id 必须唯一）" % ItemDB.kind_cn(kind))
 
 
@@ -479,41 +296,21 @@ func _load_item(id: String) -> void:
 	_is_new = false
 	_loaded_id = id
 	_build_form()
-	_save_btn.disabled = false
-	_dup_btn.disabled = false
-	_del_btn.disabled = false
+	_update_buttons()
 	_info("编辑「%s」" % str(_current.get("name", id)))
 	_select_row(id)
 
 
-# 另存副本：当前表单内容 → 新物品（id 自动唯一化），进「新建未保存」态
-func _on_duplicate() -> void:
-	if _w_id == null or not is_instance_valid(_w_id):
-		return
-	var item := _collect()
-	item["id"] = _unique_copy_id(str(item.get("id", "item")))
-	item["name"] = str(item.get("name", "")) + "（副本）"
-	_current = item
-	_current_kind = ItemDB.kind_of(item)
+# 副本以「新建未保存」态打开（外壳 _on_duplicate 已做 id 唯一化/置脏/消息）
+func _shell_open_as_new(entry: Dictionary) -> void:
+	_current = entry
+	_current_kind = ItemDB.kind_of(entry)
 	_is_new = true
 	_loaded_id = ""
-	_select_row("")
 	_build_form()
-	_dirty = true   # 副本＝未保存的新内容
-	_dup_btn.disabled = true
-	_del_btn.disabled = true
-	_info("已生成副本「%s」——改好后保存" % str(item["id"]))
-
-func _unique_copy_id(base: String) -> String:
-	var cand := base + "_copy"
-	var i := 2
-	while ItemDB.get_item(cand) != null:
-		cand = "%s_copy%d" % [base, i]
-		i += 1
-	return cand
 
 
-func _show_empty_form() -> void:
+func _shell_show_empty() -> void:
 	_clear_form()
 	_select_row("")
 	_w_id = null   # 表单已拆：预览/脏标记按「无表单」走（_clear_form 只 queue_free，引用得手动断）
@@ -1090,88 +887,30 @@ func _fill_stat_options(ob: OptionButton) -> void:
 	ob.set_item_metadata(ob.item_count - 1, "vision_state")
 
 
-# —— 保存 / 删除 ——
-func _on_save() -> void:
-	var item := _collect()
-	var id := str(item.get("id", ""))
-	if id == "":
-		_err("id 不能为空")
-		return
-	if not _valid_id(id):
-		_err("id 只能用 字母/数字/下划线（现为「%s」）" % id)
-		return
-	var renaming := (not _is_new) and _loaded_id != "" and id != _loaded_id
-	if (_is_new or renaming) and ItemDB.get_item(id) != null:
-		_err("id「%s」已存在，请换一个" % id)   # 改名撞已有 id 也拦：否则会静默覆盖别的物品
-		return
-	if not ItemDB.save_item(item, _loaded_id if renaming else ""):
-		_err("保存失败（文件被占用/只读？）")
-		return
+# —— 保存 / 删除（流程在外壳，这里只挂库口与消息）——
+
+func _shell_collect() -> Dictionary:
+	return _collect()
+
+func _shell_exists(id: String) -> bool:
+	return ItemDB.get_item(id) != null
+
+func _shell_db_save(entry: Dictionary, replace_id: String) -> bool:
+	return ItemDB.save_item(entry, replace_id)
+
+func _shell_db_delete(id: String) -> bool:
+	return ItemDB.delete_item(id)
+
+func _shell_after_save(entry: Dictionary, id: String, renaming: bool) -> void:
 	if renaming:
 		_info("✓ 已保存并改 id：%s → %s　⚠ 旧战役档里引用旧 id 的装备实例会失效" % [_loaded_id, id])
 		push_warning("ItemEditor：物品 id %s → %s——已有存档中的实例 tpl_id 不随迁" % [_loaded_id, id])
 	else:
-		_info("✓ 已保存「%s」→ %s" % [str(item.get("name", id)), ItemDB.kind_of(item) + ".json"])
-	_is_new = false
-	_loaded_id = id
-	_current = item
-	_dirty = false
-	_refresh_list()
-	_select_row(id)
-	_dup_btn.disabled = false
-	_del_btn.disabled = false
+		_info("✓ 已保存「%s」→ %s" % [str(entry.get("name", id)), ItemDB.kind_of(entry) + ".json"])
+	_current = entry
 
-
-func _on_delete() -> void:
-	var id := str(_current.get("id", ""))
-	if id == "" or _is_new:
-		return
-	EditorUI.confirm(self, "确认删除「%s」(%s)？此操作直接写盘。" % [str(_current.get("name", id)), id],
-		"删除", func(): _do_delete(id), Callable(), "确认删除")
-
-func _do_delete(id: String) -> void:
-	if not ItemDB.delete_item(id):
-		_err("删除失败（文件被占用/只读？）")
-		return
-	_dirty = false
-	_loaded_id = ""
-	_is_new = false
-	_refresh_list()
-	_show_empty_form()
-	_save_btn.disabled = true
-	_dup_btn.disabled = true
-	_del_btn.disabled = true
-	_info("✓ 已删除「%s」" % id)
-
-
-# 未保存改动守卫：干净直接执行；脏则弹确认（丢弃→执行 on_ok / 留下→执行 on_cancel）
-func _confirm_discard(on_ok: Callable, on_cancel := Callable()) -> void:
-	# 干净直接执行；脏则弹确认（丢弃→on_ok / 留下→on_cancel）。on_ok 各路径都会重建表单/离场，dirty 自会归零。
-	EditorUI.confirm_discard(self, _dirty, on_ok, on_cancel,
-		"当前物品有未保存的修改，继续将丢弃。", "丢弃修改", "留下")
-
-# Ctrl+S 保存（表单激活时）
-func _input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and not event.echo \
-			and event.keycode == KEY_S and event.ctrl_pressed:
-		if not _save_btn.disabled:
-			_on_save()
-		get_viewport().set_input_as_handled()
-
-func _valid_id(id: String) -> bool:
-	for i in id.length():
-		var c := id.unicode_at(i)
-		if not ((c >= 48 and c <= 57) or (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c == 95):
-			return false
-	return true
-
-func _info(text: String) -> void:
-	_msg.add_theme_color_override("font_color", Color(0.72, 0.78, 0.86))
-	_msg.text = text
-
-func _err(text: String) -> void:
-	_msg.add_theme_color_override("font_color", Color(0.92, 0.5, 0.45))
-	_msg.text = "✗ " + text
+func _shell_delete_confirm_text(id: String) -> String:
+	return "确认删除「%s」(%s)？此操作直接写盘。" % [str(_current.get("name", id)), id]
 
 
 # 收集表单 → 物品 dict（tags 由 稀有度 + 类型/种类/握持(或部位/甲重) + innate + 自由 组成；slot 自动派生）
@@ -1341,15 +1080,7 @@ func _rarity_color(rar: String) -> Color:
 	var c := TagDB.color(rar)
 	return Color(c) if c != "" else Color("#E0E0E0")
 
-func _select_meta(ob: OptionButton, key) -> void:
-	for i in ob.item_count:
-		if ob.get_item_metadata(i) == key:
-			ob.select(i)
-			return
-	for i in ob.item_count:
-		if not ob.is_item_disabled(i) and ob.get_item_metadata(i) != null:
-			ob.select(i)
-			return
+# _select_meta 在 ListEditorShell（按 metadata 选中 + 回退首个有效项）
 
 # 表单动态字段 → 公共层 EditorUI（信号统一走 _refresh_preview）
 func _add_line(parent: VBoxContainer, label: String, value: String) -> LineEdit:

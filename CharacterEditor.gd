@@ -1,6 +1,7 @@
-extends Control
+extends "res://ListEditorShell.gd"
 ## 角色编辑器：创作单位预设（内置原型），写回 res://data/unit_prototypes.json。
 ## 入口 StartMenu →「角色编辑器」；地图编辑器落子 / 沙盒 / 事件 spawn_unit 都读同一份（UnitFactory.all_prototypes）。
+## CRUD 外壳（清单/行卡/保存删除流程/脏守卫）＝ListEditorShell 基类，本类只管身份条+角色卡。
 ##
 ## 界面＝**真·角色状态页照搬**（复用 UnitStatusPanel 的 editor_mode）：
 ##   · 右侧一张**可编辑角色状态卡**——头像点选、四维直接填、姓名/等级/特性、装备槽点选（按槽筛物品）、背包（暂不入档）；
@@ -14,11 +15,9 @@ const TagDB := preload("res://TagDB.gd")
 const ItemDB := preload("res://ItemDB.gd")
 const EquipSlots := preload("res://EquipSlots.gd")             # 槽位资格（装备选择器按槽筛物品）
 const FactionDB := preload("res://FactionDB.gd")              # 派系单一数据源（派系下拉）
-const TextureCache := preload("res://TextureCache.gd")        # 棋子图标缩略图
-const EditorTheme := preload("res://EditorTheme.gd")
-const EditorUI := preload("res://EditorUI.gd")
 const RaceDB := preload("res://RaceDB.gd")                    # 种族底值（种族下拉同时驱动 race_id+底值，🔒 属性重做 §3）
 const Unit := preload("res://Unit.gd")                        # 换种族先重置引擎基线（防旧种族键残留）
+# EditorTheme / EditorUI / TextureCache 由 ListEditorShell 继承
 
 const FACTIONS := ["player", "ally", "enemy", "neutral"]
 const MANAGED_CATS := ["faction", "race", "biotype", "camp"]   # 有专属下拉（阵营/种族/生物类型/派系）→ 从「其他标签」排除
@@ -31,11 +30,8 @@ const NON_UNIT_CATS := ["terrain", "rarity", "wtype", "wcat_melee", "wcat_ranged
 const PORTRAIT_DIR := "res://icons/Characters"
 const ICON_DIR := "res://icons/Unit_Icons"
 
-# —— 状态 ——
+# —— 状态（外壳态 _is_new/_loaded_id/_dirty/_rows/_selected_id 等在 ListEditorShell）——
 var _unit                    # 当前编辑的活 scratch Unit
-var _is_new := false
-var _loaded_id := ""
-var _dirty := false
 var _free_tags: Array = []   # 自由标签（char_* + 自定义）
 var _bag: Array = []         # 背包内容（8 格，"" = 空；仅编辑器显示，不入档）
 # —— 外观组（成对绑定：一套外观 = 一张立绘 + 一个棋子；编辑器侧状态，经 proto 出入，不入 Unit）——
@@ -45,18 +41,7 @@ var _appearances: Array = []   # [{id,name,portrait,icon}]（至少 1 条）
 var _default_appear := ""      # 默认外观 id（无条件时用它；镜像到顶层 portrait/icon）
 var _editing_appear := ""      # 当前在卡上预览/编辑的外观 id（UI 态，可 ≠ 默认）
 
-# —— 控件 ——
-# 左侧原型清单：按阵营分折叠组 + 行卡片（棋子图标+名字〔阵营色〕/ id）+ 选中金框（仿物品编辑器）
-var _list_scroll: ScrollContainer
-var _list_root: VBoxContainer
-var _rows: Dictionary = {}            # id -> 行 Button（选中高亮 / 滚动定位）
-var _selected_id := ""
-var _fac_collapsed: Dictionary = {}   # 阵营 -> 折叠态（跨刷新保留）
-var _search: LineEdit
-var _msg: Label
-var _save_btn: Button
-var _dup_btn: Button
-var _del_btn: Button
+# —— 控件（左清单/底栏控件在 ListEditorShell）——
 var _strip: VBoxContainer
 var _panel                   # UnitStatusPanel 实例
 var _free_box: HBoxContainer
@@ -76,42 +61,34 @@ var _appear_id_edit: LineEdit       # 选中外观的 id（引用条件用；焦
 var _appear_name_edit: LineEdit     # 选中外观的显示名（即时）
 
 
-func _ready() -> void:
-	set_anchors_preset(Control.PRESET_FULL_RECT)
-	theme = EditorTheme.build()
-	add_child(EditorUI.background())
+# —— 外壳钩子（ListEditorShell）——
 
-	var root := VBoxContainer.new()
-	root.set_anchors_preset(Control.PRESET_FULL_RECT)
-	root.offset_left = 20
-	root.offset_top = 14
-	root.offset_right = -20
-	root.offset_bottom = -14
-	root.add_theme_constant_override("separation", 10)
-	add_child(root)
+func _shell_title() -> String:
+	return "角色编辑器"
 
-	var titlebar := HBoxContainer.new()
-	titlebar.add_theme_constant_override("separation", 12)
-	var title := Label.new()
-	title.text = "角色编辑器"
-	title.add_theme_font_size_override("font_size", 26)
-	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	titlebar.add_child(title)
-	var back := Button.new()
-	back.text = "返回主菜单"
-	back.custom_minimum_size = Vector2(120, 0)
-	back.pressed.connect(func(): _confirm_discard(func(): get_tree().change_scene_to_file("res://StartMenu.tscn")))
-	titlebar.add_child(back)
-	root.add_child(titlebar)
+func _shell_new_label() -> String:
+	return "＋ 新建角色"
 
-	var split := HSplitContainer.new()
-	split.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	split.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	split.split_offset = 260
-	root.add_child(split)
-	split.add_child(_build_left_pane())
+func _shell_split_offset() -> int:
+	return 260
 
-	# 右侧：身份/标签条（上） + 可编辑角色状态卡（下，填满）
+func _shell_left_min_width() -> int:
+	return 240
+
+func _shell_new_entry() -> void:
+	_do_new_unit()
+
+func _shell_load(id: String) -> void:
+	_load_proto(id)
+
+func _shell_discard_text() -> String:
+	return "当前角色有未保存的修改，继续将丢弃。"
+
+func _shell_has_entry() -> bool:
+	return _unit != null
+
+# 右侧：身份/标签条（上） + 可编辑角色状态卡（下，填满）
+func _shell_build_right(split: HSplitContainer) -> void:
 	var right := VBoxContainer.new()
 	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	right.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -138,68 +115,9 @@ func _ready() -> void:
 	_panel.on_edit = _on_panel_edit
 	panel_scroll.add_child(_panel)
 
-	var bottom := HBoxContainer.new()
-	bottom.add_theme_constant_override("separation", 12)
-	_msg = Label.new()
-	_msg.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_msg.add_theme_color_override("font_color", Color(0.72, 0.78, 0.86))
-	bottom.add_child(_msg)
-	_dup_btn = Button.new()
-	_dup_btn.text = "另存副本"
-	_dup_btn.custom_minimum_size = Vector2(110, 38)
-	_dup_btn.disabled = true
-	_dup_btn.pressed.connect(_on_duplicate)
-	bottom.add_child(_dup_btn)
-	_save_btn = Button.new()
-	_save_btn.text = "保存 ⤓ (Ctrl+S)"
-	_save_btn.custom_minimum_size = Vector2(150, 38)
-	_save_btn.disabled = true
-	_save_btn.pressed.connect(_on_save)
-	bottom.add_child(_save_btn)
-	root.add_child(bottom)
-
-	_refresh_list()
-	_show_empty()
-
-
-func _build_left_pane() -> Control:
-	var box := VBoxContainer.new()
-	box.custom_minimum_size = Vector2(240, 0)
-	box.add_theme_constant_override("separation", 8)
-	var newb := Button.new()
-	newb.text = "＋ 新建角色"
-	newb.pressed.connect(_new_unit)
-	box.add_child(newb)
-	_search = LineEdit.new()
-	_search.placeholder_text = "🔍 搜 id / 名字"
-	_search.clear_button_enabled = true
-	_search.text_changed.connect(func(_t): _refresh_list())
-	box.add_child(_search)
-	_list_scroll = ScrollContainer.new()
-	_list_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_list_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_list_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	_list_root = VBoxContainer.new()
-	_list_root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_list_root.add_theme_constant_override("separation", 4)
-	_list_scroll.add_child(_list_root)
-	box.add_child(_list_scroll)
-	_del_btn = Button.new()
-	_del_btn.text = "删除选中"
-	_del_btn.disabled = true
-	_del_btn.pressed.connect(_on_delete)
-	box.add_child(_del_btn)
-	return box
-
 
 # 原型清单：按阵营分折叠组（我方/友方/敌方/中立 + 其它）+ 组内按名字排序 + 行卡片（图标+名字/id）。
-func _refresh_list() -> void:
-	if _list_root == null or not is_instance_valid(_list_root):
-		return
-	for c in _list_root.get_children():
-		c.queue_free()
-	_rows = {}
-	var q := (_search.text.strip_edges().to_lower() if _search != null else "")
+func _shell_populate_list(q: String) -> void:
 	var searching := q != ""
 	var protos := UnitFactory.all_prototypes()
 	var by_fac := {}      # faction -> [proto]
@@ -227,111 +145,19 @@ func _refresh_list() -> void:
 		section.add_theme_constant_override("separation", 2)
 		for p in arr:
 			var id := str(p.get("id", ""))
-			var row := _make_unit_row(p, fac)
+			# 行卡图优先立绘（大图更直观；棋子图标常抽象）→ 退棋子图标 → 淡显占位
+			var tex = TextureCache.get_tex(str(p.get("portrait", "")))
+			if tex == null:
+				tex = TextureCache.get_tex(str(p.get("icon", "")))
+			var hex := TagDB.color(fac)
+			var row := _make_row_card(id, tex, str(p.get("name", id)),
+				Color(hex) if hex != "" else null, 54, Vector2(42, 48))
 			section.add_child(row)
 			_rows[id] = row
-		var collapsed := false if searching else bool(_fac_collapsed.get(fac, false))
-		var fold := EditorUI.make_foldable("%s (%d)" % [TagDB.cn(fac), arr.size()], section, collapsed, false,
-			func(open): _fac_collapsed[fac] = not open)
-		_list_root.add_child(fold)
-	if _selected_id != "" and _rows.has(_selected_id):
-		_apply_row_selected(_rows[_selected_id], true)
-
-
-# 一行原型卡片：立绘缩略（无则退棋子图标/淡显）+ 名字（阵营色）/ id（小灰）。
-func _make_unit_row(proto: Dictionary, fac: String) -> Button:
-	var id := str(proto.get("id", ""))
-	var b := Button.new()
-	b.custom_minimum_size = Vector2(0, 54)
-	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	b.clip_contents = true
-	b.pressed.connect(func(): _on_row_click(id))
-	var margin := MarginContainer.new()
-	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
-	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	margin.add_theme_constant_override("margin_left", 6)
-	margin.add_theme_constant_override("margin_right", 6)
-	var hb := HBoxContainer.new()
-	hb.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hb.add_theme_constant_override("separation", 8)
-	var icon := TextureRect.new()
-	icon.custom_minimum_size = Vector2(42, 48)
-	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	# 优先立绘（大图更直观；棋子图标常抽象）→ 退棋子图标 → 淡显占位
-	var tex = TextureCache.get_tex(str(proto.get("portrait", "")))
-	if tex == null:
-		tex = TextureCache.get_tex(str(proto.get("icon", "")))
-	if tex != null:
-		icon.texture = tex
-	else:
-		icon.modulate = Color(1, 1, 1, 0.2)
-	hb.add_child(icon)
-	var vb := VBoxContainer.new()
-	vb.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	vb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	vb.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	vb.add_theme_constant_override("separation", 0)
-	var nm := Label.new()
-	nm.text = str(proto.get("name", id))
-	var hex := TagDB.color(fac)
-	if hex != "":
-		nm.add_theme_color_override("font_color", Color(hex))
-	nm.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	nm.clip_text = true
-	vb.add_child(nm)
-	var idl := Label.new()
-	idl.text = id
-	idl.add_theme_color_override("font_color", Color(0.55, 0.58, 0.64))
-	idl.add_theme_font_size_override("font_size", 10)
-	idl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	idl.clip_text = true
-	vb.add_child(idl)
-	hb.add_child(vb)
-	margin.add_child(hb)
-	b.add_child(margin)
-	_apply_row_selected(b, id == _selected_id)
-	return b
-
-# 行选中/非选中样式（选中＝金框亮底；非选中＝中性深底 + 悬停微亮）——仿物品编辑器。
-func _apply_row_selected(b: Button, selected: bool) -> void:
-	if b == null or not is_instance_valid(b):
-		return
-	if selected:
-		var sel := EditorTheme.sb(Color(0.26, 0.30, 0.36), Color(1.0, 0.82, 0.30))
-		sel.set_border_width_all(2)
-		for s in ["normal", "hover", "pressed", "focus"]:
-			b.add_theme_stylebox_override(s, sel)
-	else:
-		b.add_theme_stylebox_override("normal", EditorTheme.sb(Color(0.16, 0.17, 0.20), Color(0, 0, 0, 0)))
-		b.add_theme_stylebox_override("hover", EditorTheme.sb(Color(0.22, 0.24, 0.28), Color(0, 0, 0, 0)))
-		b.add_theme_stylebox_override("pressed", EditorTheme.sb(Color(0.24, 0.27, 0.32), Color(0, 0, 0, 0)))
-		b.add_theme_stylebox_override("focus", EditorTheme.sb(Color(0.16, 0.17, 0.20), Color(0, 0, 0, 0)))
-
-# 点行：已在编辑它＝忽略；否则守卫后加载（取消丢弃＝旧高亮原地保留）。
-func _on_row_click(id: String) -> void:
-	if id == _selected_id and not _is_new:
-		return
-	_confirm_discard(_load_proto.bind(id))
-
-# 移动选中高亮到某 id（""＝清空），并滚动到可见。
-func _select_row(id: String) -> void:
-	if _selected_id != id and _rows.has(_selected_id):
-		_apply_row_selected(_rows[_selected_id], false)
-	_selected_id = id
-	if id != "" and _rows.has(id):
-		_apply_row_selected(_rows[id], true)
-		if _list_scroll != null and is_instance_valid(_list_scroll):
-			_list_scroll.ensure_control_visible(_rows[id])
+		_add_fold_group(fac, "%s (%d)" % [TagDB.cn(fac), arr.size()], section, searching)
 
 
 # —— 新建 / 载入 / 副本 ——
-
-func _new_unit() -> void:
-	_confirm_discard(_do_new_unit)
 
 func _do_new_unit() -> void:
 	_open_proto(_skeleton(), true)
@@ -350,24 +176,9 @@ func _load_proto(id: String) -> void:
 	_select_row(id)
 	_info("编辑「%s」" % str(p.get("name", id)))
 
-func _on_duplicate() -> void:
-	if _unit == null:
-		return
-	var proto := _collect_proto()
-	proto["id"] = _unique_id(str(proto.get("id", "unit")))
-	proto["name"] = str(proto.get("name", "")) + "（副本）"
-	_open_proto(proto, true)
-	_select_row("")
-	_dirty = true
-	_info("已生成副本「%s」——改好后保存" % str(proto["id"]))
-
-func _unique_id(base: String) -> String:
-	var cand := base + "_copy"
-	var i := 2
-	while not UnitFactory.get_prototype(cand).is_empty():
-		cand = "%s_copy%d" % [base, i]
-		i += 1
-	return cand
+# 副本以「新建未保存」态打开（外壳 _on_duplicate 已做 id 唯一化/置脏/消息）
+func _shell_open_as_new(entry: Dictionary) -> void:
+	_open_proto(entry, true)
 
 func _open_proto(proto: Dictionary, is_new: bool) -> void:
 	_unit = UnitFactory.make_unit(proto, str(proto.get("default_faction", "enemy")), 0, 0)
@@ -384,7 +195,7 @@ func _open_proto(proto: Dictionary, is_new: bool) -> void:
 
 # —— 身份/标签条（角色卡不显示的编辑器元数据）——
 
-func _show_empty() -> void:
+func _shell_show_empty() -> void:
 	_unit = null
 	_select_row("")
 	for c in _strip.get_children():
@@ -393,6 +204,9 @@ func _show_empty() -> void:
 	hint.text = "← 选左侧角色编辑，或点「＋ 新建角色」"
 	hint.add_theme_color_override("font_color", Color(0.6, 0.65, 0.72))
 	_strip.add_child(hint)
+	if _panel != null and is_instance_valid(_panel):   # 清掉上一个条目的角色卡内容
+		for c in _panel.get_children():
+			c.queue_free()
 	_update_buttons()
 
 func _build_strip() -> void:
@@ -1016,68 +830,28 @@ func _collect_proto() -> Dictionary:
 		proto["appearances"] = out
 	return proto
 
-func _on_save() -> void:
-	if _unit == null:
-		return
-	var proto := _collect_proto()
-	var id := str(proto.get("id", ""))
-	if id == "":
-		_err("id 不能为空")
-		return
-	if not _valid_id(id):
-		_err("id 只能用 字母/数字/下划线（现为「%s」）" % id)
-		return
-	var renaming := (not _is_new) and _loaded_id != "" and id != _loaded_id
-	if (_is_new or renaming) and not UnitFactory.get_prototype(id).is_empty():
-		_err("id「%s」已存在，请换一个" % id)
-		return
-	if not UnitFactory.save_prototype(proto, _loaded_id if renaming else ""):
-		_err("保存失败（文件被占用/只读？）")
-		return
+# 保存/删除流程在外壳（ListEditorShell），这里只挂库口与消息：
+
+func _shell_collect() -> Dictionary:
+	return _collect_proto()
+
+func _shell_exists(id: String) -> bool:
+	return not UnitFactory.get_prototype(id).is_empty()
+
+func _shell_db_save(entry: Dictionary, replace_id: String) -> bool:
+	return UnitFactory.save_prototype(entry, replace_id)
+
+func _shell_db_delete(id: String) -> bool:
+	return UnitFactory.delete_prototype(id)
+
+func _shell_after_save(entry: Dictionary, id: String, renaming: bool) -> void:
 	if renaming:
 		_info("✓ 已保存并改 id：%s → %s（引用旧 id 的地图/事件需同步）" % [_loaded_id, id])
 	else:
-		_info("✓ 已保存原型「%s」→ data/unit_prototypes.json" % str(proto.get("name", id)))
-	_is_new = false
-	_loaded_id = id
-	_dirty = false
-	_refresh_list()
-	_select_row(id)
-	_update_buttons()
+		_info("✓ 已保存原型「%s」→ data/unit_prototypes.json" % str(entry.get("name", id)))
 
-func _on_delete() -> void:
-	if _is_new or _loaded_id == "":
-		return
-	var id := _loaded_id
-	EditorUI.confirm(self, "确认删除原型「%s」(%s)？此操作直接写盘。" % [_unit.unit_name, id],
-		"删除", func(): _do_delete(id), Callable(), "确认删除")
-
-func _do_delete(id: String) -> void:
-	if not UnitFactory.delete_prototype(id):
-		_err("删除失败（文件被占用/只读？）")
-		return
-	_dirty = false
-	_loaded_id = ""
-	_is_new = false
-	_unit = null
-	_refresh_list()
-	_show_empty()
-	if _panel != null and is_instance_valid(_panel):
-		for c in _panel.get_children():
-			c.queue_free()
-	_info("✓ 已删除「%s」" % id)
-
-
-func _confirm_discard(on_ok: Callable, on_cancel := Callable()) -> void:
-	EditorUI.confirm_discard(self, _dirty, on_ok, on_cancel,
-		"当前角色有未保存的修改，继续将丢弃。", "丢弃修改", "留下")
-
-func _input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and not event.echo \
-			and event.keycode == KEY_S and event.ctrl_pressed:
-		if _save_btn != null and not _save_btn.disabled:
-			_on_save()
-		get_viewport().set_input_as_handled()
+func _shell_delete_confirm_text(id: String) -> String:
+	return "确认删除原型「%s」(%s)？此操作直接写盘。" % [_unit.unit_name, id]
 
 
 # —— 小工具 ——
@@ -1123,13 +897,7 @@ func _faction_dropdown(cur_tag: String) -> OptionButton:
 	ob.item_selected.connect(func(_i): _sync_tags())
 	return ob
 
-func _select_meta(ob: OptionButton, key: String) -> void:
-	for i in ob.item_count:
-		if str(ob.get_item_metadata(i)) == key:
-			ob.select(i)
-			return
-	if ob.item_count > 0:
-		ob.select(0)
+# _select_meta / _valid_id / _update_buttons / _mark_dirty / _info / _err 在 ListEditorShell
 
 func _tag_in_cat(cat: String) -> String:
 	var ids := TagDB.ids_in_cat(cat)
@@ -1149,30 +917,3 @@ func _rarity_hex(item: Dictionary) -> String:
 			return hex
 	return ""
 
-func _valid_id(id: String) -> bool:
-	if id == "":
-		return false
-	for i in id.length():
-		var c := id.unicode_at(i)
-		if not ((c >= 48 and c <= 57) or (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c == 95):
-			return false
-	return true
-
-func _update_buttons() -> void:
-	var has := _unit != null
-	if _save_btn: _save_btn.disabled = not has
-	if _dup_btn: _dup_btn.disabled = not has or _is_new
-	if _del_btn: _del_btn.disabled = not has or _is_new or _loaded_id == ""
-
-func _mark_dirty() -> void:
-	_dirty = true
-
-func _info(text: String) -> void:
-	if _msg == null: return
-	_msg.add_theme_color_override("font_color", Color(0.72, 0.78, 0.86))
-	_msg.text = text
-
-func _err(text: String) -> void:
-	if _msg == null: return
-	_msg.add_theme_color_override("font_color", Color(0.92, 0.5, 0.45))
-	_msg.text = "✗ " + text
