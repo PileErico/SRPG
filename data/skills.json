@@ -41,5 +41,344 @@
     "uses_per_battle": {
       "base": 0
     }
+  },
+  {
+    "active": true,
+    "cooldown": {
+      "base": 0
+    },
+    "costs": {
+      "ap": 1
+    },
+    "desc": "",
+    "effects": [
+      {
+        "hits": [
+          {
+            "aoe": {
+              "friendly_fire": true,
+              "length": 2,
+              "shape": "line"
+            },
+            "coeff": 0.85,
+            "damage_kind": "physical"
+          }
+        ],
+        "kind": "attack"
+      }
+    ],
+    "icon": "res://icons/Skills/WeaponSkills/Special_Veiken_Skill1.png",
+    "id": "bws_dragon_lance",
+    "max_level": 1,
+    "name": "突刺·龙枪",
+    "nature": "skill",
+    "range": 2,
+    "requires_hands": [],
+    "tags": [
+      "skill_spear",
+      "piercing",
+      "aoe"
+    ],
+    "target": {
+      "ally": false,
+      "enemy": true,
+      "self": false
+    },
+    "usable_as_bas": true,
+    "uses_per_battle": {
+      "base": 0
+    }
+  },
+  {
+    "active": true,
+    "cooldown": {
+      "base": 0
+    },
+    "costs": {
+      "ap": 1
+    },
+    "desc": "",
+    "effects": [
+      {
+        "hits": [
+          {
+            "coeff": 1,
+            "damage_kind": "physical",
+            "inflict": {
+              "chance": 30,
+              "effect": "bleeding"
+            }
+          }
+        ],
+        "kind": "attack"
+      }
+    ],
+    "icon": "res://icons/Skills/WeaponSkills/Special_Belooz_Skill_1.png",
+    "id": "bws_belooz_rend",
+    "max_level": 1,
+    "name": "撕裂（比路兹）",
+    "nature": "skill",
+    "range": 1,
+    "requires_hands": [],
+    "tags": [
+      "skill_claw",
+      "slashing",
+      "single_target"
+    ],
+    "target": {
+      "ally": false,
+      "enemy": true,
+      "self": false
+    },
+    "usable_as_bas": true,
+    "uses_per_battle": {
+      "base": 0
+    }
+  },
+  {
+    "active": true,
+    "cooldown": {
+      "base": 0
+    },
+    "costs": {
+      "ap": 1
+    },
+    "desc": "",
+    "effects": [
+      {
+        "hits": [
+          {
+            "armor_pen": 0.3,
+            "coeff": 1,
+            "damage_kind": "physical"
+          }
+        ],
+        "kind": "attack"
+      }
+    ],
+    "icon": "res://icons/Skills/WeaponSkills/Special_Belooz_Skill_2.png",
+    "id": "bws_belooz_grab",
+    "max_level": 1,
+    "name": "抓取（比路兹）",
+    "nature": "skill",
+    "range": 1,
+    "requires_hands": [],
+    "tags": [
+      "skill_claw",
+      "piercing",
+      "single_target"
+    ],
+    "target": {
+      "ally": false,
+      "enemy": true,
+      "self": false
+    },
+    "usable_as_bas": true,
+    "uses_per_battle": {
+      "base": 0
+    }
+  },
+  {
+    "active": true,
+    "cooldown": {
+      "base": 0
+    },
+    "costs": {
+      "ap": 1
+    },
+    "desc": "",
+    "effects": [
+      {
+        "hits": [
+          {
+            "coeff": 1,
+            "damage_kind": "physical"
+          }
+        ],
+        "kind": "attack"
+      }
+    ],
+    "icon": "res://icons/Skills/WeaponSkills/Special_Desmond_skill_1.png",
+    "id": "bws_desmond_claw",
+    "max_level": 1,
+    "name": "撕裂（戴斯蒙）",
+    "nature": "skill",
+    "range": 1,
+    "requires_hands": [],
+    "tags": [
+      "skill_claw",
+      "slashing",
+      "single_target"
+    ],
+    "target": {
+      "ally": false,
+      "enemy": true,
+      "self": false
+    },
+    "usable_as_bas": true,
+    "uses_per_battle": {
+      "base": 0
+    }
+  },
+  {
+    "active": true,
+    "cooldown": {
+      "base": 0
+    },
+    "costs": {
+      "ap": 1
+    },
+    "desc": "",
+    "effects": [
+      {
+        "hits": [
+          {
+            "coeff": 1,
+            "damage_kind": "physical"
+          }
+        ],
+        "kind": "attack"
+      }
+    ],
+    "icon": "",
+    "id": "bws_slash",
+    "max_level": 1,
+    "name": "斩击",
+    "nature": "skill",
+    "range": 1,
+    "requires_hands": [],
+    "tags": [
+      "single_target"
+    ],
+    "target": {
+      "ally": false,
+      "enemy": true,
+      "self": false
+    },
+    "usable_as_bas": true,
+    "uses_per_battle": {
+      "base": 0
+    }
+  },
+  {
+    "active": true,
+    "cooldown": {
+      "base": 0
+    },
+    "costs": {
+      "ap": 1
+    },
+    "desc": "",
+    "effects": [
+      {
+        "hits": [
+          {
+            "coeff": 1,
+            "damage_kind": "physical"
+          }
+        ],
+        "kind": "attack"
+      }
+    ],
+    "icon": "",
+    "id": "bws_unarmed",
+    "max_level": 1,
+    "name": "徒手",
+    "nature": "skill",
+    "range": 1,
+    "requires_hands": [],
+    "tags": [
+      "unarmed",
+      "single_target"
+    ],
+    "target": {
+      "ally": false,
+      "enemy": true,
+      "self": false
+    },
+    "usable_as_bas": true,
+    "uses_per_battle": {
+      "base": 0
+    }
+  },
+  {
+    "active": true,
+    "cooldown": {
+      "base": 0
+    },
+    "costs": {
+      "ap": 1
+    },
+    "desc": "",
+    "effects": [
+      {
+        "hits": [
+          {
+            "coeff": 0.8,
+            "damage_kind": "physical"
+          }
+        ],
+        "kind": "attack"
+      }
+    ],
+    "icon": "",
+    "id": "bws_stab",
+    "max_level": 1,
+    "name": "刺击",
+    "nature": "skill",
+    "range": 1,
+    "requires_hands": [],
+    "tags": [
+      "single_target"
+    ],
+    "target": {
+      "ally": false,
+      "enemy": true,
+      "self": false
+    },
+    "usable_as_bas": true,
+    "uses_per_battle": {
+      "base": 0
+    }
+  },
+  {
+    "active": true,
+    "cooldown": {
+      "base": 0
+    },
+    "costs": {
+      "ap": 1
+    },
+    "desc": "",
+    "effects": [
+      {
+        "hits": [
+          {
+            "coeff": 1.1,
+            "damage_kind": "physical"
+          }
+        ],
+        "kind": "attack"
+      }
+    ],
+    "icon": "",
+    "id": "bws_bash",
+    "max_level": 1,
+    "name": "重击",
+    "nature": "skill",
+    "range": 1,
+    "requires_hands": [],
+    "tags": [
+      "single_target"
+    ],
+    "target": {
+      "ally": false,
+      "enemy": true,
+      "self": false
+    },
+    "usable_as_bas": true,
+    "uses_per_battle": {
+      "base": 0
+    }
   }
 ]

@@ -1,23 +1,6 @@
 [
   {
-    "attack": {
-      "aoe": {
-        "friendly_fire": true,
-        "length": 2,
-        "shape": "line"
-      },
-      "ap_cost": 1,
-      "coeff": 0.85,
-      "damage_kind": "physical",
-      "icon": "res://icons/Skills/WeaponSkills/Special_Veiken_Skill1.png",
-      "name": "突刺·龙枪",
-      "range": 2,
-      "tags": [
-        "skill_spear",
-        "piercing",
-        "aoe"
-      ]
-    },
+    "bws": "bws_dragon_lance",
     "icon": "res://icons/Items/Weapons/Special_Veiken.png",
     "id": "spear_dragon_calamity",
     "mods": [
@@ -51,24 +34,7 @@
     "two_handed": true
   },
   {
-    "attack": {
-      "ap_cost": 1,
-      "coeff": 1,
-      "damage_kind": "physical",
-      "icon": "res://icons/Skills/WeaponSkills/Special_Belooz_Skill_1.png",
-      "inflict": {
-        "effect": "bleeding",
-        "chance": 30
-      },
-      "name": "撕裂（比路兹）",
-      "prefer": "ground",
-      "range": 1,
-      "tags": [
-        "skill_claw",
-        "slashing",
-        "single_target"
-      ]
-    },
+    "bws": "bws_belooz_rend",
     "icon": "res://icons/Items/Weapons/Special_Belooz_1.png",
     "id": "claw_wing",
     "innate": true,
@@ -85,6 +51,7 @@
       }
     ],
     "name": "比路兹的翼爪",
+    "prefer": "ground",
     "requires": [
       "char_belooz"
     ],
@@ -98,21 +65,7 @@
     "two_handed": false
   },
   {
-    "attack": {
-      "ap_cost": 1,
-      "armor_pen": 0.3,
-      "coeff": 1,
-      "damage_kind": "physical",
-      "icon": "res://icons/Skills/WeaponSkills/Special_Belooz_Skill_2.png",
-      "name": "抓取（比路兹）",
-      "prefer": "air",
-      "range": 1,
-      "tags": [
-        "skill_claw",
-        "piercing",
-        "single_target"
-      ]
-    },
+    "bws": "bws_belooz_grab",
     "icon": "res://icons/Items/Weapons/Special_Belooz_2.png",
     "id": "claw_foot",
     "innate": true,
@@ -129,6 +82,7 @@
       }
     ],
     "name": "比路兹的足爪",
+    "prefer": "air",
     "requires": [
       "char_belooz"
     ],
@@ -142,19 +96,7 @@
     "two_handed": false
   },
   {
-    "attack": {
-      "ap_cost": 1,
-      "coeff": 1,
-      "damage_kind": "physical",
-      "icon": "res://icons/Skills/WeaponSkills/Special_Desmond_skill_1.png",
-      "name": "撕裂（戴斯蒙）",
-      "range": 1,
-      "tags": [
-        "skill_claw",
-        "slashing",
-        "single_target"
-      ]
-    },
+    "bws": "bws_desmond_claw",
     "icon": "res://icons/Items/Weapons/Special_Desmond_1.png",
     "id": "Desmond_Claw",
     "innate": true,
@@ -184,17 +126,7 @@
     "two_handed": false
   },
   {
-    "attack": {
-      "ap_cost": 1,
-      "coeff": 1,
-      "damage_kind": "physical",
-      "icon": "",
-      "name": "斩击",
-      "range": 1,
-      "tags": [
-        "single_target"
-      ]
-    },
+    "bws": "bws_slash",
     "icon": "res://icons/Items/Weapons/longsword.png",
     "id": "long_sword",
     "innate": false,
@@ -222,22 +154,10 @@
     "two_handed": false
   },
   {
-    "attack": {
-      "ap_cost": 1,
-      "coeff": 1,
-      "damage_kind": "physical",
-      "icon": "",
-      "name": "徒手",
-      "range": 1,
-      "tags": [
-        "unarmed",
-        "single_target"
-      ]
-    },
+    "bws": "bws_unarmed",
     "icon": "res://icons/Items/Weapons/weapon_human_unarmed.png",
     "id": "unarmed_fists",
     "innate": true,
-    "natural": true,
     "mods": [
       {
         "op": "flat",
@@ -251,6 +171,7 @@
       }
     ],
     "name": "拳脚",
+    "natural": true,
     "requires": [],
     "slot": "main_hand",
     "tags": [
@@ -287,17 +208,7 @@
     "two_handed": false
   },
   {
-    "attack": {
-      "ap_cost": 1,
-      "coeff": 0.8,
-      "damage_kind": "physical",
-      "icon": "",
-      "name": "刺击",
-      "range": 1,
-      "tags": [
-        "single_target"
-      ]
-    },
+    "bws": "bws_stab",
     "icon": "",
     "id": "rusty_dagger",
     "innate": false,
@@ -325,17 +236,7 @@
     "two_handed": false
   },
   {
-    "attack": {
-      "ap_cost": 1,
-      "coeff": 1.1,
-      "damage_kind": "physical",
-      "icon": "",
-      "name": "重击",
-      "range": 1,
-      "tags": [
-        "single_target"
-      ]
-    },
+    "bws": "bws_bash",
     "icon": "",
     "id": "wooden_club",
     "innate": false,

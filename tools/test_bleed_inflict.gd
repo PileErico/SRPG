@@ -7,6 +7,7 @@ extends SceneTree
 const BattleState := preload("res://BattleState.gd")
 const ItemDB := preload("res://ItemDB.gd")
 const UnitC := preload("res://Unit.gd")
+const SkillDB := preload("res://SkillDB.gd")   # 阶段3a：attack 经 bws 引用解析（flatten_bws）
 
 var _fail := 0
 func ck(cond: bool, msg: String) -> void:
@@ -32,10 +33,13 @@ func _initialize() -> void:
 	print("=== bleed 迁引用 端到端 回归 ===")
 	var s = BattleState.new()
 
-	# 数据侧：claw_wing 的 inflict 已是引用形态
+	# 数据侧：claw_wing 的 inflict 已是引用形态。
+	# ⚠ 阶段3a（决策26）：attack 已迁 BWS 条目（武器 bws 引用）——经 SkillDB.flatten_bws 取扁平 attack（与运行时同路径）。
 	var claw = ItemDB.get_item("claw_wing")
 	ck(claw != null, "claw_wing 存在")
-	var atk = claw.get("attack", {}) if claw != null else {}
+	var bws_def = SkillDB.get_skill(str(claw.get("bws", ""))) if claw != null else null
+	ck(bws_def != null, "claw_wing 的 bws 引用可解析")
+	var atk: Dictionary = SkillDB.flatten_bws(bws_def) if bws_def != null else {}
 	var inf = atk.get("inflict", {})
 	ck(str(inf.get("effect", "")) == "bleeding", "inflict 引用 effect=bleeding")
 	ck(int(inf.get("chance", 0)) == 30, "inflict 保留 chance=30（rider 侧）")

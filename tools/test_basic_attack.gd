@@ -40,17 +40,18 @@ func _initialize() -> void:
 	var oh0 := int(u.equipment.get("off_hand", 0))
 	ck(mh0 != 0 and oh0 != 0 and mh0 != oh0, "双爪各占一槽（主/副手各一 uid）")
 
-	# 地面初始态：主手翼爪、普攻＝撕裂（prefer ground）
+	# 地面初始态：主手翼爪、普攻＝撕裂（偏好 ground）。
+	# ⚠ 阶段3a（决策26）：prefer 已上提武器顶层（attack 迁 BWS，flatten 不再带）——断言改读武器级 _weapon_prefer。
 	ck(not u.is_airborne(), "初始地面态")
 	ck(str(u.basic_attack().get("name", "")) == "撕裂（比路兹）", "地面普攻＝撕裂（翼爪·主手）")
-	ck(str(u.basic_attack().get("prefer", "")) == "ground", "地面主手爪 prefer=ground")
+	ck(u._weapon_prefer(int(u.equipment.get("main_hand", 0))) == "ground", "地面主手爪 prefer=ground（武器级）")
 	ck(u.current_main_weapon_name() == "比路兹的翼爪", "地面主手 item 名=比路兹的翼爪（日志 flavor 源，无括号）")
 
-	# 起飞：主副手 uid 对调 → 主手足爪、普攻＝抓取（prefer air）
+	# 起飞：主副手 uid 对调 → 主手足爪、普攻＝抓取（偏好 air）
 	u.set_airborne(true)
 	ck(int(u.equipment.get("main_hand", 0)) == oh0 and int(u.equipment.get("off_hand", 0)) == mh0, "起飞：主副手 uid 已对调")
 	ck(str(u.basic_attack().get("name", "")) == "抓取（比路兹）", "空中普攻＝抓取（足爪·主手）")
-	ck(str(u.basic_attack().get("prefer", "")) == "air", "空中主手爪 prefer=air（活跃爪在主手→不吃副手惩罚）")
+	ck(u._weapon_prefer(int(u.equipment.get("main_hand", 0))) == "air", "空中主手爪 prefer=air（活跃爪在主手→不吃副手惩罚）")
 	ck(u.current_main_weapon_name() == "比路兹的足爪", "空中主手 item 名=比路兹的足爪（起降后 flavor 源随之切换）")
 	ck(u.current_main_weapon_name().trim_prefix("比路兹的") == "足爪", "去前缀 → 足爪（日志显示形）")
 
