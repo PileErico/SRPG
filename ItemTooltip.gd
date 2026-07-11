@@ -9,7 +9,9 @@ const StatMeta := preload("res://StatMeta.gd")
 const TextureCache := preload("res://TextureCache.gd")
 const EquipSlots := preload("res://EquipSlots.gd")
 const ItemDB := preload("res://ItemDB.gd")
-const SkillDB := preload("res://SkillDB.gd")   # skill_ap_cost 双键桥（attack 块 AP 显示，§2.1）
+const SkillDB := preload("res://SkillDB.gd")   # skill_ap_cost 双键桥 + bws 引用解析 flatten_bws（阶段3a）
+const EffectDB := preload("res://EffectDB.gd") # inflict 引用形 {effect,chance} 的效果名解析
+const ProfDB := preload("res://ProfDB.gd")     # EWS 解锁条件显示（技艺域名，决策26）
 
 # 修正行语义色（与 Sandbox.OK_GREEN/BAD_RED、UnitStatusPanel.STAT_GREEN/RED 同 hex——语义色全局统一待 D8 拍板）
 const MOD_GREEN := Color("#6FCF6F")
@@ -100,8 +102,13 @@ static func render(item: Dictionary) -> Control:
 				cln.append(TagDB.cn(str(t)))
 			v.add_child(_kv("　净化", "、".join(cln)))
 
-	# 攻击 skill
+	# 攻击 skill（阶段3a 🔒 决策26：优先 bws 引用 → SkillDB 扁平化；双读窗口回退旧内联 attack）
 	var atk = item.get("attack", null)
+	var bws := str(item.get("bws", item.get("bas", "")))
+	if bws != "":
+		var bdef = SkillDB.get_skill(bws)
+		if bdef != null:
+			atk = SkillDB.flatten_bws(bdef)
 	if typeof(atk) == TYPE_DICTIONARY:
 		v.add_child(HSeparator.new())
 		var hb := HBoxContainer.new()
@@ -134,7 +141,14 @@ static func render(item: Dictionary) -> Control:
 			v.add_child(_kv("穿甲", "%s%%（按比例无视护甲）" % _num(pen * 100.0)))
 		var inf = atk.get("inflict", null)
 		if typeof(inf) == TYPE_DICTIONARY:
-			var txt := "%s%% 施加 %s" % [_num(float(inf.get("chance", 0))), str(inf.get("name", ""))]
+			# 效果名：引用形 {effect,chance} 经 EffectDB 解析（🔒 §2.2 引用制）；旧内联 name 兜底
+			var iname := str(inf.get("name", ""))
+			var eid := str(inf.get("effect", ""))
+			if eid != "":
+				var edef = EffectDB.get_effect(eid)
+				if edef != null:
+					iname = str(edef.get("name", eid))
+			var txt := "%s%% 施加 %s" % [_num(float(inf.get("chance", 100))), iname]
 			if float(inf.get("dot_pct_max_hp", 0)) > 0.0:
 				txt += "（回合末 最大生命%s%%·%d回合）" % [_num(float(inf.get("dot_pct_max_hp", 0))), int(inf.get("duration", 0))]
 			v.add_child(_kv("异常", txt))
@@ -142,13 +156,30 @@ static func render(item: Dictionary) -> Control:
 		if typeof(aoe) == TYPE_DICTIONARY:
 			var ff := "（友伤）" if bool(aoe.get("friendly_fire", false)) else ""
 			v.add_child(_kv("范围", "%s·长%d%s" % [str(aoe.get("shape", "")), int(aoe.get("length", 1)), ff]))
-		var prefer := str(atk.get("prefer", ""))
+		var prefer := str(item.get("prefer", atk.get("prefer", "")))   # 阶段3a：prefer 上提武器级（双读旧位）
 		if prefer == "ground" or prefer == "air":
 			var note := Label.new()
 			note.text = "地面战斗时优先使用" if prefer == "ground" else "天空战斗时优先使用"
 			note.add_theme_font_size_override("font_size", 12)
 			note.add_theme_color_override("font_color", Color(0.70, 0.85, 1.0))
 			v.add_child(note)
+	# EWS 额外技能陈列（🔒 决策26：解锁条件跟武器引用走；tooltip 只陈列定义+条件，解锁态在能力菜单表达）
+	var ews = item.get("ews", [])
+	if typeof(ews) == TYPE_ARRAY and not ews.is_empty():
+		v.add_child(HSeparator.new())
+		for e in ews:
+			var sid := str(e.get("skill", "")) if typeof(e) == TYPE_DICTIONARY else str(e)
+			var sdef = SkillDB.get_skill(sid)
+			var ews_nm := str(sdef.get("name", sid)) if sdef != null else "%s（引用悬空）" % sid
+			var req_txt := ""
+			if typeof(e) == TYPE_DICTIONARY:
+				var parts := []
+				for r in e.get("requires", []):
+					if typeof(r) == TYPE_DICTIONARY:
+						parts.append("%s %d" % [ProfDB.prof_name(str(r.get("prof", ""))), int(r.get("value", 0))])
+				if not parts.is_empty():
+					req_txt = "（需 %s）" % " ∧ ".join(parts)
+			v.add_child(_kv("额外技能", ews_nm + req_txt))
 	return panel
 
 # —— 共用小件（公开：物品/技能/特性 tooltip 与角色状态页复用同一份，字号按场合传）——

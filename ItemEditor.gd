@@ -10,6 +10,8 @@ const EquipSlots := preload("res://EquipSlots.gd")
 const TagDB := preload("res://TagDB.gd")
 const ItemTooltip := preload("res://ItemTooltip.gd")     # 物品富 tooltip 通用渲染组件（与角色状态页共用）
 const StatMeta := preload("res://StatMeta.gd")           # stat 键→中文单一源（本编辑器不再自带并行对照表）
+const SkillDB := preload("res://SkillDB.gd")             # 武器技能引用位（BWS 下拉/EWS 行，🔒 决策25/26 引用制）
+const ProfDB := preload("res://ProfDB.gd")               # EWS 解锁条件（技艺域下拉+档位名提示）
 # EditorTheme / EditorUI / TextureCache 由 ListEditorShell 继承
 
 const ICON_DIR := {
@@ -18,8 +20,8 @@ const ICON_DIR := {
 	"accessory": "res://icons/Items/Accessories",
 	"item": "res://icons/Items",
 }
-const DAMAGE_KINDS := ["physical", "fire", "ice", "thunder", "holy"]
 const OPS := [["flat", "固定"], ["pct", "百分比%"]]
+const PREFER_PAIRS := [["", "（无）"], ["ground", "地面（落地换进主手）"], ["air", "空中（起飞换进主手）"]]   # 比路兹式起降换手
 # 物品大类下拉（基础区，id 上方）：kind 选择器——替掉旧的 4 个「＋类别」按钮
 const KIND_PAIRS := [["weapon", "武器"], ["armor", "防具"], ["accessory", "饰品"], ["item", "物品"]]
 const USE_TARGETS := [["ally", "友方单位"], ["enemy", "敌对单位"], ["self", "自身"]]   # on_use 作用对象（可使用物品；敌对=投掷类攻击道具）
@@ -65,7 +67,6 @@ var _managed_tag_set: Dictionary = {}
 var _current: Dictionary = {}
 var _current_kind: String = ""
 var _free_tags: Array = []
-var _atk_tags: Array = []
 var _requires: Array = []   # 装备需求 tag（装备者须全部具备，如 char_desmond）
 
 # —— 物品（可使用/道具）表单控件 ——
@@ -100,18 +101,14 @@ var _innate_slot_row: Control
 # 防具
 var _w_gear: OptionButton
 var _w_weight: OptionButton
-# 修正 / 攻击
+# 修正 / 武器技能（🔒 决策25/26 引用制：BWS 普攻位 + EWS 额外技能位；招式本体在技能编辑器）
 var _mods_box: VBoxContainer
 var _mod_rows: Array = []
-var _w_atk_name: LineEdit
-var _w_atk_icon: LineEdit
-var _w_atk_coeff: SpinBox
-var _w_atk_range: SpinBox
-var _w_atk_ap: SpinBox
-var _w_atk_dmgkind: OptionButton
-var _w_has_bas: CheckBox         # 是否含基础攻击技能 BAS（关＝武器不提供基础攻击，如盾）
-var _bas_box: VBoxContainer      # BAS 字段容器（随 _w_has_bas 显隐）
-var _building: bool = false      # _build_form 进行中（抑制「选盾自动关 BAS」等用户动作专属逻辑）
+var _w_bws: OptionButton         # 普攻 BWS 下拉（usable_as_bas 过滤；（无）＝不提供普攻，如盾）
+var _w_prefer: OptionButton      # 地/空偏好（比路兹式起降换手；一般武器（无））
+var _ews_box: VBoxContainer      # EWS 行容器
+var _ews_rows: Array = []        # EWS 行：[{panel, skill:OptionButton, reqs:[{row,prof,value,hint}], reqs_box}]
+var _building: bool = false      # _build_form 进行中（抑制「选盾自动清 BWS」等用户动作专属逻辑）
 
 
 # —— 外壳钩子（ListEditorShell）——
@@ -325,11 +322,10 @@ func _shell_show_empty() -> void:
 func _skeleton(kind: String) -> Dictionary:
 	match kind:
 		"weapon":
+			# 武器技能＝引用制（🔒 决策25/26）：bws/ews 引用技能库条目，不再内嵌 attack；新武器待选 BWS
 			return {"id": "", "name": "新武器", "slot": "main_hand", "icon": "",
 				"tags": ["common", "melee", "weapon_sword", "one_handed"], "requires": [], "mods": [],
-				"two_handed": false, "innate": false,
-				"attack": {"name": "普通攻击", "icon": "", "coeff": 1.0, "range": 1,
-					"ap_cost": 1, "damage_kind": "physical", "tags": ["single_target"]}}
+				"two_handed": false, "innate": false}
 		"armor":
 			return {"id": "", "name": "新防具", "slot": "body", "icon": "",
 				"tags": ["common", "body", "medium_armor"], "requires": [],
@@ -346,8 +342,8 @@ func _clear_form() -> void:
 	for c in _form.get_children():
 		c.queue_free()
 	_mod_rows.clear()
+	_ews_rows = []
 	_free_tags = []
-	_atk_tags = []
 	_requires = []
 
 
@@ -411,9 +407,9 @@ func _build_form() -> void:
 		_refresh_preview())
 	_form.add_child(addmod)
 
-	# 4. 基础攻击技能 BAS（仅武器，放底部）
+	# 4. 武器技能（仅武器，放底部）：BWS/EWS 引用位（🔒 决策25/26）
 	if _current_kind == "weapon":
-		_build_bas_section()
+		_build_weapon_skills_section()
 
 	if _current_kind == "weapon":
 		_on_wtype_changed()   # 级联 + 显隐初始化
@@ -583,58 +579,146 @@ func _on_wtype_changed() -> void:
 		_handed_row.visible = wtype != "shield" and not innate
 	if _innate_slot_row != null and is_instance_valid(_innate_slot_row):
 		_innate_slot_row.visible = innate
-	# 盾不提供基础攻击：用户切到盾时自动关 BAS（仍可手动开回；载入初始化 _building 时不强改）
-	if not _building and wtype == "shield" and _w_has_bas != null and is_instance_valid(_w_has_bas) and _w_has_bas.button_pressed:
-		_w_has_bas.button_pressed = false
+	# 盾不提供普攻：用户切到盾时自动清 BWS 选择（仍可手动选回；载入初始化 _building 时不强改）
+	if not _building and wtype == "shield" and _w_bws != null and is_instance_valid(_w_bws):
+		_select_meta(_w_bws, "")
 	_refresh_preview()
 
 
-# 基础攻击技能（BAS）：底部段
-func _build_bas_section() -> void:
-	var atk = _current.get("attack", {})
-	if typeof(atk) != TYPE_DICTIONARY:
-		atk = {}
-	_form.add_child(EditorUI.section_title("基础攻击技能 BAS（装备武器 = 设定该单位的基础攻击）"))
-	# 开关：是否含 BAS。关闭＝武器不提供基础攻击（保存移除 attack 字段）；盾等纯防具武器用。
-	_w_has_bas = _add_check(_form, "含基础攻击技能 BAS（盾牌等不提供基础攻击的武器请关闭）", _has_bas_initial())
-	_w_has_bas.toggled.connect(func(_v): _on_has_bas_changed())
-	# BAS 字段容器（随开关显隐）
-	_bas_box = VBoxContainer.new()
-	_bas_box.add_theme_constant_override("separation", 8)
-	_form.add_child(_bas_box)
-	_w_atk_name = _add_line(_bas_box, "攻击名", str(atk.get("name", "")))
-	_w_atk_icon = _add_line(_bas_box, "攻击 icon", str(atk.get("icon", "")))
-	_w_atk_coeff = _add_spin(_bas_box, "伤害系数 coeff", float(atk.get("coeff", 1.0)), 0.0, 10.0, 0.05)
-	_w_atk_range = _add_spin(_bas_box, "射程 range", float(atk.get("range", 1)), 0, 20, 1)
-	_w_atk_ap = _add_spin(_bas_box, "AP 消耗 ap_cost", float(atk.get("ap_cost", 1)), 0, 9, 1)
-	_w_atk_dmgkind = OptionButton.new()
-	for dk in DAMAGE_KINDS:
-		_w_atk_dmgkind.add_item(dk)
-		_w_atk_dmgkind.set_item_metadata(_w_atk_dmgkind.item_count - 1, dk)
-	_select_meta(_w_atk_dmgkind, str(atk.get("damage_kind", "physical")))
-	_w_atk_dmgkind.item_selected.connect(func(_i): _refresh_preview())
-	_bas_box.add_child(EditorUI.field_row("伤害类型 damage_kind", _w_atk_dmgkind))
-	_atk_tags = []
-	for t in atk.get("tags", []):
-		_atk_tags.append(str(t))
-	_build_free_tag_ui(_bas_box, "attack", "攻击标签", _atk_tags)
-	var note := Label.new()
-	note.text = "（aoe / bonus / inflict / armor_pen 等高级字段本版不编辑，保存时原样保留）"
-	note.add_theme_color_override("font_color", Color(0.6, 0.62, 0.68))
-	note.add_theme_font_size_override("font_size", 12)
-	_bas_box.add_child(note)
-	_bas_box.visible = _w_has_bas.button_pressed
+# ============ 武器技能段（🔒 决策25/26 引用制：只引用技能库、不内嵌创建；招式参数去技能编辑器改）============
 
+# BWS 普攻位（usable_as_bas 过滤＝形状声明） + 地/空偏好 + EWS 行（每条：技能引用+复数 AND 解锁条件）
+func _build_weapon_skills_section() -> void:
+	_form.add_child(EditorUI.section_title("武器技能（引用技能库条目；招式参数在技能编辑器改——决策25 引用制）"))
+	_w_bws = OptionButton.new()
+	_w_bws.add_item("（无——不提供普攻，如盾）")
+	_w_bws.set_item_metadata(0, "")
+	for id in SkillDB.all():
+		var def = SkillDB.get_skill(id)
+		if bool(def.get("usable_as_bas", false)):
+			_w_bws.add_item("%s（%s）" % [str(def.get("name", id)), str(id)])
+			_w_bws.set_item_metadata(_w_bws.item_count - 1, str(id))
+	_select_meta(_w_bws, str(_current.get("bws", _current.get("bas", ""))))
+	_w_bws.item_selected.connect(func(_i): _refresh_preview())
+	_form.add_child(EditorUI.field_row("普攻 BWS（装备即用）", _w_bws))
+	_w_prefer = _dropdown_pairs(_form, "地/空偏好 prefer（比路兹式起降换手）", PREFER_PAIRS, str(_current.get("prefer", "")))
+	# 旧内联 attack 残留（未迁移数据）：提示——未选 BWS 时保存原样保留、选了 BWS 保存即移除（被引用取代）
+	if typeof(_current.get("attack", null)) == TYPE_DICTIONARY:
+		var warn := Label.new()
+		warn.text = "⚠ 本武器仍带旧内联 attack：未选 BWS＝保存原样保留（双读窗口）；选了 BWS＝保存时移除（引用取代）"
+		warn.add_theme_color_override("font_color", Color(0.95, 0.8, 0.35))
+		warn.add_theme_font_size_override("font_size", 12)
+		warn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		_form.add_child(warn)
+	# EWS 额外技能位：装备授予、达标解锁、以能力形式使用（🔒 决策26）
+	_form.add_child(EditorUI.section_title("额外技能 EWS（装备授予；每条可配复数 AND 解锁条件〔技艺+熟练度裸数值〕）"))
+	_ews_rows = []
+	_ews_box = VBoxContainer.new()
+	_ews_box.add_theme_constant_override("separation", 6)
+	_form.add_child(_ews_box)
+	for e in _current.get("ews", []):
+		if typeof(e) == TYPE_DICTIONARY:
+			_add_ews_row(str(e.get("skill", "")), e.get("requires", []))
+		else:
+			_add_ews_row(str(e), [])   # 决策22 兼容：裸 id＝无条件
+	var addews := Button.new()
+	addews.text = "＋ 添加额外技能"
+	addews.pressed.connect(func():
+		_add_ews_row("", [])
+		_refresh_preview())
+	_form.add_child(addews)
 
-# 载入时 BAS 开关初值＝物品当前是否有非空 attack（盾/无 BAS 的旧数据＝关）
-func _has_bas_initial() -> bool:
-	var a = _current.get("attack", null)
-	return typeof(a) == TYPE_DICTIONARY and not a.is_empty()
+# 一条 EWS：技能下拉（主动技能全库）+ ✕；下挂条件行列表 + ＋添加条件
+func _add_ews_row(skill_id: String, requires) -> void:
+	var panel := PanelContainer.new()
+	var sb := EditorTheme.sb(Color(0.14, 0.15, 0.19), Color(0.3, 0.34, 0.42))
+	sb.set_content_margin_all(8)
+	panel.add_theme_stylebox_override("panel", sb)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 4)
+	panel.add_child(box)
+	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", 6)
+	var pick := OptionButton.new()
+	pick.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	pick.add_item("（选技能…）")
+	pick.set_item_metadata(0, "")
+	for id in SkillDB.all():
+		var def = SkillDB.get_skill(id)
+		if bool(def.get("active", false)):
+			pick.add_item("%s（%s）" % [str(def.get("name", id)), str(id)])
+			pick.set_item_metadata(pick.item_count - 1, str(id))
+	_select_meta(pick, skill_id)
+	pick.item_selected.connect(func(_i): _refresh_preview())
+	head.add_child(pick)
+	var rm := Button.new()
+	rm.text = "✕"
+	head.add_child(rm)
+	box.add_child(head)
+	var reqs_box := VBoxContainer.new()
+	reqs_box.add_theme_constant_override("separation", 3)
+	box.add_child(reqs_box)
+	var entry := {"panel": panel, "skill": pick, "reqs": [], "reqs_box": reqs_box}
+	rm.pressed.connect(func():
+		_ews_rows.erase(entry)
+		panel.queue_free()
+		_refresh_preview())
+	if typeof(requires) == TYPE_ARRAY:
+		for r in requires:
+			if typeof(r) == TYPE_DICTIONARY:
+				_add_ews_req_row(entry, str(r.get("prof", "")), int(r.get("value", 0)))
+	var addr := Button.new()
+	addr.text = "＋ 添加解锁条件"
+	addr.pressed.connect(func():
+		_add_ews_req_row(entry, "", 100)
+		_refresh_preview())
+	box.add_child(addr)
+	_ews_box.add_child(panel)
+	_ews_rows.append(entry)
 
-func _on_has_bas_changed() -> void:
-	if _bas_box != null and is_instance_valid(_bas_box):
-		_bas_box.visible = _w_has_bas.button_pressed
-	_refresh_preview()
+# 一条解锁条件：技艺域下拉 + ≥ 裸数值 + 档位名提示（🔒 决策26 阈值口径＝裸数值，旁标档位辅助可读）
+func _add_ews_req_row(entry: Dictionary, prof: String, value: int) -> void:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	row.add_child(EditorUI.label("　需"))
+	var pf := OptionButton.new()
+	pf.custom_minimum_size = Vector2(190, 0)
+	pf.add_item("（选技艺…）")
+	pf.set_item_metadata(0, "")
+	for pid in ProfDB.all_ids():
+		pf.add_item("%s（%s）" % [ProfDB.prof_name(str(pid)), str(pid)])
+		pf.set_item_metadata(pf.item_count - 1, str(pid))
+	_select_meta(pf, prof)
+	pf.item_selected.connect(func(_i): _refresh_preview())
+	row.add_child(pf)
+	row.add_child(EditorUI.label("≥"))
+	var val := SpinBox.new()
+	val.min_value = 0
+	val.max_value = 1500
+	val.step = 10
+	val.value = value
+	val.custom_minimum_size = Vector2(100, 0)
+	row.add_child(val)
+	var hint := Label.new()
+	hint.add_theme_color_override("font_color", Color(0.6, 0.65, 0.72))
+	hint.add_theme_font_size_override("font_size", 12)
+	var sync_hint := func():
+		hint.text = "（%s）" % ProfDB.stage_name(ProfDB.stage_of(int(val.value)))
+	sync_hint.call()
+	val.value_changed.connect(func(_v):
+		sync_hint.call()
+		_refresh_preview())
+	row.add_child(hint)
+	var rm := Button.new()
+	rm.text = "✕"
+	var rentry := {"row": row, "prof": pf, "value": val}
+	rm.pressed.connect(func():
+		(entry["reqs"] as Array).erase(rentry)
+		row.queue_free()
+		_refresh_preview())
+	row.add_child(rm)
+	(entry["reqs_box"] as VBoxContainer).add_child(row)
+	(entry["reqs"] as Array).append(rentry)
 
 
 # —— 通用：分类下拉（建并加进表单，返回 OptionButton）——
@@ -889,21 +973,41 @@ func _collect() -> Dictionary:
 				slot = str(_w_innate_slot.get_selected_metadata())
 			else:
 				slot = "main_hand"
-			# attack（BAS）——开关关闭＝武器不提供基础攻击（如盾），移除 attack 字段；下游 basic_attack() 自会跳过
-			if _w_has_bas != null and is_instance_valid(_w_has_bas) and _w_has_bas.button_pressed:
-				var atk: Dictionary = out.get("attack", {})
-				if typeof(atk) != TYPE_DICTIONARY:
-					atk = {}
-				atk["name"] = _w_atk_name.text.strip_edges()
-				atk["icon"] = _w_atk_icon.text.strip_edges()
-				atk["coeff"] = _num(_w_atk_coeff.value)
-				atk["range"] = int(_w_atk_range.value)
-				atk["ap_cost"] = int(_w_atk_ap.value)
-				atk["damage_kind"] = _w_atk_dmgkind.get_selected_metadata()
-				atk["tags"] = _atk_tags.duplicate()
-				out["attack"] = atk
-			else:
+			# 武器技能（🔒 决策25/26 引用制）：BWS 选中→写 bws、移除旧内联 attack（被引用取代）+ 收口旧键 bas；
+			# 未选→清 bws（不提供普攻，如盾）、旧内联 attack 原样保留（双读窗口，未迁移数据不破坏）
+			var bws_id := str(_w_bws.get_selected_metadata()) if _w_bws != null and is_instance_valid(_w_bws) else ""
+			if bws_id != "":
+				out["bws"] = bws_id
+				out.erase("bas")
 				out.erase("attack")
+			else:
+				out.erase("bws")
+				out.erase("bas")
+			var prefer := str(_w_prefer.get_selected_metadata()) if _w_prefer != null and is_instance_valid(_w_prefer) else ""
+			if prefer != "":
+				out["prefer"] = prefer
+			else:
+				out.erase("prefer")
+			# EWS：每条 {skill, requires:[{prof,value},…]}（requires 空省略＝装备即用；空技能行跳过）
+			var ews := []
+			for e in _ews_rows:
+				var sid := str(e["skill"].get_selected_metadata())
+				if sid == "":
+					continue
+				var entry := {"skill": sid}
+				var reqs := []
+				for rr in e["reqs"]:
+					var pid := str(rr["prof"].get_selected_metadata())
+					if pid == "":
+						continue
+					reqs.append({"prof": pid, "value": int(rr["value"].value)})
+				if not reqs.is_empty():
+					entry["requires"] = reqs
+				ews.append(entry)
+			if ews.is_empty():
+				out.erase("ews")
+			else:
+				out["ews"] = ews
 		"armor":
 			var g: String = str(_w_gear.get_selected_metadata())
 			if g != "":
@@ -938,7 +1042,7 @@ func _collect() -> Dictionary:
 # 物品（非装备类）表单 → 物品字典：kind=item、类型多选 tag、消耗品时含 on_use/设置。无 slot/mods/requires。
 func _collect_item(out: Dictionary) -> Dictionary:
 	out["kind"] = "item"
-	for k in ["slot", "mods", "requires", "two_handed", "innate", "attack", "use_scope"]:
+	for k in ["slot", "mods", "requires", "two_handed", "innate", "attack", "bws", "bas", "ews", "prefer", "use_scope"]:
 		out.erase(k)   # 装备专属 + 废弃字段：物品一律不带
 	var tags: Array = [_w_rarity.get_selected_metadata()]
 	if _w_usable.button_pressed:

@@ -952,17 +952,23 @@ func _add_weapon_rows(parent: VBoxContainer, uid: int) -> void:
 		if srow != null:
 			parent.add_child(srow)
 
-# 一件武器的技能列表：第一个 = attack(基础攻击/广义普攻)；其余 = 未来 `skills` 数组里的附加技能。
+# 一件武器的技能列表（悬停卡）：第一个 = 普攻 BWS（bws 引用→flatten；双读窗口回退内联 attack）；
+# 其余 = EWS（装备授予的额外技能，🔒 决策26——悬停只陈列，解锁态在能力菜单表达）。
 func _weapon_skills(item) -> Array:
 	var out := []
-	var atk = item.get("attack", null)
-	if typeof(atk) == TYPE_DICTIONARY:
-		out.append(atk)
-	var extra = item.get("skills", null)
-	if typeof(extra) == TYPE_ARRAY:
-		for s in extra:
-			if typeof(s) == TYPE_DICTIONARY:
-				out.append(s)
+	var bws := str(item.get("bws", item.get("bas", "")))
+	var bdef = SkillDB.get_skill(bws) if bws != "" else null
+	if bdef != null:
+		out.append(SkillDB.flatten_bws(bdef))
+	else:
+		var atk = item.get("attack", null)
+		if typeof(atk) == TYPE_DICTIONARY:
+			out.append(atk)
+	for e in item.get("ews", []):
+		var sid := str(e.get("skill", "")) if typeof(e) == TYPE_DICTIONARY else str(e)
+		var sdef = SkillDB.get_skill(sid)
+		if sdef != null:
+			out.append({"icon": str(sdef.get("icon", "")), "name": str(sdef.get("name", sid))})
 	return out
 
 # 一行「小图标 + 名字」：图标可缺（只剩名字）；图标名都空 → null。

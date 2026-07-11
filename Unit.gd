@@ -320,10 +320,12 @@ func apply_attr_pick(key: String) -> bool:
 func initiative() -> int:
 	return int(round(effective_stat_f("speed"))) + int(floorf(effective_stat_f("agility") * 0.5))
 
-# 能否装备：①特性限制（如「天性武者」no_weapon → 不能装带 attack 的武器；**天生武器 innate 豁免**）②物品 requires 的 tag 须全有。
+# 能否装备：①特性限制（如「天性武者」no_weapon → 不能装「提供攻击」的武器；**天生武器 innate 豁免**）②物品 requires 的 tag 须全有。
+# 「提供攻击」判据＝bws/bas 引用或旧内联 attack（阶段3a 双读窗口，与 _main_weapon_attack 同口径）。
 func can_equip(item: Dictionary) -> bool:
 	var t = TraitDB.get_trait(trait_id)
-	if t != null and t.get("no_weapon", false) and item.has("attack") and not item.get("innate", false):
+	var provides_attack: bool = item.has("attack") or str(item.get("bws", item.get("bas", ""))) != ""
+	if t != null and t.get("no_weapon", false) and provides_attack and not item.get("innate", false):
 		return false
 	for req in item.get("requires", []):
 		if not tags.has(req):
