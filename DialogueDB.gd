@@ -4,26 +4,27 @@ extends RefCounted
 ## schema 见 dialogues.json _note：dialogue={id,label,nodes[]}；node 无 choices=纯演出、有 choices=分支。
 
 const PATH := "res://data/dialogues.json"
+const JsonRegistry := preload("res://JsonRegistry.gd")
 
 static var _dialogues := []   # 有序对话定义
 static var _by_id := {}       # dialogue_id -> entry
 static var _loaded := false
+static var _path_override := ""   # 测试注入缝
+
+static func _path() -> String:
+	return _path_override if _path_override != "" else PATH
 
 static func _ensure() -> void:
 	if _loaded:
 		return
 	_loaded = true
-	_dialogues = []
-	_by_id = {}
-	if FileAccess.file_exists(PATH):
-		var f = FileAccess.open(PATH, FileAccess.READ)
-		var data = JSON.parse_string(f.get_as_text())
-		f.close()
-		if typeof(data) == TYPE_DICTIONARY:
-			for e in data.get("dialogues", []):
-				if typeof(e) == TYPE_DICTIONARY and e.has("id"):
-					_dialogues.append(e)
-					_by_id[str(e["id"])] = e
+	var r = JsonRegistry.load_indexed(_path(), "dialogues")
+	_dialogues = r["list"]
+	_by_id = r["by_id"]
+
+static func reload_data() -> void:
+	_loaded = false
+	_ensure()
 
 static func all_dialogues() -> Array:
 	_ensure()

@@ -9,9 +9,12 @@ extends SceneTree
 ##  4) 强韧不入物品（🔒 模块_属性成长_设计.md §5）：weapons/armor/accessories 的 mods 出现 will_fort/body_fort 即 FAIL。
 ##  5) damage_kind 白名单：data/ 任意处的 damage_kind 值必须 ∈ {physical,fire,ice,thunder,holy}
 ##     （未知种别在 CombatResolver 会告警回退物理轨；数据侧在此挡住）。
+##  6) tag 引用完整性（🔒 tag 统一词表）：data/*.json 与 terrains.json 里任意 "tags" 数组的字符串
+##     必须 ∈ tags.json——防「用了没注册」的词表漂移（曾漏 cold/road/wall）。
 ## 运行：..._console.exe --headless --path "D:/1战棋" -s res://tools/test_data_lint.gd（退出码 0=PASS）
 
 const EffectDB := preload("res://EffectDB.gd")
+const TagDB := preload("res://TagDB.gd")
 const StatMeta := preload("res://StatMeta.gd")
 const CombatResolver := preload("res://CombatResolver.gd")
 
@@ -95,6 +98,20 @@ func _collect_effect_refs(v, refs: Array) -> void:
 			for e in v:
 				_collect_effect_refs(e, refs)
 
+# 递归收集所有 "tags" 数组里的字符串成员（tag 用点；去重）
+func _collect_tag_uses(v, out: Array) -> void:
+	match typeof(v):
+		TYPE_DICTIONARY:
+			for k in v:
+				if str(k) == "tags" and typeof(v[k]) == TYPE_ARRAY:
+					for t in v[k]:
+						if typeof(t) == TYPE_STRING and str(t) != "" and not out.has(str(t)):
+							out.append(str(t))
+				_collect_tag_uses(v[k], out)
+		TYPE_ARRAY:
+			for e in v:
+				_collect_tag_uses(e, out)
+
 func _initialize() -> void:
 	print("=== 数据 lint 开始 ===")
 	var files := _data_files()
@@ -152,6 +169,19 @@ func _initialize() -> void:
 		var bad_kinds := []
 		_collect_bad_values(data, "damage_kind", CombatResolver.RES_SUFFIX.keys(), bad_kinds)
 		ck(bad_kinds.is_empty(), "%s damage_kind 全在白名单（越界：%s）" % [path.get_file(), ", ".join(bad_kinds)])
+
+	# 6) tag 引用完整性：所有 "tags" 数组成员必须在 tags.json 注册（tags.json 自身除外——它是词表本体）
+	var tag_paths := files.duplicate()
+	tag_paths.erase("res://data/tags.json")
+	tag_paths.append("res://terrains.json")
+	for path in tag_paths:
+		var data = _read_json(path)
+		if data == null:
+			continue
+		var used := []
+		_collect_tag_uses(data, used)
+		for t in used:
+			ck(TagDB.get_tag(t) != null, "%s 使用的 tag 已注册：%s" % [path.get_file(), t])
 
 	if _fail == 0:
 		print("=== 数据 lint 全 PASS ===")

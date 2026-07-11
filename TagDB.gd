@@ -5,23 +5,17 @@ extends RefCounted
 ## 字段：{id, cn, cat, status, color?, desc?}。其中 id/cn/cat/color 有功能性，desc/status 仅参考。
 
 const FILE := "res://data/tags.json"
+const JsonRegistry := preload("res://JsonRegistry.gd")
 
 static var _tags := {}        # id -> entry（dict 保插入顺序 = json 顺序）
 static var _loaded := false
+static var _path_override := ""   # 测试注入缝
 
 static func _ensure() -> void:
 	if _loaded:
 		return
 	_loaded = true
-	if not FileAccess.file_exists(FILE):
-		return
-	var f = FileAccess.open(FILE, FileAccess.READ)
-	var data = JSON.parse_string(f.get_as_text())
-	f.close()
-	if typeof(data) == TYPE_ARRAY:
-		for e in data:
-			if typeof(e) == TYPE_DICTIONARY and e.has("id"):
-				_tags[str(e["id"])] = e
+	_tags = JsonRegistry.load_indexed(_path_override if _path_override != "" else FILE, "")["by_id"]
 
 # 取一条 tag 定义（找不到返回 null）
 static func get_tag(id: String):

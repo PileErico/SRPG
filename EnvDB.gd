@@ -13,6 +13,11 @@ static var _weather_by_id := {}     # id -> 天气 entry
 static var _time_by_id := {}        # id -> 日夜 entry
 static var _loaded := false
 
+# 丢弃内存表、下次查询重读（DB 铁律：统一 reload_data，绝不叫 reload——命中原生 Script.reload()）
+static func reload_data() -> void:
+	_loaded = false
+	_ensure()
+
 static func _ensure() -> void:
 	if _loaded:
 		return

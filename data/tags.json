@@ -19,6 +19,9 @@
   {"id": "shallow", "cn": "浅水", "cat": "terrain", "status": "in_use"},
   {"id": "blocks_sight", "cn": "阻挡视线", "cat": "terrain", "status": "in_use"},
   {"id": "deep", "cn": "深水", "cat": "terrain", "status": "in_use"},
+  {"id": "cold", "cn": "寒冷", "cat": "terrain", "status": "planned", "desc": "寒冷地块（雪/冻原）：为将来寒冷/冰系机制预留的条件 tag，暂无消费方"},
+  {"id": "road", "cn": "道路", "cat": "terrain", "status": "in_use", "desc": "道路/桥类地块标记（战场 road 地块；大地图道路＝线特征放置物另计）"},
+  {"id": "wall", "cn": "墙体", "cat": "terrain", "status": "in_use", "desc": "墙类地块标记（阻挡语义由 blocks_sight/move 块承载，此为类别标识）"},
 
   {"id": "one_handed", "cn": "单手", "cat": "handedness", "status": "in_use"},
   {"id": "two_handed", "cn": "双手", "cat": "handedness", "status": "in_use", "desc": "同时占用主手+副手；副手显示同图标+灰滤镜"},
@@ -106,7 +109,7 @@
   {"id": "char_desmond", "cn": "戴斯蒙", "cat": "char", "status": "in_use"},
 
   {"id": "human", "cn": "人类", "cat": "race", "status": "in_use"},
-  {"id": "harpy", "cn": "鸟人", "cat": "race", "status": "in_use"},
+  {"id": "harpy", "cn": "鸟妖", "cat": "race", "status": "in_use"},
   {"id": "lizardmen", "cn": "蜥蜴人", "cat": "race", "status": "planned"},
   {"id": "undead", "cn": "亡灵", "cat": "race", "status": "in_use", "desc": "种族：亡灵。免疫灵泉等生命回复类地块效果（地块 when.occupant_lacks_tags）；供后续腐蚀/圣光克制条件"},
 

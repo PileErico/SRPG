@@ -570,9 +570,11 @@ func skill_cooldown_max(def) -> int:
 	return maxi(0, int(floor(float(cd.get("base", 0)))))
 
 # 本战使用次数上限（至少 1）
+# 本战次数上限：**-1＝无限**（🔒 决策18——BAS/无次数限制技能；uses_per_battle 缺省或 base≤0 即无限）
 func skill_uses_max(def) -> int:
 	var u = def.get("uses_per_battle", {})
-	return maxi(1, int(floor(float(u.get("base", 0)))))
+	var base := int(floor(float(u.get("base", 0)))) if typeof(u) == TYPE_DICTIONARY else 0
+	return base if base > 0 else -1
 
 # 学习 / 升级一个技能（按 def.max_level 封顶）；首学初始化冷却=0、本战次数=满。返回新等级（0=失败）。
 func learn_skill(id: String) -> int:
@@ -586,18 +588,20 @@ func learn_skill(id: String) -> int:
 		skills[id] = {"level": 1, "cd": 0, "uses": skill_uses_max(def)}
 	return int(skills[id]["level"])
 
-# 是否可立即施放：已学 + 冷却就绪 + 本战还有次数（不含 AP，AP 由调用方另查）
+# 是否可立即施放：已学 + 冷却就绪 + 本战还有次数（-1=无限恒有；不含 AP，AP 由调用方另查）
 func skill_ready(id: String) -> bool:
 	if not skills.has(id):
 		return false
-	return int(skills[id].get("cd", 0)) <= 0 and int(skills[id].get("uses", 0)) > 0
+	return int(skills[id].get("cd", 0)) <= 0 and int(skills[id].get("uses", 0)) != 0
 
-# 施放后：进入冷却 + 扣本战次数
+# 施放后：进入冷却 + 扣本战次数（-1=无限不扣）
 func consume_skill(id: String, cd: int) -> void:
 	if not skills.has(id):
 		return
 	skills[id]["cd"] = maxi(0, cd)
-	skills[id]["uses"] = maxi(0, int(skills[id].get("uses", 0)) - 1)
+	var us := int(skills[id].get("uses", 0))
+	if us > 0:
+		skills[id]["uses"] = us - 1
 
 # 战斗开始：所有已学技能冷却清零、本战次数重置
 func reset_skill_charges() -> void:

@@ -29,8 +29,10 @@ func _initialize() -> void:
 	print("=== 四属性/成长定案 测试开始 ===")
 	WorldState.current = null
 	var protos := UnitFactory.all_prototypes()
-	var inf := proto_by_id(protos, "empire_infantry")   # 无装备、无 stats 覆盖的纯人类模板
-	ck(not inf.is_empty(), "帝国步兵模板存在")
+	ck(not proto_by_id(protos, "empire_infantry").is_empty(), "帝国步兵模板存在")
+	# 裸人类模板由测试自带（不绑出货内容——empire_infantry 已配装备，内容允许演进；拳脚/底值基线须无装备）
+	var inf := {"id": "_test_bare_human", "name": "裸人", "race": "human",
+		"default_faction": "player", "tags": ["ground", "human"], "equip": [], "skills": {}, "trait": ""}
 
 	# —— 1) 种族重基与四属性底值 ——
 	var u = UnitFactory.make_unit(inf, "player", 3, 3)

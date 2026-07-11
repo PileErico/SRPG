@@ -7,27 +7,31 @@ extends RefCounted
 const FILES := [
 	"res://data/skills.json",
 ]
+const JsonRegistry := preload("res://JsonRegistry.gd")
 
 static var _skills := {}     # id -> def
 static var _by_seq := {}      # 通用序列槽位(1-13) -> def
 static var _loaded := false
+static var _path_override := ""   # 测试注入缝（非空＝只读此路径）
+
+static func _paths() -> Array:
+	return [_path_override] if _path_override != "" else FILES
 
 static func _ensure() -> void:
 	if _loaded:
 		return
 	_loaded = true
-	for path in FILES:
-		if not FileAccess.file_exists(path):
-			continue
-		var f = FileAccess.open(path, FileAccess.READ)
-		var data = JSON.parse_string(f.get_as_text())
-		f.close()
-		if typeof(data) == TYPE_ARRAY:
-			for entry in data:
-				if typeof(entry) == TYPE_DICTIONARY and entry.has("id"):
-					_skills[str(entry["id"])] = entry
-					if entry.has("seq"):
-						_by_seq[int(entry["seq"])] = entry
+	_skills = {}
+	_by_seq = {}
+	for path in _paths():
+		for entry in JsonRegistry.load_indexed(path, "")["list"]:
+			_skills[str(entry["id"])] = entry
+			if entry.has("seq"):
+				_by_seq[int(entry["seq"])] = entry
+
+static func reload_data() -> void:
+	_loaded = false
+	_ensure()
 
 # 取一个技能定义（找不到返回 null）
 static func get_skill(id: String):

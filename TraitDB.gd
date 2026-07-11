@@ -6,24 +6,27 @@ extends RefCounted
 ## 稀有度取物品那套 tag（special/common/uncommon/rare/epic/legendary），颜色等同。
 
 const FILES := ["res://data/traits.json"]
+const JsonRegistry := preload("res://JsonRegistry.gd")
 
 static var _traits := {}
 static var _loaded := false
+static var _path_override := ""   # 测试注入缝（非空＝只读此路径）
+
+static func _paths() -> Array:
+	return [_path_override] if _path_override != "" else FILES
 
 static func _ensure() -> void:
 	if _loaded:
 		return
 	_loaded = true
-	for path in FILES:
-		if not FileAccess.file_exists(path):
-			continue
-		var f = FileAccess.open(path, FileAccess.READ)
-		var data = JSON.parse_string(f.get_as_text())
-		f.close()
-		if typeof(data) == TYPE_ARRAY:
-			for entry in data:
-				if typeof(entry) == TYPE_DICTIONARY and entry.has("id"):
-					_traits[str(entry["id"])] = entry
+	_traits = {}
+	for path in _paths():
+		for entry in JsonRegistry.load_indexed(path, "")["list"]:
+			_traits[str(entry["id"])] = entry
+
+static func reload_data() -> void:
+	_loaded = false
+	_ensure()
 
 # 取一条特性定义（找不到返回 null）
 static func get_trait(id: String):

@@ -7,6 +7,7 @@ const Unit := preload("res://Unit.gd")
 const UnitFactory := preload("res://UnitFactory.gd")   # 造单位/序列化单一入口（与编辑器共用）
 const CombatResolver := preload("res://CombatResolver.gd")   # 伤害分量化 + 减伤链（纯数学）
 const SkillDB := preload("res://SkillDB.gd")
+const EffectDB := preload("res://EffectDB.gd")   # 效果注册表（turn_end 连锁事件名解析）
 const ItemInstances := preload("res://ItemInstances.gd")    # 物品实例门面（悬停单位卡经合成视图取武器）
 const BattleBottomBar := preload("res://BattleBottomBar.gd")  # 常驻底边栏（独立 UI，自决布局；宿主喂数据）
 const TextureCache := preload("res://TextureCache.gd")      # 立绘/图标加载 + 缓存单一入口
@@ -386,6 +387,7 @@ func event_spawn_unit(proto_id: String, faction: String, col: int, row: int) -> 
 	var fac := faction if faction != "" else str(proto.get("default_faction", "enemy"))
 	var nu = make_unit(proto, fac, c, r)
 	units.append(nu)
+	_apply_weather_mod(nu)   # 补挂当前天气视野修正（审查修：否则新单位到下次变天前视野偏高、迷雾/AI 警觉偏乐观）
 	if phase == "battle" and not (nu in turn_order):
 		turn_order.append(nu)   # 战中召唤：排进本 round 末
 	_log_line("⚑ %s 出现！" % _cname(nu))
@@ -1455,9 +1457,18 @@ func end_turn() -> void:
 func _tick_turn_end_effects(u) -> bool:
 	var dmg_done := false
 	for ev in _state._apply_turn_end_effects(u):
-		if str(ev.get("type", "")) == "dot":
-			dmg_done = true
-			_log_line("%s %s：-%d（最大生命%s%%）" % [_cname(u), str(ev["name"]), int(ev["dmg"]), _numf(ev["pct"])])
+		match str(ev.get("type", "")):
+			"dot":
+				dmg_done = true
+				_log_line("%s %s：-%d（最大生命%s%%）" % [_cname(u), str(ev["name"]), int(ev["dmg"]), _numf(ev["pct"])])
+			"hot":
+				_log_line("%s %s：+%d 生命" % [_cname(u), str(ev.get("name", "")), int(ev.get("heal", 0))])
+			"expired":
+				_log_line("%s %s 结束" % [_cname(u), str(ev.get("name", ""))])   # 对称 turn_start 侧（审查修：曾被静默丢弃）
+			"chain":
+				var cid := str(ev.get("id", ""))
+				var cdef = EffectDB.get_effect(cid)
+				_log_line("%s 触发「%s」" % [_cname(u), str(cdef.get("name", cid)) if cdef != null else cid])   # 决策20 两段式连锁
 	for ev in _state._apply_terrain_ticks(u):
 		match str(ev.get("type", "")):
 			"terrain_heal":
@@ -1552,14 +1563,17 @@ func _build_skill_submenu(u) -> void:
 	var i := 0
 	for id in _learned_active_skills(u):
 		var def = SkillDB.get_skill(id)
-		var ready: bool = u.skill_ready(id) and u.ap >= int(def.get("ap_cost", 1))
+		var silenced: bool = u.has_state("silenced") and (def.get("tags", []) as Array).has("verbal")
+		var ready: bool = u.skill_ready(id) and u.ap >= int(def.get("ap_cost", 1)) and not silenced
 		var label := str(def.get("name", id))
 		var cd := int(u.skills[id].get("cd", 0))
 		var uses := int(u.skills[id].get("uses", 0))
 		if cd > 0:
 			label += "（冷却 %d）" % cd          # 冷却中：括号里用阿拉伯数字标剩余回合
-		elif uses <= 0:
-			label += "（本战已用尽）"
+		elif uses == 0:
+			label += "（本战已用尽）"            # -1=无限不标
+		elif silenced:
+			label += "（沉默中）"                # 失语禁 verbal 技能（🔒 §5.2 决策12）
 		_skill_submenu.add_item(label, i)
 		_skill_submenu.set_item_disabled(i, not ready)
 		_skill_menu_map[i] = id
@@ -1579,6 +1593,8 @@ func _enter_skill_mode(skill_id: String) -> void:
 		return
 	if not u.skill_ready(skill_id) or u.ap < int(def.get("ap_cost", 1)):
 		return
+	if u.has_state("silenced") and (def.get("tags", []) as Array).has("verbal"):
+		return   # 失语：verbal 技能禁施（与子菜单灰显同门槛；🔒 §5.2 决策12）
 	move_mode = false
 	attack_mode = false
 	reachable = {}
@@ -2362,16 +2378,20 @@ func _tick_weather() -> void:
 # 应用环境到视野：天气＝flat 加减（挂修正管线 source=env:weather）；日夜＝【最终乘子】_time_sight_mult（不走 flat，见 BattleState._effective_sight）。
 # 先清旧天气修正再挂新的；再刷新叠层（夜变暗 + 天气 VFX）+ 重算视野。
 func _apply_env_modifiers() -> void:
-	var w_mod := EnvDB.weather_sight(_cur_weather)
 	for u in units:
-		u.remove_modifiers_by_source("env:weather")
-		if w_mod != 0:
-			u.modifiers.append({"stat": "sight", "op": "flat", "value": w_mod,
-				"source": "env:weather", "source_label": "环境·" + EnvDB.weather_label(_cur_weather)})
+		_apply_weather_mod(u)
 	_time_sight_mult = EnvDB.time_sight_mult(_cur_time)   # 日夜＝所有加减之后的最终乘子（夜×0.5）
 	_update_env_overlays()
 	if phase == "battle":
 		_recompute_vision()
+
+# 给单个单位挂当前天气 sight 修正（先清旧再挂新＝幂等）；全体重挂与战中召唤新单位共用这一份。
+func _apply_weather_mod(u) -> void:
+	var w_mod := EnvDB.weather_sight(_cur_weather)
+	u.remove_modifiers_by_source("env:weather")
+	if w_mod != 0:
+		u.modifiers.append({"stat": "sight", "op": "flat", "value": w_mod,
+			"source": "env:weather", "source_label": "环境·" + EnvDB.weather_label(_cur_weather)})
 
 # 刷新环境视觉叠层：夜晚变暗 + 天气调色（EnvDB tint 单一实现）+ 天气 VFX 粒子（读 _cur_weather）。
 func _update_env_overlays() -> void:

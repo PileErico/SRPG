@@ -8,7 +8,7 @@
 ## 状态速览
 - ✅ 已完成（逐条实录 → [docs/实现现状.md](docs/实现现状.md)）：关卡编辑器六图层 / 战斗 sandbox＋数值地基 / **属性系统重做 🔒**（种族底值＋熟练度＋抗性四轨＋**四属性每点效果/士气/天生武器/20级制/水生·条件移动力/状态页三区** 2026-07-08）/ 感知 P1+P2＋程序化天气 VFX / Meta 层 M1~M9 / Sandbox 解耦 Phase 0~4 / 地块美术 P1~P3 / 角色外观模块 P0~P2。
 - 🟡 待验收：WorldSim 动态单位 v1 六项待定 → [docs/模块_大地图_动态单位.md](docs/模块_大地图_动态单位.md) §4。
-- 🟢 下一步候选 → [docs/路线图.md](docs/路线图.md)：技能系统执行（Phase 3＋帝国树）、任务线内容层、元素内容、suspend 存档 UI。
+- 🟢 下一步候选 → [docs/路线图.md](docs/路线图.md)：技能系统执行（**帝国树暂缓 ⚠️ 2026-07-09 用户令：新技能+熟练度体系下轻量化重做后再实装**）、任务线内容层、元素内容、suspend 存档 UI。
 
 ## 查什么去哪（文档路由）
 **表单（常驻·速查，`表单-*`）**
@@ -41,7 +41,7 @@
 **真值 🔒（只注记不默改）与其他**
 | 内容 | 文档 |
 |---|---|
-| **代码结构目录**（66 文件→职责→模块）＋跨模块约定 🔒（坐标序/DB 范式/快照/画布契约/Meta 决策） | [docs/架构.md](docs/架构.md)（**新会话先读**）|
+| **代码结构目录**（74 文件→职责→模块）＋跨模块约定 🔒（坐标序/DB 范式/快照/画布契约/Meta 决策） | [docs/架构.md](docs/架构.md)（**新会话先读**）|
 | 属性/成长/抗性/熟练度 真值 🔒 | [docs/模块_属性成长_设计.md](docs/模块_属性成长_设计.md)（§7 翻案 / §8 待定勿实现）|
 | 战斗数学/回合结构/判定序 规格 🔒 | [docs/模块_战斗_设计.md](docs/模块_战斗_设计.md)（⚠️ 作废段以头部横幅为准）|
 | 能力/效果 schema + 分期执行计划 🔒 | [docs/模块_技能_设计.md](docs/模块_技能_设计.md) ＋ [docs/技能树_帝国士兵.md](docs/技能树_帝国士兵.md) ＋ [docs/技能系统红队报告.md](docs/技能系统红队报告.md)（临时·归宿=模块_技能+路线图，技能执行收官后删）|
@@ -76,6 +76,6 @@
 ## 运行 / 测试
 - **快捷启动**：双击 `run_game.bat`（主菜单＝游戏正式入口）/ `run_sandbox.bat`（直接进单位 sandbox）/ `run_map_editor.bat`（地图编辑器）；或 VSCode `Ctrl+Shift+B`（默认任务「运行 游戏」），「运行任务…」里还有「运行 Sandbox」「运行 地图编辑器」「打开 Godot 编辑器」。
 - 命令行：开 Godot IDE 用 `..._win64.exe -e --path "D:/1战棋"`；直接跑某场景用 `..._console.exe --path "D:/1战棋" res://Sandbox.tscn`。
-- **测试基线**：28 套 headless（`tools/test_*.gd`），中央 runner `tools/run_tests.ps1` **须用 pwsh7 跑**（PowerShell 5 编码会崩）；通用截图 harness `tools/screenshot.gd`（窗口跑场景存 PNG，供 UI/美术目检）。
+- **测试基线**：34 套 headless（`tools/test_*.gd`），中央 runner `tools/run_tests.ps1` **须用 pwsh7 跑**（PowerShell 5 编码会崩）；通用截图 harness `tools/screenshot.gd`（窗口跑场景存 PNG，供 UI/美术目检）。
 - **headless 自测（推荐）**：`..._console.exe --headless --path "D:/1战棋" res://<场景>.tscn --quit-after 8`——跑真实场景、必然自动退出、stderr 能看到报错。
 - ⚠️ **不要写「不调 `quit()` 的 SceneTree 脚本」**：会空转不退出（CPU 飙、`Select-Object` 看不到输出），曾因此空转数小时。非要用 SceneTree 脚本就务必结尾 `quit()`；且 `add_child` 后 `_ready` 是**延迟**的、需显式初始化（如 `e._load_terrains()` / `e.new_map(...)`）。

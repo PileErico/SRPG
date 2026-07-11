@@ -77,7 +77,10 @@
     "_preset": true,
     "ai_threat": true,
     "default_faction": "enemy",
-    "equip": [],
+    "equip": [
+      "long_sword",
+      "breast_plate"
+    ],
     "exp": 0,
     "exp_max": 100,
     "icon": "res://icons/Characters/appearance_empire_infantry.png",
@@ -96,16 +99,26 @@
     "trait": ""
   },
   {
+    "_preset": true,
     "ai_threat": true,
     "default_faction": "enemy",
+    "equip": [
+      "long_sword"
+    ],
+    "exp": 0,
+    "exp_max": 100,
     "icon": "res://icons/Unit_Icons/Empire_Light_Infantry.png",
     "id": "empire_light_infantry",
+    "level": 1,
     "name": "帝国轻步兵",
     "portrait": "res://icons/Characters/Empire_Light_Infantry.png",
     "race": "human",
+    "skills": {},
     "tags": [
+      "ground",
       "human"
-    ]
+    ],
+    "trait": ""
   },
   {
     "_preset": true,

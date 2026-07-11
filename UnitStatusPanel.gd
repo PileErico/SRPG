@@ -581,7 +581,8 @@ func _build_skill_tooltip(def, u) -> Control:
 			t += "　→ 当前 %s：%d%%" % [ROMAN[clampi(lvl, 0, ROMAN.size() - 1)], int(heals[clampi(lvl - 1, 0, heals.size() - 1)])]
 		v.add_child(_tip_line("治疗(最大生命)", t))
 	v.add_child(_tip_line("冷却", "%d 回合" % int(u.skill_cooldown_max(def))))
-	v.add_child(_tip_line("本战次数", "%d 次" % int(u.skill_uses_max(def))))
+	var um := int(u.skill_uses_max(def))
+	v.add_child(_tip_line("本战次数", "不限" if um < 0 else "%d 次" % um))   # -1=无限（决策18）
 	var ct = def.get("cleanse_tags", [])
 	if typeof(ct) == TYPE_ARRAY and ct.size() > 0:
 		v.add_child(_tip_line("附带", "立即清除目标的流血类效果"))

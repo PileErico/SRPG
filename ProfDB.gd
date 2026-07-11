@@ -15,30 +15,22 @@ const MASTER_XP_CAP := 1500   # 大师阶段的计量槽满值/显示上限（xp
 # 前置/浮现锚 🔒（§2.1，🟡数值可调）：前置域达到本阶段＝资格达标；派生域浮现同锚。
 const REQ_STAGE := 3   # 老练
 
+const JsonRegistry := preload("res://JsonRegistry.gd")
+
 static var _profs := {}      # id -> def
 static var _order := []      # 保序 id 列表（页内排序=数据文件顺序）
 static var _loaded := false
+static var _path_override := ""   # 测试注入缝
 
 static func _ensure() -> void:
 	if _loaded:
 		return
 	_loaded = true
-	_profs = {}
+	var r = JsonRegistry.load_indexed(_path_override if _path_override != "" else PATH, "")
+	_profs = r["by_id"]
 	_order = []
-	if not FileAccess.file_exists(PATH):
-		push_warning("ProfDB：找不到 %s——技艺系统无数据" % PATH)
-		return
-	var f := FileAccess.open(PATH, FileAccess.READ)
-	var d = JSON.parse_string(f.get_as_text())
-	f.close()
-	if typeof(d) != TYPE_ARRAY:
-		push_warning("ProfDB：%s 解析失败（顶层须为数组）" % PATH)
-		return
-	for e in d:
-		if typeof(e) == TYPE_DICTIONARY and str(e.get("id", "")) != "":
-			var id := str(e["id"])
-			_profs[id] = e
-			_order.append(id)
+	for e in r["list"]:
+		_order.append(str(e["id"]))
 
 static func reload_data() -> void:
 	_loaded = false
