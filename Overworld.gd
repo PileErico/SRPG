@@ -37,6 +37,7 @@ const HOURS_PER_COST := 1    # 1 点通行成本 ＝ 1 小时（大世界成本�
 # 大世界地块通行成本（明显档 🔒）＝数据层 terrains.json 各地形 move.overworld_cost（_move_cost_at 走 TerrainDB.move_cost(_,_,true)）；
 # 道路(放置物)经 _move_cost_between 的 min(_,1)=1 恒最低；战斗地图不受影响。数值层后调。
 const CAMP_HOURS := 8        # 占位：扎营一次休整 8 小时（临时据点/职务＝M6）
+const DEFAULT_BATTLE_MAP := "res://maps/sandbox.json"   # 遭遇战/伏击/据点的兜底战斗图（单一源）
 # 自动存档槽名单一源＝SaveIO.AUTO_SLOT（实例注入见 _save_slot）
 const TIME_RATE := 2.5       # 时间流速（游戏小时/真实秒，占位可调）：cost-1 格（2h）≈0.8 真实秒
 const MAX_FRAME_DELTA := 0.1 # 单帧 delta 钳制（秒）：卡帧不折成一大坨小时（_tick_time 内仍逐小时逐格结算兜底）
@@ -62,6 +63,7 @@ var _map_regions := []        # 地图 regions 字段：大地图按「区域外
 var canvas
 var _time_label: Label
 var _play_label: Label                  # ▶/⏸ 播放指示（顶栏极简）
+var _ui_sig := ""                       # 上次渲染的时间 UI 签名（clock/gold/playing）——播放时逐帧调，变了才重建
 var _log: RichTextLabel
 var _night_overlay: ColorRect
 var _time_playing := false              # 时间播放中（空格总开关）：播放即流动——行军 or 原地等待
@@ -441,7 +443,6 @@ func _tick_time(dh: float) -> void:
 		if _hour_acc >= 1.0 - 1e-6:
 			_hour_acc = maxf(_hour_acc - 1.0, 0.0)
 			_advance_world(1)
-			_eval_all_timers()
 		# ③ 落格事件（enter_tile 每图+全局池 + 遭伏 + timer）
 		if landed.x >= 0:
 			_check_cell_events(landed)
@@ -483,7 +484,7 @@ func _advance_world(hours: int) -> void:
 				var u: Dictionary = e["unit"]
 				var t = WorldUnitDB.type_def(str(u.get("type", "")))
 				_log_line("⚔ [b]%s[/b] 追上了你们！" % WorldUnitDB.label(str(u.get("type", ""))))
-				_start_battle_with(str(t.get("battle_map", "res://maps/sandbox.json")) if t != null else "res://maps/sandbox.json",
+				_start_battle_with(str(t.get("battle_map", DEFAULT_BATTLE_MAP)) if t != null else DEFAULT_BATTLE_MAP,
 					{"world_unit_uid": int(u.get("uid", 0)), "faction_id": str(u.get("faction", ""))})
 			"skirmish":
 				var hunter := WorldUnitDB.label(str((e["hunter"] as Dictionary).get("type", "")))
@@ -492,6 +493,7 @@ func _advance_world(hours: int) -> void:
 			"caravan_arrive":
 				pass   # 商队到站：暂不播报（避免刷屏；交易接入后再表现）
 	_sync_wu_anim(ws, before)   # 世界回合后：为移动过的单位起滑行插值
+	_eval_all_timers()          # timer 随时钟推进统一评估——收口于此，各推钟入口不再各自补调
 
 # 世界单位当前位置快照 {uid: Vector2i}（世界回合前后 diff，判定谁移动了）
 func _wu_positions(ws) -> Dictionary:
@@ -518,13 +520,12 @@ func _sync_wu_anim(ws, before: Dictionary) -> void:
 		if not live.has(uid):
 			_wu_anim.erase(uid)
 
-# 一格落位后的事件评估：地图触发器 enter_tile + 全局事件池（带有效地形 id）+ 敌对派系遭伏（M9 伪触发器）+ timer（时钟刚被推进）
+# 一格落位后的事件评估：地图触发器 enter_tile + 全局事件池（带有效地形 id）+ 敌对派系遭伏（M9 伪触发器）。timer 不在此评（随推钟走 _advance_world）
 func _check_cell_events(cell: Vector2i) -> void:
 	var ws = WorldState.current
 	EventEngine.check_enter_tile(_map_triggers, cell, "player", ws.event_fired, self, ws)
 	EventEngine.check_enter_tile(EventDB.all_events(), cell, "player", ws.event_fired, self, ws, _terrain_id_at(cell.x, cell.y))
 	EventEngine.check_enter_tile(_hostile_ambush_triggers(), cell, "player", ws.event_fired, self, ws)
-	_eval_all_timers()
 
 # 该格有效地形 id（全局事件池 when.terrain 匹配用）：图级覆盖（_map_terrain_overrides）只换 move/effects 块、
 # 不换地形身份（键＝terrain/variant，见 MapIO schema）——故 id 恒取地形表 entry.id，与 _move_cost_at 同源读 tiles。
@@ -534,7 +535,7 @@ func _terrain_id_at(col: int, row: int) -> String:
 	var e = TerrainDB.entry_for(tiles[row][col])
 	return str(e.get("id", "")) if e != null else ""
 
-# timer 事件统一评估口：每图触发器 + 全局事件池——推钟后的调用点（落格/扎营/休整）全走这里，防漏评全局池
+# timer 事件统一评估口：每图触发器 + 全局事件池——由 _advance_world 收口调用（推钟＝唯一时间推进点），各入口不再各自补调
 func _eval_all_timers() -> void:
 	var ws = WorldState.current
 	if ws == null:
@@ -560,7 +561,7 @@ func _hostile_ambush_triggers() -> Array:
 			"when": {"event": "enter_tile", "once": false,
 				"chance": float(amb.get("chance", 10)), "cooldown_hours": int(amb.get("cooldown_hours", 24))},
 			"do": [{"action": "show_message", "text": str(amb.get("text", "遭到伏击！"))},
-				{"action": "start_battle", "map": str(amb.get("battle_map", "res://maps/sandbox.json"))}]})
+				{"action": "start_battle", "map": str(amb.get("battle_map", DEFAULT_BATTLE_MAP))}]})
 	return out
 
 # 扎营：原地休整推进时钟（维持离散 +8h；恢复结算走 WorldClock 调度表；临时据点/职务＝M6）
@@ -570,7 +571,6 @@ func _on_camp() -> void:
 	_advance_world(CAMP_HOURS)
 	_log_line("⛺ 扎营休整 %d 小时。" % CAMP_HOURS)
 	_refresh_time_ui()
-	_eval_all_timers()
 	if canvas != null:
 		canvas.queue_redraw()
 	_autosave()
@@ -664,7 +664,6 @@ func _do_rest(loc: Dictionary) -> bool:
 			u.stats["HP"] = u.effective_stat("HP_max")
 	_log_line("🛏 在「%s」休整 %d 小时（-%d💰）：全员生命回满。" % [str(loc.get("label", "")), int(svc.get("hours", 8)), cost])
 	_refresh_time_ui()
-	_eval_all_timers()
 	if canvas != null:
 		canvas.queue_redraw()
 	_autosave()
@@ -675,7 +674,7 @@ func _challenge_site(loc: Dictionary) -> void:
 	if not LocationDB.site_ready(loc, WorldState.current):
 		_log_line("此处已被肃清，暂无敌踪。")
 		return
-	_start_battle_with(str(loc.get("battle_map", "res://maps/sandbox.json")), {"location_id": str(loc.get("id", ""))})
+	_start_battle_with(str(loc.get("battle_map", DEFAULT_BATTLE_MAP)), {"location_id": str(loc.get("id", ""))})
 
 # 地点面板：城市/村落＝服务列表（rest 已接入；planned 灰显 ⏳）+ 可选交谈；遗迹/据点＝状态 + 进攻。
 func _open_location_panel(loc: Dictionary) -> void:
@@ -866,6 +865,10 @@ func _refresh_time_ui() -> void:
 	var ws = WorldState.current
 	if ws == null:
 		return
+	var sig := "%d|%d|%d" % [ws.clock_hours, ws.gold, int(_time_playing)]
+	if sig == _ui_sig:
+		return   # 时钟/金钱/播放态未变：跳过 describe/tint 重算（播放时省逐帧开销）
+	_ui_sig = sig
 	if _play_label != null:
 		_play_label.text = "  ▶" if _time_playing else "  ⏸"
 	if _time_label != null:
