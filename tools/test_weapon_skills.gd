@@ -27,13 +27,13 @@ func _initialize() -> void:
 	print("=== 武器技能 BWS/EWS 测试开始 ===")
 	var skills := [
 		{"id": "t_bws", "name": "试斩", "icon": "res://x.png", "nature": "skill", "desc": "",
-			"active": true, "usable_as_bas": true, "tags": ["single_target"],
+			"active": true, "tags": ["single_target"],
 			"costs": {"ap": 1}, "cooldown": {"base": 0}, "uses_per_battle": {"base": 0},
 			"max_level": 1, "target": {"enemy": true, "ally": false, "self": false},
 			"range": 2, "requires_hands": [],
 			"effects": [{"kind": "attack", "hits": [{"coeff": 0.9, "damage_kind": "fire", "armor_pen": 5}]}]},
 		{"id": "t_ews_heal", "name": "战地包扎", "icon": "", "nature": "skill", "desc": "",
-			"active": true, "usable_as_bas": false, "tags": [],
+			"active": true, "tags": [],
 			"costs": {"ap": 1}, "cooldown": {"base": 2}, "uses_per_battle": {"base": 1},
 			"max_level": 1, "target": {"enemy": false, "ally": true, "self": true},
 			"range": 1, "requires_hands": [],

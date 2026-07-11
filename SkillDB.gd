@@ -91,6 +91,25 @@ static func has_runnable_block(def: Dictionary) -> bool:
 			return true
 	return false
 
+# BAS 形判定（🔒 决策27 关系制）：BWS/EWS 不是技能种类而是武器引用方式，技能「可被引为 BWS」看形状——
+# 含 attack 块（≥1 hit 对象）∧ 冷却0 ∧ 无级 ∧ 无手门槛（攻击路径不结算冷却/次数/等级，形状不符＝语义静默丢失）。
+# 单一判定口：ItemEditor BWS 下拉过滤 / lint 规则8（在武器引用处执法）/ SkillEditor 左栏分组 共用。
+static func is_bas_shaped(def: Dictionary) -> bool:
+	var cd = def.get("cooldown", {})
+	if typeof(cd) == TYPE_DICTIONARY and int(cd.get("base", 0)) != 0:
+		return false
+	if int(def.get("max_level", 1)) != 1:
+		return false
+	var hands = def.get("requires_hands", [])
+	if typeof(hands) == TYPE_ARRAY and not (hands as Array).is_empty():
+		return false
+	for b in def.get("effects", []):
+		if typeof(b) == TYPE_DICTIONARY and str(b.get("kind", "")) == "attack":
+			var hits = b.get("hits", [])
+			if typeof(hits) == TYPE_ARRAY and hits.size() >= 1 and typeof(hits[0]) == TYPE_DICTIONARY:
+				return true
+	return false
+
 # BWS 扁平化（🔒 §6.2 blocker + 决策26 阶段3a）：BWS 技能条目 → legacy attack dict——
 # 保下游 _resolve_compute / Sandbox / 借机 / AI 的顶层读点零改动。
 # 顶层字段从技能级取（name/icon/range/ap_cost〔经 skill_ap_cost 双键桥〕/tags）；

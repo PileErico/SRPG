@@ -42,7 +42,6 @@ var _w_icon: LineEdit
 var _w_desc: TextEdit
 var _w_nature: OptionButton
 var _w_active: CheckBox
-var _w_bas: CheckBox
 var _w_seq: SpinBox
 var _w_ap: SpinBox
 var _w_cd: SpinBox
@@ -118,13 +117,13 @@ func _shell_populate_list(q: String) -> void:
 		var nm := str(s.get("name", id))
 		if searching and not (str(id).to_lower().contains(q) or nm.to_lower().contains(q)):
 			continue
-		if bool(s.get("usable_as_bas", false)):
-			groups["bws"].append(s)
+		if SkillDB.is_bas_shaped(s):
+			groups["bws"].append(s)   # 计算判定非声明（决策27）：分组只是导航便利，编辑器不感知 BWS/EWS 角色
 		elif bool(s.get("active", true)):
 			groups["active"].append(s)
 		else:
 			groups["passive"].append(s)
-	for g in [["active", "主动能力"], ["passive", "被动能力"], ["bws", "武器普攻 BWS"]]:
+	for g in [["active", "主动能力"], ["passive", "被动能力"], ["bws", "普攻形（可被武器引为 BWS）"]]:
 		var key := str(g[0])
 		var arr: Array = groups[key]
 		arr.sort_custom(func(a, b): return _sort_key(a) < _sort_key(b))
@@ -154,7 +153,7 @@ func _sort_key(s: Dictionary) -> String:
 # 骨架＝canonical 键序（§2.1 示例序；字节级往返靠「duplicate 原条目+按键更新」保序）
 func _skeleton() -> Dictionary:
 	return {"id": "", "name": "新能力", "icon": "", "nature": "skill", "desc": "",
-		"active": true, "usable_as_bas": false, "tags": [],
+		"active": true, "tags": [],
 		"costs": {"ap": 1}, "cooldown": {"base": 0}, "uses_per_battle": {"base": 0},
 		"max_level": 1, "target": {"enemy": true, "ally": false, "self": false},
 		"range": 1, "requires_hands": [], "effects": []}
@@ -197,7 +196,7 @@ func _build_form() -> void:
 	_form.add_child(EditorUI.field_row("描述 desc", _w_desc))
 	_w_nature = _dropdown_pairs("性质 nature", NATURES, str(_current.get("nature", "skill")))
 	_w_active = EditorUI.add_check(_form, "主动能力 active（关＝被动，状态页圆框陈列）", bool(_current.get("active", true)), _mark_dirty)
-	_w_bas = EditorUI.add_check(_form, "可作武器普攻 BWS（usable_as_bas：冷却须 0、无级、无手部门槛）", bool(_current.get("usable_as_bas", false)), _mark_dirty)
+	# 无 usable_as_bas 勾选（决策27 关系制）：技能编辑器只管技能做什么；能否被引为 BWS＝形状（is_bas_shaped）在物品编辑器/lint 判
 	_w_seq = EditorUI.add_spin(_form, "通用序列槽 seq（0=不占；1-13 全库唯一）", float(_current.get("seq", 0)), 0, 13, 1, _mark_dirty)
 
 	# 2. 标签
@@ -663,7 +662,6 @@ func _shell_collect() -> Dictionary:
 	out["nature"] = str(_w_nature.get_selected_metadata())
 	out["desc"] = _w_desc.text
 	out["active"] = _w_active.button_pressed
-	out["usable_as_bas"] = _w_bas.button_pressed
 	out["tags"] = _tags.duplicate()
 	var costs: Dictionary = out.get("costs", {}) if typeof(out.get("costs")) == TYPE_DICTIONARY else {}
 	costs["ap"] = int(_w_ap.value)
@@ -702,17 +700,7 @@ func _shell_collect() -> Dictionary:
 			_err(_collect_err)
 			return {}
 	out["effects"] = effects
-	# —— lint 规则7 同步校验（编辑器先拦）——
-	if bool(out["usable_as_bas"]):
-		if int(cd["base"]) != 0:
-			_err("BAS 冷却必须 0（lint 规则7）")
-			return {}
-		if int(out["max_level"]) != 1:
-			_err("BAS 无级（max_level=1，lint 规则7）")
-			return {}
-		if not hands.is_empty():
-			_err("BAS requires_hands 必须空——武器绑定天然满足（§2.5）")
-			return {}
+	# —— lint 规则7 同步校验（编辑器先拦；BAS 形约束已随决策27 移到引用处＝lint 规则8/ItemEditor 过滤）——
 	if not (bool(out["target"]["enemy"]) or bool(out["target"]["ally"]) or bool(out["target"]["self"])):
 		_err("目标三旗不得全 false（永不可施放，lint 规则7）")
 		return {}

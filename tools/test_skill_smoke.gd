@@ -83,8 +83,8 @@ func _initialize() -> void:
 		var def = SkillDB.get_skill(id)
 		if not bool(def.get("active", true)):
 			continue
-		if bool(def.get("usable_as_bas", false)):
-			continue   # BWS＝普攻路径（basic_attack→_resolve_compute），冒烟归 test_basic_attack/test_combat_golden
+		if not SkillDB.has_runnable_block(def):
+			continue   # 无可跑块（纯 attack 形＝BWS 们）：apply_skill 守卫拒发零消耗，冒烟归 test_basic_attack/test_combat_golden
 		n += 1
 		var c = UnitFactory.make_unit(BARE, "player", 0, 0)
 		c.learn_skill(str(id))

@@ -60,7 +60,6 @@ func _run() -> int:
 			"nature": "skill",
 			"desc": "",
 			"active": true,
-			"usable_as_bas": true,
 			"tags": (atk.get("tags", []) as Array).duplicate(true),
 			"costs": {"ap": int(atk.get("ap_cost", 1))},
 			"cooldown": {"base": 0},

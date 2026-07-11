@@ -1,7 +1,8 @@
 extends SceneTree
 ## SkillEditor / EffectEditor 回归（🔒 设计 §10 阶段2 验收）：
 ##  · canonical 字节级往返：载入→_collect（无改动）→save_skill → 文件字节不变；collect 结果与 DB 条目全等
-##  · lint 规则7 同步校验拦截：三旗全 false / BAS 冷却≠0 / seq 撞格 / per_level 长度≠max_level → collect 拒（{}）
+##  · lint 规则7 同步校验拦截：三旗全 false / seq 撞格 / per_level 长度≠max_level → collect 拒（{}）
+##    （BAS 形约束已随决策27 关系制移到引用处＝lint 规则8/ItemEditor 过滤，编辑器不再有 usable_as_bas）
 ##  · 坏 JSON 响亮拒存：scripted params 非法 JSON → collect 拒
 ##  · EffectEditor：bleeding 往返 + 新建效果入库
 ## 全程 SkillDB/EffectDB._path_override 注入 user:// 临时副本——绝不碰 res://data 真数据。
@@ -68,9 +69,6 @@ func _initialize() -> void:
 	ck(ed._shell_collect().is_empty(), "三旗全 false → collect 拒")
 	ed._w_t_ally.button_pressed = true
 	ed._w_t_self.button_pressed = true
-	ed._w_bas.button_pressed = true   # first_aid 冷却 2 → BAS 约束违例
-	ck(ed._shell_collect().is_empty(), "BAS+冷却≠0 → collect 拒")
-	ed._w_bas.button_pressed = false
 	ck(not ed._shell_collect().is_empty(), "校验复原后 collect 恢复")
 
 	# seq 撞格：新建技能占 first_aid 的 seq 1

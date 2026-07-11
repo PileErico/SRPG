@@ -1561,8 +1561,8 @@ func _learned_active_skills(u) -> Array:
 		var def = SkillDB.get_skill(id)
 		if def == null or not def.get("active", false):
 			continue
-		# BWS/纯 attack 块技能不进能力菜单：普攻走攻击路径，attack 经能力施放＝阶段6（apply_skill 有同口守卫）
-		if bool(def.get("usable_as_bas", false)) or not SkillDB.has_runnable_block(def):
+		# 无可跑块（纯 attack 形——BWS 们天然如此）不进能力菜单：attack 经能力路径施放＝阶段6（apply_skill 同口守卫）
+		if not SkillDB.has_runnable_block(def):
 			continue
 		out.append(id)
 	out.sort_custom(func(a, b):

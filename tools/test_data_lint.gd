@@ -11,11 +11,12 @@ extends SceneTree
 ##     （未知种别在 CombatResolver 会告警回退物理轨；数据侧在此挡住）。
 ##  6) tag 引用完整性（🔒 tag 统一词表）：data/*.json 与 terrains.json 里任意 "tags" 数组的字符串
 ##     必须 ∈ tags.json——防「用了没注册」的词表漂移（曾漏 cold/road/wall）。
-##  7) skills.json 阶段2 形状闸门（🔒 设计 §10 护栏#1 机械执法）：BAS 约束（usable_as_bas⇒cd0/无级/无手门槛/
-##     必须含 attack 块）/ target 三旗不得全 false / seq 撞格 / per_level 长度==max_level /
-##     costs.ap 与顶层 ap_cost 禁双写 / 阶段6 前 hits.size()>1 或 riders 出现即 FAIL（防「可编不可跑」内容入库）。
-##  8) weapons.json 武器技能引用（🔒 决策25/26）：bws/bas → 技能存在+usable_as_bas；
-##     ews → 技能存在+主动+含 ≥1 可跑块（纯 attack＝阶段6），requires 的 prof/value 合法。
+##  7) skills.json 阶段2 形状闸门（🔒 设计 §10 护栏#1 机械执法）：target 三旗不得全 false / seq 撞格 /
+##     per_level 长度==max_level / costs.ap 与顶层 ap_cost 禁双写 / 阶段6 前 hits.size()>1 或 riders 出现即 FAIL
+##     （防「可编不可跑」内容入库）。BAS 形约束已随决策27 关系制移到规则8 引用处执法。
+##  8) weapons.json 武器技能引用（🔒 决策25/26/27）：bws/bas → 技能存在+BAS 形（is_bas_shaped：含 attack 块+
+##     冷却0+无级+无手门槛——攻击路径不结算冷却/次数/等级）；ews → 技能存在+主动+含 ≥1 可跑块（纯 attack＝阶段6），
+##     requires 的 prof/value 合法。BWS/EWS＝武器引用方式非技能种类：同一技能可既是 A 的 BWS 又是 B 的 EWS。
 ## 运行：..._console.exe --headless --path "D:/1战棋" -s res://tools/test_data_lint.gd（退出码 0=PASS）
 
 const EffectDB := preload("res://EffectDB.gd")
@@ -225,18 +226,6 @@ func _initialize() -> void:
 			var costs = s.get("costs", {})
 			ck(not (s.has("ap_cost") and typeof(costs) == TYPE_DICTIONARY and costs.has("ap")),
 				"%s：costs.ap 与顶层 ap_cost 禁双写（双键桥在读取器，数据侧只留一个）" % sid)
-			if bool(s.get("usable_as_bas", false)):
-				ck(int((s.get("cooldown", {}) as Dictionary).get("base", 0)) == 0, "%s：BAS 冷却必须 0" % sid)
-				ck(int(s.get("max_level", 1)) == 1, "%s：BAS 无级（max_level=1）" % sid)
-				ck((s.get("requires_hands", []) as Array).is_empty(), "%s：BAS requires_hands 必须空" % sid)
-				# usable_as_bas ⇒ 必须含 attack 块（≥1 hit 对象）：否则 flatten_bws 空 → 普攻位形同虚设/旧版=幻影攻击
-				var has_atk := false
-				for b in s.get("effects", []):
-					if typeof(b) == TYPE_DICTIONARY and str(b.get("kind", "")) == "attack" \
-							and typeof(b.get("hits", null)) == TYPE_ARRAY and (b["hits"] as Array).size() >= 1 \
-							and typeof((b["hits"] as Array)[0]) == TYPE_DICTIONARY:
-						has_atk = true
-				ck(has_atk, "%s：usable_as_bas ⇒ 必须含 attack 块（≥1 hit）——否则普攻位空转" % sid)
 			var tg = s.get("target", null)
 			if typeof(tg) == TYPE_DICTIONARY:
 				ck(bool(tg.get("enemy", false)) or bool(tg.get("ally", false)) or bool(tg.get("self", false)),
@@ -258,8 +247,9 @@ func _initialize() -> void:
 			for h in hits:
 				ck((h as Array).size() <= 1, "%s：hits>1 属阶段6（护栏#1）——现禁入库" % sid)
 
-	# 8) weapons.json 的武器技能引用（🔒 决策25/26 阶段3a）：
-	#    bws/bas（双键桥）→ 技能存在 + usable_as_bas；ews → 技能存在+主动、requires 的 prof/value 合法；
+	# 8) weapons.json 的武器技能引用（🔒 决策25/26/27）：
+	#    bws/bas（双键桥）→ 技能存在 + BAS 形（约束长在引用处：没被引用的技能不受形状约束）；
+	#    ews → 技能存在+主动+可跑块、requires 的 prof/value 合法；
 	#    内联 attack 残留＝窗口期提示（迁移后应为 0；收口后改 FAIL）。
 	var wd = _read_json("res://data/weapons.json")
 	if wd != null:
@@ -269,7 +259,8 @@ func _initialize() -> void:
 		for b in bas_refs:
 			var bdef = SkillDB.get_skill(b)
 			ck(bdef != null, "weapons 引用的 BWS 技能存在：%s" % b)
-			ck(bdef != null and bool(bdef.get("usable_as_bas", false)), "%s：被引用为 BWS 须 usable_as_bas（形状声明）" % b)
+			ck(bdef == null or SkillDB.is_bas_shaped(bdef),
+				"%s：被引为 BWS 须 BAS 形（含 attack 块·冷却0·无级·无手门槛——攻击路径不结算冷却/次数/等级）" % b)
 		var inline_left := 0
 		if typeof(wd) == TYPE_ARRAY:
 			for w in wd:
