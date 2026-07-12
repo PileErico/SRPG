@@ -1815,9 +1815,12 @@ func _popup_gate_denied() -> void:
 	menu.set_item_disabled(0, true)
 	_popup_equip_menu(menu, func(_id): pass)
 
-# 点装备槽 → 动作菜单：卸下（背包满灰显）/ 单手武器换手
+# 右键装备槽 → 动作菜单：卸下（背包满灰显）/ 单手武器换手
+# 🔒 交互分工（用户 2026-07-12）：左键＝拖拽/选中（菜单若挂左键会抢输入、拖拽启动不了），右键＝上下文菜单。
 func _on_equip_cell_click(event: InputEvent, u, slot_id: String) -> void:
-	if not (event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT):
+	if not (event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT):
+		return
+	if get_viewport().gui_is_dragging():
 		return
 	var iuid := int(u.equipment.get(slot_id, 0))
 	var it = ItemInstances.view(iuid)
@@ -1845,9 +1848,11 @@ func _on_equip_cell_click(event: InputEvent, u, slot_id: String) -> void:
 				_try_equip_action(u, func(): return u.transfer_hand(slot_id, to2))
 	_popup_equip_menu(menu, cb)
 
-# 点背包件 → 装备菜单：默认槽装备 / 单手武器可选副手
+# 右键背包件 → 装备菜单：默认槽装备 / 单手武器可选副手（左键拖拽右键菜单，同上）
 func _on_bag_item_click(event: InputEvent, u, iuid: int) -> void:
-	if not (event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT):
+	if not (event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT):
+		return
+	if get_viewport().gui_is_dragging():
 		return
 	var it = ItemInstances.view(iuid)
 	if it == null:
