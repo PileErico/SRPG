@@ -203,6 +203,28 @@ static func check_enter_tile(triggers: Array, cell: Vector2i, faction: String, f
 		_record_fire(when, tid, fired, ws)
 		fire_trigger(trig, host)
 
+# enter_location：抵达地点（任务线地基 §2-3；Overworld._arrive 停靠时评估——途经不触发，与地点面板同 BB 式停靠语义）。
+# when.location 缺省＝任意地点；when.location_type（可选）＝按类型（city/village/ruin/lair）。
+static func check_enter_location(triggers: Array, loc: Dictionary, fired: Dictionary, host, ws = null) -> void:
+	for i in triggers.size():
+		var trig = triggers[i]
+		if typeof(trig) != TYPE_DICTIONARY:
+			continue
+		var when = trig.get("when", {})
+		if typeof(when) != TYPE_DICTIONARY or str(when.get("event", "")) != "enter_location":
+			continue
+		if when.has("location") and str(when["location"]) != str(loc.get("id", "")):
+			continue
+		if when.has("location_type") and str(when["location_type"]) != str(loc.get("type", "")):
+			continue
+		var tid := trigger_key(trig, i)
+		if not _gates_open(when, tid, fired, ws, true):
+			continue
+		if not _roll_chance(when):
+			continue
+		_record_fire(when, tid, fired, ws)
+		fire_trigger(trig, host)
+
 # timer：世界时间节拍（大地图推进时钟后调用；战斗不耗世界时间 🔒 → 战斗侧不会走到）。
 # every_hours＝间隔；一次推进跨多个节拍只触发一次（不补触发，BB 式）；chance 不中＝本节拍已消耗、等下个 every。
 # fired / 计时状态全在 ws（世界持久层）。
@@ -242,6 +264,12 @@ static func gate_status(when: Dictionary, tid: String, fired: Dictionary, ws, de
 		return {"ready": false, "reason": "disabled", "hours_left": 0}   # 玩家在📜面板禁用（含伪触发器；随档持久）
 	if bool(when.get("once", default_once)) and fired.has(tid):
 		return {"ready": false, "reason": "fired", "hours_left": 0}
+	# flag 闸（任务线地基 §2-3）：when.flag=该世界 flag 须为真 / when.flag_not=须为假——任务链纯数据可表达
+	#（无 ws＝无档沙盒：带 flag 条件的事件一律不中，与 terrain 条件同款保守语义）
+	if when.has("flag") and (ws == null or not bool(ws.flags.get(str(when["flag"]), false))):
+		return {"ready": false, "reason": "flag", "hours_left": 0}
+	if when.has("flag_not") and ws != null and bool(ws.flags.get(str(when["flag_not"]), false)):
+		return {"ready": false, "reason": "flag", "hours_left": 0}
 	if ws != null:
 		var cd_left: int = int(ws.event_cooldown_until.get(tid, -1)) - ws.clock_hours
 		if cd_left > 0:
@@ -292,6 +320,8 @@ static func event_status(ev: Dictionary, ws) -> Dictionary:
 				return {"ready": false, "text": "已禁用"}
 			"fired":
 				return {"ready": false, "text": "已触发"}
+			"flag":
+				return {"ready": false, "text": "前置未达（flag 条件）"}
 			"cooldown":
 				return {"ready": false, "text": "冷却中（剩 %d 小时）" % int(gs["hours_left"])}
 			"global_gap":
@@ -317,6 +347,12 @@ static func when_text(when: Dictionary) -> String:
 			return "任意移动"
 		"enter_region":
 			return "进入区域〈%s〉" % str(when.get("region", "?"))
+		"enter_location":
+			if when.has("location"):
+				return "抵达地点〈%s〉" % str(when["location"])
+			if when.has("location_type"):
+				return "抵达任意〈%s〉" % str(when["location_type"])
+			return "抵达任意地点"
 		"timer":
 			return "每 %d 小时" % maxi(1, int(when.get("every_hours", 24)))
 	return "？（%s）" % str(when.get("event", ""))
@@ -329,6 +365,10 @@ static func gate_text(when: Dictionary) -> String:
 	var parts := ["概率 %s" % chance_txt, ("CD %d 小时" % cd) if cd > 0 else "CD 无"]
 	if bool(when.get("global_gap", false)):
 		parts.append("全局间隔")
+	if when.has("flag"):
+		parts.append("需〈%s〉" % str(when["flag"]))
+	if when.has("flag_not"):
+		parts.append("需无〈%s〉" % str(when["flag_not"]))
 	if bool(when.get("once", str(when.get("event", "")) != "timer")):
 		parts.append("仅一次")
 	return "｜".join(parts)

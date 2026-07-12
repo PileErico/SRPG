@@ -65,10 +65,14 @@ static func collect_result(roster: Array, kills: Array, win: bool, context: Dict
 	return {"win": win, "units": entries, "kills": kills_out, "context": context.duplicate(true)}
 
 # 战后回写 campaign（结果出的唯一落点）：HP/经验/重伤/真死 → roster；击杀统计 → ws.kill_stats（情报解锁输入源）。
-# 返回讨伐赏金入账额（0=无赏金/败北；宿主战报播报用）。
-static func apply_result(ws, result: Dictionary) -> int:
+# 返回结算摘要 dict（任务线地基 §2-2——kills/context 不再在唯一交接点被丢弃，任务战斗类目标单点消费）：
+#   {bounty:int 赏金入账额, win:bool, kills:Array（{proto_id,faction}）, context:Dictionary（开战来由原样）,
+#    cleared_location:String（胜且有据点＝其 id）, removed_world_unit:int（胜且有世界单位＝其 uid）}
+static func apply_result(ws, result: Dictionary) -> Dictionary:
+	var summary := {"bounty": 0, "win": bool(result.get("win", false)), "kills": result.get("kills", []),
+		"context": result.get("context", {}), "cleared_location": "", "removed_world_unit": 0}
 	if ws == null:
-		return 0
+		return summary
 	for e in result.get("units", []):
 		var u = ws.roster_by_uid(int(e.get("uid", 0)))
 		if u == null:
@@ -103,11 +107,15 @@ static func apply_result(ws, result: Dictionary) -> int:
 	# 战斗来由落账：据点讨伐获胜 → 肃清计时（M7）；动态单位交战获胜 → 该单位覆灭（WorldSim v1）；
 	# 讨伐赏金（波2 收入闭环第一环）：bounty 由开战点解析进 context（据点=locations.json 类型 /
 	# 游团=world_units.json 类型），此处胜后单点入账。
-	var bounty := 0
 	var ctx = result.get("context", {})
 	if bool(result.get("win", false)) and typeof(ctx) == TYPE_DICTIONARY:
-		ws.mark_location_cleared(str(ctx.get("location_id", "")))
-		ws.remove_world_unit(int(ctx.get("world_unit_uid", 0)))
-		bounty = maxi(0, int(ctx.get("bounty", 0)))
-		ws.gold += bounty
-	return bounty
+		var loc_id := str(ctx.get("location_id", ""))
+		var wu_uid := int(ctx.get("world_unit_uid", 0))
+		ws.mark_location_cleared(loc_id)
+		if ws.world_unit_by_uid(wu_uid) != null:
+			summary["removed_world_unit"] = wu_uid
+		ws.remove_world_unit(wu_uid)
+		summary["cleared_location"] = loc_id
+		summary["bounty"] = maxi(0, int(ctx.get("bounty", 0)))
+		ws.gold += int(summary["bounty"])
+	return summary

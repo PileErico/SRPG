@@ -410,7 +410,7 @@ func event_set_flag(key: String, value) -> void:
 	if ws == null:
 		_log_line("⚑ （沙盒无战役档，flag 设置跳过）")
 		return
-	ws.flags[key] = value
+	ws.set_flag(key, value)   # 唯一写口（带 flag_changed 广播）
 
 # 开对话（do: dialogue，M8 战场内触发）：模态覆盖战斗 UI；ws 有档＝选项效果落战役、纯沙盒＝效果跳过
 func event_dialogue(dialogue_id: String) -> void:
@@ -1372,7 +1372,8 @@ func _finish_campaign_battle(win: bool) -> void:
 	var ws = WorldState.current
 	if ws == null:
 		return
-	var bounty := BattleIO.apply_result(ws, BattleIO.collect_result(roster, _battle_kills, win, _battle_context))
+	var summary := BattleIO.apply_result(ws, BattleIO.collect_result(roster, _battle_kills, win, _battle_context))
+	var bounty := int(summary.get("bounty", 0))
 	if bounty > 0:
 		_log_line("[color=%s]💰 讨伐赏金 +%d（已入账，现有 %d）[/color]" % [OK_GREEN, bounty, ws.gold])
 	SaveIO.save_campaign(ws, SaveIO.AUTO_SLOT)

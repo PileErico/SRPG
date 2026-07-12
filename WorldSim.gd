@@ -31,7 +31,7 @@ static var last_trails := {}
 static func ensure_spawned(ws, world) -> void:
 	if ws == null or bool(ws.flags.get("world_units_seeded", false)):
 		return
-	ws.flags["world_units_seeded"] = true
+	ws.set_flag("world_units_seeded", true)   # 经唯一写口（内部旗也不例外——裸写口清零）
 	for t in WorldUnitDB.all_types():
 		var tid := str(t["id"])
 		# per_city：每座城一支（home=城）

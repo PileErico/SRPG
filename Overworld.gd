@@ -475,6 +475,7 @@ func _tick_time(dh: float) -> void:
 			_arrive(landed)
 
 # 抵达目的地：自动暂停＋落盘；地点＝自动进入（面板；途经不进——BB 式点到才停靠）
+# enter_location 事件（任务线地基 §2-3）：停靠即评估（每图触发器+全局池两路，与 enter_tile 同构）
 func _arrive(dest: Vector2i) -> void:
 	_pause_time()
 	_move_target = Vector2i(-1, -1)
@@ -482,7 +483,12 @@ func _arrive(dest: Vector2i) -> void:
 		canvas.queue_redraw()
 	_autosave()
 	if _loc_by_cell.has(dest):
-		_open_location_panel(_loc_by_cell[dest])
+		var loc: Dictionary = _loc_by_cell[dest]
+		var ws = WorldState.current
+		EventEngine.check_enter_location(_map_triggers, loc, ws.event_fired, self, ws)
+		EventEngine.check_enter_location(EventDB.all_events(), loc, ws.event_fired, self, ws)
+		if _dialogue == null and SandboxConfig.battle_setup == null:
+			_open_location_panel(loc)   # 事件开了对话/战斗＝面板让位（读完/战后玩家可再点开）
 
 # 测试助手：把整条路径一次跑完（headless 无真 _process——小步反复 _tick_time 直到自动暂停/抵达）
 func simulate_travel_to_arrival(path: Array) -> void:
@@ -644,12 +650,12 @@ func event_add_rep(faction_id: String, delta: int) -> void:
 	_log_line("🚩 %s 声望 %+d → %d%s" % [FactionDB.label(faction_id), delta,
 		FactionDB.rep_of(ws, faction_id), "（敌对！）" if FactionDB.hostile(ws, faction_id) else ""])
 
-# 设世界 flag（do: set_flag，M9）：任务/事件状态的通用兜底存储
+# 设世界 flag（do: set_flag，M9）：任务/事件状态的通用兜底存储——经 set_flag 唯一写口（带 flag_changed 广播）
 func event_set_flag(key: String, value) -> void:
 	var ws = WorldState.current
 	if ws == null:
 		return
-	ws.flags[key] = value
+	ws.set_flag(key, value)
 
 # 给予物品（do: give_item，M3 挂点）：入队伍背包（可堆叠 tpl_id→count）；事件「装水得道具」/烹饪食材获取共用。
 func event_give_item(item_id: String, count: int) -> void:

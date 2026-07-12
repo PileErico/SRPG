@@ -14,6 +14,8 @@ const ItemInstances := preload("res://ItemInstances.gd")
 
 const SAVE_VERSION := 1
 
+signal flag_changed(key: String, value)   # set_flag 唯一写口广播（任务线地基：任务系统/UI 订阅它，零轮询）
+
 static var current = null           # 当前战役（WorldState 实例）或 null
 static var _transient_next_uid := 1 # 无战役时的临时计数（沙盒等；与档内 uid 域天然隔离——库也各是一个）
 
@@ -27,7 +29,7 @@ var party_col := -1      # 大地图队伍位置（-1=未落位，Overworld 首�
 var party_row := -1
 var ironman := false     # 铁人模式 flag（强制单槽覆盖；SaveIO 第一版即预留）
 var gold := 0            # 队伍资金（M7 起：休整消费；交易/招募/铁匠后续同用）
-var flags := {}          # 世界 flag {key: value}——任务/事件状态起步先用它兜底
+var flags := {}          # 世界 flag {key: value}——任务/事件状态起步先用它兜底。⚠ 写入走 set_flag 唯一写口（裸写＝无广播）
 var reputation := {}     # 派系声望 {faction_id: int}
 var roster := []         # 花名册：活 Unit 对象列表（存档时经 unit_to_campaign 快照、读档重建）
 var item_instances := {} # 本档物品实例库 {uid(int): inst}——ItemInstances 门面在 current==self 时路由到这
@@ -125,6 +127,15 @@ func job_holder(job_id: String):
 func mark_location_cleared(loc_id: String) -> void:
 	if loc_id != "":
 		location_cleared_at[loc_id] = clock_hours
+
+# 世界 flag 唯一写口（任务线地基 §2-1）：写入并广播 flag_changed（值没变＝不重播，任务系统幂等友好）。
+# 三处散写（事件 set_flag 动作/对话 set_flags/沙盒宿主原语）已全部收拢到此。
+func set_flag(key: String, value) -> void:
+	var k := str(key)
+	if flags.has(k) and typeof(flags[k]) == typeof(value) and flags[k] == value:
+		return
+	flags[k] = value
+	flag_changed.emit(k, value)
 
 # 大地图动态单位：按 uid 查/移除（BattleIO 战胜回写、WorldSim 摩擦战用）。
 # uid<=0＝无效（未分配/坏档），直接 null——防 context 缺键时 get 默认 0 误中坏数据单位。

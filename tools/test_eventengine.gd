@@ -178,6 +178,39 @@ func _initialize() -> void:
 	EventEngine.check_timer(tm_trigs, null, h)   # 无档不炸
 	ck(h.logs.size() == 3, "无档 no-op")
 
+	# 6b) flag 闸 + set_flag 唯一写口 + enter_location（任务线地基 §2-1/§2-3）
+	var ws3 = WorldState.new()
+	WorldState.current = ws3
+	var flag_trigs := [
+		{"id": "f1", "when": {"event": "enter_tile", "once": false, "flag": "door_open"}, "do": [{"action": "show_message", "text": "门开"}]},
+		{"id": "f2", "when": {"event": "enter_tile", "once": false, "flag_not": "door_open"}, "do": [{"action": "show_message", "text": "门关"}]},
+	]
+	h = MockHost.new()
+	EventEngine.check_enter_tile(flag_trigs, Vector2i(0, 0), "player", ws3.event_fired, h, ws3)
+	ck(h.logs == ["门关"], "flag 未设：flag 条件不中、flag_not 条件中")
+	var sig_got := []
+	ws3.flag_changed.connect(func(k, v): sig_got.append([k, v]))
+	ws3.set_flag("door_open", true)
+	ck(sig_got == [["door_open", true]], "set_flag 广播 flag_changed")
+	ws3.set_flag("door_open", true)
+	ck(sig_got.size() == 1, "同值重设不重播（幂等友好）")
+	h = MockHost.new()
+	EventEngine.check_enter_tile(flag_trigs, Vector2i(0, 0), "player", ws3.event_fired, h, ws3)
+	ck(h.logs == ["门开"], "flag 已设：条件翻转")
+	ck(str(EventEngine.event_status({"id": "f1", "when": flag_trigs[1]["when"]}, ws3).get("text", "")).contains("前置未达"),
+		"📜面板 flag 闸文案（gate_status 单一源自动跟上）")
+	var loc_trigs := [
+		{"id": "l1", "when": {"event": "enter_location", "location": "city_a"}, "do": [{"action": "show_message", "text": "到城"}]},
+		{"id": "l2", "when": {"event": "enter_location", "location_type": "ruin", "once": false}, "do": [{"action": "show_message", "text": "到废墟"}]},
+		{"id": "l3", "when": {"event": "enter_location", "once": false}, "do": [{"action": "show_message", "text": "任意点"}]},
+	]
+	h = MockHost.new()
+	EventEngine.check_enter_location(loc_trigs, {"id": "city_a", "type": "city"}, ws3.event_fired, h, ws3)
+	ck(h.logs == ["到城", "任意点"], "enter_location：按 id 中 + 任意地点中 + 类型不匹配不中")
+	h = MockHost.new()
+	EventEngine.check_enter_location(loc_trigs, {"id": "ruin_x", "type": "ruin"}, ws3.event_fired, h, ws3)
+	ck(h.logs == ["到废墟", "任意点"], "enter_location：按类型中；once 缺省 true 的 l1 不再来")
+
 	# 7) 事件状态存档往返（值 int 化）
 	ws2.event_cooldown_until["c9"] = 123
 	ws2.last_world_event_hours = 77

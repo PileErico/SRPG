@@ -95,7 +95,7 @@ func _apply_choice_effects(c: Dictionary) -> void:
 	var sf = c.get("set_flags", {})
 	if typeof(sf) == TYPE_DICTIONARY:
 		for k in sf:
-			_ws.flags[str(k)] = sf[k]
+			_ws.set_flag(str(k), sf[k])   # 唯一写口（带 flag_changed 广播）
 	var rp = c.get("rep", {})
 	if typeof(rp) == TYPE_DICTIONARY:
 		for f in rp:
