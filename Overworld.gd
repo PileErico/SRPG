@@ -33,6 +33,7 @@ const WorldUnitDB := preload("res://WorldUnitDB.gd") # 动态单位类型注册�
 const MinHeap := preload("res://MinHeap.gd")         # 寻路优先队列（find_path；与 BattleState._dijkstra 共用实现）
 const UnitStatusPanel := preload("res://UnitStatusPanel.gd")   # 👥 角色状态卡（与战斗侧同一份；宿主契约见 _open_status_panel）
 const TextureCache := preload("res://TextureCache.gd")         # 队伍面板成员立绘缩略
+const SettingsOverlay := preload("res://Settings.gd")          # ⚙ 设置覆盖层（与主菜单同一份，ESC 菜单入口）
 
 const MAP_PATH := "res://maps/overworld/world.json"
 const HOURS_PER_COST := 1    # 1 点通行成本 ＝ 1 小时（大世界成本＝terrains.json move.overworld_cost：道路 1h/格、平原 2h、山 6h）
@@ -380,11 +381,16 @@ func _advance_wu_anim(delta: float) -> bool:
 			moving = true
 	return moving
 
-# 空格＝时间总开关（播放/暂停）；只吃空格、不吞其它键。顶栏按钮已设 FOCUS_NONE，空格不会误触聚焦按钮。
+# 空格＝时间总开关（播放/暂停）、ESC＝☰ 菜单开关；只吃这两键、不吞其它键。顶栏按钮已设 FOCUS_NONE，空格不会误触聚焦按钮。
+# 弹窗（PopupPanel）持有焦点时 ESC 由弹窗自行关闭（Godot Popup 默认行为），不会落到这里重开菜单。
 func _unhandled_key_input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_SPACE:
-		_toggle_time()
-		get_viewport().set_input_as_handled()
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_SPACE:
+			_toggle_time()
+			get_viewport().set_input_as_handled()
+		elif event.keycode == KEY_ESCAPE:
+			_toggle_esc_menu()
+			get_viewport().set_input_as_handled()
 
 func _toggle_time() -> void:
 	if not _time_playing and (_dialogue != null or SandboxConfig.battle_setup != null):
@@ -858,13 +864,10 @@ func _build_ui() -> void:
 	bag_b.text = "🎒 背包"
 	bag_b.pressed.connect(_open_inventory_panel)
 	top.add_child(bag_b)
-	var save_b := Button.new()
-	save_b.text = "💾 存档"
-	save_b.pressed.connect(_open_save_panel)
-	top.add_child(save_b)
 	var menu_b := Button.new()
-	menu_b.text = "返回菜单"
-	menu_b.pressed.connect(_on_back_to_menu)
+	menu_b.text = "☰"
+	menu_b.tooltip_text = "菜单（ESC）：设置 / 存档 / 返回主菜单"
+	menu_b.pressed.connect(_toggle_esc_menu)
 	top.add_child(menu_b)
 	for b in top.get_children():
 		if b is Button:
@@ -902,6 +905,47 @@ func _refresh_time_ui() -> void:
 func _log_line(text: String) -> void:
 	if _log != null:
 		_log.append_text(text + "\n")
+
+# ============ ☰ ESC 菜单（设置/存档/返回主菜单——顶栏只留 ☰ 入口，减右上角堆积）============
+
+var _esc_menu: PopupPanel
+
+func _toggle_esc_menu() -> void:
+	if _esc_menu != null and is_instance_valid(_esc_menu) and _esc_menu.visible:
+		_esc_menu.hide()
+		return
+	_open_esc_menu()
+
+func _open_esc_menu() -> void:
+	if _dialogue != null or SandboxConfig.battle_setup != null:
+		return   # 模态事件（对话/战斗待切场景）中不开菜单（同 _toggle_time 规则）
+	_pause_time()   # 进菜单即停表（与抵达/模态事件同一规则）
+	if _esc_menu != null and is_instance_valid(_esc_menu):
+		_esc_menu.queue_free()
+	var ui = CampaignUI.popup(240, 8)
+	_esc_menu = ui["popup"]
+	var v: VBoxContainer = ui["box"]
+	var title := Label.new()
+	title.text = "☰ 菜单"
+	title.add_theme_font_size_override("font_size", 18)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v.add_child(title)
+	v.add_child(HSeparator.new())
+	var settings_b := CampaignUI.button("⚙ 设置")
+	settings_b.pressed.connect(func():
+		_esc_menu.hide()
+		add_child(SettingsOverlay.new()))   # 覆盖层自管 ESC/返回关闭（与主菜单同一份）
+	v.add_child(settings_b)
+	var save_b := CampaignUI.button("💾 存档")
+	save_b.pressed.connect(func():
+		_esc_menu.hide()
+		_open_save_panel())
+	v.add_child(save_b)
+	var quit_b := CampaignUI.button("🚪 返回主菜单")
+	quit_b.pressed.connect(_on_back_to_menu)   # 内含自动存档
+	v.add_child(quit_b)
+	add_child(_esc_menu)
+	_esc_menu.popup_centered()
 
 # ============ 💾 手动存档（多槽位；铁人模式禁手动＝仅自动档）============
 
