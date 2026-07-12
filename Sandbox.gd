@@ -1206,50 +1206,21 @@ func _ai_set_aggro(unit) -> void:
 	for u in _state._ai_set_aggro_state(unit):
 		_log_line("%s 进入战斗！" % _cname(u))
 
-# 一个 AI 动作：能打就打、否则靠近；返回是否做了事
+# 一个 AI 动作：决策核在 BattleState._ai_plan（纯函数，技改 §1-2）——宿主只剩「取 plan → 动画 → 提交」
 func _ai_one_action(unit) -> bool:
-	var target = _ai_nearest_hostile(unit)
-	if target == null:
-		return false
-	var here := Vector2i(unit.col, unit.row)
-	var tcell := Vector2i(target.col, target.row)
-	var rng := int(unit.basic_attack().get("range", 1))
-	# 1) 在攻击距离内且有 AP → 攻击
-	if _hex_dist(here, tcell) <= rng and _can_attack(unit):
-		_do_attack(unit, tcell)
-		return true
-	# 2) 否则朝目标移动一步（buy 一批移动力 / 用剩余移动点）
-	if _move_budget(unit) > 0:
-		return await _ai_step_toward(unit, target)
+	var plan: Dictionary = _state._ai_plan(unit)
+	match str(plan.get("action", "none")):
+		"attack":
+			_do_attack(unit, plan["cell"])
+			return true
+		"move":
+			return await _ai_exec_move(unit, plan)
 	return false
 
-# 朝 target 走：在可达格里挑最靠近 target 的；不能更近就不动（返回 false）
-func _ai_step_toward(unit, target) -> bool:
-	var budget := _move_budget(unit)
-	if budget <= 0:
-		return false
-	var data := _dijkstra(unit, budget)
-	var best: Dictionary = data["best"]          # {格: 累计消耗}，含起点(0)
-	var came: Dictionary = data["came_from"]
-	var start := Vector2i(unit.col, unit.row)
-	var tcell := Vector2i(target.col, target.row)
-	var cur_dist := _hex_dist(start, tcell)
-	var pick := start
-	var pick_dist := cur_dist
-	var pick_cost := 0
-	for cell in best:
-		if cell == start:
-			continue
-		# （占位格无需再查：_dijkstra 的 best 本就不含他人占位格——预计算 occupied 集合直接跳过）
-		var dd := _hex_dist(cell, tcell)
-		var cc := int(best[cell])
-		if dd < pick_dist or (dd == pick_dist and cc < pick_cost):
-			pick = cell
-			pick_dist = dd
-			pick_cost = cc
-	if pick == start or pick_dist >= cur_dist:
-		return false   # 没有更靠近的落点 → 收手
-	var path := _path_via(came, pick)
+# 执行移动 plan（副作用全在这：买移动力/ZOC 借机/落位/动画/触发器）；返回是否走成
+func _ai_exec_move(unit, plan: Dictionary) -> bool:
+	var pick: Vector2i = plan["cell"]
+	var path: Array = plan["path"]
 	# 预算：移动点=0 时花 1 AP 买一批移动力，再扣路径消耗（与玩家提交移动同口径）
 	if unit.move_points == 0:
 		if unit.ap <= 0:
@@ -1263,7 +1234,7 @@ func _ai_step_toward(unit, target) -> bool:
 		if canvas != null:
 			canvas.queue_redraw()
 		return false
-	unit.move_points -= int(best[pick])
+	unit.move_points -= int(plan.get("cost", 0))
 	unit.col = pick.x
 	unit.row = pick.y
 	_refresh_info()
@@ -1820,16 +1791,9 @@ func _move_cost_at(col: int, row: int, unit) -> int:
 func _occupied_by_other(col: int, row: int, self_u) -> bool:
 	return _state._occupied_by_other(col, row, self_u)
 
-# 本次「移动」动作的可用预算（格数）：
-# 移动点>0 → 用剩余移动点；移动点=0 但有 AP → 用一次移动力（提交时才扣 AP）；否则 0。
+# 本次「移动」动作的可用预算（格数）——实现下沉 BattleState._ai_move_budget（玩家预览与 AI 决策同口径，§1-2）
 func _move_budget(u) -> int:
-	if u == null:
-		return 0
-	if u.move_points > 0:
-		return u.move_points
-	if u.ap > 0:
-		return u.move_allowance(_state._tile_tags_at(u.col, u.row))   # effective 口径＋脚下地块条件（与预览范围一致）
-	return 0
+	return _state._ai_move_budget(u)
 
 # Dijkstra：算 unit 在 budget 内可达的格 + 前驱树（实现迁 BattleState._dijkstra）。
 # 玩家移动范围、敌方 AI 走位共用。

@@ -1226,6 +1226,54 @@ func _ai_nearest_hostile(unit):
 			best = u
 	return best
 
+# 本次「移动」动作的可用预算（格数）：移动点>0 用剩余；=0 有 AP 则一批移动力（提交时才扣 AP）；否则 0。
+# （原 Sandbox._move_budget 下沉——玩家预览范围与 AI 决策同口径）
+func _ai_move_budget(u) -> int:
+	if u == null:
+		return 0
+	if u.move_points > 0:
+		return u.move_points
+	if u.ap > 0:
+		return u.move_allowance(_tile_tags_at(u.col, u.row))   # effective 口径＋脚下地块条件
+	return 0
+
+# AI 单步决策核（技改 §1-2：纯函数、零副作用——掷骰/动画/扣费/ZOC 全在宿主执行侧）。返回 plan：
+#   {"action":"attack", "cell":目标格, "target":Unit}
+#   {"action":"move", "cell":落点, "path":[起点..落点], "cost":路径耗, "target":Unit}
+#   {"action":"none"}   —— 无目标 / 打不着又走不近（宿主收手 end_turn）
+# 决策规则（基础版）＝进攻击距离且付得起 AP 就打；否则预算可达格里挑最靠近目标的（平手取耗低）；不能更近＝收手。
+func _ai_plan(unit) -> Dictionary:
+	var target = _ai_nearest_hostile(unit)
+	if target == null:
+		return {"action": "none"}
+	var here := Vector2i(unit.col, unit.row)
+	var tcell := Vector2i(target.col, target.row)
+	var atk_range := int(unit.basic_attack().get("range", 1))
+	if _hex_dist(here, tcell) <= atk_range and unit.ap >= SkillDB.skill_ap_cost(unit.basic_attack()):
+		return {"action": "attack", "cell": tcell, "target": target}
+	var budget := _ai_move_budget(unit)
+	if budget <= 0:
+		return {"action": "none"}
+	var data := _dijkstra(unit, budget)
+	var best_cells: Dictionary = data["best"]          # {格: 累计消耗}，含起点(0)；不含他人占位格
+	var came: Dictionary = data["came_from"]
+	var cur_dist := _hex_dist(here, tcell)
+	var pick := here
+	var pick_dist := cur_dist
+	var pick_cost := 0
+	for cell in best_cells:
+		if cell == here:
+			continue
+		var dd := _hex_dist(cell, tcell)
+		var cc := int(best_cells[cell])
+		if dd < pick_dist or (dd == pick_dist and cc < pick_cost):
+			pick = cell
+			pick_dist = dd
+			pick_cost = cc
+	if pick == here or pick_dist >= cur_dist:
+		return {"action": "none"}   # 没有更靠近的落点
+	return {"action": "move", "cell": pick, "path": _path_via(came, pick), "cost": int(best_cells[pick]), "target": target}
+
 # ============ 序列化（战中 suspend 地基；约定 🔒 见 docs/架构.md「战中快照约定」）============
 # 白名单原则：派生态不存——_vis_visible / aggro_regions·_all_region_cells·_deploy_cells（restore 重算），
 # _vis_seen＝唯一不可重建的历史必存；_time_sight_mult 随存（模型自洽），重入场景时宿主仍应重挂环境叠层。

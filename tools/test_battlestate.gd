@@ -179,6 +179,37 @@ func _initialize() -> void:
 	htgt.stats["HP"] = hpmax
 	ck(s._apply_terrain_ticks(htgt).is_empty(), "满血不产生回血事件")
 
+	# —— 8) AI 决策核 _ai_plan（技改 §1-2 纯函数下沉——「AI 零测试」债首笔）——
+	var s8 = BattleState.new()
+	s8._new_grassland(9, 7)
+	var ai_u = UnitFactory.make_unit(protos[0], "enemy", 1, 1)
+	var foe = UnitFactory.make_unit(protos[0], "player", 6, 1)
+	s8.units = [ai_u, foe]
+	ai_u.ap = 2
+	ai_u.move_points = 0
+	var plan: Dictionary = s8._ai_plan(ai_u)
+	ck(str(plan.get("action")) == "move", "远敌 → move（实际 %s）" % str(plan.get("action")))
+	if str(plan.get("action")) == "move":
+		var pk: Vector2i = plan["cell"]
+		ck(s8._hex_dist(pk, Vector2i(6, 1)) < s8._hex_dist(Vector2i(1, 1), Vector2i(6, 1)), "落点比起点更靠近目标")
+		var pth: Array = plan["path"]
+		ck(not pth.is_empty() and pth.back() == pk, "path 尾＝落点")
+		ck(int(plan["cost"]) > 0, "带路径消耗")
+		var before_state := [ai_u.col, ai_u.row, ai_u.ap, ai_u.move_points]
+		ck(before_state == [1, 1, 2, 0], "决策零副作用（坐标/AP/移动点未动）")
+	foe.col = 2
+	foe.row = 1
+	plan = s8._ai_plan(ai_u)
+	ck(str(plan.get("action")) == "attack" and plan["cell"] == Vector2i(2, 1), "邻敌 → attack 目标格")
+	ai_u.ap = 0
+	ai_u.move_points = 0
+	plan = s8._ai_plan(ai_u)
+	ck(str(plan.get("action")) == "none", "无 AP 无移动点 → none")
+	s8.units = [ai_u]
+	ai_u.ap = 2
+	plan = s8._ai_plan(ai_u)
+	ck(str(plan.get("action")) == "none", "无敌人 → none")
+
 	if _fail == 0:
 		print("=== 全部断言 PASS ===")
 	else:
