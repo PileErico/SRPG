@@ -376,6 +376,19 @@ func _err(text: String) -> void:
 	_msg.text = "✗ " + text
 
 
+# 载入引用不在下拉（条目被删/被新过滤规则挡）→ 补「⚠ 悬空引用」项保值（技改 §3-1 上提外壳）：
+# 否则 _select_meta 静默回退首项，随手保存＝剥掉数据里的引用（唯一「无声数据损坏」路径）。
+# 用法：凡「下拉存引用 id」的位，_select_meta 前先调本函数。lint 会另行标红悬空数据。
+func _ensure_meta_option(ob: OptionButton, key: String) -> void:
+	if key == "":
+		return
+	for i in ob.item_count:
+		var m = ob.get_item_metadata(i)
+		if m != null and str(m) == key:
+			return
+	ob.add_item("⚠ 悬空引用：%s" % key)
+	ob.set_item_metadata(ob.item_count - 1, key)
+
 # OptionButton 按 metadata 选中；找不到＝回退第一个有效项（跳过分隔/占位 null）
 func _select_meta(ob: OptionButton, key) -> void:
 	for i in ob.item_count:

@@ -245,6 +245,7 @@ func _setup_campaign_battle() -> void:
 	var setup: Dictionary = SandboxConfig.battle_setup
 	SandboxConfig.battle_setup = null   # 读后即清：下次进沙盒不误入战役模式
 	campaign_battle = true
+	_state.ironman = WorldState.current.ironman   # 开战捕获（技改 §1-10）：模型层此后不再读全局
 	SandboxConfig.map_path = str(setup.get("map_path", ""))
 	var ctx = setup.get("context", {})
 	_battle_context = ctx if typeof(ctx) == TYPE_DICTIONARY else {}   # 战斗来由（据点讨伐等）：结算时随 result 回写
@@ -2335,7 +2336,7 @@ func _spawn_hit_feedback(target, hit: bool, crit: bool, blocked: bool, armor_los
 		return
 	var entries := []   # [text, color, bold]
 	if not hit:
-		var friendly: bool = str(target.faction) in ["player", "ally"]
+		var friendly: bool = str(target.faction) in BattleState.FRIENDLY_STANCES   # 立场单一源（技改 §1-9）
 		entries.append(["闪避" if friendly else "未命中", FLOAT_MISS_COLOR, false])
 	else:
 		if blocked:

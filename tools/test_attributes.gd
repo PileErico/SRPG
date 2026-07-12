@@ -71,12 +71,12 @@ func _initialize() -> void:
 	# 命中 = 拳脚25 + 技巧10 − (闪避0 + 灵活10) = 25
 	ck(s._hit_chance(u, e) == 25, "命中公式：25+10−10=25（实际 %d）" % s._hit_chance(u, e))
 	# 暴击 = 0 + 技巧10×0.5 − 对方运气5 = 0（钳底）；技巧 20 → 10−5 = 5
-	seed(20260707)
+	s.rng.seed = 20260707   # 注入定序（战斗骰统一过 BattleState.rng——技改 §1-1）
 	var r: Dictionary = s._resolve_compute(u, e, {"coeff": 1.0})
 	if r.get("hit", false):
 		ck(is_equal_approx(float(r.get("cr", -1)), 0.0), "基线互殴暴击率=0（5−5 钳底）")
 	u.stats["finesse"] = 20
-	seed(20260707)
+	s.rng.seed = 20260707
 	r = s._resolve_compute(u, e, {"coeff": 1.0})
 	if r.get("hit", false):
 		ck(is_equal_approx(float(r.get("cr", -1)), 5.0), "技巧20：暴击率=10−5=5（实际 %s）" % str(r.get("cr")))

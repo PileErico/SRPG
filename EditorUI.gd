@@ -114,26 +114,12 @@ static func make_menu(title: String) -> MenuButton:
 	return mb
 
 # —— 工坊切换器（角色 ⇄ 地块）——
-# 两个分段按钮，高亮当前项、点另一个 change_scene 直达；两工坊标题栏共用一份（DRY，场景仍分离、不合并）。
-# current: "appearance" | "terrain"；host＝当前场景根（取 get_tree() 用）。
+# scene_switch 的预置参数版（技改 §3-10：原独立实现已删，迁移到参数化通用件）。
 static func workshop_switch(host: Node, current: String) -> Control:
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 4)
-	for d in [["appearance", "🎭 角色", "res://AppearanceWorkshop.tscn"], ["terrain", "🧱 地块", "res://TerrainArtWorkshop.tscn"]]:
-		var id := str(d[0])
-		var scene := str(d[2])
-		var b := Button.new()
-		b.text = str(d[1])
-		b.focus_mode = Control.FOCUS_NONE
-		if id == current:
-			var hl := EditorTheme.sb(Color(0.24, 0.36, 0.52), Color(0.46, 0.62, 0.85))
-			b.add_theme_stylebox_override("normal", hl)
-			b.add_theme_stylebox_override("disabled", hl)
-			b.disabled = true   # 当前所在工坊：高亮不可点
-		else:
-			b.pressed.connect(func(): host.get_tree().change_scene_to_file(scene))
-		row.add_child(b)
-	return row
+	return scene_switch(host, current, [
+		["appearance", "🎭 角色", "res://AppearanceWorkshop.tscn"],
+		["terrain", "🧱 地块", "res://TerrainArtWorkshop.tscn"],
+	])
 
 # —— 表单动态字段（信号经 on_change 回调，不耦合具体编辑器刷新）——
 

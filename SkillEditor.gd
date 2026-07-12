@@ -543,6 +543,7 @@ func _build_apply_effect_block(box: VBoxContainer, entry: Dictionary) -> void:
 		var e = EffectDB.all()[id]
 		ob.add_item("%s（%s）" % [str(e.get("name", id)), str(id)])
 		ob.set_item_metadata(ob.item_count - 1, str(id))
+	_ensure_meta_option(ob, str(entry["data"].get("effect", "")))   # 悬空引用保值（§3-1 守卫上提后补挂）
 	_select_meta(ob, str(entry["data"].get("effect", "")))
 	ob.item_selected.connect(func(_i): _mark_dirty())
 	box.add_child(EditorUI.field_row("效果 effect（EffectDB 引用；🔒 对象形禁裸串）", ob))

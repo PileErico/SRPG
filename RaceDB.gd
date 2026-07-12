@@ -9,20 +9,24 @@ const PATH := "res://data/races.json"
 
 static var _races := {}
 static var _loaded := false
+static var _path_override := ""   # 测试缝（DB 范式 16/16 收齐，技改 §4-9）：注入临时数据文件，reload_data 后生效
+
+static func _path() -> String:
+	return _path_override if _path_override != "" else PATH
 
 static func _ensure() -> void:
 	if _loaded:
 		return
 	_loaded = true
 	_races = {}
-	if not FileAccess.file_exists(PATH):
-		push_warning("RaceDB：找不到 %s——种族底值缺失，单位将用引擎默认基线" % PATH)
+	if not FileAccess.file_exists(_path()):
+		push_warning("RaceDB：找不到 %s——种族底值缺失，单位将用引擎默认基线" % _path())
 		return
-	var f := FileAccess.open(PATH, FileAccess.READ)
+	var f := FileAccess.open(_path(), FileAccess.READ)
 	var d = JSON.parse_string(f.get_as_text())
 	f.close()
 	if typeof(d) != TYPE_DICTIONARY:
-		push_warning("RaceDB：%s 解析失败（顶层须为 {race_id: {...}}）" % PATH)
+		push_warning("RaceDB：%s 解析失败（顶层须为 {race_id: {...}}）" % _path())
 		return
 	_races = d
 

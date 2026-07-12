@@ -4,16 +4,16 @@ extends SceneTree
 ##       效能/护甲改动一旦静默改数就 FAIL（blocker 静默回归的可测护栏；见模块_技能_设计.md §10 阶段0）。
 ##
 ## 确定化手法（无 flaky）：命中率 clamp[5,95] 无法钳到 100，但
-##   crit_rate=0 → randf()*100<0 恒 false（暴击结果与 RNG 无关）；
+##   crit_rate=0 → roll*100<0 恒 false（暴击结果与 RNG 无关）；
 ##   block_rate=0 → 同理恒不格挡；
-##   施放前 seed(SEED) 使首个命中掷骰恒定 → 命中恒成立。
+##   施放前注入 s.rng.seed=SEED（技改 §1-1 战斗骰统一过 BattleState.rng）使首个命中掷骰恒定 → 命中恒成立。
 ## 故每个用例结果确定、可逐分量断言。
 ## 运行：..._console.exe --headless --path "D:/1战棋" -s res://tools/test_combat_golden.gd（退出码 0=PASS）
 
 const BattleState := preload("res://BattleState.gd")
 const UnitC := preload("res://Unit.gd")
 
-const SEED := 20260705   # 该 seed 下首个 randf()*100 < 95 → 命中恒成立（_initialize 首条断言把关）
+const SEED := 20260705   # 该 seed 下首骰 < 95 → 命中恒成立（_initialize 首条断言把关）
 
 var _fail := 0
 func ck(cond: bool, msg: String) -> void:
@@ -46,7 +46,7 @@ func mk(overrides: Dictionary):
 # 确定化施放：每次施放前同 seed，命中/暴击/格挡结果恒定。
 # 士气钉回 25（稳定档＝档位判定 0，🔒 §10.7 已接线）：命中 +2 会连击滚档改 aeff——golden 只锁伤害数学。
 func hit(s, a, t, skill) -> Dictionary:
-	seed(SEED)
+	s.rng.seed = SEED   # 注入定序（战斗骰统一过 BattleState.rng——技改 §1-1）
 	a.morale = 25
 	return s._resolve_compute(a, t, skill)
 

@@ -644,17 +644,7 @@ func _build_weapon_skills_section() -> void:
 		_refresh_preview())
 	_form.add_child(addews)
 
-# 载入引用不在下拉（技能被删/被新过滤规则挡）→ 补「⚠ 悬空引用」项保值：
-# 否则 _select_meta 静默回退首项，随手保存＝剥掉数据里的引用（审查确认项3）。lint 会另行标红悬空数据。
-func _ensure_meta_option(ob: OptionButton, key: String) -> void:
-	if key == "":
-		return
-	for i in ob.item_count:
-		var m = ob.get_item_metadata(i)
-		if m != null and str(m) == key:
-			return
-	ob.add_item("⚠ 悬空引用：%s" % key)
-	ob.set_item_metadata(ob.item_count - 1, key)
+# （_ensure_meta_option 已上提 ListEditorShell——技改 §3-1：EffectEditor/SkillEditor 同享悬空引用守卫）
 
 # 一条 EWS：技能下拉（主动+可跑块过滤）+ ✕；下挂条件行列表 + ＋添加条件
 func _add_ews_row(skill_id: String, requires) -> void:

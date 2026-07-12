@@ -23,11 +23,11 @@ func mk(nm: String, fac: String, col: int, row: int) -> Unit:
 
 func _initialize() -> void:
 	print("=== 战斗结算链 测试开始 ===")
-	seed(20260707)
 
 	# —— 1) _resolve_compute：确定性分支（钳位/超阈值构造，不依赖赌骰）——
 	var s = BattleState.new()
 	s._new_grassland(9, 7)
+	s.rng.seed = 20260707   # 注入定序（战斗骰统一过 BattleState.rng——技改 §1-1）
 	var a = mk("攻手", "player", 3, 3)
 	var d = mk("靶子", "enemy", 4, 3)
 	s.units = [a, d]

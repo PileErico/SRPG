@@ -228,6 +228,7 @@ func _build_form() -> void:
 		var e = EffectDB.all()[id]
 		_w_expire_apply.add_item("%s（%s）" % [str(e.get("name", id)), str(id)])
 		_w_expire_apply.set_item_metadata(_w_expire_apply.item_count - 1, str(id))
+	_ensure_meta_option(_w_expire_apply, str(_current.get("on_expire_apply", "")))   # 悬空引用保值（§3-1 守卫上提后补挂）
 	_select_meta(_w_expire_apply, str(_current.get("on_expire_apply", "")))
 	_w_expire_apply.item_selected.connect(func(_i): _mark_dirty())
 	_form.add_child(EditorUI.field_row("消失时施加 on_expire_apply", _w_expire_apply))

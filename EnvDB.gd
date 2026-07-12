@@ -12,6 +12,10 @@ static var _times := []             # 有序日夜定义
 static var _weather_by_id := {}     # id -> 天气 entry
 static var _time_by_id := {}        # id -> 日夜 entry
 static var _loaded := false
+static var _path_override := ""     # 测试缝（DB 范式 16/16 收齐，技改 §4-9）：注入临时数据文件，reload_data 后生效
+
+static func _path() -> String:
+	return _path_override if _path_override != "" else ENV_PATH
 
 # 丢弃内存表、下次查询重读（DB 铁律：统一 reload_data，绝不叫 reload——命中原生 Script.reload()）
 static func reload_data() -> void:
@@ -26,8 +30,8 @@ static func _ensure() -> void:
 	_times = []
 	_weather_by_id = {}
 	_time_by_id = {}
-	if FileAccess.file_exists(ENV_PATH):
-		var f = FileAccess.open(ENV_PATH, FileAccess.READ)
+	if FileAccess.file_exists(_path()):
+		var f = FileAccess.open(_path(), FileAccess.READ)
 		var data = JSON.parse_string(f.get_as_text())
 		f.close()
 		if typeof(data) == TYPE_DICTIONARY:

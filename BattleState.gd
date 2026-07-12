@@ -19,6 +19,13 @@ const MinHeap := preload("res://MinHeap.gd") # 寻路优先队列（_dijkstra；
 const DEFAULT_TERRAIN := "plain"
 const DEFAULT_VARIANT := "grassland"
 
+# 战斗掷骰统一源（技改 §1-1）：全部判定骰走 rng（命中/暴击/格挡/施加/豁免/士气）——
+# 测试注入定序（s.rng.seed = X）＝逐骰确定化；默认构造即随机（游戏行为不变）。回放/录像的地基。
+var rng := RandomNumberGenerator.new()
+
+func _init() -> void:
+	rng.randomize()
+
 # —— 棋盘（地块＝战斗权威棋盘）——
 var width := 15
 var height := 15
@@ -50,6 +57,7 @@ var _fired_triggers := {}   # 已触发 trigger id（战斗局部 once；EventEn
 var _battle_kills := []     # 本战击杀记录 [{proto_id, victim_uid, faction, by_uid}]
 var campaign_battle := false
 var _battle_context := {}   # BattleSetup.context 透传（location_id/world_unit_uid…）
+var ironman := false        # 开战捕获（技改 §1-10）：模型层不读全局 WorldState.current——纯度+死门测试免布景；随快照
 
 # —— 感知 / 战争迷雾（玩家侧）——
 var _vis_visible := {}    # 当前可见格 {Vector2i:true}（派生：可由单位位置重算）
@@ -168,15 +176,18 @@ func _cells_within(cells: Dictionary, radius: int) -> Dictionary:
 
 # ============ 阵营 ============
 
+# 友方立场单一源（技改 §1-9）：三处消费（下两函数 + Sandbox 悬停条），convert 转换内容轮前收口；
+# const 亦免去热路径（Dijkstra/ZOC/士气循环里的 _is_hostile）每调分配临时数组。
+const FRIENDLY_STANCES := ["player", "ally"]
+
 func _is_friendly(u) -> bool:
-	return u != null and u.faction in ["player", "ally"]
+	return u != null and u.faction in FRIENDLY_STANCES
 
 # 敌友判定：玩家/友军 为一方，敌方/中立 为另一方；跨方=敌对
 func _is_hostile(a, b) -> bool:
 	if a == null or b == null:
 		return false
-	var friendly := ["player", "ally"]
-	return (a.faction in friendly) != (b.faction in friendly)
+	return (a.faction in FRIENDLY_STANCES) != (b.faction in FRIENDLY_STANCES)
 
 # ============ 移动力 / 寻路 ============
 
@@ -549,7 +560,7 @@ func _resolve_compute_body(attacker, target, skill) -> Dictionary:
 		+ attacker.morale_combat_mod()   # 展示口径与 _hit_chance 同含士气档位平加（显式类型：attacker 无类型，Variant 不可推断）
 	var eva := int(round(target.effective_stat_f("eva") + target.effective_stat_f("agility")))
 	var hc := _hit_chance(attacker, target)   # 命中公式单一来源（见 _hit_chance）
-	var roll := int(randf() * 100.0)
+	var roll := int(rng.randf() * 100.0)
 	var hit := roll < hc
 	var r := {"hit": hit, "roll": roll, "hc": hc, "acc": acc, "eva": eva}
 	if not hit:
@@ -558,7 +569,7 @@ func _resolve_compute_body(attacker, target, skill) -> Dictionary:
 	# 暴击 🔒 §10.6：无人身底率——crit_rate 面板（招式/武器承载）＋技巧×0.5 −受击方运气，钳底 0
 	var cr := maxf(0.0, float(attacker.effective_stat_f("crit_rate")) \
 		+ float(attacker.effective_stat_f("finesse")) * 0.5 - float(target.effective_stat_f("luck")))
-	var crit := randf() * 100.0 < cr
+	var crit := rng.randf() * 100.0 < cr
 	# 伤害 = 攻击 × 系数 [× 暴击] [× 效能≠100%]；暴击威力＝crit_dmg ＋ 运气×0.5（🔒 §10.6 二次修订：运气加爆伤）
 	var coeff := float(skill.get("coeff", 1.0))
 	var cmult := ((float(attacker.effective_stat_f("crit_dmg")) \
@@ -579,7 +590,7 @@ func _resolve_compute_body(attacker, target, skill) -> Dictionary:
 		out += bonus
 	# 格挡 + 全域减伤 G = max(0, 1−格挡性能/100) × 防御效能因子（下限 clamp🔒）
 	var br := float(target.effective_stat_f("block_rate"))
-	var blocked := randf() * 100.0 < br
+	var blocked := rng.randf() * 100.0 < br
 	if not blocked:
 		r["morale_att"] = _morale_add(attacker, 2)   # 士气：命中 +2、被格挡无变化（🔒 §10.7）
 	var bp := float(target.effective_stat_f("block_power")) if blocked else 0.0
@@ -648,7 +659,7 @@ func _try_inflict_state(target, skill) -> Dictionary:
 		return {}
 	var eid := str(inf.get("effect", ""))
 	var base_ch := float(inf.get("chance", 100.0 if eid != "" else 0.0))
-	var iroll := randf() * 100.0
+	var iroll := rng.randf() * 100.0
 	var applied := iroll < base_ch
 	var ignore_fort := bool(inf.get("ignore_fort", false))
 	var fort := 0.0
@@ -663,7 +674,7 @@ func _try_inflict_state(target, skill) -> Dictionary:
 			if fk != "":
 				fort = float(target.effective_stat_f(fk))
 				if fort > 0.0:
-					fort_roll = randf() * 100.0
+					fort_roll = rng.randf() * 100.0
 					shrugged = fort_roll < fort
 		if applied and not shrugged:
 			_add_effect(target, {"id": eid, "ignore_fort": ignore_fort})   # id 路径：定义查 EffectDB
@@ -911,7 +922,7 @@ func _apply_turn_start_effects(u) -> Array:
 		var fk := _fort_key_for(e.get("tags", []))
 		if fk != "" and not bool(e.get("ignore_fort", false)):
 			var fort := float(u.effective_stat_f(fk))
-			if fort > 0.0 and randf() * 100.0 < fort:
+			if fort > 0.0 and rng.randf() * 100.0 < fort:
 				_remove_mods_by_source(u, str(e.get("source", "buff:" + str(e.get("name", "")))))
 				events.append({"type": "fort_shrug", "name": str(e.get("name", ""))})
 				continue
@@ -1037,7 +1048,6 @@ func _enter_deaths_door_state(u) -> void:
 # −3＝倒下（非铁人挂 injured 重伤离场 / 铁人挂 dead 真死 🔒）；+3＝爬回（HP 保底占位 1，挂重伤 debuff 至战斗结束）。
 func _door_settle_state(u) -> String:
 	if u.door_gauge <= -3:
-		var ironman: bool = WorldState.current != null and WorldState.current.ironman
 		u.tags.append("dead" if ironman else "injured")
 		u.stats["HP"] = 0
 		return "down_dead" if ironman else "down_injured"
@@ -1276,6 +1286,7 @@ func to_dict() -> Dictionary:
 		"fired_triggers": _fired_triggers.duplicate(),
 		"battle_kills": _battle_kills.duplicate(true),
 		"campaign_battle": campaign_battle, "battle_context": _battle_context.duplicate(true),
+		"ironman": ironman,
 		"phase": phase, "battle_over": battle_over,
 		"cur_time": _cur_time, "cur_weather": _cur_weather, "weather_left": _weather_left,
 		"time_sight_mult": _time_sight_mult,
@@ -1332,6 +1343,7 @@ func restore(d: Dictionary) -> bool:
 		_fired_triggers[str(k)] = true
 	_battle_kills = d.get("battle_kills", []) if typeof(d.get("battle_kills", [])) == TYPE_ARRAY else []
 	campaign_battle = bool(d.get("campaign_battle", false))
+	ironman = bool(d.get("ironman", false))
 	_battle_context = d.get("battle_context", {}) if typeof(d.get("battle_context", {})) == TYPE_DICTIONARY else {}
 	phase = str(d.get("phase", "deploy"))
 	battle_over = bool(d.get("battle_over", false))

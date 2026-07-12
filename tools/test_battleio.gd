@@ -96,10 +96,8 @@ func _initialize() -> void:
 			has_injury_debuff = true
 	ck(has_injury_debuff, "+3 挂「重伤」permanent debuff")
 	ck(is_equal_approx(c.effective_stat("agility"), UnitFactory.make_unit(protos[0], "enemy", 0, 0).effective_stat("agility")), "爬回后死门修正已摘（agility 复原）")
-	# 3f) 铁人＝真死标记
-	var iws = WorldState.new()
-	iws.ironman = true
-	WorldState.current = iws
+	# 3f) 铁人＝真死标记（技改 §1-10：ironman 开战捕获为 BattleState 字段——测试免全局布景）
+	sb._state.ironman = true
 	var f = UnitFactory.make_unit(protos[0], "player", 0, 1)
 	sb.units.append(f)
 	f.stats["HP"] = 0
@@ -107,7 +105,7 @@ func _initialize() -> void:
 	f.door_gauge = -3
 	sb._door_settle(f)
 	ck(f.tags.has("dead") and not f.tags.has("injured"), "铁人 −3 挂 dead（真死）")
-	WorldState.current = null
+	sb._state.ironman = false
 	sb.free()
 
 	# 4) BattleIO：快照进 / 结果出 / 回写

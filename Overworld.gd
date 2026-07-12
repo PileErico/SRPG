@@ -117,6 +117,20 @@ func _load_map() -> void:
 			var t = _map_triggers[i]
 			if typeof(t) == TYPE_DICTIONARY and str(t.get("id", "")) == "":
 				push_warning("Overworld：triggers[%d]「%s」无 id——世界层持久状态将按下标记档，地图改版会错位；请补 id" % [i, str(t.get("label", "?"))])
+		# 三路事件源（图 triggers / 全局池 / 派系伏击伪触发器）共用 tid 命名空间——撞名＝once/冷却/禁用状态串档（技改 §2-10）
+		var seen_tids := {}
+		for t in _map_triggers:
+			if typeof(t) == TYPE_DICTIONARY and str(t.get("id", "")) != "":
+				seen_tids[str(t["id"])] = "图触发器"
+		for ev in EventDB.all_events():
+			var eid := str(ev.get("id", ""))
+			if seen_tids.has(eid):
+				push_warning("Overworld：事件 id「%s」在全局池与%s间撞名——once/冷却/禁用状态会串档，请改 id" % [eid, seen_tids[eid]])
+			seen_tids[eid] = "全局池"
+		for f in FactionDB.all_factions():
+			var aid := "faction_ambush_%s" % str(f["id"])
+			if seen_tids.has(aid):
+				push_warning("Overworld：事件 id「%s」与派系伏击伪触发器撞名——状态会串档，请改 id" % aid)
 	else:
 		push_warning("Overworld：读不到 %s，回退全草原 %d×%d" % [MAP_PATH, width, height])
 		tiles = MapIO.grassland(width, height)
