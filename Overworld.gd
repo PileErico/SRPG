@@ -858,6 +858,10 @@ func _build_ui() -> void:
 	bag_b.text = "🎒 背包"
 	bag_b.pressed.connect(_open_inventory_panel)
 	top.add_child(bag_b)
+	var save_b := Button.new()
+	save_b.text = "💾 存档"
+	save_b.pressed.connect(_open_save_panel)
+	top.add_child(save_b)
 	var menu_b := Button.new()
 	menu_b.text = "返回菜单"
 	menu_b.pressed.connect(_on_back_to_menu)
@@ -898,6 +902,73 @@ func _refresh_time_ui() -> void:
 func _log_line(text: String) -> void:
 	if _log != null:
 		_log.append_text(text + "\n")
+
+# ============ 💾 手动存档（多槽位；铁人模式禁手动＝仅自动档）============
+
+var _save_popup: PopupPanel
+var _save_confirm_slot := ""   # 覆盖确认二段态：非空＝该槽等待第二次点击确认
+
+# 存档面板：每手动槽一行（槽名 + 速览〔第N天·队伍X人·金Z〕/（空））+「存入」；占用槽两段确认防误覆盖。
+func _open_save_panel() -> void:
+	_save_confirm_slot = ""
+	_rebuild_save_panel()
+
+func _rebuild_save_panel() -> void:
+	if _save_popup != null and is_instance_valid(_save_popup):
+		_save_popup.queue_free()
+	var ui = CampaignUI.popup(420)
+	_save_popup = ui["popup"]
+	var v: VBoxContainer = ui["box"]
+	var title := Label.new()
+	title.text = "💾 手动存档"
+	title.add_theme_font_size_override("font_size", 18)
+	v.add_child(title)
+	v.add_child(HSeparator.new())
+	var ws = WorldState.current
+	if ws == null:
+		v.add_child(CampaignUI.muted("（无进行中的战役）"))
+	elif ws.ironman:
+		v.add_child(CampaignUI.muted("铁人模式：仅自动存档，不可手动存/读"))
+	else:
+		for slot in SaveIO.MANUAL_SLOTS:
+			v.add_child(_save_slot_row(str(slot)))
+	add_child(_save_popup)
+	_save_popup.popup_centered()
+
+func _save_slot_row(slot: String) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	var info := SaveIO.slot_info(slot)
+	var name_l := Label.new()
+	name_l.text = "存档位 %s" % slot.trim_prefix("save")
+	name_l.custom_minimum_size = Vector2(90, 0)
+	row.add_child(name_l)
+	var desc := CampaignUI.muted(_slot_desc(info))
+	desc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(desc)
+	var b := Button.new()
+	var occupied := not info.is_empty()
+	b.text = ("⚠ 再点一次覆盖" if _save_confirm_slot == slot else ("覆盖存入" if occupied else "存入"))
+	b.pressed.connect(func():
+		if occupied and _save_confirm_slot != slot:
+			_save_confirm_slot = slot   # 两段确认：首点亮警示、再点才写
+			_rebuild_save_panel()
+			return
+		_save_confirm_slot = ""
+		if SaveIO.save_campaign(WorldState.current, slot):
+			_log_line("💾 已存入「存档位 %s」" % slot.trim_prefix("save"))
+		else:
+			_log_line("[color=#E07A5A]⚠ 手动存档失败（磁盘/占用/权限？）[/color]")
+		_rebuild_save_panel())
+	row.add_child(b)
+	return row
+
+# 槽位速览人话：「第N天 HH:MM · 队伍X人 · 💰Z」；空槽＝（空）
+func _slot_desc(info: Dictionary) -> String:
+	if info.is_empty():
+		return "（空）"
+	return "%s · 队伍%d人 · 💰%d" % [WorldClock.describe(int(info.get("clock_hours", 0))),
+		int(info.get("party", 0)), int(info.get("gold", 0))]
 
 # 自动存档统一入口：调试兜底档（_transient）不落盘；写失败红字提示（否则玩家以为一直在存、退出才发现丢档）
 func _autosave() -> void:

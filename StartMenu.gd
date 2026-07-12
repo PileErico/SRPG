@@ -7,6 +7,9 @@ const WorldState := preload("res://WorldState.gd")
 const SaveIO := preload("res://SaveIO.gd")
 const GameSettings := preload("res://GameSettings.gd")
 const SettingsOverlay := preload("res://Settings.gd")
+const WorldClock := preload("res://WorldClock.gd")   # 读档面板速览（第N天 HH:MM）
+
+var _load_popup: PopupPanel   # 读档选档面板（懒建）
 
 func _ready() -> void:
 	# 回到菜单＝退出战役语义：清 current（活档已由 Overworld 落盘、「继续」从磁盘重读，保留无收益）。
@@ -38,6 +41,7 @@ func _ready() -> void:
 	box.add_child(_spacer(18))
 	box.add_child(_menu_button("战役 · 新开局", _on_new_campaign, false))
 	box.add_child(_menu_button("战役 · 继续", _on_continue_campaign, not SaveIO.list_slots().has(SaveIO.AUTO_SLOT)))
+	box.add_child(_menu_button("战役 · 读档", _on_load_campaign, SaveIO.list_slots().is_empty()))
 	box.add_child(_menu_button("编辑器（编辑 · 试玩）", _on_game, false))
 	box.add_child(_menu_button("沙盒模式", _on_sandbox, false))
 	box.add_child(_menu_button("地图编辑", _on_map_editor, false))
@@ -69,9 +73,60 @@ func _on_new_campaign() -> void:
 	get_tree().change_scene_to_file("res://Overworld.tscn")
 
 func _on_continue_campaign() -> void:
-	var ws = SaveIO.load_campaign(SaveIO.AUTO_SLOT)
+	_load_slot(SaveIO.AUTO_SLOT)
+
+# 读档选档面板：自动档 + 手动槽逐行（速览＋读取按钮）；空槽不列。
+func _on_load_campaign() -> void:
+	if _load_popup != null and is_instance_valid(_load_popup):
+		_load_popup.queue_free()
+	_load_popup = PopupPanel.new()
+	var v := VBoxContainer.new()
+	v.custom_minimum_size = Vector2(430, 0)
+	v.add_theme_constant_override("separation", 8)
+	_load_popup.add_child(v)
+	var title := Label.new()
+	title.text = "读取存档"
+	title.add_theme_font_size_override("font_size", 18)
+	v.add_child(title)
+	v.add_child(HSeparator.new())
+	var slots: Array = [SaveIO.AUTO_SLOT]
+	slots.append_array(SaveIO.MANUAL_SLOTS)
+	var listed := 0
+	for slot in slots:
+		var info: Dictionary = SaveIO.slot_info(str(slot))
+		if info.is_empty():
+			continue
+		listed += 1
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 8)
+		var name_l := Label.new()
+		name_l.text = "自动档" if str(slot) == SaveIO.AUTO_SLOT else "存档位 %s" % str(slot).trim_prefix("save")
+		name_l.custom_minimum_size = Vector2(90, 0)
+		row.add_child(name_l)
+		var desc := Label.new()
+		desc.text = "%s · 队伍%d人 · 💰%d%s" % [WorldClock.describe(int(info.get("clock_hours", 0))),
+			int(info.get("party", 0)), int(info.get("gold", 0)),
+			"　🔒铁人" if bool(info.get("ironman", false)) else ""]
+		desc.add_theme_color_override("font_color", Color(0.65, 0.7, 0.78))
+		desc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(desc)
+		var b := Button.new()
+		b.text = "读取"
+		b.pressed.connect(_load_slot.bind(str(slot)))
+		row.add_child(b)
+		v.add_child(row)
+	if listed == 0:
+		var none := Label.new()
+		none.text = "（暂无可读存档）"
+		none.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
+		v.add_child(none)
+	add_child(_load_popup)
+	_load_popup.popup_centered()
+
+func _load_slot(slot: String) -> void:
+	var ws = SaveIO.load_campaign(slot)
 	if ws == null:
-		push_warning("StartMenu：自动档读取失败")
+		push_warning("StartMenu：存档「%s」读取失败（主档与 .bak 双失）" % slot)
 		return
 	WorldState.activate(ws)
 	get_tree().change_scene_to_file("res://Overworld.tscn")
