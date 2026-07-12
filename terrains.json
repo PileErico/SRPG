@@ -11,7 +11,7 @@
     "旧的内容",
     "怪的东西"
   ],
-  "format_version": 2.0,
+  "format_version": 2,
   "terrains": [
     {
       "accent": "#7BB35C",
@@ -25,7 +25,7 @@
       "id": "grassland",
       "label": "草原",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "overworld_cost": 2,
         "passable_by": "all"
       },
@@ -49,7 +49,7 @@
       "id": "wasteland",
       "label": "稀疏草原",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "overworld_cost": 2,
         "passable_by": "all"
       },
@@ -76,7 +76,7 @@
           "grant": {
             "layer": "效能",
             "nature": "buff",
-            "percent": 15.0,
+            "percent": 15,
             "stat": "evasion"
           },
           "name": "森林掩蔽",
@@ -91,11 +91,11 @@
       "is_object": true,
       "label": "森林",
       "move": {
-        "cost": 2.0,
+        "cost": 2,
         "overworld_cost": 4,
         "passable_by": "all",
         "tag_cost": {
-          "flying": 1.0
+          "flying": 1
         }
       },
       "scope": "both",
@@ -120,11 +120,11 @@
       "id": "mountain",
       "label": "山",
       "move": {
-        "cost": 3.0,
+        "cost": 3,
         "overworld_cost": 6,
         "passable_by": "all",
         "tag_cost": {
-          "flying": 1.0
+          "flying": 1
         }
       },
       "scope": "both",
@@ -149,12 +149,12 @@
       "id": "shallow_water",
       "label": "浅水",
       "move": {
-        "cost": 2.0,
+        "cost": 2,
         "overworld_cost": 3,
         "passable_by": "all",
         "tag_cost": {
-          "aquatic": 1.0,
-          "flying": 1.0
+          "aquatic": 1,
+          "flying": 1
         }
       },
       "scope": "both",
@@ -177,7 +177,7 @@
       "id": "deep_water",
       "label": "深水",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": [
           "flying",
           "aquatic"
@@ -200,7 +200,7 @@
       "id": "road",
       "label": "道路",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "battle",
@@ -221,7 +221,7 @@
       "id": "bush",
       "label": "灌木",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "overworld_cost": 2,
         "passable_by": "all"
       },
@@ -243,11 +243,11 @@
       "id": "hill",
       "label": "丘陵",
       "move": {
-        "cost": 2.0,
+        "cost": 2,
         "overworld_cost": 4,
         "passable_by": "all",
         "tag_cost": {
-          "flying": 1.0
+          "flying": 1
         }
       },
       "scope": "both",
@@ -271,11 +271,11 @@
       "id": "sand",
       "label": "沙地",
       "move": {
-        "cost": 2.0,
+        "cost": 2,
         "overworld_cost": 3,
         "passable_by": "all",
         "tag_cost": {
-          "flying": 1.0
+          "flying": 1
         }
       },
       "scope": "both",
@@ -299,11 +299,11 @@
       "id": "snow",
       "label": "雪地",
       "move": {
-        "cost": 2.0,
+        "cost": 2,
         "overworld_cost": 3,
         "passable_by": "all",
         "tag_cost": {
-          "flying": 1.0
+          "flying": 1
         }
       },
       "scope": "both",
@@ -324,11 +324,11 @@
       "id": "rubble",
       "label": "废墟",
       "move": {
-        "cost": 2.0,
+        "cost": 2,
         "overworld_cost": 3,
         "passable_by": "all",
         "tag_cost": {
-          "flying": 1.0
+          "flying": 1
         }
       },
       "scope": "battle",
@@ -350,7 +350,7 @@
       "id": "wall",
       "label": "墙",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": [
           "flying",
           "spectral"
@@ -376,11 +376,11 @@
       "id": "swamp",
       "label": "沼泽",
       "move": {
-        "cost": 3.0,
+        "cost": 3,
         "overworld_cost": 5,
         "passable_by": "all",
         "tag_cost": {
-          "flying": 1.0
+          "flying": 1
         }
       },
       "scope": "overworld",
@@ -400,7 +400,7 @@
       "id": "farmland",
       "label": "农田",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "overworld_cost": 2,
         "passable_by": "all"
       },
@@ -424,11 +424,11 @@
       "id": "tundra",
       "label": "冻原",
       "move": {
-        "cost": 2.0,
+        "cost": 2,
         "overworld_cost": 3,
         "passable_by": "all",
         "tag_cost": {
-          "flying": 1.0
+          "flying": 1
         }
       },
       "scope": "overworld",
@@ -449,11 +449,11 @@
       "id": "coast",
       "label": "海岸浅滩",
       "move": {
-        "cost": 2.0,
+        "cost": 2,
         "passable_by": "all",
         "tag_cost": {
-          "aquatic": 1.0,
-          "flying": 1.0
+          "aquatic": 1,
+          "flying": 1
         }
       },
       "scope": "overworld",
@@ -473,7 +473,7 @@
       "id": "bridge",
       "label": "桥面",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "battle",
@@ -496,7 +496,7 @@
       "id": "fh_academy_classical_era",
       "label": "学院-经典",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -516,7 +516,7 @@
       "id": "fh_ancient_ruins_jungle",
       "label": "远古遗迹-丛林",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -536,7 +536,7 @@
       "id": "fh_ancient_ruins_sand",
       "label": "远古遗迹-沙漠",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "overworld_cost": 3,
         "passable_by": "all"
       },
@@ -557,7 +557,7 @@
       "id": "fh_ancient_ruins_snow",
       "label": "远古遗迹-雪原",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "overworld_cost": 3,
         "passable_by": "all"
       },
@@ -578,7 +578,7 @@
       "id": "fh_ancient_ruins",
       "label": "远古遗迹",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -598,7 +598,7 @@
       "id": "fh_ancient_ruins2",
       "label": "远古遗迹2",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -618,7 +618,7 @@
       "id": "fh_atoll",
       "label": "环礁",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -638,7 +638,7 @@
       "id": "fh_barbarian_encampment_snow",
       "label": "野蛮人营地-雪原",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "overworld_cost": 3,
         "passable_by": "all"
       },
@@ -659,7 +659,7 @@
       "id": "fh_barbarian_encampment",
       "label": "野蛮人营地",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "overworld_cost": 3,
         "passable_by": "all"
       },
@@ -680,7 +680,7 @@
       "id": "fh_barringer_crater",
       "label": "陨石坑",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -700,7 +700,7 @@
       "id": "fh_basalt",
       "label": "玄武岩",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -720,7 +720,7 @@
       "id": "fh_basaltquarry",
       "label": "玄武岩矿场",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -740,7 +740,7 @@
       "id": "fh_bison_camp",
       "label": "野牛+营地",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -760,7 +760,7 @@
       "id": "fh_bison",
       "label": "野牛",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "overworld_cost": 2,
         "passable_by": "all"
       },
@@ -781,7 +781,7 @@
       "id": "fh_campus_medieval_era",
       "label": "校园",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -801,7 +801,7 @@
       "id": "fh_canal",
       "label": "Canal",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -821,7 +821,7 @@
       "id": "fh_cattle_pasture",
       "label": "牛群和牧场",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -841,7 +841,7 @@
       "id": "fh_cattle",
       "label": "牛群",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -861,7 +861,7 @@
       "id": "fh_citadel_snow",
       "label": "Citadel-Snow",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -881,7 +881,7 @@
       "id": "fh_citadel",
       "label": "Citadel",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -901,7 +901,7 @@
       "id": "fh_citrus_plantation",
       "label": "柑橘种植园",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -921,7 +921,7 @@
       "id": "fh_citrus",
       "label": "柑橘",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -941,7 +941,7 @@
       "id": "fh_city_center_classical_era",
       "label": "City center-Classical era",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -961,7 +961,7 @@
       "id": "fh_city_center_medieval_era",
       "label": "City center-Medieval era",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "overworld_cost": 2,
         "passable_by": "all"
       },
@@ -982,7 +982,7 @@
       "id": "fh_city_center",
       "label": "城市据点（一级）",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "overworld_cost": 2,
         "passable_by": "all"
       },
@@ -1003,7 +1003,7 @@
       "id": "fh_city_ruins",
       "label": "City ruins",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1023,7 +1023,7 @@
       "id": "fh_city_ancient_era_middle_eastern",
       "label": "City-Ancient_era_Middle_Eastern",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1043,7 +1043,7 @@
       "id": "fh_city_medieval_era_asian",
       "label": "City-Medieval_era_Asian",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1063,7 +1063,7 @@
       "id": "fh_city_medieval_era_middle_eastern",
       "label": "City-Medieval_era_Middle_Eastern",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1083,7 +1083,7 @@
       "id": "fh_coal",
       "label": "Coal",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1103,7 +1103,7 @@
       "id": "fh_copper",
       "label": "铜矿",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "overworld_cost": 4,
         "passable_by": "all"
       },
@@ -1124,7 +1124,7 @@
       "id": "fh_deer_1",
       "label": "鹿",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1144,7 +1144,7 @@
       "id": "fh_deer_camp",
       "label": "鹿群+营地",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1164,7 +1164,7 @@
       "id": "fh_deer",
       "label": "鹿群",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "overworld_cost": 2,
         "passable_by": "all"
       },
@@ -1185,7 +1185,7 @@
       "id": "fh_desert_farm",
       "label": "沙漠农场",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1205,7 +1205,7 @@
       "id": "fh_desert_flood_plains_farm",
       "label": "沙漠农场+冲积平原",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1225,7 +1225,7 @@
       "id": "fh_encampment",
       "label": "Encampment",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1245,7 +1245,7 @@
       "id": "fh_entertainment_complex",
       "label": "Entertainment Complex",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1265,7 +1265,7 @@
       "id": "fh_exotic_fruits",
       "label": "Exotic Fruits",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1285,7 +1285,7 @@
       "id": "fh_fallout",
       "label": "Fallout",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1305,7 +1305,7 @@
       "id": "fh_fish",
       "label": "Fish",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1325,7 +1325,7 @@
       "id": "fh_fishing_boats",
       "label": "Fishing Boats",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1345,7 +1345,7 @@
       "id": "fh_flood_plains",
       "label": "Flood plains",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1365,7 +1365,7 @@
       "id": "fh_floodplains",
       "label": "FloodPlains",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1385,7 +1385,7 @@
       "id": "fh_forest",
       "label": "Forest",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1405,7 +1405,7 @@
         {
           "desc": "每回合末回复5点生命（飞行/亡灵单位不享受）",
           "grant": {
-            "amount": 5.0,
+            "amount": 5,
             "kind": "heal",
             "layer": "tick"
           },
@@ -1421,7 +1421,7 @@
       "id": "fh_fountain_of_youth",
       "label": "灵泉",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "overworld_cost": 2,
         "passable_by": "all"
       },
@@ -1442,7 +1442,7 @@
       "id": "fh_gems",
       "label": "Gems",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1462,7 +1462,7 @@
       "id": "fh_gold_ore",
       "label": "Gold Ore",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1482,7 +1482,7 @@
       "id": "fh_grand_mesa",
       "label": "Grand Mesa",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "overworld_cost": 6,
         "passable_by": "all"
       },
@@ -1503,7 +1503,7 @@
       "id": "fh_grassland_farm",
       "label": "草原-农场",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "overworld_cost": 2,
         "passable_by": "all"
       },
@@ -1524,7 +1524,7 @@
       "id": "fh_grassland_forest_camp",
       "label": "草原-森林-营地",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1544,7 +1544,7 @@
       "id": "fh_grassland_forest_deer_camp",
       "label": "草原-森林-营地-鹿",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1564,7 +1564,7 @@
       "id": "fh_grassland_forest_furs_camp",
       "label": "Grassland+Forest+Furs+Camp",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1584,7 +1584,7 @@
       "id": "fh_grassland_forest_lumber_mill",
       "label": "Grassland+Forest+Lumber mill",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1604,7 +1604,7 @@
       "id": "fh_grassland_forest_truffles_camp",
       "label": "Grassland+Forest+Truffles+Camp",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1624,7 +1624,7 @@
       "id": "fh_grassland_hill_farm",
       "label": "草原-农场-山丘",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1644,7 +1644,7 @@
       "id": "fh_grassland_hill_forest_camp",
       "label": "Grassland+Hill+Forest+Camp",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1664,7 +1664,7 @@
       "id": "fh_harmonix_crystals",
       "label": "Harmonix Crystals",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1684,7 +1684,7 @@
       "id": "fh_hexanite",
       "label": "Hexanite",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1704,7 +1704,7 @@
       "id": "fh_hill",
       "label": "Hill",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1724,7 +1724,7 @@
       "id": "fh_hillforest_lumber_mill",
       "label": "HillForest+Lumber mill",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1744,7 +1744,7 @@
       "id": "fh_hillmarblequarry",
       "label": "HillMarbleQuarry",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1764,7 +1764,7 @@
       "id": "fh_hillmine",
       "label": "HillMine",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "overworld_cost": 4,
         "passable_by": "all"
       },
@@ -1785,7 +1785,7 @@
       "id": "fh_hillstonequarry",
       "label": "HillStoneQuarry",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1805,7 +1805,7 @@
       "id": "fh_horses_pasture",
       "label": "Horses+Pasture",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1825,7 +1825,7 @@
       "id": "fh_horses",
       "label": "Horses",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "overworld_cost": 2,
         "passable_by": "all"
       },
@@ -1846,7 +1846,7 @@
       "id": "fh_ice",
       "label": "Ice",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1866,7 +1866,7 @@
       "id": "fh_iron",
       "label": "Iron",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "overworld_cost": 4,
         "passable_by": "all"
       },
@@ -1887,7 +1887,7 @@
       "id": "fh_jadonyx",
       "label": "Jadonyx",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1907,7 +1907,7 @@
       "id": "fh_jungle",
       "label": "Jungle",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1927,7 +1927,7 @@
       "id": "fh_krakatoa",
       "label": "Krakatoa",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1947,7 +1947,7 @@
       "id": "fh_lakes",
       "label": "Lakes",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "overworld_cost": 3,
         "passable_by": "all"
       },
@@ -1968,7 +1968,7 @@
       "id": "fh_marble",
       "label": "Marble",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1988,7 +1988,7 @@
       "id": "fh_megaxenoform_graveyard",
       "label": "Megaxenoform Graveyard",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2008,7 +2008,7 @@
       "id": "fh_mine",
       "label": "Mine",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2028,7 +2028,7 @@
       "id": "fh_oasis",
       "label": "Oasis",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "overworld_cost": 3,
         "passable_by": "all"
       },
@@ -2049,7 +2049,7 @@
       "id": "fh_old_faithful",
       "label": "Old Faithful",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2069,7 +2069,7 @@
       "id": "fh_phostlite",
       "label": "Phostlite",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2089,7 +2089,7 @@
       "id": "fh_plains_farm",
       "label": "Plains+Farm",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2109,7 +2109,7 @@
       "id": "fh_plains_forest_camp",
       "label": "Plains+Forest+Camp",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2129,7 +2129,7 @@
       "id": "fh_plains_forest_lumber_mill",
       "label": "Plains+Forest+Lumber mill",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2149,7 +2149,7 @@
       "id": "fh_plainsforest",
       "label": "PlainsForest",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2169,7 +2169,7 @@
       "id": "fh_plainsjungle",
       "label": "PlainsJungle",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2189,7 +2189,7 @@
       "id": "fh_quarry_marble",
       "label": "Quarry+Marble",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2209,7 +2209,7 @@
       "id": "fh_quarry_stone",
       "label": "Quarry+Stone",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2229,7 +2229,7 @@
       "id": "fh_redstone",
       "label": "Redstone",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2249,7 +2249,7 @@
       "id": "fh_river_bottom",
       "label": "River-Bottom",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2269,7 +2269,7 @@
       "id": "fh_river_bottomleft",
       "label": "River-BottomLeft",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2289,7 +2289,7 @@
       "id": "fh_river_bottomright",
       "label": "River-BottomRight",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2309,7 +2309,7 @@
       "id": "fh_salt",
       "label": "Salt",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2329,7 +2329,7 @@
       "id": "fh_sheep_pasture",
       "label": "Sheep+Pasture",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2349,7 +2349,7 @@
       "id": "fh_sheep",
       "label": "Sheep",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2369,7 +2369,7 @@
       "id": "fh_silver",
       "label": "Silver",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2389,7 +2389,7 @@
       "id": "fh_snow_farm",
       "label": "Snow+Farm",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "overworld_cost": 3,
         "passable_by": "all"
       },
@@ -2410,7 +2410,7 @@
       "id": "fh_sri_pada",
       "label": "Sri Pada",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2430,7 +2430,7 @@
       "id": "fh_stone",
       "label": "Stone",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2450,7 +2450,7 @@
       "id": "fh_titanium",
       "label": "Titanium",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2470,7 +2470,7 @@
       "id": "fh_tree_of_worlds",
       "label": "Tree of Worlds",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2490,7 +2490,7 @@
       "id": "fh_tundra_farm",
       "label": "Tundra+Farm",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2510,7 +2510,7 @@
       "id": "fh_tundra_forest_camp_furs",
       "label": "Tundra+Forest+Camp+Furs",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2530,7 +2530,7 @@
       "id": "fh_tundra_forest_camp",
       "label": "Tundra+Forest+Camp",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2550,7 +2550,7 @@
       "id": "fh_tundra_forest_deer_camp",
       "label": "Tundra+Forest+Deer+Camp",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2570,7 +2570,7 @@
       "id": "fh_tundraforest",
       "label": "TundraForest",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "overworld_cost": 4,
         "passable_by": "all"
       },
@@ -2591,7 +2591,7 @@
       "id": "fh_ulframite",
       "label": "Ulframite",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2611,7 +2611,7 @@
       "id": "fh_uranium",
       "label": "Uranium",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2624,7 +2624,7 @@
       "art": [
         "res://icons/Tiles/randr/road_0.png"
       ],
-      "art_anchor": 31.0,
+      "art_anchor": 31,
       "color": "#8a8478",
       "decor": "none",
       "effects": [],
@@ -2632,7 +2632,7 @@
       "is_object": true,
       "label": "道路0",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2645,7 +2645,7 @@
       "art": [
         "res://icons/Tiles/randr/road_1.png"
       ],
-      "art_anchor": 31.0,
+      "art_anchor": 31,
       "color": "#8a8478",
       "decor": "none",
       "effects": [],
@@ -2653,7 +2653,7 @@
       "is_object": true,
       "label": "道路1",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2666,7 +2666,7 @@
       "art": [
         "res://icons/Tiles/randr/road_2.png"
       ],
-      "art_anchor": 31.0,
+      "art_anchor": 31,
       "color": "#8a8478",
       "decor": "none",
       "effects": [],
@@ -2674,7 +2674,7 @@
       "is_object": true,
       "label": "道路2",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2687,7 +2687,7 @@
       "art": [
         "res://icons/Tiles/randr/road_3.png"
       ],
-      "art_anchor": 31.0,
+      "art_anchor": 31,
       "color": "#8a8478",
       "decor": "none",
       "effects": [],
@@ -2695,7 +2695,7 @@
       "is_object": true,
       "label": "道路3",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2708,7 +2708,7 @@
       "art": [
         "res://icons/Tiles/randr/road_4.png"
       ],
-      "art_anchor": 31.0,
+      "art_anchor": 31,
       "color": "#8a8478",
       "decor": "none",
       "effects": [],
@@ -2716,7 +2716,7 @@
       "is_object": true,
       "label": "道路4",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2729,7 +2729,7 @@
       "art": [
         "res://icons/Tiles/randr/road_5.png"
       ],
-      "art_anchor": 31.0,
+      "art_anchor": 31,
       "color": "#8a8478",
       "decor": "none",
       "effects": [],
@@ -2737,7 +2737,7 @@
       "is_object": true,
       "label": "道路5",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2750,7 +2750,7 @@
       "art": [
         "res://icons/Tiles/randr/road_6.png"
       ],
-      "art_anchor": 31.0,
+      "art_anchor": 31,
       "color": "#8a8478",
       "decor": "none",
       "effects": [],
@@ -2758,7 +2758,7 @@
       "is_object": true,
       "label": "道路6",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2771,7 +2771,7 @@
       "art": [
         "res://icons/Tiles/randr/road_7.png"
       ],
-      "art_anchor": 31.0,
+      "art_anchor": 31,
       "color": "#8a8478",
       "decor": "none",
       "effects": [],
@@ -2779,7 +2779,7 @@
       "is_object": true,
       "label": "道路7",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2792,7 +2792,7 @@
       "art": [
         "res://icons/Tiles/randr/road_8.png"
       ],
-      "art_anchor": 31.0,
+      "art_anchor": 31,
       "color": "#8a8478",
       "decor": "none",
       "effects": [],
@@ -2800,7 +2800,7 @@
       "is_object": true,
       "label": "道路8",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2813,7 +2813,7 @@
       "art": [
         "res://icons/Tiles/randr/road_9.png"
       ],
-      "art_anchor": 31.0,
+      "art_anchor": 31,
       "color": "#8a8478",
       "decor": "none",
       "effects": [],
@@ -2821,7 +2821,7 @@
       "is_object": true,
       "label": "道路9",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2834,7 +2834,7 @@
       "art": [
         "res://icons/Tiles/randr/road_10.png"
       ],
-      "art_anchor": 31.0,
+      "art_anchor": 31,
       "color": "#8a8478",
       "decor": "none",
       "effects": [],
@@ -2842,7 +2842,7 @@
       "is_object": true,
       "label": "道路10",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2855,7 +2855,7 @@
       "art": [
         "res://icons/Tiles/randr/river_0.png"
       ],
-      "art_anchor": 31.0,
+      "art_anchor": 31,
       "color": "#3a6ea5",
       "decor": "none",
       "effects": [],
@@ -2863,7 +2863,7 @@
       "is_object": true,
       "label": "河流0",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2876,7 +2876,7 @@
       "art": [
         "res://icons/Tiles/randr/river_1.png"
       ],
-      "art_anchor": 31.0,
+      "art_anchor": 31,
       "color": "#3a6ea5",
       "decor": "none",
       "effects": [],
@@ -2884,7 +2884,7 @@
       "is_object": true,
       "label": "河流1",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2897,7 +2897,7 @@
       "art": [
         "res://icons/Tiles/randr/river_2.png"
       ],
-      "art_anchor": 31.0,
+      "art_anchor": 31,
       "color": "#3a6ea5",
       "decor": "none",
       "effects": [],
@@ -2905,7 +2905,7 @@
       "is_object": true,
       "label": "河流2",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2918,7 +2918,7 @@
       "art": [
         "res://icons/Tiles/randr/river_3.png"
       ],
-      "art_anchor": 31.0,
+      "art_anchor": 31,
       "color": "#3a6ea5",
       "decor": "none",
       "effects": [],
@@ -2926,7 +2926,7 @@
       "is_object": true,
       "label": "河流3",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2939,7 +2939,7 @@
       "art": [
         "res://icons/Tiles/randr/river_4.png"
       ],
-      "art_anchor": 31.0,
+      "art_anchor": 31,
       "color": "#3a6ea5",
       "decor": "none",
       "effects": [],
@@ -2947,7 +2947,7 @@
       "is_object": true,
       "label": "河流4",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2960,7 +2960,7 @@
       "art": [
         "res://icons/Tiles/randr/river_5.png"
       ],
-      "art_anchor": 31.0,
+      "art_anchor": 31,
       "color": "#3a6ea5",
       "decor": "none",
       "effects": [],
@@ -2968,7 +2968,7 @@
       "is_object": true,
       "label": "河流5",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2981,7 +2981,7 @@
       "art": [
         "res://icons/Tiles/randr/river_6.png"
       ],
-      "art_anchor": 31.0,
+      "art_anchor": 31,
       "color": "#3a6ea5",
       "decor": "none",
       "effects": [],
@@ -2989,7 +2989,7 @@
       "is_object": true,
       "label": "河流6",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -3002,7 +3002,7 @@
       "art": [
         "res://icons/Tiles/randr/river_7.png"
       ],
-      "art_anchor": 31.0,
+      "art_anchor": 31,
       "color": "#3a6ea5",
       "decor": "none",
       "effects": [],
@@ -3010,7 +3010,7 @@
       "is_object": true,
       "label": "河流7",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -3023,7 +3023,7 @@
       "art": [
         "res://icons/Tiles/randr/river_8.png"
       ],
-      "art_anchor": 31.0,
+      "art_anchor": 31,
       "color": "#3a6ea5",
       "decor": "none",
       "effects": [],
@@ -3031,7 +3031,7 @@
       "is_object": true,
       "label": "河流8",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -3044,7 +3044,7 @@
       "art": [
         "res://icons/Tiles/randr/river_9.png"
       ],
-      "art_anchor": 31.0,
+      "art_anchor": 31,
       "color": "#3a6ea5",
       "decor": "none",
       "effects": [],
@@ -3052,7 +3052,7 @@
       "is_object": true,
       "label": "河流9",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
@@ -3065,7 +3065,7 @@
       "art": [
         "res://icons/Tiles/randr/river_10.png"
       ],
-      "art_anchor": 31.0,
+      "art_anchor": 31,
       "color": "#3a6ea5",
       "decor": "none",
       "effects": [],
@@ -3073,7 +3073,7 @@
       "is_object": true,
       "label": "河流10",
       "move": {
-        "cost": 1.0,
+        "cost": 1,
         "passable_by": "all"
       },
       "scope": "both",
