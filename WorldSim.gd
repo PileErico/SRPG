@@ -8,7 +8,10 @@ extends RefCounted
 ## world＝宿主鸭子接口（Overworld）：find_path(a,b) / _move_cost_at(c,r) / _map_locations / width/height
 ## + 可选 _move_cost_between(fc,fr,c,r)（边感知通行：河阻断/桥豁免——游荡邻格判定优先用它，缺省退格通行）。
 ## 本模块不认识场景节点，headless new() 的 Overworld 即可测。
-## 实例形（纯 JSON 兼容 dict，随档）：{uid,type,faction,col,row,budget,target_loc,wait_until,calm_until}。
+## 实例形（纯 JSON 兼容 dict，随档）：{uid,type,faction,col,row,budget,target_loc,wait_until,calm_until,
+##   route:[[c,r],…], route_kind:"idle"/"chase"/"trade", chase:[c,r]}——route＝预定行为计划（v2 2026-07-12）：
+##   巡逻/游荡挑航点走整段、到航点才歇脚（pause_hours）、商队全程缓存路径（不再每步全图 Dijkstra）；
+##   追击仍逐步反应（目标格没变时沿缓存路续走）。JSON 读回全 float，消费处一律 int() 兜底。
 
 const WorldUnitDB := preload("res://WorldUnitDB.gd")
 const FactionDB := preload("res://FactionDB.gd")
@@ -16,6 +19,11 @@ const HexGrid := preload("res://HexGrid.gd")
 
 const MAX_STEPS_PER_TICK := 12   # 单 tick 步数上限（长休整一次喂 8h+ 时防病态循环）
 const CALM_HOURS := 12           # 交战后的冷静期（占位）：战败/弃战归来不被原地连环追击
+const DEFAULT_PAUSE_HOURS := 2   # 航点歇脚缺省时长（类型可用 pause_hours 覆盖）；商队到站仍走 rest_hours
+const WAYPOINT_TRIES := 12       # 随机航点采样次数（采不到＝退回随机邻格一步的旧行为）
+
+# 本 tick 实际走过的格序 {uid:[Vector2i,…]}——纯表现（宿主滑行动画消费），每 tick 清空、不随档。
+static var last_trails := {}
 
 # ============ 生成（开局一次；重生成/刷新规则＝待定，见设计文档）============
 
@@ -49,6 +57,7 @@ static func _spawn(ws, world, tid: String, t: Dictionary, near: Vector2i, home_i
 		"uid": ws.next_uid, "type": tid, "faction": str(t.get("faction", "")),
 		"col": cell.x, "row": cell.y, "budget": 0.0,
 		"target_loc": "", "wait_until": 0, "calm_until": 0, "home": home_id,
+		"route": [], "route_kind": "",
 	})
 	ws.next_uid += 1
 
@@ -60,6 +69,7 @@ static func _spawn(ws, world, tid: String, t: Dictionary, near: Vector2i, home_i
 #   {kind:"caravan_arrive", unit, loc_id}       —— 商队到站（表现可选）
 static func tick(ws, hours: int, world) -> Array:
 	var events := []
+	last_trails = {}
 	if ws == null or hours <= 0:
 		return events
 	for u in ws.world_units.duplicate():   # 遍历副本：摩擦战会移除单位
@@ -69,20 +79,23 @@ static func tick(ws, hours: int, world) -> Array:
 		if t == null:
 			push_warning("WorldSim：档内单位类型「%s」未登记，跳过" % str(u.get("type", "")))
 			continue
-		if int(u.get("wait_until", 0)) > ws.clock_hours:
+		var wu_until := int(u.get("wait_until", 0))
+		if wu_until > ws.clock_hours:
 			u["budget"] = 0.0   # 停靠中不攒步（醒来不补走）
 			continue
-		u["budget"] = float(u.get("budget", 0.0)) + hours
+		# 跨窗结算（审查修复）：单次大 tick（扎营/住店 8h）跨过醒来点时只记醒来后的小时——
+		# 歇脚时数不回充成移动 budget（否则每次扎营全图单位爆发式补走）
+		u["budget"] = float(u.get("budget", 0.0)) + minf(float(hours), maxf(0.0, float(ws.clock_hours - wu_until)))
 		var hpc := maxf(1.0, float(t.get("hours_per_cell", 2)))
 		var steps := 0
 		while u["budget"] >= hpc and steps < MAX_STEPS_PER_TICK:
 			u["budget"] -= hpc
 			steps += 1
 			_step(ws, u, t, world, events)
+			if not ws.world_units.has(u):
+				break   # 摩擦战里输了（自灭后不再参与 engage 判定——审查修复判序）
 			if _check_engage_player(ws, u, t, world, events):
 				break   # 追上玩家：本单位停下（事件交宿主开战）
-			if not ws.world_units.has(u):
-				break   # 摩擦战里输了
 			if int(u.get("wait_until", 0)) > ws.clock_hours:
 				break   # 本步到站停靠
 		if _has_engage(events):
@@ -106,87 +119,184 @@ static func _step(ws, u: Dictionary, t: Dictionary, world, events: Array) -> voi
 		"hunt":
 			_step_hunt(ws, u, t, world)
 		_:
-			_step_wander(u, t, world)
+			_step_wander(ws, u, t, world)
 	# 巡逻类：落位后判猎物摩擦战（同格/边可跨的邻格）
 	if (t.get("hunts", []) as Array).size() > 0:
 		_check_skirmish(ws, u, t, world, events)
 
-# 商队：无目标 → 随机挑一个城/村；有目标 → 沿最短路走一步；到站 → 停靠 rest_hours 再换目标
+# 商队：无目标 → 随机挑一个城/村并规划全程路径；有目标 → 沿缓存路径走一步；到站 → 停靠 rest_hours 再换目标
 static func _step_trade(ws, u: Dictionary, t: Dictionary, world, events: Array) -> void:
 	var cur := _cell(u)
 	var tgt_id := str(u.get("target_loc", ""))
 	if tgt_id == "":
 		tgt_id = _pick_settlement(world, cur)
 		u["target_loc"] = tgt_id
+		_clear_route(u)
 	var tgt := _loc_cell(world, tgt_id)
 	if tgt.x < 0:
-		_step_wander(u, t, world)   # 目标地点不存在（地图改版）：游荡兜底
+		_step_wander(ws, u, t, world)   # 目标地点不存在（地图改版）：游荡兜底
 		u["target_loc"] = ""
 		return
 	if cur == tgt:
 		u["wait_until"] = ws.clock_hours + int(t.get("rest_hours", 6))
+		u["budget"] = 0.0   # 入睡弃残余步数（醒来不补走）
 		u["target_loc"] = ""
+		_clear_route(u)
 		events.append({"kind": "caravan_arrive", "unit": u, "loc_id": tgt_id})
 		return
-	_step_along_path(u, cur, tgt, world)
+	# 缓存有效性＝kind + 非空 + 末格==目的地（末格校验防「回滚往返」携入指向旧目标的陈旧残路）
+	if str(u.get("route_kind", "")) != "trade" or not _route_ends_at(u, tgt):
+		_plan_route(u, cur, tgt, world, "trade")
+	if not _follow_route(u, world):
+		_step_along_path(u, cur, tgt, world)   # 路径失效（地图改版/病态）：单步兜底
 
-# 巡逻队：视野内有猎物（hunts 派系单位 / 敌对玩家）→ 追；否则在 home 半径内游荡
+# 巡逻队：视野内有猎物（hunts 派系单位 / 敌对玩家）→ 追；否则绕 home 巡逻（航点计划，走整段才歇脚）
 static func _step_patrol(ws, u: Dictionary, t: Dictionary, world) -> void:
 	var cur := _cell(u)
 	var sight := int(t.get("sight", 3))
 	var prey = _nearest_prey(ws, u, t, sight)
 	if prey != null:
-		_step_along_path(u, cur, _cell(prey), world)
+		_chase_step(u, cur, _cell(prey), world)
 		return
 	if not ws.overworld_combat_off and FactionDB.hostile(ws, str(u.get("faction", ""))) and HexGrid.distance(cur, _party_cell(ws)) <= sight \
 			and ws.clock_hours >= int(u.get("calm_until", 0)):
-		_step_along_path(u, cur, _party_cell(ws), world)
+		_chase_step(u, cur, _party_cell(ws), world)
 		return
-	_step_wander_near_home(u, t, world)
+	_step_planned_idle(ws, u, t, world)
 
-# 游团：己方派系对玩家敌对且玩家进视野 → 追击；否则绕巢游荡
+# 游团：己方派系对玩家敌对且玩家进视野 → 追击；否则绕巢游荡（航点计划）
 static func _step_hunt(ws, u: Dictionary, t: Dictionary, world) -> void:
 	var cur := _cell(u)
 	if not ws.overworld_combat_off and FactionDB.hostile(ws, str(u.get("faction", ""))) \
 			and HexGrid.distance(cur, _party_cell(ws)) <= int(t.get("sight", 4)) \
 			and ws.clock_hours >= int(u.get("calm_until", 0)):
-		_step_along_path(u, cur, _party_cell(ws), world)
+		_chase_step(u, cur, _party_cell(ws), world)
 		return
-	_step_wander_near_home(u, t, world)
+	_step_planned_idle(ws, u, t, world)
 
-# 随机游荡一步（可通行邻格；无处可去＝原地）
-static func _step_wander(u: Dictionary, _t: Dictionary, world) -> void:
-	var opts := _passable_neighbors(world, _cell(u))
-	if not opts.is_empty():
-		var pick: Vector2i = opts[randi() % opts.size()]
-		u["col"] = pick.x
-		u["row"] = pick.y
+# 游荡（wander 行为主入口）：与绕 home 巡逻同一套航点计划（无 home＝以当前位置为锚）
+static func _step_wander(ws, u: Dictionary, t: Dictionary, world) -> void:
+	_step_planned_idle(ws, u, t, world)
 
-# 绕 home 游荡：越出活动半径 → 往回走；否则随机走不越界的邻格
-static func _step_wander_near_home(u: Dictionary, t: Dictionary, world) -> void:
+# ============ 计划移动核心（v2：预定行为，不再一步一决策）============
+
+# 闲时计划移动：有 idle 路线 → 续走，走完整段在航点歇脚 pause_hours；无路线 → 采样新航点并规划整段。
+# 航点锚＝home（无 home＝当前位置），采样距锚 2..radius；采不到（孤岛/全占）退回随机邻格一步的旧行为。
+static func _step_planned_idle(ws, u: Dictionary, t: Dictionary, world) -> void:
 	var cur := _cell(u)
+	if str(u.get("route_kind", "")) == "idle" and not (u.get("route", []) as Array).is_empty():
+		if _follow_route(u, world):
+			_pause_if_route_done(ws, u, t)   # 走完整段：到航点歇脚
+			return
 	var home := _loc_cell(world, str(u.get("home", "")))
+	var anchor := home if home.x >= 0 else cur
 	var radius := int(t.get("radius", 4))
 	if home.x >= 0 and HexGrid.distance(cur, home) > radius:
-		_step_along_path(u, cur, home, world)
+		if _plan_route(u, cur, anchor, world, "idle") and _follow_route(u, world):
+			_pause_if_route_done(ws, u, t)
+			return   # 越出活动半径：规划整段回家路（老行为是每步重寻路）
+	var wp := _pick_waypoint(world, anchor, radius, cur)
+	if wp.x >= 0 and _plan_route(u, cur, wp, world, "idle") and _follow_route(u, world):
+		_pause_if_route_done(ws, u, t)   # 1 段短腿航点当步走完也要歇脚（审查修复）
 		return
+	_step_neighbor_fallback(u, world, home, radius)   # 采样/规划失败兜底：旧式随机邻格一步
+
+# 走完整段（route 清空）→ 在航点歇脚 pause_hours、弃残余步数（醒来不补走）——idle 歇脚唯一写口
+static func _pause_if_route_done(ws, u: Dictionary, t: Dictionary) -> void:
+	if (u.get("route", []) as Array).is_empty():
+		u["wait_until"] = ws.clock_hours + int(t.get("pause_hours", DEFAULT_PAUSE_HOURS))
+		u["budget"] = 0.0
+
+# 追击一步（目标会动）：目标格没变 → 沿缓存追击路续走；变了/无缓存 → 重寻路并缓存整段。
+static func _chase_step(u: Dictionary, from: Vector2i, tgt: Vector2i, world) -> void:
+	var cached: Array = u.get("chase", [])
+	var same_tgt: bool = cached.size() == 2 and int(cached[0]) == tgt.x and int(cached[1]) == tgt.y
+	if same_tgt and str(u.get("route_kind", "")) == "chase" and not (u.get("route", []) as Array).is_empty():
+		if _follow_route(u, world):
+			return
+	u["chase"] = [tgt.x, tgt.y]
+	if _plan_route(u, from, tgt, world, "chase"):
+		_follow_route(u, world)
+	else:
+		_clear_route(u)   # 规划失败清残路（防按新目标键回放旧目标残路——防御性加固）
+
+# 随机邻格一步（计划失败兜底；home 有效时不越活动半径）
+static func _step_neighbor_fallback(u: Dictionary, world, home: Vector2i, radius: int) -> void:
 	var opts := []
-	for nb in _passable_neighbors(world, cur):
+	for nb in _passable_neighbors(world, _cell(u)):
 		if home.x < 0 or HexGrid.distance(nb, home) <= radius:
 			opts.append(nb)
 	if not opts.is_empty():
-		var pick: Vector2i = opts[randi() % opts.size()]
-		u["col"] = pick.x
-		u["row"] = pick.y
+		_move_to(u, opts[randi() % opts.size()])
 
-# 沿最短路走一步（不可达＝原地）
+# 规划路径并缓存进实例（route＝去掉起点的整段，[[c,r],…] 纯 JSON）；不可达＝false 不写
+static func _plan_route(u: Dictionary, from: Vector2i, to: Vector2i, world, kind: String) -> bool:
+	if from == to:
+		return false
+	var path: Array = world.find_path(from, to)
+	if path.size() < 2:
+		return false
+	var route := []
+	for i in range(1, path.size()):
+		route.append([path[i].x, path[i].y])
+	u["route"] = route
+	u["route_kind"] = kind
+	return true
+
+# 沿缓存路径走一步：下一格必须与当前相邻且可达（地图没变就恒真；失效＝清路线返回 false 让行为层重规划）
+static func _follow_route(u: Dictionary, world) -> bool:
+	var route: Array = u.get("route", [])
+	if route.is_empty():
+		return false
+	var nxt := Vector2i(int(route[0][0]), int(route[0][1]))
+	if not _reachable_adjacent(world, _cell(u), nxt) or world._move_cost_at(nxt.x, nxt.y) < 0:
+		_clear_route(u)
+		return false
+	route.pop_front()
+	_move_to(u, nxt)
+	return true
+
+static func _clear_route(u: Dictionary) -> void:
+	u["route"] = []
+	u["route_kind"] = ""
+
+# 缓存路径末格是否指向 cell（回滚往返可能携入指向旧目标的陈旧 route——末格校验一票否决）
+static func _route_ends_at(u: Dictionary, cell: Vector2i) -> bool:
+	var route: Array = u.get("route", [])
+	if route.is_empty():
+		return false
+	var tail: Array = route.back()
+	return int(tail[0]) == cell.x and int(tail[1]) == cell.y
+
+# 随机航点：距锚 2..radius 的可通行格（矩形包围盒采样 WAYPOINT_TRIES 次）；采不到＝(-1,-1)
+static func _pick_waypoint(world, anchor: Vector2i, radius: int, cur: Vector2i) -> Vector2i:
+	for i in WAYPOINT_TRIES:
+		var c := Vector2i(anchor.x + randi() % (radius * 2 + 1) - radius, anchor.y + randi() % (radius * 2 + 1) - radius)
+		if c.x < 0 or c.y < 0 or c.x >= world.width or c.y >= world.height:
+			continue
+		var d := HexGrid.distance(anchor, c)
+		if d < 2 or d > radius or c == cur:
+			continue
+		if world._move_cost_at(c.x, c.y) >= 0:
+			return c
+	return Vector2i(-1, -1)
+
+# 落位单步（唯一写坐标口）：顺手记 last_trails 供宿主滑行动画（纯表现，不随档）
+static func _move_to(u: Dictionary, cell: Vector2i) -> void:
+	u["col"] = cell.x
+	u["row"] = cell.y
+	var uid := int(u.get("uid", 0))
+	if not last_trails.has(uid):
+		last_trails[uid] = []
+	(last_trails[uid] as Array).append(cell)
+
+# 沿最短路走一步（不可达＝原地；仅作路径缓存失效时的单步兜底）
 static func _step_along_path(u: Dictionary, from: Vector2i, to: Vector2i, world) -> void:
 	if from == to:
 		return
 	var path: Array = world.find_path(from, to)
 	if path.size() >= 2:
-		u["col"] = path[1].x
-		u["row"] = path[1].y
+		_move_to(u, Vector2i(path[1].x, path[1].y))
 
 # ============ 交互判定 ============
 

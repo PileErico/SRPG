@@ -44,7 +44,8 @@ const DEFAULT_BATTLE_MAP := "res://maps/sandbox.json"   # 遭遇战/伏击/据�
 # 自动存档槽名单一源＝SaveIO.AUTO_SLOT（实例注入见 _save_slot）
 const TIME_RATE := 2.5       # 时间流速（游戏小时/真实秒，占位可调）：cost-1 格（2h）≈0.8 真实秒
 const MAX_FRAME_DELTA := 0.1 # 单帧 delta 钳制（秒）：卡帧不折成一大坨小时（_tick_time 内仍逐小时逐格结算兜底）
-const WU_ANIM_SECONDS := 0.3 # 世界单位每步滑行时长（真实秒，占位）：略短于典型步间隔，滑完再走下一步
+const WU_CATCHUP := 1.1      # 世界单位滑行追赶系数：滑速＝逻辑步速×1.1（微快防积压；速度本体＝TIME_RATE/hours_per_cell）
+const WU_MAX_QUEUE := 4      # 滑行队列积压上限（段）：长休整一次推 8h+ 时最多补滑 4 段，再多直接跳（时跳可感）
 const PARTY_TAGS: Array = [] # 队伍通行 tag（暂无船/坐骑——深水/墙 passable_by 列表对空 tags 关闭＝天然屏障）
 
 var width := 15
@@ -73,7 +74,8 @@ var _time_playing := false              # 时间播放中（空格总开关）�
 var _route: Array = []                  # 行军剩余路径（Vector2i 待走格序列，[0]=当前段终点；空＝无目的地）
 var _seg_progress := 0.0                # 当前段插值分数 [0,1)：token 平滑绘制 + 跨格判定
 var _hour_acc := 0.0                    # 整点累加器（浮点游戏小时）：跨 1.0 才推 WorldClock——clock_hours 恒整数
-var _wu_anim := {}                      # 世界单位滑行插值 {uid: {from:Vector2i, to:Vector2i, t:float}}——纯表现、不随档
+var _wu_anim := {}                      # 世界单位滑行队列 {uid: {pts:[Vector2i,…], t:float, sps:float}}——纯表现、不随档；
+                                        # pts=待滑格链（pts[0]→pts[1] 为当前段，t∈[0,1) 段内进度）、sps=段/秒（逻辑步速×WU_CATCHUP）
 var _move_target := Vector2i(-1, -1)    # 当前行进目的地（画布标记用）
 var _save_slot: String = SaveIO.AUTO_SLOT   # 自动存档槽（单一源在 SaveIO；测试可注入独立槽）
 var _transient := false                 # 兜底建的调试档：只活内存、绝不自动落盘（防覆盖玩家 auto 真档）
@@ -166,15 +168,19 @@ func _edge_index(pairs: Array) -> Dictionary:
 			out[HexGrid.edge_key(va, vb)] = true
 	return out
 
-# 首进战役：party 未落位 → 从地图中心 BFS 外扩找第一个可走格
+# 首进战役：party 未落位 → 从地图中心 BFS 外扩找第一个可走格。
+# 换图救援（2026-07-12）：旧档坐标在新图上越界/落在不可通行格 → 就地 BFS 到最近可走格（老档不因地图改版卡死）。
 func _ensure_party_placed() -> void:
 	var ws = WorldState.current
-	if ws.party_col >= 0 and ws.party_row >= 0 and _cell_in_bounds(ws.party_col, ws.party_row):
-		return
 	@warning_ignore("integer_division")
 	var center := Vector2i(width / 2, height / 2)
-	var seen := {center: true}
-	var queue := [center]
+	var anchor := center
+	if ws.party_col >= 0 and ws.party_row >= 0 and _cell_in_bounds(ws.party_col, ws.party_row):
+		if _move_cost_at(ws.party_col, ws.party_row) >= 0:
+			return
+		anchor = Vector2i(int(ws.party_col), int(ws.party_row))   # 在界但站不住（地图改版）：就地找最近可走格
+	var seen := {anchor: true}
+	var queue := [anchor]
 	while not queue.is_empty():
 		var cur: Vector2i = queue.pop_front()
 		if _move_cost_at(cur.x, cur.y) >= 0:
@@ -371,14 +377,22 @@ func _process(delta: float) -> void:
 	elif anim_moving and canvas != null:
 		canvas.queue_redraw()
 
-# 推进世界单位滑行插值：每步 WU_ANIM_SECONDS 真实秒 from→to；返回是否有单位仍在滑（决定是否重绘）。
+# 推进世界单位滑行队列：段速 sps＝逻辑步速×WU_CATCHUP（与世界回合供步速率匹配→连走不停顿）；
+# 每帧滑当前段（pts[0]→pts[1]），滑完弹出队首继续下一段。返回是否有单位仍在滑（决定是否重绘）。
 func _advance_wu_anim(delta: float) -> bool:
 	var moving := false
 	for uid in _wu_anim:
 		var a: Dictionary = _wu_anim[uid]
-		if float(a["t"]) < 1.0:
-			a["t"] = minf(1.0, float(a["t"]) + delta / WU_ANIM_SECONDS)
-			moving = true
+		var pts: Array = a["pts"]
+		if pts.size() < 2:
+			continue
+		moving = true
+		a["t"] = float(a["t"]) + delta * float(a.get("sps", 2.0))
+		while float(a["t"]) >= 1.0 and pts.size() >= 2:
+			a["t"] = float(a["t"]) - 1.0
+			pts.pop_front()
+		if pts.size() < 2:
+			a["t"] = 0.0
 	return moving
 
 # 空格＝时间总开关（播放/暂停）、ESC＝☰ 菜单开关；只吃这两键、不吞其它键。顶栏按钮已设 FOCUS_NONE，空格不会误触聚焦按钮。
@@ -491,6 +505,8 @@ func _advance_world(hours: int) -> void:
 			"engage_player":
 				var u: Dictionary = e["unit"]
 				var t = WorldUnitDB.type_def(str(u.get("type", "")))
+				# 视觉对齐：大 tick（扎营 8h）中途 engage 时滑行队列还落后数格——开战瞬间把该单位动画快进到逻辑位
+				_wu_anim[int(u.get("uid", 0))] = {"pts": [Vector2i(int(u.get("col", 0)), int(u.get("row", 0)))], "t": 0.0, "sps": _wu_sps(u)}
 				_log_line("⚔ [b]%s[/b] 追上了你们！" % WorldUnitDB.label(str(u.get("type", ""))))
 				# 讨伐赏金（波2 收入闭环）：开战点解析、随 context 走、胜后 BattleIO.apply_result 单点入账
 				_start_battle_with(str(t.get("battle_map", DEFAULT_BATTLE_MAP)) if t != null else DEFAULT_BATTLE_MAP,
@@ -512,23 +528,52 @@ func _wu_positions(ws) -> Dictionary:
 		out[int(u.get("uid", 0))] = Vector2i(int(u.get("col", 0)), int(u.get("row", 0)))
 	return out
 
-# 为世界回合中移动过的单位起滑行插值：相邻步=滑行(t:0)、传送/重生成=直接落位(t:1)、消失单位清表。
+# 为世界回合中移动过的单位续滑行队列：WorldSim.last_trails 给出本 tick 实际走过的格序 → 逐格追加进队列
+# （相邻性逐段校验，传送/重生成=队列重置直接落位）；积压超 WU_MAX_QUEUE 段＝丢队首快进；消失单位清表。
 func _sync_wu_anim(ws, before: Dictionary) -> void:
 	var live := {}
 	for u in ws.world_units:
 		var uid := int(u.get("uid", 0))
 		live[uid] = true
 		var cur := Vector2i(int(u.get("col", 0)), int(u.get("row", 0)))
-		if not before.has(uid):
-			_wu_anim[uid] = {"from": cur, "to": cur, "t": 1.0}
-		elif before[uid] != cur:
-			if HexGrid.distance(before[uid], cur) == 1:
-				_wu_anim[uid] = {"from": before[uid], "to": cur, "t": 0.0}
-			else:
-				_wu_anim[uid] = {"from": cur, "to": cur, "t": 1.0}
+		var a = _wu_anim.get(uid)
+		if a == null:
+			# 场景重建（读档/战斗归来）后首个世界回合：以回合前位置起队再喂 trail（不丢滑行）；真·新单位＝当前格落位
+			a = {"pts": [before[uid] if before.has(uid) else cur], "t": 0.0, "sps": _wu_sps(u)}
+			_wu_anim[uid] = a
+		elif not before.has(uid):
+			_wu_anim[uid] = {"pts": [cur], "t": 0.0, "sps": _wu_sps(u)}   # tick 中途新增（理论不发生）：直接落位
+			continue
+		a["sps"] = _wu_sps(u)
+		var pts: Array = a["pts"]
+		var tail: Vector2i = pts.back()
+		for c in (WorldSim.last_trails.get(uid, []) as Array):
+			var cell: Vector2i = c
+			if cell == tail:
+				continue
+			if HexGrid.distance(tail, cell) == 1:
+				pts.append(cell)
+				tail = cell
+			else:   # 传送/重生成（非相邻跳变）：清队列直接落位
+				a["pts"] = [cell]
+				a["t"] = 0.0
+				pts = a["pts"]
+				tail = cell
+		if pts.back() != cur:   # trail 缺口兜底（理论不该发生）：直接落位
+			a["pts"] = [cur]
+			a["t"] = 0.0
+		while (a["pts"] as Array).size() - 1 > WU_MAX_QUEUE:   # 积压快进：只补滑最后几段
+			(a["pts"] as Array).pop_front()
+			a["t"] = 0.0
 	for uid in _wu_anim.keys():
 		if not live.has(uid):
 			_wu_anim.erase(uid)
+
+# 单位滑行段速（段/秒）＝时间流速 / 每格耗时 × 追赶系数——与世界回合的供步速率匹配，走路连贯不顿挫
+func _wu_sps(u: Dictionary) -> float:
+	var t = WorldUnitDB.type_def(str(u.get("type", "")))
+	var hpc := maxf(1.0, float(t.get("hours_per_cell", 2)) if t != null else 2.0)
+	return TIME_RATE / hpc * WU_CATCHUP
 
 # 一格落位后的事件评估：地图触发器 enter_tile + 全局事件池（带有效地形 id）+ 敌对派系遭伏（M9 伪触发器）。timer 不在此评（随推钟走 _advance_world）
 func _check_cell_events(cell: Vector2i) -> void:
@@ -794,10 +839,18 @@ func world_units_for_draw() -> Array:
 		var uid := int(u.get("uid", 0))
 		var cur := Vector2i(int(u.get("col", 0)), int(u.get("row", 0)))
 		var a = _wu_anim.get(uid)
+		# 画布契约不变（from/to/t 单段插值）：从滑行队列取当前段（无队列/滑完＝落格心）
+		var wfrom := cur
+		var wto := cur
+		var wt := 1.0
+		if a != null and (a["pts"] as Array).size() >= 2:
+			wfrom = a["pts"][0]
+			wto = a["pts"][1]
+			wt = float(a["t"])
 		out.append({
-			"from": (a["from"] if a != null else cur),
-			"to": (a["to"] if a != null else cur),
-			"t": (float(a["t"]) if a != null else 1.0),
+			"from": wfrom,
+			"to": wto,
+			"t": wt,
 			"color": FactionDB.color(str(u.get("faction", ""))),
 			"glyph": str(t.get("glyph", "?")),
 			"hostile": FactionDB.hostile(ws, str(u.get("faction", ""))),
