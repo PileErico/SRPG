@@ -1313,6 +1313,7 @@ func _open_status_panel(u) -> void:
 		_status_panel = UnitStatusPanel.new()
 		_status_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
 		_status_panel.host = self
+		_status_panel.equip_interact = true   # 大地图穿卸免费（不设费用闸；战斗 1 AP 闸只在沙盒宿主）
 		add_child(_status_panel)
 	_status_panel.open(u)
 

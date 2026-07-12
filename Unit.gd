@@ -118,6 +118,11 @@ var modifiers := []
 # 物品数据一律经 ItemInstances.view(uid) 取合成视图（模板 ⊕ 词条/耐久/状态）。
 var equipment := {}
 
+# —— 角色背包：物品实例 uid 列表（装备穿卸的缓冲区；上限 BAG_CAP＝状态页可用格数单源）——
+# 序列化三层全走：proto 存模板 id / campaign 存 uid 引用 / 战斗快照整份（护栏#3 白名单）。
+const BAG_CAP := 8
+var bag := []
+
 # —— 已学技能：skill_id -> {level:int(1..max), cd:int(剩余冷却,按本单位 turn), uses:int(本战剩余次数)} ——
 # 学过 = 键存在；等级 / 冷却 / 本战次数 都存这。技能定义（数值/门槛/效果）查 SkillDB，不在此重复。
 var skills := {}
@@ -461,7 +466,8 @@ func equip_instance(iuid: int, target_slot := "") -> bool:
 	return true
 
 # 顶替占槽者（equip_instance 内部用）：默认型天生武器＝收回肉身（摘修正+清槽+销毁实例，空位时再造）；
-# 普通装备＝正常卸下（不销毁、将来进背包）——但**不**触发拳脚自动回位（新武器马上落座）。
+# 普通装备＝卸下**进背包**（不销毁；bag 无上限硬拒——UI 侧动作前查容量，这里保证不丢件）——
+# 但**不**触发拳脚自动回位（新武器马上落座）。
 func _displace_slot(slot: String) -> void:
 	var iuid: int = int(equipment.get(slot, 0))
 	var item = ItemInstances.view(iuid)
@@ -476,6 +482,8 @@ func _displace_slot(slot: String) -> void:
 		ItemInstances.destroy(iuid)
 	else:
 		unequip(slot, false)
+		if iuid != 0 and item != null and not bag.has(iuid):
+			bag.append(iuid)   # 被顶掉的旧件落包（曾为孤儿实例——「将来进背包」兑现）
 
 # 卸下某槽的物品（双手武器从任一槽卸都连带清两槽 + 去掉它的修正，按实例 iuid 配对）。
 # 天生武器（innate，含拳脚）不可手动卸下/缴械——直接忽略。卸下不销毁实例（将来进背包）。
@@ -497,6 +505,76 @@ func unequip(slot: String, auto_natural := true) -> void:
 	if auto_natural and to_clear.has("main_hand"):
 		ensure_natural_weapon()
 
+# ============ 穿卸/换手交互（背包缓冲；战斗内 1 AP 由宿主闸，模型不管费用）============
+
+# 卸下到背包：innate（含拳脚 natural）不可卸；背包满拒绝。卸空主手拳脚自动回位（unequip 内建）。
+func unequip_to_bag(slot: String) -> bool:
+	var iuid := int(equipment.get(slot, 0))
+	if iuid == 0:
+		return false
+	var item = ItemInstances.view(iuid)
+	if item == null or item.get("innate", false):
+		return false
+	if bag.size() >= BAG_CAP:
+		return false
+	unequip(slot)
+	bag.append(iuid)
+	return true
+
+# 从背包装备（target_slot 空＝物品默认槽）：经 equip_instance 全套资格闸；被顶掉的旧件自动落包（_displace_slot）。
+# 预检：目标被非 natural 件占用且背包已满（含本件腾出的格）→ 拒绝（防顶替把包挤爆）。
+func equip_from_bag(iuid: int, target_slot := "") -> bool:
+	if not bag.has(iuid):
+		return false
+	var item = ItemInstances.view(iuid)
+	if item == null:
+		bag.erase(iuid)   # 悬空引用顺手清
+		return false
+	var primary := target_slot if target_slot != "" else str(item.get("slot", ""))
+	var slots := ["main_hand", "off_hand"] if item.get("two_handed", false) else [primary]
+	var displaced_uids := {}   # 按 uid 去重：双手武器占两槽＝一件
+	for s in slots:
+		var ouid := int(equipment.get(s, 0))
+		var occ = ItemInstances.view(ouid)
+		if occ != null and not occ.get("natural", false):
+			displaced_uids[ouid] = true
+	if bag.size() - 1 + displaced_uids.size() > BAG_CAP:
+		return false
+	if equip_instance(iuid, target_slot):
+		bag.erase(iuid)
+		return true
+	return false
+
+# 单手武器换手（主↔副）：目标被占＝互换（双方各过对侧槽位资格）；innate/双手不换；
+# 目标是拳脚＝顶掉（销毁、单向移入）。直接对调 equipment 字典（比路兹起降同族手法，决策3——修正不重挂）。
+func transfer_hand(from_slot: String, to_slot: String) -> bool:
+	if not (from_slot in ["main_hand", "off_hand"] and to_slot in ["main_hand", "off_hand"]) or from_slot == to_slot:
+		return false
+	var a := int(equipment.get(from_slot, 0))
+	if a == 0:
+		return false
+	var ia = ItemInstances.view(a)
+	if ia == null or ia.get("two_handed", false) or ia.get("innate", false):
+		return false
+	if not EquipSlots.accepts(to_slot, ia):
+		return false
+	var b := int(equipment.get(to_slot, 0))
+	var ib = ItemInstances.view(b) if b != 0 else null
+	if ib != null:
+		if ib.get("natural", false):
+			_displace_slot(to_slot)   # 拳脚收回肉身
+			b = 0
+			ib = null
+		elif ib.get("innate", false) or ib.get("two_handed", false) or not EquipSlots.accepts(from_slot, ib):
+			return false
+	equipment.erase(from_slot)
+	equipment[to_slot] = a
+	if b != 0:
+		equipment[from_slot] = b
+	elif from_slot == "main_hand":
+		ensure_natural_weapon()   # 主手腾空 → 拳脚回位（🔒 §10.4）
+	return true
+
 # 天生武器入位 🔒（§10.4 实装·可替换）：主手空且种族配有 natural_weapon → 造实例装上。
 # 生成时（UnitFactory.make_unit）与卸下主手武器后（unequip）两处调用；race 空/未配＝no-op
 # （无种族的裸单位退回 UNARMED_ATTACK 常量兜底）。
@@ -507,11 +585,14 @@ func ensure_natural_weapon() -> void:
 	if nid != "":
 		equip(nid)
 
-# 收编迁移用（WorldState._adopt_equipment）：装备实例换 uid——equipment 槽值 + 修正 source 前缀同步重写。
+# 收编迁移用（WorldState._adopt_equipment）：装备实例换 uid——equipment 槽值 + 背包条目 + 修正 source 前缀同步重写。
 func remap_equip_uid(old_uid: int, new_uid: int) -> void:
 	for s in equipment:
 		if int(equipment[s]) == old_uid:
 			equipment[s] = new_uid
+	for i in bag.size():
+		if int(bag[i]) == old_uid:
+			bag[i] = new_uid
 	var oldp := "equip:%d:" % old_uid
 	var newp := "equip:%d:" % new_uid
 	for m in modifiers:

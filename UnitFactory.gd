@@ -37,6 +37,10 @@ static func make_unit(proto: Dictionary, fac: String, col: int, row: int):
 		u.set_trait(tr)
 	for it in proto.get("equip", []):
 		u.equip(str(it))
+	for it in proto.get("bag", []):   # 背包（proto 层＝模板 id；词条属实例态、campaign 层才保真）
+		var biuid := ItemInstances.create(str(it))
+		if biuid != 0:
+			u.bag.append(biuid)
 	u.ensure_natural_weapon()   # 🔒 §10.4：主手空 → 种族天生武器（拳脚）实装入位
 	u.attr_picks = int(proto.get("attr_picks", 0))
 	# 属性覆盖（与种族底值的差异：HP_max/atk/acc/…全部面板值均可覆盖）
@@ -137,6 +141,14 @@ static func unit_to_proto(u) -> Dictionary:
 	}
 	if not profs.is_empty():
 		proto["profs"] = profs
+	if not u.bag.is_empty():   # 背包 → 模板 id（同 equip 先例：实例态 campaign 层保真；空包不写、旧档零影响）
+		var bag_ids := []
+		for biuid in u.bag:
+			var btpl := ItemInstances.tpl_id(int(biuid))
+			if btpl != "":
+				bag_ids.append(btpl)
+		if not bag_ids.is_empty():
+			proto["bag"] = bag_ids
 	if u.attr_picks > 0:
 		proto["attr_picks"] = u.attr_picks   # 待分配加点（战后结算 🔒 §10.6；0 不写、旧档零影响）
 	# 敌方 AI 警觉字段：仅对 enemy/neutral 写出（player/ally 忽略这些字段——不写省噪音）。
@@ -160,6 +172,7 @@ static func unit_to_campaign(u) -> Dictionary:
 		"uid": u.uid,
 		"proto": unit_to_proto(u),
 		"equip_uids": equip_uids,
+		"bag_uids": u.bag.duplicate(),   # 背包实例引用（本体在 ws.item_instances 整库，同 equip_uids 律）
 		"hp": int(u.stats.get("HP", 0)),
 		"armor": int(u.stats.get("armor", 0)),
 		"injured_until": u.injured_until,
@@ -173,9 +186,13 @@ static func unit_from_campaign(entry: Dictionary):
 	if typeof(proto) != TYPE_DICTIONARY:
 		proto = {}
 	var has_inst: bool = typeof(entry.get("equip_uids", null)) == TYPE_DICTIONARY
-	if has_inst:
+	var has_bag: bool = typeof(entry.get("bag_uids", null)) == TYPE_ARRAY
+	if has_inst or has_bag:
 		proto = proto.duplicate(true)
+	if has_inst:
 		proto.erase("equip")   # 防 make_unit 按模板另造一套新实例
+	if has_bag:
+		proto.erase("bag")     # 同律：背包实例引用在档，模板路径闭嘴
 	var u = make_unit(proto, str(proto.get("default_faction", "player")), -1, -1)   # col/row=-1＝待命（非战斗中）
 	if has_inst:
 		var done := []
@@ -183,11 +200,19 @@ static func unit_from_campaign(entry: Dictionary):
 			var iuid := int(entry["equip_uids"][slot])
 			if iuid > 0 and not done.has(iuid):
 				done.append(iuid)
-				if not u.equip_instance(iuid):
+				# 按存档槽位重挂（换手/副手装备后槽位≠默认槽——不传 slot 会回跳默认槽且把被顶件挤进背包）
+				if not u.equip_instance(iuid, str(slot)):
 					# 实例缺失/模板被删/资格不再满足：响亮警告 + 按模板补新件兜底（能查到模板时），拒绝无声空手
 					var tpl := ItemInstances.tpl_id(iuid)
 					var salvaged := tpl != "" and u.equip(tpl)
 					push_warning("读档重挂装备失败：unit=%s slot=%s iuid=%d tpl=%s%s" % [u.unit_name, str(slot), iuid, tpl if tpl != "" else "?", "，已按模板补新件（词条丢失）" if salvaged else "，该件丢失"])
+	if has_bag:
+		for biuid in entry["bag_uids"]:
+			var bid := int(biuid)
+			if bid > 0 and ItemInstances.exists(bid):
+				u.bag.append(bid)
+			elif bid > 0:
+				push_warning("读档背包实例缺失：unit=%s iuid=%d——该件丢失" % [u.unit_name, bid])
 	u.uid = int(entry.get("uid", 0))
 	u.stats["HP"] = clampi(int(entry.get("hp", u.stats.get("HP", 0))), 0, int(u.effective_stat("HP_max")))
 	u.stats["armor"] = clampi(int(entry.get("armor", u.stats.get("armor", 0))), 0, int(u.effective_stat("armor_max")))
@@ -216,6 +241,7 @@ static func unit_to_battle_snapshot(u) -> Dictionary:
 		"effects": u.effects.duplicate(true),
 		"modifiers": u.modifiers.duplicate(true),   # 整份含 trait/equip 烘焙条 + buff:/env: 临时条（source 配对保真 🔒）
 		"equipment": u.equipment.duplicate(),        # slot -> 实例 uid（实例本体：战役随档；沙盒 _transient 不落盘 ⚠️）
+		"bag": u.bag.duplicate(),                    # 角色背包实例 uid（穿卸缓冲；护栏#3 白名单同 PR 扩展）
 		"skills": u.skills.duplicate(true),          # 含 cd/uses 运行态
 		"ews_state": u.ews_state.duplicate(true),    # EWS cd/uses 运行态（🔒 决策26 护栏#3：新运行态同 PR 扩白名单）
 		"ai_threat": u.ai_threat, "ai_region": u.ai_region, "ai_group": u.ai_group, "ai_aggroed": u.ai_aggroed,
@@ -277,6 +303,10 @@ static func unit_from_battle_snapshot(d: Dictionary):
 		for slot in esrc:
 			equip[str(slot)] = int(esrc[slot])
 	u.equipment = equip
+	var bag := []
+	for b in d.get("bag", []):
+		bag.append(int(b))   # 旧快照无 bag 键 → 空包安全
+	u.bag = bag
 	var skills := {}
 	var ssrc = d.get("skills", {})
 	if typeof(ssrc) == TYPE_DICTIONARY:

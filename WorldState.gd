@@ -141,13 +141,16 @@ func remove_world_unit(uid: int) -> void:
 	if u != null:
 		world_units.erase(u)
 
-# 收编：单位装备引用的实例若不在本档库（来自沙盒 transient 域），迁移进来并重铸 uid（修正 source 同步重写）。
+# 收编：单位装备/背包引用的实例若不在本档库（来自沙盒 transient 域），迁移进来并重铸 uid（修正 source 同步重写）。
 func _adopt_equipment(u) -> void:
 	var missing := {}
 	for s in u.equipment:
 		var iuid: int = int(u.equipment[s])
 		if iuid > 0 and not item_instances.has(iuid):
 			missing[iuid] = true
+	for biuid in u.bag:   # 背包同律（remap_equip_uid 已含 bag 条目重写）
+		if int(biuid) > 0 and not item_instances.has(int(biuid)):
+			missing[int(biuid)] = true
 	for old_uid in missing:
 		var inst = ItemInstances.take_transient(old_uid)
 		if inst == null:

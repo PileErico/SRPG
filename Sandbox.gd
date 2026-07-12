@@ -722,7 +722,32 @@ func _build_ui() -> void:
 	_status_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_status_panel.visible = false
 	_status_panel.host = self     # 供翻页取同阵营单位 + 棋子高亮
+	_status_panel.equip_interact = true            # 穿卸交互：布置期免费；战斗中经费用闸扣 1 AP
+	_status_panel.on_equip_gate = _equip_gate
+	_status_panel.on_equipment_changed = func():
+		if canvas != null:
+			canvas.queue_redraw()
+		_refresh_info()
 	add_child(_status_panel)
+
+# 穿卸费用闸（状态页回调；🔒 用户 2026-07-12：战斗中装备/卸下/换手各 1 AP）：
+# 布置期/战后＝免费；战斗中＝仅当前行动者、AP≥1；commit=false 只查资格、true 扣费+日志。
+func _equip_gate(u, commit: bool) -> bool:
+	if phase != "battle" or battle_over:
+		return true
+	if u != active_unit():
+		if commit:
+			_log_line("只能在该单位的行动回合整备装备")
+		return false
+	if u.ap < 1:
+		if commit:
+			_log_line("%s AP 不足，无法整备装备" % _cname(u))
+		return false
+	if commit:
+		u.ap -= 1
+		_log_line("%s 整备装备（1 AP）" % _cname(u))
+		_refresh_info()
+	return true
 
 # 行动顺序槽点头像 → 把镜头切到该单位所在格（不开角色状态）
 func focus_on_unit(u) -> void:

@@ -12,6 +12,7 @@ const DiagonalFrame := preload("res://DiagonalFrame.gd")
 const ItemInstances := preload("res://ItemInstances.gd")   # 装备槽经合成视图取物品（equipment 存实例 uid）
 const ItemDB := preload("res://ItemDB.gd")                 # 编辑器背包格取模板（bag_items 存模板 id）
 const ItemSlot := preload("res://ItemSlot.gd")
+const EquipSlots := preload("res://EquipSlots.gd")   # 穿卸交互：槽位资格判定（拖放/菜单灰显与模型同口）
 const TraitDB := preload("res://TraitDB.gd")
 const SkillDB := preload("res://SkillDB.gd")
 const ProfDB := preload("res://ProfDB.gd")               # 技艺（熟练度域）注册表——「技艺」页
@@ -31,7 +32,8 @@ const FRAME_SCALE := 3                 # 角饰放大倍数
 const GUTTER := 52                     # 上下留白：≥角饰高(17×scale) 以避让角饰
 const SIDE_PAD := 28                   # 左右内缩
 
-const BAG_USABLE := 8                  # 默认可用物品格（横4竖2）
+const Unit := preload("res://Unit.gd")   # BAG_CAP 单源（背包格数＝模型容量）
+const BAG_USABLE := Unit.BAG_CAP       # 可用物品格（横4竖2）＝Unit.BAG_CAP 单源
 const BAG_TOTAL := 16                  # 实际画 4×4，多出的锁定
 const HEADER_H := 56                   # 抬头/拖动区高度（覆盖标题行 + 上方留白）
 
@@ -63,6 +65,13 @@ var on_edit := Callable()              # 面板内任一编辑后 → 宿主标�
 var bag_items: Array = []              # 编辑器背包内容（item id 列表；仅编辑器态显示，不入档）
 var _stats_col: VBoxContainer = null   # 右侧属性列引用（特性/种族/装备改后就地刷新，免整卡重建）
 var _trait_ids: Array = []             # 编辑器特性下拉的 index→id 映射
+
+# —— 穿卸交互模式（游戏内 Sandbox/Overworld 开启；与 editor_mode 互斥——编辑器沿用旧回调路径）——
+# 点装备槽 → 卸下/换手菜单；点背包件 → 装备菜单；拖拽（槽↔背包、主手↔副手）同语义。仅 player 阵营单位生效。
+var equip_interact := false            # true=装备槽/背包可交互
+var on_equip_gate := Callable()        # 费用闸 Callable(u, commit:bool)->bool：false=只查资格、true=扣费提交（战斗中 1 AP）；无效=免费
+var on_equipment_changed := Callable() # 动作成功后通知宿主（刷画布/信息栏）
+var _equip_menu: PopupMenu = null      # 穿卸动作菜单（懒建复用）
 
 func open(u) -> void:
 	_unit = u
@@ -1760,12 +1769,154 @@ func _equip_cell(u, slot_label: String, slot_id: String) -> Control:
 	if editor_mode:                       # 点槽 → 宿主开物品选择器（按 slot 筛选）
 		box.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 		box.gui_input.connect(_on_equip_slot_input.bind(slot_id))
+	elif _can_interact(u):                # 穿卸交互：点出菜单 / 拖出 / 接拖放
+		box.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		box.gui_input.connect(_on_equip_cell_click.bind(u, slot_id))
+		var iuid := int(u.equipment.get(slot_id, 0))
+		var it = ItemInstances.view(iuid)
+		if it != null and not it.get("innate", false):
+			box.drag_payload = {"kind": "equip", "slot": slot_id}
+		box.can_drop = func(p): return _equip_drop_ok(u, slot_id, p)
+		box.on_drop = func(p): _do_equip_drop(u, slot_id, p)
 	v.add_child(box)
 	var l := Label.new()
 	l.text = slot_label
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	v.add_child(l)
 	return v
+
+# ============ 穿卸交互（游戏内；费用闸在宿主——战斗中 1 AP）============
+
+func _can_interact(u) -> bool:
+	return equip_interact and not editor_mode and u != null and u.faction == "player"
+
+# 动作三段式：①资格（宿主闸 commit=false，战斗中＝当前行动者且 AP≥1）②执行（模型 API，失败零扣费）③扣费+刷新
+func _try_equip_action(u, act: Callable) -> void:
+	if not _can_interact(u):
+		return
+	if on_equip_gate.is_valid() and not bool(on_equip_gate.call(u, false)):
+		return
+	if not bool(act.call()):
+		return
+	if on_equip_gate.is_valid():
+		on_equip_gate.call(u, true)
+	open(_unit)   # 整卡重建（tab/页态保持）
+	if on_equipment_changed.is_valid():
+		on_equipment_changed.call()
+
+func _gate_ok(u) -> bool:
+	return not on_equip_gate.is_valid() or bool(on_equip_gate.call(u, false))
+
+# 战斗中资格不满足（非本单位回合/AP 不足）→ 单条灰显提示菜单（拖放路径静默拒即可，点击要有反馈）
+func _popup_gate_denied() -> void:
+	var menu := _get_equip_menu()
+	menu.clear()
+	menu.add_item("整备不可（需本单位行动回合且 AP≥1）", 99)
+	menu.set_item_disabled(0, true)
+	_popup_equip_menu(menu, func(_id): pass)
+
+# 点装备槽 → 动作菜单：卸下（背包满灰显）/ 单手武器换手
+func _on_equip_cell_click(event: InputEvent, u, slot_id: String) -> void:
+	if not (event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT):
+		return
+	var iuid := int(u.equipment.get(slot_id, 0))
+	var it = ItemInstances.view(iuid)
+	if it == null or it.get("innate", false):
+		return
+	if not _gate_ok(u):
+		_popup_gate_denied()
+		return
+	var menu := _get_equip_menu()
+	menu.clear()
+	menu.add_item("卸下（放入背包）", 0)
+	if u.bag.size() >= u.BAG_CAP:
+		menu.set_item_disabled(0, true)
+		menu.set_item_text(0, "卸下（背包已满）")
+	if slot_id in ["main_hand", "off_hand"] and not it.get("two_handed", false):
+		var to := "off_hand" if slot_id == "main_hand" else "main_hand"
+		menu.add_item("转移到" + ("副手" if to == "off_hand" else "主手"), 1)
+		if not EquipSlots.accepts(to, it):
+			menu.set_item_disabled(menu.item_count - 1, true)
+	var cb := func(id: int) -> void:
+		match id:
+			0: _try_equip_action(u, func(): return u.unequip_to_bag(slot_id))
+			1:
+				var to2 := "off_hand" if slot_id == "main_hand" else "main_hand"
+				_try_equip_action(u, func(): return u.transfer_hand(slot_id, to2))
+	_popup_equip_menu(menu, cb)
+
+# 点背包件 → 装备菜单：默认槽装备 / 单手武器可选副手
+func _on_bag_item_click(event: InputEvent, u, iuid: int) -> void:
+	if not (event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT):
+		return
+	var it = ItemInstances.view(iuid)
+	if it == null:
+		return
+	if not _gate_ok(u):
+		_popup_gate_denied()
+		return
+	var menu := _get_equip_menu()
+	menu.clear()
+	menu.add_item("装备", 0)
+	if str(it.get("slot", "")) == "main_hand" and not it.get("two_handed", false) and EquipSlots.accepts("off_hand", it):
+		menu.add_item("装备到副手", 1)
+	var cb := func(id: int) -> void:
+		match id:
+			0: _try_equip_action(u, func(): return u.equip_from_bag(iuid))
+			1: _try_equip_action(u, func(): return u.equip_from_bag(iuid, "off_hand"))
+	_popup_equip_menu(menu, cb)
+
+func _get_equip_menu() -> PopupMenu:
+	if _equip_menu == null or not is_instance_valid(_equip_menu):
+		_equip_menu = PopupMenu.new()
+		add_child(_equip_menu)
+	# 旧连接清干净（懒建复用，回调随点击换）
+	for c in _equip_menu.id_pressed.get_connections():
+		_equip_menu.id_pressed.disconnect(c["callable"])
+	return _equip_menu
+
+func _popup_equip_menu(menu: PopupMenu, cb: Callable) -> void:
+	menu.id_pressed.connect(cb, CONNECT_ONE_SHOT)
+	menu.position = Vector2i(get_global_mouse_position())
+	menu.popup()
+
+# —— 拖放判定/执行（策略层；ItemSlot 只做管道）——
+# 装备槽收：bag 件（装备到本槽）/ equip 件（主↔副换手）
+func _equip_drop_ok(u, slot_id: String, p) -> bool:
+	if typeof(p) != TYPE_DICTIONARY or not _can_interact(u):
+		return false
+	if on_equip_gate.is_valid() and not bool(on_equip_gate.call(u, false)):
+		return false
+	match str(p.get("kind", "")):
+		"bag":
+			var it = ItemInstances.view(int(p.get("iuid", 0)))
+			return it != null and EquipSlots.accepts(slot_id, it) \
+				and not (it.get("two_handed", false) and slot_id == "off_hand")
+		"equip":
+			var from := str(p.get("slot", ""))
+			return from != slot_id and from in ["main_hand", "off_hand"] and slot_id in ["main_hand", "off_hand"]
+	return false
+
+func _do_equip_drop(u, slot_id: String, p) -> void:
+	match str(p.get("kind", "")):
+		"bag":
+			_try_equip_action(u, func(): return u.equip_from_bag(int(p.get("iuid", 0)), slot_id))
+		"equip":
+			_try_equip_action(u, func(): return u.transfer_hand(str(p.get("slot", "")), slot_id))
+
+# 背包格收：equip 件（卸下入包）
+func _bag_drop_ok(u, p) -> bool:
+	if typeof(p) != TYPE_DICTIONARY or str(p.get("kind", "")) != "equip" or not _can_interact(u):
+		return false
+	if u.bag.size() >= u.BAG_CAP:
+		return false
+	if on_equip_gate.is_valid() and not bool(on_equip_gate.call(u, false)):
+		return false
+	var it = ItemInstances.view(int(u.equipment.get(str(p.get("slot", "")), 0)))
+	return it != null and not it.get("innate", false)
+
+func _do_bag_drop(u, p) -> void:
+	_try_equip_action(u, func(): return u.unequip_to_bag(str(p.get("slot", ""))))
 
 # 编辑器：点装备槽 → 回调宿主开选择器（左键）
 func _on_equip_slot_input(event: InputEvent, slot_id: String) -> void:
@@ -1814,9 +1965,10 @@ func _fill_equip_slot(box: Control, u, slot_id: String) -> void:
 		ic.modulate = Color(0.45, 0.45, 0.45)   # 双手武器的副手：灰
 	box.add_child(ic)
 
-# 中下：物品栏（占位）。实画 4×4，前 BAG_USABLE 个可用，其余锁定画 ✕。
-# 编辑器模式：可用格显示 bag_items 内容、点击开选择器（任意物品）；⚠ 背包暂不入档（先占位）。
-func _build_bag(parent: VBoxContainer, _u) -> void:
+# 中下：物品栏。实画 4×4，前 BAG_USABLE 个可用（＝Unit.BAG_CAP 单源），其余锁定画 ✕。
+# 编辑器模式：可用格显示 bag_items 模板（点击开选择器、不入档——编辑器旧路不动）；
+# 游戏内：显示 u.bag 实例（真背包，入档）；穿卸交互开启时可点菜单/拖拽（装备↔背包）。
+func _build_bag(parent: VBoxContainer, u) -> void:
 	_section(parent, "物品栏（编辑器：可放任意物品，暂不入档）" if editor_mode else "物品栏")
 	var grid := GridContainer.new()
 	grid.columns = 4
@@ -1824,6 +1976,7 @@ func _build_bag(parent: VBoxContainer, _u) -> void:
 	grid.add_theme_constant_override("h_separation", 6)
 	grid.add_theme_constant_override("v_separation", 6)
 	parent.add_child(grid)
+	var interact := _can_interact(u)
 	for i in BAG_TOTAL:
 		if i < BAG_USABLE:
 			var box := _slot_box(Vector2(44, 44))
@@ -1831,9 +1984,44 @@ func _build_bag(parent: VBoxContainer, _u) -> void:
 				_fill_bag_slot(box, i)
 				box.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 				box.gui_input.connect(_on_bag_slot_input.bind(i))
+			else:
+				var iuid: int = int(u.bag[i]) if u != null and i < u.bag.size() else 0
+				if iuid != 0:
+					_fill_bag_instance(box, iuid)
+				if interact:
+					box.can_drop = func(p): return _bag_drop_ok(u, p)
+					box.on_drop = func(p): _do_bag_drop(u, p)
+					if iuid != 0:
+						box.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+						box.gui_input.connect(_on_bag_item_click.bind(u, iuid))
+						box.drag_payload = {"kind": "bag", "iuid": iuid}
 			grid.add_child(box)
 		else:
 			grid.add_child(_locked_slot(Vector2(44, 44)))
+
+# 游戏内背包格：装备实例合成视图（模板⊕词条）→ 图标 + 稀有度边框 + 富 tooltip（与装备槽同款）
+func _fill_bag_instance(box: Control, iuid: int) -> void:
+	var item = ItemInstances.view(iuid)
+	if item == null:
+		return
+	box.item = item
+	box.tooltip_builder = _build_item_tooltip
+	box.tooltip_text = str(item.get("name", ""))
+	var rc = _rarity_color(item)
+	if rc != null:
+		var sb = box.get_theme_stylebox("panel")
+		if sb is StyleBoxFlat:
+			sb.border_color = rc
+			sb.set_border_width_all(2)
+	var tex = TextureCache.get_tex(str(item.get("icon", "")))
+	if tex != null:
+		var ic := TextureRect.new()
+		ic.texture = tex
+		ic.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		ic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		ic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		box.add_child(ic)
 
 # 编辑器背包格：有物品叠图标（无图标叠首字），点击 → 回调宿主
 func _fill_bag_slot(box: Control, idx: int) -> void:
