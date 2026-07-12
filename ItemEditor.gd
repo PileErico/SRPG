@@ -609,7 +609,7 @@ func _build_weapon_skills_section() -> void:
 		if SkillDB.is_bas_shaped(def):
 			_w_bws.add_item("%s（%s）" % [str(def.get("name", id)), str(id)])
 			_w_bws.set_item_metadata(_w_bws.item_count - 1, str(id))
-	var cur_bws := str(_current.get("bws", _current.get("bas", "")))
+	var cur_bws := SkillDB.weapon_bws_id(_current)   # 双读单口（§1-6）
 	_ensure_meta_option(_w_bws, cur_bws)
 	_select_meta(_w_bws, cur_bws)
 	_w_bws.item_selected.connect(func(_i): _refresh_preview())

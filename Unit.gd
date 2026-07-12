@@ -392,7 +392,7 @@ func initiative() -> int:
 # 「提供攻击」判据＝bws/bas 引用或旧内联 attack（阶段3a 双读窗口，与 _main_weapon_attack 同口径）。
 func can_equip(item: Dictionary) -> bool:
 	var t = TraitDB.get_trait(trait_id)
-	var provides_attack: bool = item.has("attack") or str(item.get("bws", item.get("bas", ""))) != ""
+	var provides_attack: bool = item.has("attack") or SkillDB.weapon_bws_id(item) != ""   # 双读单口（§1-6）
 	if t != null and t.get("no_weapon", false) and provides_attack and not item.get("innate", false):
 		return false
 	for req in item.get("requires", []):
@@ -667,7 +667,7 @@ func _main_weapon_attack() -> Dictionary:
 	var item = ItemInstances.view(int(equipment.get("main_hand", 0)))
 	if item == null:
 		return {}
-	var bws := str(item.get("bws", item.get("bas", "")))
+	var bws := SkillDB.weapon_bws_id(item)   # 双读单口（§1-6）
 	if bws != "":
 		var def = SkillDB.get_skill(bws)
 		var flat: Dictionary = SkillDB.flatten_bws(def) if def != null else {}

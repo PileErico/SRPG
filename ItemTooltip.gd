@@ -104,7 +104,7 @@ static func render(item: Dictionary) -> Control:
 
 	# 攻击 skill（阶段3a 🔒 决策26：优先 bws 引用 → SkillDB 扁平化；双读窗口回退旧内联 attack）
 	var atk = item.get("attack", null)
-	var bws := str(item.get("bws", item.get("bas", "")))
+	var bws := SkillDB.weapon_bws_id(item)   # 双读单口（§1-6）
 	if bws != "":
 		var bdef = SkillDB.get_skill(bws)
 		if bdef != null:

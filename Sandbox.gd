@@ -314,20 +314,24 @@ func load_from_memory(map_dict: Dictionary) -> void:
 	_map_roads = res.get("roads", [])
 	_map_bridges = res.get("bridges", [])
 	_setup_regions()
-	# 场上清空、roster 收回待命（保留玩家自带军，跨试玩不丢）
+	_reset_to_deploy()   # 场上清空、roster 收回待命（保留玩家自带军，跨试玩不丢）+ 落预置单位 + 回合归零
+	if canvas != null:
+		canvas.request_fit()
+		canvas.queue_redraw()
+
+# 回布置统一序（技改 §1-8：原「换图」与「R 重开/退战」两份手抄收敛）：场上清空、roster 收回待命
+# （清效果/buff 修正 + init_vitals 回满），重落地图预置单位，回合状态归零，进布置阶段。suspend UI 落地前必抽。
+func _reset_to_deploy() -> void:
 	units = []
 	for u in roster:
 		u.col = -1
 		u.row = -1
 		_clear_effects_and_buffs(u)
-		u.init_vitals()
-	_spawn_map_units()   # 按新地图落预置单位（关卡的敌 / 我）
+		u.init_vitals()   # 回满生命/护甲（清掉战斗里的损耗）
+	_spawn_map_units()   # 落地图预置单位（关卡的敌 / 我），重开后不消失
 	turn_order = []
 	active_index = 0
 	round_num = 1
-	if canvas != null:
-		canvas.request_fit()
-		canvas.queue_redraw()
 	_enter_deploy()
 
 # 落子地图预置单位（_map_units → units）：关卡设计者在编辑器/部署里摆好、存进地图的敌 / 中立 / 固定单位。
@@ -982,7 +986,7 @@ func _add_weapon_rows(parent: VBoxContainer, uid: int) -> void:
 # 其余 = EWS（装备授予的额外技能，🔒 决策26——悬停只陈列，解锁态在能力菜单表达）。
 func _weapon_skills(item) -> Array:
 	var out := []
-	var bws := str(item.get("bws", item.get("bas", "")))
+	var bws := SkillDB.weapon_bws_id(item)   # 双读单口（§1-6）
 	var bdef = SkillDB.get_skill(bws) if bws != "" else null
 	var flat: Dictionary = SkillDB.flatten_bws(bdef) if bdef != null else {}
 	if not flat.is_empty():
@@ -1420,18 +1424,8 @@ func exit_battle() -> void:
 		_status_panel.close()
 	if _log != null:
 		_log.clear()
-	# R 重开 = 回到布置阶段：场上单位收回待命（roster 保留，可重新布置），回合状态归零
-	units = []
-	for u in roster:
-		u.col = -1
-		u.row = -1
-		_clear_effects_and_buffs(u)
-		u.init_vitals()   # 回满生命/护甲（清掉战斗里的损耗）
-	_spawn_map_units()   # 重新落地图预置单位（关卡的敌 / 我），R 重开后不消失
-	turn_order = []
-	active_index = 0
-	round_num = 1
-	_enter_deploy()
+	# R 重开 = 回到布置阶段（统一序 _reset_to_deploy——与换图共用一份，🔧 §1-8）
+	_reset_to_deploy()
 	if canvas != null:
 		canvas.queue_redraw()
 

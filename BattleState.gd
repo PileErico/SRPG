@@ -519,13 +519,18 @@ func _apply_terrain_ticks(u) -> Array:
 # Π命中效能 = 攻方命中效能(增益向) × 守方闪避效能(减免向) × 攻方地块命中效能 × 守方地块闪避效能（森林掩蔽）——
 # 无效能修正 / 无地块效果时 =1.0（与旧行为一致）。地块贡献惰性读取，见 _terrain_eff_factor。
 func _hit_chance(attacker, target) -> int:
-	var base: int = int(round(attacker.effective_stat_f("acc") + attacker.effective_stat_f("finesse") \
-		- target.effective_stat_f("eva") - target.effective_stat_f("agility"))) \
+	return int(_hit_chance_detail(attacker, target)["hc"])
+
+# 明细版（技改 §1-5 判定/展示口径合一）：{hc, acc, eva}——acc/eva＝含技巧/灵活/士气的合计口径，
+# 判定（_resolve_compute_body 掷骰）与展示（战斗记录）同吃这一份，不再各自分算。
+func _hit_chance_detail(attacker, target) -> Dictionary:
+	var acc: int = int(round(attacker.effective_stat_f("acc") + attacker.effective_stat_f("finesse"))) \
 		+ attacker.morale_combat_mod()   # 士气档位 🔒 §10.7：命中平加 ±5/10（稳定 0）
+	var eva := int(round(target.effective_stat_f("eva") + target.effective_stat_f("agility")))
 	var eff: float = attacker.eff_mult("hit_eff") * target.eff_reduce("eva_eff")
 	eff *= _terrain_eff_factor(attacker, "hit_eff", true)    # 攻方地块命中效能（增益向）
 	eff *= _terrain_eff_factor(target, "eva_eff", false)     # 守方地块闪避效能（森林掩蔽·减免向）
-	return clampi(int(round(float(base) * eff)), 5, 95)
+	return {"hc": clampi(int(round(float(acc - eva) * eff)), 5, 95), "acc": acc, "eva": eva}
 
 # 技能伤害补正（flat、不吃效能）：bonus = Σ(指定四维/属性) × mult。无则 0。
 func _skill_bonus(attacker, skill) -> float:
@@ -555,14 +560,12 @@ func _resolve_compute(attacker, target, skill) -> Dictionary:
 	return r
 
 func _resolve_compute_body(attacker, target, skill) -> Dictionary:
-	# 命中（r 携带的 acc/eva ＝含技巧/灵活的合计口径，供战斗记录展示）
-	var acc: int = int(round(attacker.effective_stat_f("acc") + attacker.effective_stat_f("finesse"))) \
-		+ attacker.morale_combat_mod()   # 展示口径与 _hit_chance 同含士气档位平加（显式类型：attacker 无类型，Variant 不可推断）
-	var eva := int(round(target.effective_stat_f("eva") + target.effective_stat_f("agility")))
-	var hc := _hit_chance(attacker, target)   # 命中公式单一来源（见 _hit_chance）
+	# 命中：判定与展示同吃 _hit_chance_detail 一份明细（§1-5 口径合一；acc/eva 供战斗记录展示）
+	var hd := _hit_chance_detail(attacker, target)
+	var hc := int(hd["hc"])
 	var roll := int(rng.randf() * 100.0)
 	var hit := roll < hc
-	var r := {"hit": hit, "roll": roll, "hc": hc, "acc": acc, "eva": eva}
+	var r := {"hit": hit, "roll": roll, "hc": hc, "acc": int(hd["acc"]), "eva": int(hd["eva"])}
 	if not hit:
 		r["morale_att"] = _morale_add(attacker, -1)   # 士气：失手 −1（🔒 §10.7）
 		return r

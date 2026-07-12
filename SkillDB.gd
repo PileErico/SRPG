@@ -159,6 +159,11 @@ static func _write_array(path: String, arr: Array) -> bool:
 static func _intify(v):   # 外部消费（迁移脚本/test_skilleditor 语义比较）仍走此名
 	return JsonRegistry.intify(v)
 
+# 武器 BWS 引用 id 单口（技改 §1-6：原五处手抄 bws→bas 双读链）——
+# bws 正键 + bas 旧键回退（双键桥）；拆桥时只删这一处回退分支即一刀净。
+static func weapon_bws_id(item: Dictionary) -> String:
+	return str(item.get("bws", item.get("bas", "")))
+
 # 按 id upsert 进主文件（FILES[0]）；replace_id=改名语义（旧条目全移除，改名≠复制）。写盘后 reload_data。
 static func save_skill(skill: Dictionary, replace_id := "") -> bool:
 	if not skill.has("id") or str(skill["id"]) == "":
