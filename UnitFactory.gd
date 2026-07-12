@@ -11,6 +11,7 @@ const Unit := preload("res://Unit.gd")
 const ItemInstances := preload("res://ItemInstances.gd")   # 装备实例库（equipment 存 uid、proto 存模板 id，此处互转）
 const StatMeta := preload("res://StatMeta.gd")             # stat 序列化白名单单一源
 const RaceDB := preload("res://RaceDB.gd")                 # 种族底值注册表（属性重做 🔒：基础面板值按种族给定）
+const JsonRegistry := preload("res://JsonRegistry.gd")     # 写盘口单一源（技改 §4-4）
 
 const PROTOS_PATH := "res://data/unit_prototypes.json"   # 内置原型
 const PRESETS_PATH := "user://unit_presets.json"         # 用户自存预设（跨次启动保留）
@@ -391,32 +392,9 @@ static func delete_prototype(id: String) -> bool:
 		return false   # 没找到＝没删
 	return _write_protos(out)
 
-# 写数组（2 空格缩进，与工程其它数据文件一致）；写前整数归一化（JSON 读回全是 float，避免 1→1.0 噪音 diff）。
+# 写盘口已上收 JsonRegistry（技改 §4-4：四胞胎实为五份——本文件是第五份）
 static func _write_protos(arr: Array) -> bool:
-	var f := FileAccess.open(PROTOS_PATH, FileAccess.WRITE)
-	if f == null:
-		push_warning("UnitFactory：写入失败（%s）——文件被占用/只读？" % PROTOS_PATH)
-		return false
-	f.store_string(JSON.stringify(_intify(arr), "  "))
-	f.close()
-	return true
-
-# 递归把「值为整数的 float」还原为 int（1.0→1；1.5 保留）——只影响落盘表示，不改语义（仿 ItemDB._intify）。
-static func _intify(v):
-	match typeof(v):
-		TYPE_FLOAT:
-			return int(v) if v == floorf(v) else v
-		TYPE_ARRAY:
-			var a := []
-			for e in v:
-				a.append(_intify(e))
-			return a
-		TYPE_DICTIONARY:
-			var d := {}
-			for k in v:
-				d[k] = _intify(v[k])
-			return d
-	return v
+	return JsonRegistry.write_json(PROTOS_PATH, arr, "UnitFactory")
 
 static func load_presets() -> Array:
 	if not FileAccess.file_exists(PRESETS_PATH):

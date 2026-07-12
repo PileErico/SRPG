@@ -149,42 +149,15 @@ static func flatten_bws(def: Dictionary) -> Dictionary:
 
 # ============ 写盘口（阶段2；仿 EffectDB/ItemDB 范式——SkillEditor/迁移脚本的唯一写侧）============
 
-# 读某文件的原始数组（写路径用；读侧走 _ensure/JsonRegistry）
+# 读写盘口已上收 JsonRegistry（技改 §4-4 四胞胎收敛）；私有名保留＝本文件调用点零改动
 static func _read_array(path: String) -> Array:
-	if not FileAccess.file_exists(path):
-		return []
-	var f = FileAccess.open(path, FileAccess.READ)
-	if f == null:
-		return []
-	var data = JSON.parse_string(f.get_as_text())
-	f.close()
-	return data if typeof(data) == TYPE_ARRAY else []
+	return JsonRegistry.read_array(path)
 
 static func _write_array(path: String, arr: Array) -> bool:
-	var f = FileAccess.open(path, FileAccess.WRITE)
-	if f == null:
-		push_warning("SkillDB：写入失败（%s）——文件被占用/只读？" % path)
-		return false
-	f.store_string(JSON.stringify(_intify(arr), "  "))
-	f.close()
-	return true
+	return JsonRegistry.write_json(path, arr, "SkillDB")
 
-# 递归把「值为整数的 float」还原 int（1.0→1，防 diff 噪音；同 EffectDB._intify）
-static func _intify(v):
-	match typeof(v):
-		TYPE_FLOAT:
-			return int(v) if v == floorf(v) else v
-		TYPE_ARRAY:
-			var out := []
-			for e in v:
-				out.append(_intify(e))
-			return out
-		TYPE_DICTIONARY:
-			var out := {}
-			for k in v:
-				out[k] = _intify(v[k])
-			return out
-	return v
+static func _intify(v):   # 外部消费（迁移脚本/test_skilleditor 语义比较）仍走此名
+	return JsonRegistry.intify(v)
 
 # 按 id upsert 进主文件（FILES[0]）；replace_id=改名语义（旧条目全移除，改名≠复制）。写盘后 reload_data。
 static func save_skill(skill: Dictionary, replace_id := "") -> bool:

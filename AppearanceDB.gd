@@ -11,6 +11,7 @@ extends RefCounted
 
 const PATH := "res://data/appearance_parts.json"
 const LOOKS_PATH := "res://data/appearance_looks.json"   # 单位原型 id → 外观配方（供「应用到单位」后回读再编辑）
+const JsonRegistry := preload("res://JsonRegistry.gd")   # 读写盘口单一源（技改 §4-4）
 
 static var _doc := {}
 static var _by_part := {}     # part_id -> part dict
@@ -239,39 +240,9 @@ static func _palettes_raw() -> Array:
 	var a = _doc.get("palettes", [])
 	return a if typeof(a) == TYPE_ARRAY else []
 
+# 读写盘口已上收 JsonRegistry（技改 §4-4 四胞胎收敛）；私有名保留＝本文件调用点零改动
 static func _read_doc(path: String) -> Dictionary:
-	if not FileAccess.file_exists(path):
-		return {}
-	var f = FileAccess.open(path, FileAccess.READ)
-	if f == null:
-		return {}
-	var data = JSON.parse_string(f.get_as_text())
-	f.close()
-	return data if typeof(data) == TYPE_DICTIONARY else {}
+	return JsonRegistry.read_dict(path)
 
-# 写整个 doc（2 空格缩进 + 整数归一化，与工程其它数据文件一致）。
 static func _write_doc(path: String, doc: Dictionary) -> bool:
-	var f = FileAccess.open(path, FileAccess.WRITE)
-	if f == null:
-		push_warning("AppearanceDB：写入失败（%s）——占用/只读/目录不存在？" % path)
-		return false
-	f.store_string(JSON.stringify(_intify(doc), "  "))
-	f.close()
-	return true
-
-# 递归把「值为整数的 float」还原为 int（1.0→1；1.5 保留）——只影响落盘表示。
-static func _intify(v):
-	match typeof(v):
-		TYPE_FLOAT:
-			return int(v) if v == floorf(v) else v
-		TYPE_ARRAY:
-			var out := []
-			for e in v:
-				out.append(_intify(e))
-			return out
-		TYPE_DICTIONARY:
-			var out := {}
-			for k in v:
-				out[k] = _intify(v[k])
-			return out
-	return v
+	return JsonRegistry.write_json(path, doc, "AppearanceDB")

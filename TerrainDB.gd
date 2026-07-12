@@ -7,6 +7,7 @@ extends RefCounted
 
 const TERRAINS_PATH := "res://terrains.json"
 const TagDB := preload("res://TagDB.gd")   # 移动型/地形 tag → 中文（通行性文案本地化用）
+const JsonRegistry := preload("res://JsonRegistry.gd")   # 写盘 intify（技改 §4-5：治 1.0 噪音）
 
 static var _palette := []      # 有序地形定义（笔刷栏顺序 / 战斗调色都按这个）
 static var _by_key := {}       # "terrain/variant" -> entry，O(1) 查表
@@ -307,12 +308,7 @@ static func save() -> bool:
 	_ensure()
 	var out := _root if typeof(_root) == TYPE_DICTIONARY and not _root.is_empty() else {}
 	out["terrains"] = _palette   # 保留 format_version/_note 等顶层字段，只更新 terrains
-	var f = FileAccess.open(_path(), FileAccess.WRITE)
-	if f == null:
-		return false
-	f.store_string(JSON.stringify(out, "  "))
-	f.close()
-	return true
+	return JsonRegistry.write_json(_path(), out, "TerrainDB")   # 含 intify（§4-5：此前漏挂＝1.0 噪音源头）
 
 # 丢弃内存表、下次查询重新从磁盘读（terrains.json 被外部改过时用）
 # ⚠️ 不能叫 reload：外部 TerrainDB.reload() 会命中原生 Script.reload()（重编译+静态全重置），见 ItemDB 同注。
