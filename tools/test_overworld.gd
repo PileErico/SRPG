@@ -59,26 +59,27 @@ func _initialize() -> void:
 	ck((world.get("triggers", []) as Array).size() >= 3, "world.json 带示例触发器")
 
 	# 5) Overworld 纯逻辑（new() 不进树）：落位 / 寻路 / 悬停文字
+	# v5 地标（与 tools/gen_overworld_map.gd 对表 ⚠ 改布局两边同步）：主道 row 10（山口 3,10~4,10）、湖心深水 (36,4)
 	var ow = OverworldScript.new()
 	ow._ensure_campaign()   # current 已是 ws（上面 start_new 的）
 	ow._load_map()
-	ck(ow.width == 24 and ow.height == 16, "大地图尺寸 24×16")
+	ck(ow.width == 40 and ow.height == 28, "大地图尺寸 40×28（v5）")
 	ow._ensure_party_placed()
 	var pc := ow.party_cell()
 	ck(pc.x >= 0 and ow._move_cost_at(pc.x, pc.y) >= 0, "party 落位在可走格（%s）" % pc)
-	# 道路直走可达（山口在 row 8）
-	var p1: Array = ow.find_path(Vector2i(8, 8), Vector2i(20, 8))
-	ck(p1.size() >= 2 and p1.front() == Vector2i(8, 8) and p1.back() == Vector2i(20, 8), "道路寻路可达")
-	# 山脉以西（col 0~2）↔ 以东：必须存在路（山口/道路），且路径绕开山格（成本 3 的山可走但更贵，最优路走山口道路）
-	var p2: Array = ow.find_path(Vector2i(1, 8), Vector2i(8, 8))
+	# 道路直走可达（主道在 row 10）
+	var p1: Array = ow.find_path(Vector2i(8, 10), Vector2i(20, 10))
+	ck(p1.size() >= 2 and p1.front() == Vector2i(8, 10) and p1.back() == Vector2i(20, 10), "道路寻路可达")
+	# 山脉以西（col 0~2）↔ 以东：必须存在路（山口/道路），且路径绕开山格（成本 6 的山可走但更贵，最优路走山口道路）
+	var p2: Array = ow.find_path(Vector2i(1, 10), Vector2i(8, 10))
 	ck(p2.size() >= 2, "跨山脉可达（山口）")
-	# 深水（湖心 19,2 附近）对空 tags 队伍不可达
-	var p3: Array = ow.find_path(Vector2i(12, 8), Vector2i(19, 2))
+	# 深水（湖心 36,4 附近）对空 tags 队伍不可达
+	var p3: Array = ow.find_path(Vector2i(12, 10), Vector2i(36, 4))
 	ck(p3.is_empty(), "深水目标不可达（空 tags）")
-	ck(ow._move_cost_at(19, 2) == -1, "深水格 move_cost=-1")
+	ck(ow._move_cost_at(36, 4) == -1, "深水格 move_cost=-1")
 	# 悬停文字（不依赖 UI）
-	ck(ow.hover_text(19, 2).contains("不可通行"), "悬停：深水显示不可通行")
-	ck(ow.hover_text(8, 8).contains("小时"), "悬停：可走格显示行程耗时")
+	ck(ow.hover_text(36, 4).contains("不可通行"), "悬停：深水显示不可通行")
+	ck(ow.hover_text(8, 10).contains("小时"), "悬停：可走格显示行程耗时")
 	ow.free()   # Control 是 Node：手动释放（未进树无人管）
 
 	# 6) 伪即时行军/_on_camp 闭环（2026-07-08 重写自 _travel：_tick_time 直调模拟帧；断言等价——终点/时钟增量/事件钩/自动存档）
@@ -97,13 +98,13 @@ func _initialize() -> void:
 	for pe in EventDB.all_events():
 		ws2.event_disabled[str(pe.get("id", ""))] = true
 	SandboxConfig.battle_setup = null   # 静态跨场景通道：清残留，防误判「战斗待切」暂停
-	ws2.party_col = 8
-	ws2.party_row = 8
-	var tpath: Array = ow2.find_path(Vector2i(8, 8), Vector2i(11, 8))   # 沿道路 3 格（cost 1/格）
+	ws2.party_col = 11
+	ws2.party_row = 10
+	var tpath: Array = ow2.find_path(Vector2i(11, 10), Vector2i(14, 10))   # 沿主道 3 格（cost 1/格；避开城格）
 	ck(tpath.size() == 4, "道路 3 格路径（含起点 4 节点）")
 	var t0: int = ws2.clock_hours
 	ow2.simulate_travel_to_arrival(tpath)
-	ck(ws2.party_col == 11 and ws2.party_row == 8, "行军落终点")
+	ck(ws2.party_col == 14 and ws2.party_row == 10, "行军落终点")
 	ck(ws2.clock_hours == t0 + 3 * 1 * ow2.HOURS_PER_COST, "行军推钟（路径总成本 3×cost1×%dh，实得 +%d）" % [ow2.HOURS_PER_COST, ws2.clock_hours - t0])
 	ck(not ow2._time_playing, "抵达自动暂停")
 	ck(ow2._route.is_empty() and ow2.move_target() == Vector2i(-1, -1), "抵达清路径/目的地标记")
@@ -113,20 +114,20 @@ func _initialize() -> void:
 	# 6b) 段内插值 + 半路改令：道路段＝1h（cost1×HOURS_PER_COST1），推 0.5h＝半段——token 半途、未落格、整点未跨
 	var tb0: int = ws2.clock_hours
 	ow2._hour_acc = 0.0   # 清整点累加器零头，令下面整点断言干净
-	ow2._set_route(ow2.find_path(Vector2i(11, 8), Vector2i(8, 8)))
+	ow2._set_route(ow2.find_path(Vector2i(14, 10), Vector2i(11, 10)))
 	ow2._time_playing = true
 	ow2._tick_time(0.5)
-	ck(ws2.party_col == 11 and absf(ow2._seg_progress - 0.5) < 0.001, "半段：未落格、seg_progress=0.5")
+	ck(ws2.party_col == 14 and absf(ow2._seg_progress - 0.5) < 0.001, "半段：未落格、seg_progress=0.5")
 	ck(ws2.clock_hours == tb0, "半段未跨整点（sub-hour 不进位，clock_hours 恒整数）")
 	var seg: Dictionary = ow2.party_seg()
-	ck(seg["from"] == Vector2i(11, 8) and seg["to"] == Vector2i(10, 8) and absf(float(seg["t"]) - 0.5) < 0.001, "party_seg 插值钩子透出半途段")
-	ow2.left_click_cell(10, 8)   # 半路改令：从当前格重新寻路（段内进度作废）
+	ck(seg["from"] == Vector2i(14, 10) and seg["to"] == Vector2i(13, 10) and absf(float(seg["t"]) - 0.5) < 0.001, "party_seg 插值钩子透出半途段")
+	ow2.left_click_cell(13, 10)   # 半路改令：从当前格重新寻路（段内进度作废）
 	ck(ow2._seg_progress == 0.0 and ow2._time_playing, "半路重新寻路：段进度重置、自动播放")
 	for i in 100:
 		if not ow2._time_playing:
 			break
 		ow2._tick_time(0.5)
-	ck(ws2.party_col == 10 and ws2.party_row == 8 and not ow2._time_playing, "改令后抵达新目的地并自动暂停")
+	ck(ws2.party_col == 13 and ws2.party_row == 10 and not ow2._time_playing, "改令后抵达新目的地并自动暂停")
 	ck(ws2.clock_hours == tb0 + 1, "改令重走整段：累计跨 1 整点 → +1h（clock_hours 恒整数）")
 	# 6c) 原地等待：无路径播放＝时间照常流逝（WorldSim/timer 逐整点推进），不自动暂停
 	var tw0: int = ws2.clock_hours

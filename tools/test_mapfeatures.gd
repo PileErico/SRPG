@@ -109,15 +109,16 @@ func _initialize() -> void:
 	# 6) 真实 world.json：线特征转正落地 + 城→村跨河（走桥）+ 无桥边阻断
 	var world := MapIO.read_file("res://maps/overworld/world.json")
 	ck((world.get("rivers", []) as Array).size() >= 1 and (world.get("roads", []) as Array).size() >= 1 and (world.get("bridges", []) as Array).size() >= 1, "world.json 带河/路/桥")
+	# v5 地标（与 tools/gen_overworld_map.gd 对表 ⚠）：霜河 rows 5|6 cols 12..32、桥 (20,5)-(20,6)、主道 row 10
 	var ow2 = OverworldScript.new()
 	ow2._ensure_campaign()
 	ow2._load_map()
-	ck(ow2._move_cost_between(10, 5, 10, 6) == -1, "world 河边无桥阻断 (10,5)-(10,6)")
-	ck(ow2._move_cost_between(13, 5, 13, 6) == 1, "world 桥可跨 (13,5)-(13,6)")
-	var pcity := ow2.find_path(Vector2i(8, 8), Vector2i(15, 5))
+	ck(ow2._move_cost_between(25, 5, 25, 6) == -1, "world 河边无桥阻断 (25,5)-(25,6)")
+	ck(ow2._move_cost_between(20, 5, 20, 6) == 1, "world 桥可跨 (20,5)-(20,6)")
+	var pcity := ow2.find_path(Vector2i(9, 10), Vector2i(20, 3))
 	ck(not pcity.is_empty(), "城→村可达（跨河走桥）")
-	ck(pcity.has(Vector2i(13, 5)) and pcity.has(Vector2i(13, 6)), "城→村路径经过桥")
-	var proad := ow2.find_path(Vector2i(8, 8), Vector2i(20, 8))
+	ck(pcity.has(Vector2i(20, 5)) and pcity.has(Vector2i(20, 6)), "城→村路径经过桥")
+	var proad := ow2.find_path(Vector2i(8, 10), Vector2i(20, 10))
 	ck(proad.size() >= 2, "东西大道仍可达（道路 overlay 化后）")
 	ow2.free()
 

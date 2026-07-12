@@ -87,11 +87,13 @@ func _initialize() -> void:
 	ow._ensure_campaign()   # current 已是 ws
 	ow._save_slot = SLOT    # 绝不碰玩家 auto 档
 	ow._load_map()
-	ck(ow._map_locations.size() == 4, "world.json 4 个地点（实得 %d）" % ow._map_locations.size())
-	ck(ow._loc_by_cell.has(Vector2i(8, 8)) and ow._loc_by_cell.has(Vector2i(20, 14)), "落格索引（城/遗迹）")
-	ck(ow.hover_text(8, 8).contains("阿斯特拉") and ow.hover_text(8, 8).contains("城市"), "悬停显示地点名+类型")
-	ck(ow.hover_text(11, 11).contains("可挑战"), "悬停显示据点状态")
-	ck(ow.locations_for_draw().size() == 4 and bool(ow.locations_for_draw()[0].get("active")), "画布标记数据")
+	# v5 地标（与 tools/gen_overworld_map.gd 对表 ⚠）：城 (9,10)、沙没之殿 (33,24)、劫道者营地 (12,20)；地点数从图数据推导
+	var n_locs: int = ow._map_locations.size()
+	ck(n_locs >= 4, "world.json 至少 4 个地点（实得 %d）" % n_locs)
+	ck(ow._loc_by_cell.has(Vector2i(9, 10)) and ow._loc_by_cell.has(Vector2i(33, 24)), "落格索引（城/遗迹）")
+	ck(ow.hover_text(9, 10).contains("阿斯特拉") and ow.hover_text(9, 10).contains("城市"), "悬停显示地点名+类型")
+	ck(ow.hover_text(12, 20).contains("可挑战"), "悬停显示据点状态")
+	ck(ow.locations_for_draw().size() == n_locs and bool(ow.locations_for_draw()[0].get("active")), "画布标记数据")
 
 	# 7) 休整（rest 首个城市功能）：扣钱+推钟+回满；钱不够=拒绝无副作用
 	var u = ws.roster[0]

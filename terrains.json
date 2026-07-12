@@ -377,6 +377,7 @@
       "label": "沼泽",
       "move": {
         "cost": 3.0,
+        "overworld_cost": 5,
         "passable_by": "all",
         "tag_cost": {
           "flying": 1.0
@@ -400,6 +401,7 @@
       "label": "农田",
       "move": {
         "cost": 1.0,
+        "overworld_cost": 2,
         "passable_by": "all"
       },
       "scope": "overworld",
@@ -423,6 +425,7 @@
       "label": "冻原",
       "move": {
         "cost": 2.0,
+        "overworld_cost": 3,
         "passable_by": "all",
         "tag_cost": {
           "flying": 1.0
@@ -534,6 +537,7 @@
       "label": "远古遗迹-沙漠",
       "move": {
         "cost": 1.0,
+        "overworld_cost": 3,
         "passable_by": "all"
       },
       "scope": "both",
@@ -554,6 +558,7 @@
       "label": "远古遗迹-雪原",
       "move": {
         "cost": 1.0,
+        "overworld_cost": 3,
         "passable_by": "all"
       },
       "scope": "both",
@@ -634,6 +639,7 @@
       "label": "野蛮人营地-雪原",
       "move": {
         "cost": 1.0,
+        "overworld_cost": 3,
         "passable_by": "all"
       },
       "scope": "both",
@@ -654,6 +660,7 @@
       "label": "野蛮人营地",
       "move": {
         "cost": 1.0,
+        "overworld_cost": 3,
         "passable_by": "all"
       },
       "scope": "both",
@@ -754,6 +761,7 @@
       "label": "野牛",
       "move": {
         "cost": 1.0,
+        "overworld_cost": 2,
         "passable_by": "all"
       },
       "scope": "both",
@@ -954,6 +962,7 @@
       "label": "City center-Medieval era",
       "move": {
         "cost": 1.0,
+        "overworld_cost": 2,
         "passable_by": "all"
       },
       "scope": "both",
@@ -974,6 +983,7 @@
       "label": "城市据点（一级）",
       "move": {
         "cost": 1.0,
+        "overworld_cost": 2,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1094,6 +1104,7 @@
       "label": "铜矿",
       "move": {
         "cost": 1.0,
+        "overworld_cost": 4,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1154,6 +1165,7 @@
       "label": "鹿群",
       "move": {
         "cost": 1.0,
+        "overworld_cost": 2,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1410,6 +1422,7 @@
       "label": "灵泉",
       "move": {
         "cost": 1.0,
+        "overworld_cost": 2,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1470,6 +1483,7 @@
       "label": "Grand Mesa",
       "move": {
         "cost": 1.0,
+        "overworld_cost": 6,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1490,6 +1504,7 @@
       "label": "草原-农场",
       "move": {
         "cost": 1.0,
+        "overworld_cost": 2,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1750,6 +1765,7 @@
       "label": "HillMine",
       "move": {
         "cost": 1.0,
+        "overworld_cost": 4,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1810,6 +1826,7 @@
       "label": "Horses",
       "move": {
         "cost": 1.0,
+        "overworld_cost": 2,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1850,6 +1867,7 @@
       "label": "Iron",
       "move": {
         "cost": 1.0,
+        "overworld_cost": 4,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1930,6 +1948,7 @@
       "label": "Lakes",
       "move": {
         "cost": 1.0,
+        "overworld_cost": 3,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2010,6 +2029,7 @@
       "label": "Oasis",
       "move": {
         "cost": 1.0,
+        "overworld_cost": 3,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2370,6 +2390,7 @@
       "label": "Snow+Farm",
       "move": {
         "cost": 1.0,
+        "overworld_cost": 3,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2550,6 +2571,7 @@
       "label": "TundraForest",
       "move": {
         "cost": 1.0,
+        "overworld_cost": 4,
         "passable_by": "all"
       },
       "scope": "both",
