@@ -25,11 +25,7 @@ static func make_unit(proto: Dictionary, fac: String, col: int, row: int):
 		if not u.tags.has(str(t)):
 			u.tags.append(str(t))
 	RaceDB.apply_to(u, str(proto.get("race", "")))   # 种族底值先落（stats 基础值+种族 tags）；下方 proto.stats 再叠差异覆盖
-	var final_level := maxi(1, int(proto.get("level", 1)))
-	for l in range(2, final_level + 1):
-		u.level = l
-		u._apply_level_growth()   # 🔒 §10.6 自动轨追溯：逐级行走（成长节奏数组按等级取值；原型×等级纯函数）
-	u.level = final_level
+	_walk_growth(u, maxi(1, int(proto.get("level", 1))))   # 🔒 §10.6 自动轨追溯（与 unit_to_proto 的 diff 基线同一份）
 	u.exp = int(proto.get("exp", 0))
 	u.exp_max = int(proto.get("exp_max", u.exp_max))
 	var tr := str(proto.get("trait", ""))
@@ -78,6 +74,14 @@ static func make_unit(proto: Dictionary, fac: String, col: int, row: int):
 	u._sync_hands_to_state()   # 维持不变式：主手＝当前地/空态偏好的武器（比路兹专属；覆盖直接带 flying tag 构造等绕过 set_airborne 的路径）；无 prefer 单位 no-op
 	return u
 
+# 成长轨逐级行走到 final_level（🔒 §10.6 原型×等级纯函数）：make_unit 组装与 unit_to_proto 的 diff 基线共用一份，
+# 两侧口径永不漂移（漂移＝level>1 原型「打开即存」把成长值烘焙进 stats 差异覆盖）。
+static func _walk_growth(u, final_level: int) -> void:
+	for l in range(2, final_level + 1):
+		u.level = l
+		u._apply_level_growth()
+	u.level = final_level
+
 # Unit → proto 字典（可被 make_unit 复原）。阵营立场/flying/死门 不入 tags（单独存/运行时态）。
 static func unit_to_proto(u) -> Dictionary:
 	var keep_tags := []
@@ -111,13 +115,14 @@ static func unit_to_proto(u) -> Dictionary:
 		profs["slots"] = u.prof_slots.duplicate()
 	if not u.prof_xp.is_empty():
 		profs["xp"] = u.prof_xp.duplicate()
-	# 白名单单一源＝StatMeta.SERIALIZABLE_BASE_STATS；**只写与「引擎基线+种族底值」的差异**
-	# （🔒 属性重做 §3：原型 stats 只写差异——调 races.json 平衡能传导既有原型，不被全量快照冻结；对抗 review 修复）
-	var ref: Dictionary = Unit.new().stats.duplicate()
-	var rst = RaceDB.get_race(u.race_id).get("stats", {})
-	if typeof(rst) == TYPE_DICTIONARY:
-		for k in rst:
-			ref[k] = rst[k]
+	# 白名单单一源＝StatMeta.SERIALIZABLE_BASE_STATS；**只写与「引擎基线+种族底值+成长轨走到 u.level」的差异**
+	# （🔒 属性重做 §3：原型 stats 只写差异——调 races.json 平衡能传导既有原型，不被全量快照冻结；对抗 review 修复。
+	#  2026-07-12 审查修复：基线原来不含成长轨——level>1 原型打开即存＝成长值整块烘焙进 stats、传导失效；
+	#  现与 make_unit 同一份 _walk_growth，「打开即存」恒零 diff。）
+	var ref_u = Unit.new()
+	RaceDB.apply_to(ref_u, u.race_id)
+	_walk_growth(ref_u, maxi(1, int(u.level)))
+	var ref: Dictionary = ref_u.stats
 	var stat_ov := {}
 	for k in StatMeta.SERIALIZABLE_BASE_STATS:
 		if u.stats.has(k) and (not ref.has(k) or float(u.stats[k]) != float(ref[k])):

@@ -99,6 +99,21 @@ func _initialize() -> void:
 	ck(str(ap_got.get("default_appearance", "")) == "base", "读回 default_appearance=base")
 	ck(UnitFactory.delete_prototype(TMP_ID), "清理外观兵")
 
+	# 5.7) level>1 原型「打开即存」零 diff（审查修复回归：diff 基线含成长轨——成长值不烘焙进 stats）
+	var lv_proto := {"id": "lv_probe", "name": "高级兵", "default_faction": "enemy",
+		"tags": ["human"], "race": "human", "level": 5}
+	var lu = UnitFactory.make_unit(lv_proto, "enemy", 0, 0)
+	var lp := UnitFactory.unit_to_proto(lu)
+	ck((lp.get("stats", {}) as Dictionary).is_empty(),
+		"level=5 打开即存 stats 零差异（成长值不烘焙；实得 %s）" % JSON.stringify(lp.get("stats", {})))
+	ck(int(lp.get("level", 0)) == 5, "level 保真")
+	# 手工差异覆盖仍应保留（只烘焙成长是错、丢差异也是错——两头都钉住）
+	var lv_proto2 := {"id": "lv_probe2", "name": "高级兵改", "default_faction": "enemy",
+		"tags": ["human"], "race": "human", "level": 5, "stats": {"HP_max": 99}}
+	var lu2 = UnitFactory.make_unit(lv_proto2, "enemy", 0, 0)
+	var lp2 := UnitFactory.unit_to_proto(lu2)
+	ck(int((lp2.get("stats", {}) as Dictionary).get("HP_max", 0)) == 99, "level>1 + 手工覆盖：差异仍保留")
+
 	# 6) 还原原文（保证零 diff），并校验确实还原
 	_write_text(orig)
 	ck(_read_text() == orig, "原型文件逐字节还原")

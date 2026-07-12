@@ -2871,8 +2871,9 @@ func new_map(w: int, h: int) -> void:
 	_close_unit_edit()   # 换图前关掉深编面板（下标失效）
 	var nw := clampi(w, 1, MAX_W)
 	var nh := clampi(h, 1, MAX_H)
-	if not tiles.is_empty():
-		_push_undo(_snapshot(), "新建 %d×%d" % [nw, nh])
+	_undo_stack.clear()   # 跨文档不留撤销历史（同 load_from_file，见彼处审查修复注释）
+	_redo_stack.clear()
+	_refresh_history()
 	width = nw
 	height = nh
 	tiles = []
@@ -3285,8 +3286,11 @@ func load_from_file(path: String) -> void:
 	var nw := int(res["width"])
 	var nh := int(res["height"])
 	var new_tiles: Array = res["tiles"]
-	if not tiles.is_empty():
-		_push_undo(_snapshot(), "加载 %s" % path.get_file())
+	# 跨文档不留撤销历史（审查修复）：快照不含 current_path，跨图 Ctrl+Z 会把 A 图内容
+	# 回放到 B 的文件名下，Ctrl+S 即用 A 覆盖写 B.json——唯一能静默毁另一张图的路径。
+	_undo_stack.clear()
+	_redo_stack.clear()
+	_refresh_history()
 	width = nw
 	height = nh
 	tiles = new_tiles

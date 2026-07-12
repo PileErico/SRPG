@@ -507,6 +507,13 @@ func _build_heal_block(box: VBoxContainer, entry: Dictionary) -> void:
 
 func _build_passive_block(box: VBoxContainer, entry: Dictionary) -> void:
 	box.add_child(_warn("被动桥已生效（🔒 阶段4 2026-07-11）：学得即挂修正 source=skill:<id>，升级重挂、数值可用公式随级", HINT_COLOR))
+	# 公式值护栏（审查修复，同多 hits 先例）：mod value 为公式对象时本版表单只有标量 Spin——
+	# 强行建表单＝float() 转换错 + 保存把公式扁平化毁数据 → 整块锁定只读、保存原样保留
+	for m0 in entry["data"].get("mods", []):
+		if typeof(m0) == TYPE_DICTIONARY and not typeof(m0.get("value", 0)) in [TYPE_INT, TYPE_FLOAT]:
+			entry["locked"] = true
+			box.add_child(_warn("含公式值修正（{base/per_stat/per_level}）——本版表单仅编标量，本块锁定只读，保存原样保留（conditional_mod 表单轮补公式控件）", LOCK_COLOR))
+			return
 	var rows := []
 	entry["mods"] = rows
 	var mods_box := VBoxContainer.new()
@@ -524,6 +531,11 @@ func _build_passive_block(box: VBoxContainer, entry: Dictionary) -> void:
 	box.add_child(addm)
 
 func _build_apply_effect_block(box: VBoxContainer, entry: Dictionary) -> void:
+	# 公式值护栏（同上）：chance 为公式对象（引擎 resolve_num 支持）时锁定只读，防 float() 报错+扁平化
+	if not typeof(entry["data"].get("chance", 100)) in [TYPE_INT, TYPE_FLOAT]:
+		entry["locked"] = true
+		box.add_child(_warn("chance 为公式值——本版表单仅编标量，本块锁定只读，保存原样保留", LOCK_COLOR))
+		return
 	var ob := OptionButton.new()
 	ob.add_item("（选效果…）")
 	ob.set_item_metadata(0, "")

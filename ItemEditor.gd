@@ -274,6 +274,7 @@ func _row_tooltip(item) -> String:
 	return "%s\n%s · slot=%s" % [str(item.get("name", "")), " · ".join(parts), str(item.get("slot", ""))]
 
 func _do_new_item(kind: String) -> void:
+	_kind_cache.clear()   # 换条目：大类切换缓存作废（防上一条内容漏进新条目）
 	_current = _skeleton(kind)
 	_current_kind = kind
 	_is_new = true
@@ -288,6 +289,7 @@ func _load_item(id: String) -> void:
 	var it = ItemDB.get_item(id)
 	if it == null:
 		return
+	_kind_cache.clear()   # 换条目：大类切换缓存作废
 	_current = it.duplicate(true)
 	_current_kind = ItemDB.kind_of(_current)
 	_is_new = false
@@ -300,6 +302,7 @@ func _load_item(id: String) -> void:
 
 # 副本以「新建未保存」态打开（外壳 _on_duplicate 已做 id 唯一化/置脏/消息）
 func _shell_open_as_new(entry: Dictionary) -> void:
+	_kind_cache.clear()   # 换条目：大类切换缓存作废
 	_current = entry
 	_current_kind = ItemDB.kind_of(entry)
 	_is_new = true
@@ -419,13 +422,20 @@ func _build_form() -> void:
 
 
 # 基础区「物品大类」下拉改选 → 换 kind、按新骨架重建表单（保留 id/名/图标）。等价旧的 4 个「＋类别」按钮。
+# 防误切（审查修复）：离开的 kind 表单态缓存进 _kind_cache，切回优先恢复——误碰下拉不再蒸发整张表单。
+var _kind_cache: Dictionary = {}   # kind -> 离开时的 _collect() 快照（本条目会话内有效，换条目清空）
+
 func _on_kind_changed(new_kind: String) -> void:
 	if _building or new_kind == _current_kind:
 		return
 	var kid := _w_id.text.strip_edges()
 	var knm := _w_name.text.strip_edges()
 	var kic := _w_icon.text.strip_edges()
-	_current = _skeleton(new_kind)
+	_kind_cache[_current_kind] = _collect()   # 离开前存表单态（含 mods/EWS/标签等全部内容）
+	if _kind_cache.has(new_kind):
+		_current = _kind_cache[new_kind]      # 切回：恢复缓存而非骨架
+	else:
+		_current = _skeleton(new_kind)
 	_current["id"] = kid
 	_current["name"] = knm
 	_current["icon"] = kic

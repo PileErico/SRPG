@@ -36,6 +36,10 @@ func _ready() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	theme = EditorTheme.build()
 	add_child(EditorUI.background())
+	# 关窗（X / Alt+F4）也走脏守卫（审查修复）：默认 auto_accept_quit 直接退出＝静默丢改动的唯一残留路径。
+	# null 守卫：headless 测试 new() 不进树直调 _ready（本仓测试范式），get_tree() 为 null。
+	if get_tree() != null:
+		get_tree().auto_accept_quit = false
 	_shell_init()   # 子类前置状态（建 UI 前需要的数据准备）
 
 	var root := VBoxContainer.new()
@@ -94,6 +98,14 @@ func _ready() -> void:
 
 	_refresh_list()
 	_shell_show_empty()
+
+func _exit_tree() -> void:
+	if get_tree() != null:
+		get_tree().auto_accept_quit = true   # 还原默认（防污染主菜单/其他场景的关窗行为）
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		_confirm_discard(func(): get_tree().quit())   # 净态直接放行（confirm_discard 内判 _dirty）
 
 
 func _build_left_pane() -> Control:
