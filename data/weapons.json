@@ -1,6 +1,5 @@
 [
   {
-    "acc": 30,
     "atk": 5,
     "block_power": 0,
     "block_rate": 0,
@@ -28,7 +27,6 @@
     "two_handed": true
   },
   {
-    "acc": 15,
     "atk": 9.5,
     "block_power": 0,
     "block_rate": 0,
@@ -52,7 +50,6 @@
     "two_handed": false
   },
   {
-    "acc": 15,
     "atk": 9.5,
     "block_power": 0,
     "block_rate": 0,
@@ -76,7 +73,6 @@
     "two_handed": false
   },
   {
-    "acc": 32,
     "atk": 9,
     "block_power": 0,
     "block_rate": 0,
@@ -99,7 +95,6 @@
     "two_handed": false
   },
   {
-    "acc": 30,
     "atk": 5,
     "block_power": 0,
     "block_rate": 0,
@@ -120,7 +115,6 @@
     "two_handed": false
   },
   {
-    "acc": 25,
     "atk": 2.5,
     "block_power": 0,
     "block_rate": 0,
@@ -141,7 +135,6 @@
     "two_handed": false
   },
   {
-    "acc": 0,
     "atk": 0,
     "block_power": 35,
     "block_rate": 15,
@@ -160,7 +153,6 @@
     "two_handed": false
   },
   {
-    "acc": 35,
     "atk": 3,
     "block_power": 0,
     "block_rate": 0,
@@ -181,7 +173,6 @@
     "two_handed": false
   },
   {
-    "acc": 20,
     "atk": 4,
     "block_power": 0,
     "block_rate": 0,
@@ -202,10 +193,9 @@
     "two_handed": false
   },
   {
-    "acc": 0,
-    "atk": 0,
-    "block_power": 0,
-    "block_rate": 0,
+    "atk": 10,
+    "block_power": 20,
+    "block_rate": 15,
     "bws": "ws_swing",
     "icon": "res://icons/Items/Weapons/双手巨剑.png",
     "id": "sword_zweihande",
