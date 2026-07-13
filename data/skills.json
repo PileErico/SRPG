@@ -1,6 +1,7 @@
 [
   {
     "active": true,
+    "category": "skill",
     "cooldown": {
       "base": 2
     },
@@ -27,10 +28,8 @@
     "id": "first_aid",
     "max_level": 3,
     "name": "救护",
-    "nature": "skill",
     "range": 1,
     "requires_hands": [],
-    "seq": 1,
     "tags": [],
     "target": {
       "ally": true,
@@ -43,6 +42,7 @@
   },
   {
     "active": true,
+    "category": "skill",
     "cooldown": {
       "base": 0
     },
@@ -70,7 +70,6 @@
     "id": "bws_dragon_lance",
     "max_level": 1,
     "name": "突刺·龙枪",
-    "nature": "skill",
     "range": 2,
     "requires_hands": [],
     "tags": [
@@ -89,6 +88,7 @@
   },
   {
     "active": true,
+    "category": "skill",
     "cooldown": {
       "base": 0
     },
@@ -115,7 +115,6 @@
     "id": "bws_belooz_rend",
     "max_level": 1,
     "name": "撕裂（比路兹）",
-    "nature": "skill",
     "range": 1,
     "requires_hands": [],
     "tags": [
@@ -134,6 +133,7 @@
   },
   {
     "active": true,
+    "category": "skill",
     "cooldown": {
       "base": 0
     },
@@ -157,7 +157,6 @@
     "id": "bws_belooz_grab",
     "max_level": 1,
     "name": "抓取（比路兹）",
-    "nature": "skill",
     "range": 1,
     "requires_hands": [],
     "tags": [
@@ -176,6 +175,7 @@
   },
   {
     "active": true,
+    "category": "skill",
     "cooldown": {
       "base": 0
     },
@@ -198,7 +198,6 @@
     "id": "bws_desmond_claw",
     "max_level": 1,
     "name": "撕裂（戴斯蒙）",
-    "nature": "skill",
     "range": 1,
     "requires_hands": [],
     "tags": [
@@ -217,6 +216,7 @@
   },
   {
     "active": true,
+    "category": "skill",
     "cooldown": {
       "base": 0
     },
@@ -239,7 +239,6 @@
     "id": "bws_slash",
     "max_level": 1,
     "name": "斩击",
-    "nature": "skill",
     "range": 1,
     "requires_hands": [],
     "tags": [
@@ -256,6 +255,7 @@
   },
   {
     "active": true,
+    "category": "skill",
     "cooldown": {
       "base": 0
     },
@@ -278,7 +278,6 @@
     "id": "bws_unarmed",
     "max_level": 1,
     "name": "徒手",
-    "nature": "skill",
     "range": 1,
     "requires_hands": [],
     "tags": [
@@ -296,6 +295,7 @@
   },
   {
     "active": true,
+    "category": "skill",
     "cooldown": {
       "base": 0
     },
@@ -318,7 +318,6 @@
     "id": "bws_stab",
     "max_level": 1,
     "name": "刺击",
-    "nature": "skill",
     "range": 1,
     "requires_hands": [],
     "tags": [
@@ -335,6 +334,7 @@
   },
   {
     "active": true,
+    "category": "skill",
     "cooldown": {
       "base": 0
     },
@@ -357,11 +357,49 @@
     "id": "bws_bash",
     "max_level": 1,
     "name": "重击",
-    "nature": "skill",
     "range": 1,
     "requires_hands": [],
     "tags": [
       "single_target"
+    ],
+    "target": {
+      "ally": false,
+      "enemy": true,
+      "self": false
+    },
+    "uses_per_battle": {
+      "base": 0
+    }
+  },
+  {
+    "active": true,
+    "category": "skill",
+    "cooldown": {
+      "base": 0
+    },
+    "costs": {
+      "ap": 2
+    },
+    "desc": "",
+    "effects": [
+      {
+        "hits": [
+          {
+            "coeff": 1
+          }
+        ],
+        "kind": "attack"
+      }
+    ],
+    "icon": "res://icons/Skills/WeaponSkills/横扫_32x32.png",
+    "id": "ws_swing",
+    "max_level": 1,
+    "name": "横扫",
+    "range": 1,
+    "requires_hands": [],
+    "tags": [
+      "aoe",
+      "slashing"
     ],
     "target": {
       "ally": false,
