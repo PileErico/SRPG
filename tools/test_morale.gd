@@ -114,11 +114,12 @@ func _initialize() -> void:
 		atk_u.morale = int(pair[0])
 		ck(atk_u.morale_combat_mod() == int(pair[1]), "档位判定值：士气 %d → %+d" % [int(pair[0]), int(pair[1])])
 	atk_u.morale = 25
-	var hc_base: int = s._hit_chance(atk_u, def_u)
+	var ua: Dictionary = atk_u.basic_attack()   # 基准命中在武器技能 hit（决策33 三轮校准）——拳脚 25 抬离 clamp 底
+	var hc_base: int = s._hit_chance(atk_u, def_u, ua)
 	atk_u.morale = 50
-	ck(s._hit_chance(atk_u, def_u) == hc_base + 10, "狂热：命中 +10（%d→%d）" % [hc_base, s._hit_chance(atk_u, def_u)])
+	ck(s._hit_chance(atk_u, def_u, ua) == hc_base + 10, "狂热：命中 +10（%d→%d）" % [hc_base, s._hit_chance(atk_u, def_u, ua)])
 	atk_u.morale = 5
-	ck(s._hit_chance(atk_u, def_u) == hc_base - 10, "崩溃：命中 −10")
+	ck(s._hit_chance(atk_u, def_u, ua) == hc_base - 10, "崩溃：命中 −10")
 	atk_u.stats["acc"] = 200.0   # 钳 95 内必命中，取 aeff 断言伤害因子
 	var rr := {}
 	for _i in range(64):

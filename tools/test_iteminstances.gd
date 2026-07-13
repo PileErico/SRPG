@@ -32,8 +32,8 @@ func _initialize() -> void:
 	var v1 = ItemInstances.view(uid1)
 	ck(v1 != null and int(v1["uid"]) == uid1 and str(v1["tpl_id"]) == "long_sword", "view uid/tpl_id")
 	ck((v1["mods"] as Array).is_empty(), "view 继承模板 mods（🔒 决策33 固有属性上提顶层键——长剑 mods 空）")
-	ck(is_equal_approx(float(v1.get("atk", 0)), 5.0) and is_equal_approx(float(v1.get("acc", 0)), 30.0),
-		"view 携带固有键 atk5/acc30（决策33）")
+	ck(is_equal_approx(float(v1.get("atk", 0)), 5.0) and not v1.has("acc"),
+		"view 携带固有键 atk5（acc 非武器固有——基准命中在武器技能侧，决策33 三轮校准）")
 
 	# 2) 雷①：view 是深拷，改视图不污染全局模板（固有键/mods 双查）
 	v1["name"] = "被篡改"

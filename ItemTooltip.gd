@@ -72,11 +72,11 @@ static func render(item: Dictionary) -> Control:
 		rl.add_theme_color_override("font_color", Color(0.95, 0.62, 0.5))
 		v.add_child(rl)
 
-	# 武器固有属性（🔒 决策33：严格四项顶层必填字段非 mods；0=无不显）
-	for p in [["atk", "攻击"], ["acc", "命中"], ["block_rate", "格挡率"], ["block_power", "格挡性能"]]:
+	# 武器固有属性（🔒 决策33 三轮校准：攻/格挡率%/格挡性能%——命中在武器技能侧；0=无不显）
+	for p in [["atk", "攻击"], ["block_rate", "格挡率"], ["block_power", "格挡性能"]]:
 		var iv := float(item.get(str(p[0]), 0))
 		if iv != 0.0:
-			v.add_child(_kv(str(p[1]), str(_num(iv))))
+			v.add_child(_kv(str(p[1]), ("%s%%" % _num(iv)) if str(p[0]) != "atk" else str(_num(iv))))
 
 	# mods（词条/附加修正）
 	for m in item.get("mods", []):

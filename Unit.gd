@@ -733,10 +733,11 @@ func dual_strike_active() -> bool:
 		return false
 	return not offhand_weapon_attack().is_empty()
 
-# 武器固有属性键（🔒 决策33 2026-07-13）：攻/命中/格挡率/格挡性能＝物品顶层必填字段（0=无），
+# 武器固有属性键（🔒 决策33；⚠ 三轮校准 2026-07-13：**命中 acc 移出**——命中的固有归属＝武器技能 hit
+# 〔决策32 命中系数〕，物品侧命中只能是普通 mod）：攻/格挡率%/格挡性能%＝物品顶层必填字段（0=无），
 # 非 mods——mods 留给词条/附魔等**额外**修正。装备时折成 equip 源修正进同一管线（格挡休眠/
 # 按件取高/tooltip 汇总零改动）。armor_dmg 甲伤不在此列：按段读持械件（BattleState._seg_armor_dmg_factor）。
-const INTRINSIC_EQUIP_STATS := ["atk", "acc", "block_rate", "block_power"]
+const INTRINSIC_EQUIP_STATS := ["atk", "block_rate", "block_power"]
 
 # 挂装备修正：每条 mod 唯一 source（"equip:<实例iuid>:<序号>"）——同件装备的模板 mod 与词条 mod
 # 即使同 stat 同 op 也各自生效（effective_stat 的「同 source 去重取高」只该压重复 buff，不该吃词条）。

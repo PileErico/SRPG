@@ -49,11 +49,11 @@ func _initialize() -> void:
 	ck(fist != null and bool(fist.get("natural", false)), "主手＝默认型天生武器")
 	ck(str(u.basic_attack().get("name", "")) == "徒手", "普攻＝拳脚攻击行为")
 	ck(is_equal_approx(u.effective_stat_f("atk"), 2.5), "徒手攻击力 2.5（数值在拳脚条目）")
-	ck(is_equal_approx(u.effective_stat_f("acc"), 25.0), "徒手命中 25（武器侧承载）")
+	ck(is_equal_approx(u.effective_stat_f("acc"), 0.0), "acc 面板 0（基准命中在武器技能 hit——决策33 三轮校准）")
 	# 顶替：装长剑 → 拳脚收回；卸下 → 拳脚回位
 	ck(u.equip("long_sword"), "装长剑成功（顶掉拳脚）")
-	ck(is_equal_approx(u.effective_stat_f("atk"), 5.0) and is_equal_approx(u.effective_stat_f("acc"), 30.0),
-		"长剑数值生效且拳脚修正无残留（atk=5 acc=30）")
+	ck(is_equal_approx(u.effective_stat_f("atk"), 5.0) and is_equal_approx(u.effective_stat_f("acc"), 0.0),
+		"长剑数值生效且拳脚修正无残留（atk=5；acc 非武器固有——基准命中已迁武器技能 hit，决策33 三轮校准）")
 	var sword_uid: int = int(u.equipment["main_hand"])
 	u.unequip("main_hand")
 	ck(u.equipment.has("main_hand") and int(u.equipment["main_hand"]) != sword_uid, "卸剑后拳脚自动回位")
@@ -68,10 +68,11 @@ func _initialize() -> void:
 	s._new_grassland(9, 7)
 	var e = UnitFactory.make_unit(inf, "enemy", 4, 3)
 	s.units = [u, e]
-	# 命中 = 拳脚25 + 技巧10 − (闪避0 + 灵活10) = 25
-	ck(s._hit_chance(u, e) == 25, "命中公式：25+10−10=25（实际 %d）" % s._hit_chance(u, e))
-	# 技能基准命中（2026-07-13 用户拍板：命中链＝武器技能面板 hit + 角色命中修正）——平加进命中侧、缺省 0 零回归
-	ck(s._hit_chance(u, e, {"hit": 20}) == 45, "技能基准命中 hit=20 → 25+20=45（实际 %d）" % s._hit_chance(u, e, {"hit": 20}))
+	# 命中 = 武器技能基准25（bws_unarmed hit——决策33 三轮校准：基准命中在技能侧非武器 acc）+ 技巧10 − (闪避0+灵活10) = 25
+	var ua: Dictionary = u.basic_attack()
+	ck(int(ua.get("hit", 0)) == 25, "拳脚 BWS 携带基准命中 25（原武器 acc 迁移）")
+	ck(s._hit_chance(u, e, ua) == 25, "命中公式：25+10−10=25（实际 %d）" % s._hit_chance(u, e, ua))
+	ck(s._hit_chance(u, e, {"hit": 20}) == 20, "技能基准命中 hit=20 → 20+10−10=20（实际 %d）" % s._hit_chance(u, e, {"hit": 20}))
 	ck(int(s._hit_chance_detail(u, e, {"hit": 20})["acc"]) == int(s._hit_chance_detail(u, e)["acc"]) + 20,
 		"技能基准并入 acc 展示项（判定/战斗记录口径合一）")
 	# 暴击 = 0 + 技巧10×0.5 − 对方运气5 = 0（钳底）；技巧 20 → 10−5 = 5
@@ -88,7 +89,7 @@ func _initialize() -> void:
 	ck(u.initiative() == 5, "回合序＝speed0＋灵活10/2 向下取整（🔒 2026-07-08 减半修订）")
 	u.modifiers.append({"stat": "agility", "op": "flat", "value": -3, "source": "equip:900:0"})
 	ck(u.initiative() == 3, "防具减灵活 → 回合序减半降（floor(7/2)=3）")
-	ck(s._hit_chance(e, u) == 25 + 3, "灵活降 3 → 被命中 +3（闪避仍吃满灵活）")
+	ck(s._hit_chance(e, u, e.basic_attack()) == 25 + 3, "灵活降 3 → 被命中 +3（闪避仍吃满灵活）")
 	u.modifiers.pop_back()
 
 	# —— 4) 自动轨成长（节奏数组）+ 20 级帽 + 加点（🔒 §10.1 二次修订 2026-07-08）——

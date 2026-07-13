@@ -75,12 +75,12 @@ func _initialize() -> void:
 				{"stat": "block_power", "op": "flat", "value": 35}]},
 		{"id": "d31_parry", "name": "格挡剑", "slot": "main_hand", "tags": ["one_handed"], "bws": "d31_off",
 			"mods": [{"stat": "block_rate", "op": "flat", "value": 10}]},
-		# 决策33 试料：固有属性顶层键 + 甲伤 + On-Hit Effects
+		# 决策33 试料：固有属性顶层键（三轮校准后无 acc）+ 甲伤 + On-Hit Effects
 		{"id": "d33_hammer", "name": "破甲锤", "slot": "main_hand", "tags": ["one_handed"], "bws": "d31_main",
-			"atk": 6, "acc": 10, "block_rate": 0, "block_power": 0, "armor_dmg": 50,
+			"atk": 6, "block_rate": 0, "block_power": 0, "armor_dmg": 50,
 			"on_hit_effects": [{"effect": "bleeding", "chance": 100}]},
 		{"id": "d33_off", "name": "副刀", "slot": "main_hand", "tags": ["one_handed"], "bws": "d31_off",
-			"atk": 2, "acc": 5, "block_rate": 0, "block_power": 0},
+			"atk": 2, "block_rate": 0, "block_power": 0},
 		# 决策34 试料：On-Hit 带高级出血变体
 		{"id": "d34_saw", "name": "锯刃", "slot": "main_hand", "tags": ["one_handed"], "bws": "d31_main",
 			"on_hit_effects": [{"effect": "bleed_high", "chance": 100}]},
@@ -213,8 +213,8 @@ func _initialize() -> void:
 	h.equipment["off_hand"] = ItemInstances.create("d33_off")
 	h._apply_item_mods(ItemInstances.view(int(h.equipment["main_hand"])), int(h.equipment["main_hand"]))
 	h._apply_item_mods(ItemInstances.view(int(h.equipment["off_hand"])), int(h.equipment["off_hand"]))
-	ck(h.effective_stat_f("atk") == 28.0 and h.effective_stat_f("acc") == 215.0,
-		"固有键装备合成进修正管线：atk 20+6+2、acc 200+10+5（🔒 决策33 非 mods）")
+	ck(h.effective_stat_f("atk") == 28.0 and h.effective_stat_f("acc") == 200.0,
+		"固有键装备合成进修正管线：atk 20+6+2；acc 非武器固有不合成（决策33 三轮校准）")
 	ck(is_equal_approx(sb._state._seg_armor_dmg_factor(h, {}), 1.5), "主手段甲伤因子＝1+50%（件固有键）")
 	ck(is_equal_approx(sb._state._seg_armor_dmg_factor(h, {"weapon_source": "off_hand"}), 1.0),
 		"副手段甲伤因子＝1（件归属：不吃主手件甲伤——同 offhand_eff/格挡休眠先例）")

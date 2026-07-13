@@ -24,9 +24,10 @@ const ICON_DIR := {
 	"item": "res://icons/Items",
 }
 const OPS := [["flat", "固定"], ["pct", "百分比%"]]
-# 武器固有属性（🔒 决策33 2026-07-13 用户拍板）：**严格四项**必填字段非可选 mod——0=无此项；词条/附加修正仍走 mods。
-# 甲伤 armor_dmg 不在此列（用户校准：甲伤也是一种 On-Hit——不论用什么技能挥舞都破坏护甲）→ 住 On-Hit 板块。
-const WEAPON_INTRINSIC := [["atk", "攻击"], ["acc", "命中"], ["block_rate", "格挡率"], ["block_power", "格挡性能"]]
+# 武器固有属性（🔒 决策33；三轮校准 2026-07-13）：必填字段非可选 mod——0=无此项；词条/附加修正仍走 mods。
+# **命中不在此列**（命中的固有归属＝武器技能的「命中系数」〔决策32〕；物品侧命中＝普通 acc mod）；
+# 甲伤 armor_dmg 也不在此列（甲伤是一种 On-Hit）→ 住 On-Hit 板块。格挡两项皆百分比。
+const WEAPON_INTRINSIC := [["atk", "攻击"], ["block_rate", "格挡率（%）"], ["block_power", "格挡性能（%）"]]
 const PREFER_PAIRS := [["", "（无）"], ["ground", "地面（落地换进主手）"], ["air", "空中（起飞换进主手）"]]   # 比路兹式起降换手
 # 物品大类下拉（基础区，id 上方）：kind 选择器——替掉旧的 4 个「＋类别」按钮
 const KIND_PAIRS := [["weapon", "武器"], ["armor", "防具"], ["accessory", "饰品"], ["item", "物品"]]
@@ -1194,10 +1195,11 @@ func _collect() -> Dictionary:
 				out["prefer"] = prefer
 			else:
 				out.erase("prefer")
-			# 固有属性（🔒 决策33：四键必填恒写——0=无此项；armor_dmg 0 不落键）
-			for k in ["atk", "acc", "block_rate", "block_power"]:
+			# 固有属性（🔒 决策33 三轮校准：三键必填恒写——0=无此项；armor_dmg 0 不落键）
+			for k in ["atk", "block_rate", "block_power"]:
 				if _w_intr.has(k):
 					out[k] = _num(float(_w_intr[k].value))
+			out.erase("acc")   # 命中已移出固有面板（随存即迁——基准命中在武器技能 hit、物品侧命中走 mods）
 			if _w_intr.has("armor_dmg"):
 				var adm := float(_w_intr["armor_dmg"].value)
 				if adm != 0.0:
