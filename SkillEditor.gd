@@ -234,11 +234,12 @@ func _build_form() -> void:
 	# 无 seq 槽位（2026-07-13 废除）：旧「13 通用序列」随通用能力页退役，陈列排序归技能树轮
 
 	# —— 武器技能（🔒 决策29 显式勾选制，翻案决策27 形状判定）：勾＝可被武器选取（BWS/EWS 之分武器侧定）——
-	_w_wskill = EditorUI.add_check(_form, "武器技能 weapon_skill（勾＝可被武器选取为 BWS/EWS）",
+	_w_wskill = EditorUI.add_check(_form, "武器技能 weapon_skill（勾＝可被武器选取为 BWS/EWS；等级钉 1——无升级）",
 		bool(_current.get("weapon_skill", false)), func(_v = false):
 			_mark_dirty()
 			if _kind_box != null:
-				_kind_box.visible = _w_wskill.button_pressed)
+				_kind_box.visible = _w_wskill.button_pressed
+			_update_shape_gray())
 	_kind_box = VBoxContainer.new()
 	_kind_box.add_theme_constant_override("separation", 2)
 	var kb_hint := Label.new()
@@ -279,7 +280,9 @@ func _build_form() -> void:
 	_form.add_child(shp_row)
 	_w_anchor = EditorUI.add_dropdown(_form, "作用形锚点 anchor",
 		[["caster", "锚定自身（按目标方向 60° 旋转——横扫弧）"], ["target", "锚定落点（平移到所点格——火球）"]],
-		str(shp0.get("anchor", "caster")), func(_i = 0): _mark_dirty())
+		str(shp0.get("anchor", "caster")), func(_i = 0):
+			_mark_dirty()
+			_update_shape_gray())
 	_w_ff = EditorUI.add_check(_form, "友伤 friendly_fire（AOE 可空放，故不设对敌/对友、只设是否伤及友军）",
 		bool(shp0.get("friendly_fire", false)), _mark_dirty)
 
@@ -299,9 +302,11 @@ func _build_form() -> void:
 		float((_current.get("cooldown", {}) as Dictionary).get("base", 0)), 0, 9, 1, _mark_dirty)
 	_w_uses = EditorUI.add_spin(_form, "每战次数 uses_per_battle.base（0=无限 ∞）",
 		float((_current.get("uses_per_battle", {}) as Dictionary).get("base", 0)), 0, 9, 1, _mark_dirty)
-	_w_maxlv = EditorUI.add_spin(_form, "技能等级数 max_level（各级参数=per_level 数组长度）",
+	_w_maxlv = EditorUI.add_spin(_form, "技能等级数 max_level（各级参数=per_level 数组长度；武器技能钉 1——无升级）",
 		float(_current.get("max_level", 1)), 1, 5, 1, _mark_dirty)
-	_w_range = EditorUI.add_spin(_form, "射程 range（格；0=自身/同格）", float(_current.get("range", 1)), 0, 20, 1, _mark_dirty)
+	_w_range = EditorUI.add_spin(_form, "射程 range（格；0=自身/同格）——画了选取形/锚自身作用形＝被顶掉（灰化+存盘清键）",
+		float(_current.get("range", 1)), 0, 20, 1, _mark_dirty)
+	_update_shape_gray()   # 初始灰化态（range 被形状顶掉/武器技能等级钉 1）
 	# 目标三旗（🔒 §2.7 正交自由组合；全 false=永不可施放，存盘拦）
 	var trow := HBoxContainer.new()
 	trow.add_theme_constant_override("separation", 12)
@@ -388,6 +393,27 @@ func _dropdown_pairs(label: String, pairs: Array, sel: String) -> OptionButton:
 	_form.add_child(EditorUI.field_row(label, ob))
 	return ob
 
+# range/等级的联动灰化（决策30 收口）：选取形非空或作用形锚自身 → range 被顶掉（灰化+存盘清键；
+# 火球型〔锚落点、无选取形〕仍靠 range 定投掷距离）；勾武器技能 → max_level 钉 1（武器技能无升级）
+func _update_shape_gray() -> void:
+	if _w_range == null:
+		return
+	var superseded := _range_superseded()
+	_w_range.editable = not superseded
+	_w_range.modulate = Color(0.55, 0.55, 0.6) if superseded else Color.WHITE
+	var ws: bool = _w_wskill != null and _w_wskill.button_pressed
+	if ws:
+		_w_maxlv.value = 1
+	_w_maxlv.editable = not ws
+	_w_maxlv.modulate = Color(0.55, 0.55, 0.6) if ws else Color.WHITE
+
+func _range_superseded() -> bool:
+	if _w_pick == null or _w_effect == null:
+		return false
+	if not (_w_pick.mask() as Array).is_empty():
+		return true
+	return not (_w_effect.mask() as Array).is_empty() and str(_w_anchor.get_selected_metadata()) == "caster"
+
 # 形状盘列（标题 + 六边形点格盘 + 清空钮）——选取形/作用形两处共用（🔒 决策30）
 func _shape_picker_col(parent: Control, title: String, mask) -> Control:
 	var col := VBoxContainer.new()
@@ -401,7 +427,9 @@ func _shape_picker_col(parent: Control, title: String, mask) -> Control:
 	col.add_child(l)
 	var p := HexShapePicker.new()
 	p.set_mask(mask if typeof(mask) == TYPE_ARRAY else [])
-	p.changed.connect(_mark_dirty)
+	p.changed.connect(func():
+		_mark_dirty()
+		_update_shape_gray())
 	col.add_child(p)
 	var clr := Button.new()
 	clr.text = "清空"
@@ -953,6 +981,8 @@ func _shell_collect() -> Dictionary:
 			shp["anchor"] = str(_w_anchor.get_selected_metadata())
 			shp["friendly_fire"] = _w_ff.button_pressed
 		out["shape"] = shp
+	if _range_superseded():
+		out.erase("range")   # 被形状顶掉＝随存清键（火球型〔锚落点无选取形〕仍留 range 定投掷距离）
 	# requires_hands
 	var hands := []
 	for h in _hand_rows:

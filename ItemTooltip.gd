@@ -126,7 +126,7 @@ static func render(item: Dictionary) -> Control:
 		hb.add_child(sn)
 		v.add_child(hb)
 		_tags(v, atk.get("tags", []))
-		v.add_child(_kv("距离", "%d" % int(atk.get("range", 1))))
+		v.add_child(_kv("距离", "%d" % SkillDB.skill_reach(atk)))   # 形状掩码优先、range 兜底（决策30）
 		v.add_child(_kv("伤害系数", "%d%%" % int(round(float(atk.get("coeff", 1.0)) * 100.0))))
 		v.add_child(_kv("AP 消耗", "%d" % SkillDB.skill_ap_cost(atk)))
 		var dk := str(atk.get("damage_kind", ""))
@@ -154,6 +154,11 @@ static func render(item: Dictionary) -> Control:
 			if float(inf.get("dot_pct_max_hp", 0)) > 0.0:
 				txt += "（回合末 最大生命%s%%·%d回合）" % [_num(float(inf.get("dot_pct_max_hp", 0))), int(inf.get("duration", 0))]
 			v.add_child(_kv("异常", txt))
+		var shp: Dictionary = SkillDB.shape_of(atk)
+		if not (shp.get("effect", []) as Array).is_empty():
+			var ff0 := "·友伤" if bool(shp.get("friendly_fire", false)) else ""
+			var anc := "锚落点" if str(shp.get("anchor", "caster")) == "target" else "随方向"
+			v.add_child(_kv("范围", "AOE %d 格（%s%s）" % [(shp["effect"] as Array).size(), anc, ff0]))
 		var aoe = atk.get("aoe", null)
 		if typeof(aoe) == TYPE_DICTIONARY:
 			var ff := "（友伤）" if bool(aoe.get("friendly_fire", false)) else ""
