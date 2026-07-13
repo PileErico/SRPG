@@ -1557,7 +1557,7 @@ func fly_factor(u) -> float:
 
 # —— 主动技能：菜单 / 进入目标模式 / 释放 ——
 
-# 该单位已学、且「主动」的技能 id 列表（按通用序列槽位 seq 升序，稳定）
+# 该单位已学、且「主动」的技能 id 列表（按名字→id 稳定排序；seq 已废 2026-07-13）
 func _learned_active_skills(u) -> Array:
 	var out := []
 	if u == null:
@@ -1571,7 +1571,9 @@ func _learned_active_skills(u) -> Array:
 			continue
 		out.append(id)
 	out.sort_custom(func(a, b):
-		return int(SkillDB.get_skill(a).get("seq", 99)) < int(SkillDB.get_skill(b).get("seq", 99)))
+		var an := str(SkillDB.get_skill(a).get("name", a))
+		var bn := str(SkillDB.get_skill(b).get("name", b))
+		return an < bn if an != bn else str(a) < str(b))
 	return out
 
 # 装备武器授予的主动 EWS 条目（🔒 决策26；排除已学同名——已学走 skills 路径）：[{id, requires, unlocked}]

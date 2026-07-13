@@ -57,7 +57,7 @@ func _run() -> int:
 			"id": sid,
 			"name": str(atk.get("name", wid)),
 			"icon": str(atk.get("icon", "")),
-			"nature": "skill",
+			"category": "skill",
 			"desc": "",
 			"active": true,
 			"tags": (atk.get("tags", []) as Array).duplicate(true),

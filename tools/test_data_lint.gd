@@ -11,7 +11,7 @@ extends SceneTree
 ##     （未知种别在 CombatResolver 会告警回退物理轨；数据侧在此挡住）。
 ##  6) tag 引用完整性（🔒 tag 统一词表）：data/*.json 与 terrains.json 里任意 "tags" 数组的字符串
 ##     必须 ∈ tags.json——防「用了没注册」的词表漂移（曾漏 cold/road/wall）。
-##  7) skills.json 阶段2 形状闸门（🔒 设计 §10 护栏#1 机械执法）：target 三旗不得全 false / seq 撞格 /
+##  7) skills.json 阶段2 形状闸门（🔒 设计 §10 护栏#1 机械执法）：target 三旗不得全 false / seq·nature 禁回流（2026-07-13 废除/改词）/
 ##     per_level 长度==max_level / costs.ap 与顶层 ap_cost 禁双写 / 阶段6 前 hits.size()>1 或 riders 出现即 FAIL
 ##     （防「可编不可跑」内容入库）。WS 形约束已随决策27 关系制移到规则8 引用处执法。
 ##  8) weapons.json 武器技能引用（🔒 决策25/26/27）：bws/bas → 技能存在+WS 形（is_ws_shaped：含 attack 块+
@@ -261,7 +261,6 @@ func _initialize() -> void:
 	# 7) skills.json 阶段2 形状闸门（护栏#1 机械执法）
 	var sk = _read_json("res://data/skills.json")
 	if typeof(sk) == TYPE_ARRAY:
-		var seqs := {}
 		for s in sk:
 			if typeof(s) != TYPE_DICTIONARY:
 				continue
@@ -275,10 +274,8 @@ func _initialize() -> void:
 			if typeof(tg) == TYPE_DICTIONARY:
 				ck(bool(tg.get("enemy", false)) or bool(tg.get("ally", false)) or bool(tg.get("self", false)),
 					"%s：target 三旗不得全 false（永不可施放）" % sid)
-			if s.has("seq"):
-				var q := int(s["seq"])
-				ck(not seqs.has(q), "%s：seq %d 与 %s 撞格" % [sid, q, str(seqs.get(q, ""))])
-				seqs[q] = sid
+			ck(not s.has("seq"), "%s：seq 已废（2026-07-13 通用序列退役）——禁回流" % sid)
+			ck(not s.has("nature"), "%s：nature 已改词 category（2026-07-13）——禁回流" % sid)
 			var pls := []
 			_collect_key_arrays(s, "per_level", pls)
 			for pl in pls:

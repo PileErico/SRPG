@@ -56,7 +56,7 @@ func _initialize() -> void:
 	# 注入 conditional_mod 试料（§6 表单往返；只进临时副本不碰真数据）：
 	# when 六型各一 + 一条未实现类型（time_of_day＝光环轮，行级锁定原样保留）
 	var arr0 := SkillDB._read_array("user://test_skills.json")
-	arr0.append({"id": "t_cond", "name": "条件被动试料", "icon": "", "nature": "skill", "desc": "",
+	arr0.append({"id": "t_cond", "name": "条件被动试料", "icon": "", "category": "skill", "desc": "",
 		"active": false, "tags": [],
 		"costs": {"ap": 1}, "cooldown": {"base": 0}, "uses_per_battle": {"base": 0},
 		"max_level": 1, "target": {"enemy": false, "ally": false, "self": true},
@@ -105,13 +105,13 @@ func _initialize() -> void:
 	ed._w_t_self.button_pressed = true
 	ck(not ed._shell_collect().is_empty(), "校验复原后 collect 恢复")
 
-	# seq 撞格：新建技能占 first_aid 的 seq 1
+	# 新建技能（seq 已废除 2026-07-13——撞格用例随退役删除；新条目断言无旧键）
 	ed._shell_new_entry()
 	ed._w_id.text = "test_two"
-	ed._w_seq.value = 1
-	ck(ed._shell_collect().is_empty(), "seq 撞格 → collect 拒")
-	ed._w_seq.value = 2
-	ck(not ed._shell_collect().is_empty(), "换空槽 seq → collect 通过")
+	var col_new = ed._shell_collect()
+	ck(not col_new.is_empty(), "新建条目 collect 通过")
+	ck(not col_new.has("seq") and not col_new.has("nature") and str(col_new.get("category", "")) == "skill",
+		"新条目无 seq/nature 旧键、category 缺省 skill")
 
 	# per_level 长度 ≠ max_level：max_level=1 配两档
 	ed._add_block(ed._block_skeleton("heal"))

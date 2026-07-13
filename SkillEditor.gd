@@ -8,7 +8,7 @@ extends "res://ListEditorShell.gd"
 ##   未编辑高级字段保存原样保留。conditional_mod 的 when 行控件在 EditorUI（词表 §4 v1，将来技能树同词表直取）；
 ##   未实现 when 类型（time_of_day 等）＝行级锁定原样保留。块可折叠+↑/↓ 调序（按序结算，序有编辑权）。
 ## 存盘校验与 test_data_lint 规则7 对齐（编辑器先拦，别让 lint 红）：BAS 约束 / target 三旗全 false /
-##   seq 撞格 / per_level 长度==max_level / costs.ap 与顶层 ap_cost 禁双写（收集时剥旧键）。
+##   per_level 长度==max_level / costs.ap 与顶层 ap_cost 禁双写（收集时剥旧键 nature/seq 随存即迁——2026-07-13 改词/废除）。
 ## 效果库（EffectDB）＝独立 EffectEditor 场景，标题栏分段切换（仿工坊切换器，脏守卫接管）。
 
 const SkillDB := preload("res://SkillDB.gd")
@@ -20,7 +20,7 @@ const ItemDB := preload("res://ItemDB.gd")                     # §18 反向引�
 const UnitFactory := preload("res://UnitFactory.gd")           # §18 反向引用感知（原型 skills 引用技能）
 
 const ICON_DIR := "res://icons/Skills"
-const NATURES := [["skill", "技巧 skill"], ["spell", "魔法 spell（魔法系统后置）"]]
+const CATEGORIES := [["skill", "技巧 skill"], ["spell", "魔法 spell（魔法系统后置）"]]   # ⚠ 2026-07-13 用户改词：键 nature→category（与修正对象的 nature〔buff/debuff〕分家）
 const DAMAGE_KINDS := ["physical", "fire", "ice", "thunder", "holy"]
 const HAND_SLOTS := [["main_hand", "主手"], ["off_hand", "副手"]]
 const BLOCK_KINDS := [["attack", "攻击 attack"], ["heal", "治疗 heal"],
@@ -47,9 +47,8 @@ var _w_id: LineEdit
 var _w_name: LineEdit
 var _w_icon: LineEdit
 var _w_desc: TextEdit
-var _w_nature: OptionButton
+var _w_category: OptionButton
 var _w_active: CheckBox
-var _w_seq: SpinBox
 var _w_ap: SpinBox
 var _w_cd: SpinBox
 var _w_uses: SpinBox
@@ -132,7 +131,7 @@ func _shell_show_empty() -> void:
 	_form.add_child(hint)
 	_dirty = false
 
-# 清单：武器普攻 BWS / 主动 / 被动 三折叠组；组内按 seq→名字 排序。
+# 清单：武器普攻 BWS / 主动 / 被动 三折叠组；组内按名字排序。
 func _shell_populate_list(q: String) -> void:
 	var searching := q != ""
 	var groups := {"bws": [], "active": [], "passive": []}
@@ -169,14 +168,14 @@ func _shell_populate_list(q: String) -> void:
 		_add_fold_group(key, "%s (%d)" % [str(g[1]), arr.size()], section, searching)
 
 func _sort_key(s: Dictionary) -> String:
-	return "%02d|%s" % [int(s.get("seq", 99)), str(s.get("name", "")).to_lower()]
+	return str(s.get("name", "")).to_lower()
 
 
 # —— 新建 / 载入 / 副本 ——
 
 # 骨架＝canonical 键序（§2.1 示例序；字节级往返靠「duplicate 原条目+按键更新」保序）
 func _skeleton() -> Dictionary:
-	return {"id": "", "name": "新能力", "icon": "", "nature": "skill", "desc": "",
+	return {"id": "", "name": "新能力", "icon": "", "category": "skill", "desc": "",
 		"active": true, "tags": [],
 		"costs": {"ap": 1}, "cooldown": {"base": 0}, "uses_per_battle": {"base": 0},
 		"max_level": 1, "target": {"enemy": true, "ally": false, "self": false},
@@ -218,10 +217,11 @@ func _build_form() -> void:
 	_w_desc.scroll_fit_content_height = true
 	_w_desc.text_changed.connect(_mark_dirty)
 	_form.add_child(EditorUI.field_row("描述 desc", _w_desc))
-	_w_nature = _dropdown_pairs("性质 nature", NATURES, str(_current.get("nature", "skill")))
+	# 类别 category（旧键 nature 兼容读——数据已迁，残档兜底；写盘只落 category）
+	_w_category = _dropdown_pairs("类别 category", CATEGORIES, str(_current.get("category", _current.get("nature", "skill"))))
 	_w_active = EditorUI.add_check(_form, "主动能力 active（关＝被动，状态页圆框陈列）", bool(_current.get("active", true)), _mark_dirty)
 	# 无 usable_as_bas 勾选（决策27 关系制）：技能编辑器只管技能做什么；能否被引为 BWS＝形状（is_ws_shaped）在物品编辑器/lint 判
-	_w_seq = EditorUI.add_spin(_form, "通用序列槽 seq（0=不占；1-13 全库唯一）", float(_current.get("seq", 0)), 0, 13, 1, _mark_dirty)
+	# 无 seq 槽位（2026-07-13 废除）：旧「13 通用序列」随通用能力页退役，陈列排序归技能树轮
 
 	# 2. 标签
 	_form.add_child(EditorUI.section_title("技能标签（verbal=需发声、失语时禁用）"))
@@ -826,7 +826,8 @@ func _shell_collect() -> Dictionary:
 	out["id"] = _w_id.text.strip_edges()
 	out["name"] = _w_name.text.strip_edges()
 	out["icon"] = _w_icon.text.strip_edges()
-	out["nature"] = str(_w_nature.get_selected_metadata())
+	out["category"] = str(_w_category.get_selected_metadata())
+	out.erase("nature")   # 旧键随存即迁（2026-07-13 改词 nature→category）
 	out["desc"] = _w_desc.text
 	out["active"] = _w_active.button_pressed
 	out["tags"] = _tags.duplicate()
@@ -843,10 +844,7 @@ func _shell_collect() -> Dictionary:
 	out["max_level"] = int(_w_maxlv.value)
 	out["target"] = {"enemy": _w_t_enemy.button_pressed, "ally": _w_t_ally.button_pressed, "self": _w_t_self.button_pressed}
 	out["range"] = int(_w_range.value)
-	if int(_w_seq.value) > 0:
-		out["seq"] = int(_w_seq.value)
-	else:
-		out.erase("seq")
+	out.erase("seq")   # 旧键随存即清（2026-07-13 通用序列废除）
 	# requires_hands
 	var hands := []
 	for h in _hand_rows:
@@ -871,13 +869,6 @@ func _shell_collect() -> Dictionary:
 	if not (bool(out["target"]["enemy"]) or bool(out["target"]["ally"]) or bool(out["target"]["self"])):
 		_err("目标三旗不得全 false（永不可施放，lint 规则7）")
 		return {}
-	if out.has("seq"):
-		for oid in SkillDB.all():
-			if str(oid) == out["id"] or str(oid) == _loaded_id:
-				continue
-			if int((SkillDB.all()[oid] as Dictionary).get("seq", -1)) == int(out["seq"]):
-				_err("seq %d 与「%s」撞格（lint 规则7）" % [int(out["seq"]), str(oid)])
-				return {}
 	var pls := []
 	_collect_per_levels(out, pls)
 	for pl in pls:

@@ -25,17 +25,16 @@ func _write(path: String, text: String) -> void:
 func _initialize() -> void:
 	print("=== 技能运行态测试开始 ===")
 
-	# 1) SkillDB 契约：注入缝 + reload_data + by_seq + 未知 id/坏条目兜底
+	# 1) SkillDB 契约：注入缝 + reload_data + 未知 id/坏条目兜底（by_seq 已随通用序列废除 2026-07-13）
 	SkillDB._path_override = P_S
 	_write(P_S, JSON.stringify([
-		{"id": "t_strike", "name": "打击", "seq": 1, "max_level": 2,
+		{"id": "t_strike", "name": "打击", "max_level": 2,
 			"cooldown": {"base": 2}, "uses_per_battle": {"base": 2}},
 		{"id": "t_shout", "name": "呐喊", "tags": ["verbal"]},
 		{"no_id": true},
 	]))
 	SkillDB.reload_data()
 	ck(SkillDB.get_skill("t_strike") != null, "注入 + get_skill 命中")
-	ck(SkillDB.by_seq(1) != null and str(SkillDB.by_seq(1).get("id")) == "t_strike", "by_seq 副索引")
 	ck(SkillDB.get_skill("no_such") == null, "未知 id → null")
 	ck(SkillDB.all().size() == 2, "无 id 条目被跳过（2/3 收录）")
 
