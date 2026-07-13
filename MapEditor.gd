@@ -3,7 +3,8 @@ extends Control
 ## 闭环：选画笔铺地形 -> 保存 JSON -> 读取 JSON 渲染并可继续编辑。
 ## 网格：flat-top / odd-q 六边形（见 HexCanvas.gd）。
 ## 操作：左键画 / 右键取色 / 中键拖拽平移 / 滚轮缩放 /
-##       Ctrl+Z 撤销 / Ctrl+Y(或 Ctrl+Shift+Z) 重做 / Ctrl+S 保存。
+##       Ctrl+Z 撤销 / Ctrl+Y(或 Ctrl+Shift+Z) 重做 / Ctrl+S 保存（有文件静默覆盖）/
+##       F1~F6 切图层 / B G R L 地形工具 / [ ] 画笔半径 / 1~9 选笔刷。
 
 const HexCanvas := preload("res://HexCanvas.gd")
 const EditorCanvas := preload("res://EditorCanvas.gd")
@@ -54,8 +55,17 @@ var _prompt_lbl: Label
 var _prompt_cb := Callable()
 var _erase_object := false          # 橡皮·放置物：开则左键清除该格放置物
 # —— 地形工具（2026-07-07）：画笔（可调半径）/ 油漆桶 / 矩形 / 直线 ——
+# 定义行＝[id, 按钮文字, tooltip, 快捷键]（§21：B/G/R/L 与按钮同走 _set_terrain_tool 单一入口）
+const TOOL_DEFS := [
+	["brush", "画笔", "逐格涂（半径>0＝一片）", "B"],
+	["fill", "填充", "油漆桶：同地形连通块整片刷", "G"],
+	["rect", "矩形", "按下定起点、拖到对角松开成片", "R"],
+	["line", "直线", "按下定起点、拖到终点松开连线", "L"],
+]
 var terrain_tool := "brush"           # "brush" | "fill" | "rect" | "line"
 var brush_radius := 0                 # 画笔半径（六边形距离 ≤N 一片；0=单格）
+var _tool_btns := {}                  # 工具 id → Button（快捷键切换时同步按钮状态）
+var _radius_spin: SpinBox             # 画笔半径 SpinBox（[ ] 快捷键同步显示）
 var _fill_stroke_done := false        # 油漆桶：一次按下只填一回（拖动不重复触发）
 var _shape_anchor := Vector2i(-1, -1) # rect/line 两点工具：本次 stroke 起点格（-1=未定）
 var _shape_target := Vector2i(-1, -1) # rect/line：拖动中的当前终点格（预览/落形共用）
@@ -135,16 +145,26 @@ const REGION_KINDS := [["aggro", "触发区"], ["deploy", "部署区"]]
 const UNIT_FACTIONS := ["enemy", "player", "ally", "neutral"]   # 顺序=下拉顺序；中文走 TagDB.cn、颜色走 TagDB.color
 var _unit_panel: Control   # 单位工具区（当前层=单位时显示）
 var _unit_list: ItemList   # 单位原型选择列表
-var _unit_proto = null     # 当前要落子的原型（null=未选）
+var _unit_proto = null     # 当前要落子的原型（null=未选；Ctrl 取样后＝已放单位 proto 的深拷贝）
 var _unit_faction := "enemy"   # 落子阵营（关卡敌人居多，默认敌方）
 var _unit_protos := []     # 内置原型缓存（data/unit_prototypes.json）
+var _unit_filter := ""     # 原型列表搜索词（§20：匹配 行文本/id）
+var _unit_row_map := []    # 列表行 → _unit_protos 下标（过滤后映射）
 # —— placed 单位深度编辑（复用 DeployPanel，editor_mode）——
 var _unit_edit_win: PanelContainer   # 右侧浮动编辑面板（编辑某个已放置单位时显示）
 var _unit_edit_panel                 # DeployPanel 实例（host=本编辑器）
 var _editing_unit = null             # 当前编辑的活 Unit（改完序列化回 map_units）
 var _editing_index := -1             # 被编辑单位在 map_units 的下标
 var _unit_edit_snap_pushed := false  # 本次编辑会话是否已压过撤销快照（整段编辑 = 一步撤销）
-var _unit_stroke_action := ""        # 单位层一次拖动的动作锁（""未定 / "edit" 编辑 / "place" 落子）
+var _unit_pos_col_spin: SpinBox      # 深编面板：位置 col/row（§8；改值＝挪格，占用格拒绝）
+var _unit_pos_row_spin: SpinBox
+var _unit_pos_loading := false       # 填位置 spin 时抑制回写
+# 单位层一次拖动的动作锁（""未定 / "move" 拖移已放单位 / "place" 落子 / "sample" Ctrl取样复制）；
+# 首格有单位＝move（原地松开＝点击→深编，拖走＝挪格）、空格＝place（拖动续落）。
+var _unit_stroke_action := ""
+var _unit_drag_index := -1                 # move：被拖单位在 map_units 的下标
+var _unit_drag_from := Vector2i(-1, -1)    # move：拖动起点格（松开原地＝点击语义）
+var _unit_drag_ever_moved := false         # move：本次拖动是否真的动过（区分点击 vs 拖回原地）
 
 # —— 线特征层（大地图专属）：河=边刷 / 路=格心连线刷 / 桥=河边豁免点 ——
 # 存储即 schema 形（map_rivers/map_roads=[{id,label,pairs}]、map_bridges=[格对]）；边键归一走 HexGrid.edge_key。
@@ -166,6 +186,7 @@ var _loc_type_label: Label          # 类型只读显示（要改类型＝改画
 var _loc_battle_edit: LineEdit
 var _loc_dialogue_edit: LineEdit
 var _loc_loading := false           # 填表单时抑制回写
+var _loc_move_pending := false      # 「移注记到…」待点目标格（§8 顺手交互：孤儿注记归位）
 
 # —— 触发器层：authoring 关卡事件（when 条件 → do 动作），存进地图 triggers 字段 ——
 const TRIG_FACTIONS := [["player", "玩家"], ["any", "任意"]]
@@ -178,6 +199,7 @@ var _trig_faction_opt: OptionButton
 var _trig_once_chk: CheckBox
 var _trig_do_box: VBoxContainer   # do 动作行容器
 var _trig_loading := false        # 填表单时抑制回写（避免 set 信号回写到错对象）
+var _trig_form_win: PanelContainer   # §32：触发器编辑表单＝右侧浮动宽面板（本层激活时显示，仿 _unit_edit_win）
 
 var current_path := ""     # 当前地图对应的本地文件（空＝尚未存盘）
 var _dirty := false        # 自上次存/读以来是否有改动
@@ -201,6 +223,7 @@ var _terr_pass_checks := {}             # tag → CheckBox
 var _terr_tagcost_checks := {}          # tag_cost：tag → 启用 CheckBox
 var _terr_tagcost_spins := {}           # tag_cost：tag → 成本 SpinBox
 var _terr_data_loading := false
+var _terr_global_dirty := false   # §19：全局地形数据（TerrainDB live 表）有未写盘改动——保存钮高亮+退出守卫
 # 地形数据编辑范围：global=改全局 terrains.json（所有图）/ map=只覆盖本图（map_terrain_overrides）
 var _terr_scope := "global"
 var _terr_scope_opt: OptionButton
@@ -233,6 +256,9 @@ var _nameask_dlg: ConfirmationDialog   # 通用文件名输入弹窗（地图库
 var _nameask_edit: LineEdit
 var _nameask_cb: Callable = Callable() # 当前弹窗确认后要干嘛（每次 _ask_name 现装）
 var _newsize_dlg: ConfirmationDialog   # 「新建地图」弹窗（宽/高/预设，文件菜单调；内存新建不落盘）
+var _resize_dlg: ConfirmationDialog    # §30「调整尺寸…」弹窗（扩/裁当前地图，非新建）
+var _resize_w_spin: SpinBox
+var _resize_h_spin: SpinBox
 
 # 撤销/重做：以整图快照为单位，每项 {"snap":Dictionary, "label":String}
 var _undo_stack := []
@@ -311,6 +337,13 @@ func _build_ui() -> void:
 	_map_type_btn.tooltip_text = "点击在 战斗图 ⇄ 大地图 间切换。\n影响：地形笔刷按 scope 过滤；线特征（河/路/桥）与地点层仅大地图可编。"
 	_map_type_btn.pressed.connect(_on_map_type_toggle)
 	bar.add_child(_map_type_btn)
+
+	# §30 调整尺寸：扩/裁当前地图（非新建）——确认制，裁剪丢出界内容、一次撤销可回退
+	var resize_btn := Button.new()
+	resize_btn.text = "调整尺寸…"
+	resize_btn.tooltip_text = "扩/裁当前地图（保留内容，非新建）。\n扩＝新格铺草原；裁＝出界内容处理：单位/地点注记删除、区域格与河/路/桥段丢弃、触发器坐标钳入界内。\n整个调整＝一步撤销。"
+	resize_btn.pressed.connect(_on_resize_pressed)
+	bar.add_child(resize_btn)
 
 	bar.add_child(VSeparator.new())
 	status_label = Label.new()
@@ -421,6 +454,31 @@ func _build_ui() -> void:
 	_newsize_dlg.confirmed.connect(_on_new_pressed)
 	add_child(_newsize_dlg)
 
+	# §30 调整尺寸弹窗（顶栏「调整尺寸…」调）：改当前地图尺寸，非新建
+	_resize_dlg = ConfirmationDialog.new()
+	_resize_dlg.title = "调整地图尺寸"
+	_resize_dlg.ok_button_text = "调整"
+	_resize_dlg.get_cancel_button().text = "取消"
+	var rs_box := VBoxContainer.new()
+	var rs_row := HBoxContainer.new()
+	rs_row.add_child(_make_label("宽"))
+	_resize_w_spin = SpinBox.new()
+	_resize_w_spin.min_value = 1
+	_resize_w_spin.max_value = MAX_W
+	rs_row.add_child(_resize_w_spin)
+	rs_row.add_child(_make_label("  高"))
+	_resize_h_spin = SpinBox.new()
+	_resize_h_spin.min_value = 1
+	_resize_h_spin.max_value = MAX_H
+	rs_row.add_child(_resize_h_spin)
+	rs_box.add_child(rs_row)
+	var rs_hint := _make_label("扩＝新格铺草原；裁＝丢出界内容：\n单位/地点注记删除、区域格与河/路/桥段丢弃、\n触发器坐标钳入界内。整个调整＝一步撤销。")
+	rs_hint.add_theme_color_override("font_color", Color(0.85, 0.75, 0.5))
+	rs_box.add_child(rs_hint)
+	_resize_dlg.add_child(rs_box)
+	_resize_dlg.confirmed.connect(func(): resize_map(int(_resize_w_spin.value), int(_resize_h_spin.value)))
+	add_child(_resize_dlg)
+
 	# 保存覆盖确认 → 公共层 EditorUI.confirm（见 _save_shortcut）；不再持久化对话框节点
 
 	# 区域改名弹窗
@@ -444,6 +502,7 @@ func _build_ui() -> void:
 	_refresh_env_panel()
 	_update_file_label()
 	_build_unit_edit_win()
+	_build_trig_form_win()
 
 func _build_brush_sidebar() -> Control:
 	var sidebar := VBoxContainer.new()
@@ -455,8 +514,9 @@ func _build_brush_sidebar() -> Control:
 	layer_grid.columns = 3
 	var lg := ButtonGroup.new()
 	_layer_btns = {}
-	for pair in [["地形", "terrain"], ["线", "line"], ["区域", "region"], ["单位", "unit"], ["触发", "trigger"], ["地点", "location"]]:
+	for pair in [["地形", "terrain", "F1"], ["线", "line", "F2"], ["区域", "region", "F3"], ["单位", "unit", "F4"], ["触发", "trigger", "F5"], ["地点", "location", "F6"]]:
 		var b := _layer_button(str(pair[0]), str(pair[1]), lg)
+		b.tooltip_text = "快捷键 %s" % str(pair[2])
 		layer_grid.add_child(b)
 		_layer_btns[str(pair[1])] = b
 	_layer_btns["terrain"].button_pressed = true
@@ -509,7 +569,10 @@ func _set_layer(id: String) -> void:
 	if _region_panel: _region_panel.visible = (id == "region")
 	if _unit_panel: _unit_panel.visible = (id == "unit")
 	if _trigger_panel: _trigger_panel.visible = (id == "trigger")
+	if _trig_form_win: _trig_form_win.visible = (id == "trigger")   # §32 触发器表单浮面板随层显隐
 	if _loc_panel: _loc_panel.visible = (id == "location")
+	if id != "location":
+		_loc_move_pending = false   # 离开地点层取消「移注记到…」待选态
 	if id == "trigger":
 		_refresh_trigger_list()
 		if _active_trigger_idx < 0 and not map_triggers.is_empty():
@@ -550,35 +613,33 @@ func _build_terrain_brushes() -> Control:
 	erase_chk.tooltip_text = "开启后：左键点格＝清除该格的放置物（不动地形）"
 	erase_chk.toggled.connect(func(on: bool): _erase_object = on)
 	box.add_child(erase_chk)
-	# 工具行：画笔/油漆桶/矩形/直线（互斥）＋ 画笔半径
+	# 工具行：画笔/油漆桶/矩形/直线（互斥）＋ 画笔半径（§21：快捷键 B/G/R/L 与 [ ] 同走单一入口）
 	var toolrow := HBoxContainer.new()
 	var tool_group := ButtonGroup.new()
-	for t in [["brush", "画笔", "逐格涂（半径>0＝一片）"], ["fill", "填充", "油漆桶：同地形连通块整片刷"],
-			["rect", "矩形", "按下定起点、拖到对角松开成片"], ["line", "直线", "按下定起点、拖到终点松开连线"]]:
+	_tool_btns = {}
+	for t in TOOL_DEFS:
 		var tb := Button.new()
 		tb.text = str(t[1])
-		tb.tooltip_text = str(t[2])
+		tb.tooltip_text = "%s（快捷键 %s）" % [str(t[2]), str(t[3])]
 		tb.toggle_mode = true
 		tb.button_group = tool_group
 		tb.button_pressed = terrain_tool == str(t[0])
 		var tid := str(t[0])
-		tb.pressed.connect(func():
-			terrain_tool = tid
-			_shape_anchor = Vector2i(-1, -1)
-			set_status("地形工具：%s" % str(t[1])))
+		tb.pressed.connect(func(): _set_terrain_tool(tid))
+		_tool_btns[tid] = tb
 		toolrow.add_child(tb)
 	box.add_child(toolrow)
 	var rrow := HBoxContainer.new()
 	var rlab := Label.new()
 	rlab.text = "画笔半径"
 	rrow.add_child(rlab)
-	var rspin := SpinBox.new()
-	rspin.min_value = 0
-	rspin.max_value = 4
-	rspin.value = brush_radius
-	rspin.tooltip_text = "0=单格；N=六边形距离 ≤N 的一片（仅画笔工具生效）"
-	rspin.value_changed.connect(func(v: float): brush_radius = int(v))
-	rrow.add_child(rspin)
+	_radius_spin = SpinBox.new()
+	_radius_spin.min_value = 0
+	_radius_spin.max_value = 4
+	_radius_spin.value = brush_radius
+	_radius_spin.tooltip_text = "0=单格；N=六边形距离 ≤N 的一片（仅画笔工具生效）\n快捷键 [ 减 / ] 增"
+	_radius_spin.value_changed.connect(func(v: float): brush_radius = int(v))
+	rrow.add_child(_radius_spin)
 	box.add_child(rrow)
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -593,6 +654,27 @@ func _build_terrain_brushes() -> Control:
 	# 向上展开（expand_up）：header 钉在侧栏最底不动，展开时内容向上顶开笔刷区——开合位置一致，符合人体工学。
 	box.add_child(EditorUI.make_foldable("地形数据（选中笔刷）", _build_terrain_data(), true, true))
 	return box
+
+# 地形工具切换单一入口（工具按钮 / 快捷键 B G R L 共用）：置工具 + 重置两点起点 + 同步按钮状态
+func _set_terrain_tool(id: String) -> void:
+	terrain_tool = id
+	_shape_anchor = Vector2i(-1, -1)
+	if _tool_btns.has(id) and not (_tool_btns[id] as Button).button_pressed:
+		(_tool_btns[id] as Button).button_pressed = true   # 快捷键路径：同步互斥组视觉（属性置位不发 pressed，无回环）
+	set_status("地形工具：%s" % _tool_label(id))
+
+func _tool_label(id: String) -> String:
+	for t in TOOL_DEFS:
+		if str(t[0]) == id:
+			return str(t[1])
+	return id
+
+# 画笔半径调整单一入口（SpinBox / 快捷键 [ ] 共用）：钳 0~4 + 同步 SpinBox 显示
+func _set_brush_radius(v: int) -> void:
+	brush_radius = clampi(v, 0, 4)
+	if _radius_spin != null and int(_radius_spin.value) != brush_radius:
+		_radius_spin.value = brush_radius   # value_changed 会再写同值 brush_radius，幂等无回环
+	set_status("画笔半径：%d（[ 减 / ] 增；仅画笔工具生效）" % brush_radius)
 
 # ==================== 笔刷分类管理 ====================
 # 按分类分组重建笔刷列表。分组只是视觉：brush_buttons 仍与 PALETTE 下标对齐（裸下标消费不受影响）。
@@ -757,7 +839,7 @@ func _on_new_category() -> void:
 		if not cats.has(nm):
 			cats.append(nm)
 			TerrainDB.set_categories(cats)
-			TerrainDB.save()
+			_save_terrain_db()
 		_cat_collapsed[nm] = false
 		_rebuild_terrain_brushes())
 
@@ -776,7 +858,7 @@ func _on_rename_category(cat: String) -> void:
 		if _cat_collapsed.has(cat):
 			_cat_collapsed[nm] = _cat_collapsed[cat]
 			_cat_collapsed.erase(cat)
-		TerrainDB.save()
+		_save_terrain_db()
 		_rebuild_terrain_brushes())
 
 func _on_delete_category(cat: String) -> void:
@@ -789,7 +871,7 @@ func _on_delete_category(cat: String) -> void:
 				if str(e.get("category", "")) == cat:
 					e.erase("category")
 			_cat_collapsed.erase(cat)
-			TerrainDB.save()
+			_save_terrain_db()
 			_rebuild_terrain_brushes(),
 		Callable(), "删除分类")
 
@@ -806,7 +888,7 @@ func _on_move_category(cat: String, delta: int) -> void:
 	cats[idx] = cats[j]
 	cats[j] = tmp
 	TerrainDB.set_categories(cats)
-	TerrainDB.save()
+	_save_terrain_db()
 	_rebuild_terrain_brushes()
 
 func _on_rename_brush(i: int) -> void:
@@ -817,7 +899,7 @@ func _on_rename_brush(i: int) -> void:
 		if nm == "":
 			return
 		e["label"] = nm
-		TerrainDB.save()
+		_save_terrain_db()
 		if i < brush_buttons.size() and brush_buttons[i] != null:
 			brush_buttons[i].text = nm   # 原地改名、免全表重建
 		else:
@@ -835,7 +917,7 @@ func _on_delete_brush(i: int) -> void:
 				cur_key = "%s/%s" % [ce.get("terrain"), ce.get("variant")]
 			var del_key := "%s/%s" % [e.get("terrain"), e.get("variant")]
 			TerrainDB.delete_entry({"terrain": e.get("terrain"), "variant": e.get("variant")})
-			TerrainDB.save()   # PALETTE 是 _palette 活引用、已同步缩短
+			_save_terrain_db()   # PALETTE 是 _palette 活引用、已同步缩短
 			if cur_key == del_key or cur_key == "":
 				brush_index = clampi(brush_index, 0, maxi(0, PALETTE.size() - 1))
 			else:
@@ -856,7 +938,7 @@ func _on_move_brush(i: int, cat: String) -> void:
 		e.erase("category")
 	else:
 		e["category"] = cat
-	TerrainDB.save()
+	_save_terrain_db()
 	_rebuild_terrain_brushes()
 
 # 切换「放置物笔刷」标记：标了的地形，画笔时落在放置物层（盖地形上、单位之下）
@@ -865,7 +947,7 @@ func _on_toggle_object(i: int) -> void:
 		return
 	var e = PALETTE[i]
 	TerrainDB.set_object({"terrain": e.get("terrain"), "variant": e.get("variant")}, not TerrainDB.is_object(e))
-	TerrainDB.save()
+	_save_terrain_db()
 	_rebuild_terrain_brushes()
 
 # 地形数据编辑区（移动成本/通行/tag 成本 + 全局·本图范围）——被 _build_terrain_brushes 包进折叠区
@@ -1035,12 +1117,35 @@ func _on_terr_scope_changed(idx: int) -> void:
 	_refresh_terrain_data()
 	set_status("地形数据范围：%s" % ("本图（仅此图）" if _terr_scope == "map" else "全局（terrains.json）"))
 
-# 本图范围下每次改动 → 标脏（随地图 Ctrl+S 存盘）+ 刷新覆盖状态标
+# 地形数据改动落点分派：本图范围＝标地图脏（随 Ctrl+S 存盘）；
+# 全局范围＝标 §19 全局脏旗（写的是 TerrainDB live 表——不点保存只在本次运行生效、重启即丢）
 func _terr_edit_touched() -> void:
 	if _terr_scope == "map":
 		_dirty = true
 		_update_file_label()
 		_refresh_terr_ov_label()
+	else:
+		_terr_global_dirty = true
+		_update_terr_save_btn()
+
+# §19：保存钮随全局脏旗变化（● 前缀 + 黄字提醒，与外壳脏可见同语义）
+func _update_terr_save_btn() -> void:
+	if _terr_save_btn == null:
+		return
+	_terr_save_btn.text = "● 保存到 terrains.json（未保存）" if _terr_global_dirty else "保存到 terrains.json"
+	if _terr_global_dirty:
+		_terr_save_btn.add_theme_color_override("font_color", Color(1.0, 0.85, 0.3))
+	else:
+		_terr_save_btn.remove_theme_color_override("font_color")
+
+# TerrainDB 写盘统一出口（§19）：save 写整份 terrains.json——任何一次成功写盘（含笔刷/分类管理）
+# 都会把未保存的 move 改动一并持久化，故成功即清全局脏旗。
+func _save_terrain_db() -> bool:
+	var ok: bool = TerrainDB.save()
+	if ok:
+		_terr_global_dirty = false
+		_update_terr_save_btn()
+	return ok
 
 # 清除当前笔刷的本图覆盖（回到全局值）
 func _on_terr_clear_override() -> void:
@@ -1116,7 +1221,7 @@ func _on_terr_tagcost_changed() -> void:
 	_terr_edit_touched()
 
 func _on_save_terrain_data() -> void:
-	if TerrainDB.save():
+	if _save_terrain_db():
 		set_status("已保存地形数据 → terrains.json（影响所有地图，编辑器与战斗共用）")
 	else:
 		set_status("保存失败：无法写入 terrains.json")
@@ -1386,6 +1491,17 @@ func _build_location_tools() -> Control:
 	v.add_child(_loc_battle_edit)
 	_loc_dialogue_edit = _loc_form_line("dialogue_id（交谈对话）", func(t: String): _set_loc_field_or_erase("dialogue_id", t))
 	v.add_child(_loc_dialogue_edit)
+	# §8 顺手交互：改画瓦片后注记留原格成孤儿——「移注记到…」把选中注记搬到新地点格
+	var mv := Button.new()
+	mv.text = "⇢ 移注记到…（点目标格）"
+	mv.tooltip_text = "选中注记后点此，再左键点地图目标格＝把注记（id/名字/讨伐图/对话）搬过去。\n改画地点瓦片后孤儿注记的归位工具；右键取消。"
+	mv.pressed.connect(func():
+		if _ann_index_at(_active_loc_cell.x, _active_loc_cell.y) < 0:
+			set_status("先在列表/画布选一个带注记（●/⚠）的地点")
+			return
+		_loc_move_pending = true
+		set_status("移注记：左键点目标格（右键取消）"))
+	v.add_child(mv)
 	var clr := Button.new()
 	clr.text = "删除注记（恢复自动 id/名字）"
 	clr.tooltip_text = "只删注记不删地点（地点跟着瓦片走）；孤儿注记删后彻底消失"
@@ -1427,9 +1543,14 @@ func _ensure_ann(col: int, row: int) -> Dictionary:
 	map_locations.append(ann)
 	return ann
 
-# 地点层左键：点地点格＝选中（编辑注记）；点非地点格＝提示去地形层画瓦片
+# 地点层左键：点地点格＝选中（编辑注记）；点非地点格＝提示去地形层画瓦片；
+# 「移注记到…」待选态＝本次点击当目标格（§8：把选中注记搬过去，一步撤销）
 func _loc_paint(col: int, row: int) -> void:
 	var cell := Vector2i(col, row)
+	if _loc_move_pending:
+		_loc_move_pending = false
+		_loc_move_ann_to(col, row)
+		return
 	if cell == _active_loc_cell:
 		return   # 拖动重复格不刷
 	var d := derived_locations()
@@ -1446,8 +1567,38 @@ func _loc_paint(col: int, row: int) -> void:
 	else:
 		set_status("该格不是地点瓦片——在地形层画 城市/村落/营地/遗迹 瓦片即创建地点")
 
-# 地点层右键：删该格注记（地点本体跟瓦片走，不受影响；孤儿注记删后彻底消失）
+# §8 移注记：把选中格的注记 col/row 改到目标格（目标已有注记＝拒绝；同格＝取消）
+func _loc_move_ann_to(col: int, row: int) -> void:
+	var src := _ann_index_at(_active_loc_cell.x, _active_loc_cell.y)
+	if src < 0:
+		set_status("注记已不在（撤销/删除过？）——重新选中再移")
+		return
+	var dst := Vector2i(col, row)
+	if dst == _active_loc_cell:
+		set_status("已取消移注记（点了原格）")
+		return
+	if _ann_index_at(col, row) >= 0:
+		set_status("目标格已有注记——先删它或换个格")
+		return
+	_push_undo(_snapshot(), "移动地点注记")
+	map_locations[src]["col"] = col
+	map_locations[src]["row"] = row
+	_active_loc_cell = dst
+	_dirty = true
+	_update_file_label()
+	_refresh_loc_list()
+	_load_loc_form()
+	if canvas: canvas.refresh_static()
+	var still := (derived_locations()["by_cell"] as Dictionary).has(dst)
+	set_status("注记已移到 (%d,%d)%s" % [col, row, "" if still else "——⚠ 该格不是地点瓦片（仍为孤儿），可在地形层补画瓦片"])
+
+# 地点层右键：删该格注记（地点本体跟瓦片走，不受影响；孤儿注记删后彻底消失）；
+# 「移注记到…」待选态＝右键取消
 func _loc_remove(col: int, row: int) -> void:
+	if _loc_move_pending:
+		_loc_move_pending = false
+		set_status("已取消移注记")
+		return
 	var idx := _ann_index_at(col, row)
 	if idx < 0:
 		return
@@ -1606,6 +1757,14 @@ func _build_unit_tools() -> Control:
 	frow.add_child(fopt)
 	v.add_child(frow)
 	v.add_child(_make_label("原型（选一个再落子）"))
+	# §20 搜索过滤：匹配 行文本（名/等级/兵系/阵营）或 id，大小写不敏感
+	var filt := LineEdit.new()
+	filt.placeholder_text = "搜索（名 / id / 兵系 / Lv）"
+	filt.clear_button_enabled = true
+	filt.text_changed.connect(func(t: String):
+		_unit_filter = t
+		_refresh_unit_protos())
+	v.add_child(filt)
 	_unit_list = ItemList.new()
 	_unit_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_unit_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1615,17 +1774,33 @@ func _build_unit_tools() -> Control:
 	_refresh_unit_protos()
 	return v
 
+# §20 原型行文本：名字 Lv级·兵系（阵营）——等级/种族直读原型字段，汉化走 TagDB（未知 id 原样回显）
+func _unit_row_text(p: Dictionary) -> String:
+	return "%s Lv%d·%s（%s）" % [str(p.get("name", "单位")), int(p.get("level", 1)),
+		TagDB.cn(str(p.get("race", "human"))), TagDB.cn(str(p.get("default_faction", "enemy")))]
+
+# §20 过滤后的原型下标序列（列表行 → _unit_protos 下标；空过滤＝全部）——纯逻辑，headless 可测
+func _unit_rows_filtered() -> Array:
+	var out := []
+	var f := _unit_filter.strip_edges().to_lower()
+	for i in _unit_protos.size():
+		var p: Dictionary = _unit_protos[i]
+		if f == "" or _unit_row_text(p).to_lower().contains(f) or str(p.get("id", "")).to_lower().contains(f):
+			out.append(i)
+	return out
+
 func _refresh_unit_protos() -> void:
 	_unit_protos = UnitFactory.all_prototypes()   # 与 Sandbox 共用同一原型读取
+	_unit_row_map = _unit_rows_filtered()
 	if _unit_list == null:
 		return
 	_unit_list.clear()
-	for p in _unit_protos:
-		_unit_list.add_item("%s（%s）" % [str(p.get("name", "单位")), TagDB.cn(str(p.get("default_faction", "enemy")))])
+	for i in _unit_row_map:
+		_unit_list.add_item(_unit_row_text(_unit_protos[i]))
 
-func _on_unit_proto_selected(idx: int) -> void:
-	if idx >= 0 and idx < _unit_protos.size():
-		_unit_proto = _unit_protos[idx]
+func _on_unit_proto_selected(row: int) -> void:
+	if row >= 0 and row < _unit_row_map.size():
+		_unit_proto = _unit_protos[_unit_row_map[row]]
 		_unit_faction = str(_unit_proto.get("default_faction", _unit_faction))   # 选原型即取其默认阵营（仍可改）
 		set_status("将落子：%s（%s）— 左键放到格上" % [str(_unit_proto.get("name", "单位")), TagDB.cn(_unit_faction)])
 
@@ -1698,6 +1873,20 @@ func _build_unit_edit_win() -> void:
 	close_b.pressed.connect(_close_unit_edit)
 	head.add_child(close_b)
 	v.add_child(head)
+	# §8 位置行：col/row 显示可改（占用格拒绝；整段编辑会话＝一步撤销，与面板其他改动同栈）
+	var prow := HBoxContainer.new()
+	prow.add_child(_make_label("位置 col/row"))
+	_unit_pos_col_spin = SpinBox.new()
+	_unit_pos_col_spin.min_value = 0
+	_unit_pos_col_spin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_unit_pos_col_spin.value_changed.connect(func(_v: float): _on_unit_pos_changed())
+	prow.add_child(_unit_pos_col_spin)
+	_unit_pos_row_spin = SpinBox.new()
+	_unit_pos_row_spin.min_value = 0
+	_unit_pos_row_spin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_unit_pos_row_spin.value_changed.connect(func(_v: float): _on_unit_pos_changed())
+	prow.add_child(_unit_pos_row_spin)
+	v.add_child(prow)
 	v.add_child(HSeparator.new())
 	_unit_edit_panel = DeployPanel.new()
 	_unit_edit_panel.host = self
@@ -1718,9 +1907,43 @@ func _edit_placed_unit(idx: int) -> void:
 	_editing_index = idx
 	_editing_unit = UnitFactory.make_unit(proto, str(e.get("faction", "enemy")), int(e.get("col", 0)), int(e.get("row", 0)))
 	_unit_edit_snap_pushed = false
+	if _unit_pos_col_spin != null:   # §8 位置行同步（钳到当前地图界内）
+		_unit_pos_loading = true
+		_unit_pos_col_spin.max_value = width - 1
+		_unit_pos_row_spin.max_value = height - 1
+		_unit_pos_col_spin.value = int(e.get("col", 0))
+		_unit_pos_row_spin.value = int(e.get("row", 0))
+		_unit_pos_loading = false
 	if _unit_edit_win: _unit_edit_win.visible = true
 	if _unit_edit_panel: _unit_edit_panel.select_unit(_editing_unit)
 	set_status("编辑单位：%s（改动即时写回关卡；右上 ✕ 关闭）" % _editing_unit.unit_name)
+
+# §8 深编位置行回写：挪格（目标占用拒绝并回显原值）；走 _unit_edit_before_change＝整段编辑一步撤销
+func _on_unit_pos_changed() -> void:
+	if _unit_pos_loading or _editing_index < 0 or _editing_index >= map_units.size():
+		return
+	var c := int(_unit_pos_col_spin.value)
+	var r := int(_unit_pos_row_spin.value)
+	var e = map_units[_editing_index]
+	if int(e.get("col", -1)) == c and int(e.get("row", -1)) == r:
+		return
+	var occ := _unit_index_at(c, r)
+	if occ >= 0 and occ != _editing_index:
+		set_status("(%d,%d) 已有单位——先挪开或删除它" % [c, r])
+		_unit_pos_loading = true
+		_unit_pos_col_spin.value = int(e.get("col", 0))
+		_unit_pos_row_spin.value = int(e.get("row", 0))
+		_unit_pos_loading = false
+		return
+	_unit_edit_before_change()
+	e["col"] = c
+	e["row"] = r
+	if _editing_unit != null:
+		_editing_unit.col = c
+		_editing_unit.row = r
+	_dirty = true
+	_update_file_label()
+	if canvas: canvas.refresh_static()
 
 func _close_unit_edit() -> void:
 	if _unit_edit_win: _unit_edit_win.visible = false
@@ -1781,12 +2004,15 @@ func save_unit_preset(u, preset_name: String) -> void:
 
 # ============ 触发器层（authoring 关卡事件：when 条件 → do 动作）============
 
+# 左栏＝列表+增删（§32 2026-07-13：编辑表单迁右侧浮动宽面板 _trig_form_win——
+# 全编辑器最复杂表单不再挤 230px 窄列；_trig_loading 守卫与控件引用原样不动）
 func _build_trigger_tools() -> Control:
 	var v := VBoxContainer.new()
 	v.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	v.add_child(EditorUI.section_title("触发器"))
 	_trigger_list = ItemList.new()
 	_trigger_list.custom_minimum_size = Vector2(0, 84)
+	_trigger_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_trigger_list.item_selected.connect(_on_trigger_selected)
 	v.add_child(_trigger_list)
 	var brow := HBoxContainer.new()
@@ -1801,6 +2027,36 @@ func _build_trigger_tools() -> Control:
 	del_b.pressed.connect(_on_delete_trigger)
 	brow.add_child(del_b)
 	v.add_child(brow)
+	var hint := _make_label("编辑表单在右侧面板（本层激活时显示）")
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hint.add_theme_color_override("font_color", Color(0.7, 0.74, 0.82))
+	v.add_child(hint)
+	return v
+
+# §32：触发器编辑表单＝右侧浮动宽面板（420px，仿 _build_unit_edit_win；随触发器层显隐）
+func _build_trig_form_win() -> void:
+	_trig_form_win = PanelContainer.new()
+	_trig_form_win.visible = false
+	_trig_form_win.anchor_left = 1.0
+	_trig_form_win.anchor_right = 1.0
+	_trig_form_win.anchor_top = 0.0
+	_trig_form_win.anchor_bottom = 1.0
+	_trig_form_win.offset_left = -430
+	_trig_form_win.offset_right = -8
+	_trig_form_win.offset_top = 48
+	_trig_form_win.offset_bottom = -8
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.11, 0.12, 0.15, 0.98)
+	sb.set_border_width_all(1)
+	sb.border_color = Color(0.42, 0.52, 0.66)
+	sb.set_corner_radius_all(4)
+	sb.set_content_margin_all(6)
+	_trig_form_win.add_theme_stylebox_override("panel", sb)
+	var v := VBoxContainer.new()
+	var t := Label.new()
+	t.text = "触发器编辑"
+	t.add_theme_color_override("font_color", Color(0.85, 0.9, 1.0))
+	v.add_child(t)
 	v.add_child(HSeparator.new())
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -1811,7 +2067,7 @@ func _build_trigger_tools() -> Control:
 	v.add_child(scroll)
 	form.add_child(_make_label("标签"))
 	_trig_label_edit = LineEdit.new()
-	_trig_label_edit.text_changed.connect(func(t: String): _set_trig_field("label", t))
+	_trig_label_edit.text_changed.connect(func(txt: String): _set_trig_field("label", txt))
 	form.add_child(_trig_label_edit)
 	form.add_child(_make_label("事件：踏入区域"))
 	form.add_child(_make_label("区域"))
@@ -1833,7 +2089,8 @@ func _build_trigger_tools() -> Control:
 	_trig_do_box = VBoxContainer.new()
 	_trig_do_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	form.add_child(_trig_do_box)
-	return v
+	_trig_form_win.add_child(v)
+	add_child(_trig_form_win)   # 加在 root 之后 → 浮在画布上层（与单位深编面板同位、不同层互斥显示）
 
 func active_trigger() -> Dictionary:
 	if _active_trigger_idx >= 0 and _active_trigger_idx < map_triggers.size():
@@ -1910,6 +2167,8 @@ func _on_trig_region_selected(idx: int) -> void:
 		_set_trig_when("region", str(regions[idx].get("id", "")))
 
 func _load_trigger_form() -> void:
+	if _trig_label_edit == null:
+		return   # headless / UI 未建：纯逻辑调用不碰控件
 	_trig_loading = true
 	var t := active_trigger()
 	var has := not t.is_empty()
@@ -2536,13 +2795,62 @@ func _unhandled_input(event: InputEvent) -> void:
 				_save_shortcut()
 				get_viewport().set_input_as_handled()
 		return
-	# 数字键 1~9 快速选笔刷（仅地形层；按 scope 过滤后的可见序映射；焦点在输入框时该键被其消费、不会落到这里）
-	if current_layer == "terrain" and event.keycode >= KEY_1 and event.keycode <= KEY_9:
+	# §21 F1~F6 切图层（顺序＝左栏按钮序；线/地点仅大地图开放——隐藏时提示不切）
+	if event.keycode >= KEY_F1 and event.keycode <= KEY_F6:
+		var order := ["terrain", "line", "region", "unit", "trigger", "location"]
+		var lid: String = order[event.keycode - KEY_F1]
+		var lb = _layer_btns.get(lid)
+		if lb != null and (lb as Button).visible:
+			(lb as Button).button_pressed = true   # 触发 toggled → _set_layer
+		elif lb != null:
+			set_status("该图层仅大地图可编（顶栏「类型」切换）")
+		get_viewport().set_input_as_handled()
+		return
+	# 焦点在文本输入不抢键（外壳 ListEditorShell 同判定法；字母/括号本会被输入框消费，此处双保险）
+	if _text_input_focused():
+		return
+	if current_layer != "terrain":
+		return
+	# §21 地形层工具快捷键：B/G/R/L＝画笔/填充/矩形/直线，[ ]＝画笔半径 -/+
+	match event.keycode:
+		KEY_B:
+			_set_terrain_tool("brush")
+			get_viewport().set_input_as_handled()
+			return
+		KEY_G:
+			_set_terrain_tool("fill")
+			get_viewport().set_input_as_handled()
+			return
+		KEY_R:
+			_set_terrain_tool("rect")
+			get_viewport().set_input_as_handled()
+			return
+		KEY_L:
+			_set_terrain_tool("line")
+			get_viewport().set_input_as_handled()
+			return
+		KEY_BRACKETLEFT:
+			_set_brush_radius(brush_radius - 1)
+			get_viewport().set_input_as_handled()
+			return
+		KEY_BRACKETRIGHT:
+			_set_brush_radius(brush_radius + 1)
+			get_viewport().set_input_as_handled()
+			return
+	# 数字键 1~9 快速选笔刷（按 scope 过滤后的可见序映射）
+	if event.keycode >= KEY_1 and event.keycode <= KEY_9:
 		var idx: int = event.keycode - KEY_1
 		var vis := _visible_brush_indices()
 		if idx < vis.size():
 			brush_buttons[vis[idx]].button_pressed = true  # 触发 toggled -> select_brush
 			get_viewport().set_input_as_handled()
+
+# 焦点在文本输入时不抢快捷键（与 ListEditorShell._text_input_focused 同判定；SpinBox 内嵌 LineEdit 聚焦亦命中）
+func _text_input_focused() -> bool:
+	if not is_inside_tree():
+		return false
+	var f := get_viewport().gui_get_focus_owner()
+	return f is LineEdit or f is TextEdit
 
 # 有未保存改动时先确认再执行 action（新建/加载共用）
 func _confirm_discard(action: Callable) -> void:
@@ -2568,12 +2876,13 @@ func _on_brush_toggled(pressed: bool, idx: int) -> void:
 		select_brush(idx)
 
 func _save_shortcut() -> void:
-	# 没文件走“另存为”（文件选择器本身即确认）；有文件＝覆盖，先弹确认显示目标路径（防手快覆盖错文件）
+	# §13：有文件＝静默覆盖保存（最高频操作不再弹确认；状态栏反馈在 save_to_file——
+	# 跨图撤销毁档路径已修：load/new 清撤销栈，静默保存不再可能把别图内容写进当前文件）；
+	# 没文件走“另存为”（文件选择器本身即确认）。
 	if current_path == "":
 		_on_save_as_pressed()
 	else:
-		EditorUI.confirm(self, "覆盖保存到：\n%s\n（此操作会覆盖该文件）" % current_path,
-			"覆盖保存", func(): save_to_file(current_path), Callable(), "确认保存")
+		save_to_file(current_path)
 
 func _on_save_as_pressed() -> void:
 	if current_path != "":
@@ -2585,8 +2894,17 @@ func _on_load_pressed() -> void:
 	_confirm_discard(func(): _load_dlg.popup_centered(Vector2i(900, 600)))
 
 func _on_back_to_menu() -> void:
-	# 返回主菜单（有未保存改动先确认）
-	_confirm_discard(func(): get_tree().change_scene_to_file("res://StartMenu.tscn"))
+	# 返回主菜单：先守卫全局地形数据（§19 不保存只在本次运行生效、重启即丢），再守卫地图未保存改动
+	_confirm_terr_discard(func():
+		_confirm_discard(func(): get_tree().change_scene_to_file("res://StartMenu.tscn")))
+
+# §19：全局地形数据未写盘时的离开守卫（地图脏守卫 _confirm_discard 的地形数据版）
+func _confirm_terr_discard(action: Callable) -> void:
+	if not _terr_global_dirty:
+		action.call()
+		return
+	EditorUI.confirm(self, "「地形数据（全局）」有未保存改动——不保存只在本次运行生效，重启即丢。\n仍要离开吗？（留下后可在左栏「地形数据」区点保存写回 terrains.json）",
+		"不保存离开", action, Callable(), "地形数据未保存")
 
 func _on_reset_view() -> void:
 	if canvas:
@@ -2639,17 +2957,60 @@ func primary_paint(col: int, row: int) -> void:
 			_:
 				_paint_radius(col, row)
 
-# 单位层左键：一次拖动在第一格决定并锁定动作——点到已有单位=编辑它；点空格=落子（拖动续落）
+# 单位层左键：一次拖动在第一格决定并锁定动作（§8 2026-07-13 拖移/取样）——
+#   Ctrl+点已放单位＝取样复制（深拷 proto 成当前笔刷，再点空格连放副本）；
+#   点已放单位＝move（原地松开＝点击→打开深编；拖到空格＝挪格，深编数据不丢、一次拖动一步撤销）；
+#   点空格＝place（拖动续落）。
 func _unit_paint(col: int, row: int) -> void:
 	if _unit_stroke_action == "":
 		var idx := _unit_index_at(col, row)
-		_unit_stroke_action = "edit" if idx >= 0 else "place"
-		if _unit_stroke_action == "edit":
-			_edit_placed_unit(idx)
+		if idx >= 0 and Input.is_key_pressed(KEY_CTRL):
+			_unit_stroke_action = "sample"
+			_sample_unit(idx)
 			return
-	if _unit_stroke_action == "edit":
+		if idx >= 0:
+			_unit_stroke_action = "move"
+			_unit_drag_index = idx
+			_unit_drag_from = Vector2i(col, row)
+			_unit_drag_ever_moved = false
+			return
+		_unit_stroke_action = "place"
+	match _unit_stroke_action:
+		"move":
+			_unit_drag_to(col, row)
+		"place":
+			_place_unit(col, row)
+		_:
+			pass   # sample：取样后本次拖动不再落子（松开再点格连放）
+
+# §8 拖移：把被拖单位挪到 (col,row)——目标已有别的单位＝拒绝（继续拖到空格）；只改 col/row，proto 深编数据不动
+func _unit_drag_to(col: int, row: int) -> void:
+	if _unit_drag_index < 0 or _unit_drag_index >= map_units.size():
 		return
-	_place_unit(col, row)
+	var e = map_units[_unit_drag_index]
+	if int(e.get("col", -1)) == col and int(e.get("row", -1)) == row:
+		return
+	var occ := _unit_index_at(col, row)
+	if occ >= 0 and occ != _unit_drag_index:
+		set_status("(%d,%d) 已有单位——拖到空格放下" % [col, row])
+		return
+	e["col"] = col
+	e["row"] = row
+	_unit_drag_ever_moved = true
+	_stroke_dirty = true
+	_dirty = true
+	if canvas: canvas.refresh_static()
+
+# §8 Ctrl 取样复制：深拷已放单位的 proto（含深编改动）+ 阵营成当前笔刷——之后左键点格＝连放副本
+func _sample_unit(idx: int) -> void:
+	if idx < 0 or idx >= map_units.size():
+		return
+	var e = map_units[idx]
+	_unit_proto = (e.get("proto", {}) as Dictionary).duplicate(true)
+	_unit_faction = str(e.get("faction", "enemy"))
+	if _unit_list != null:
+		_unit_list.deselect_all()   # 取消列表高亮：当前笔刷＝取样副本而非库原型
+	set_status("已取样：%s（%s）——左键点格连放副本（含深编改动）" % [str((_unit_proto as Dictionary).get("name", "单位")), TagDB.cn(_unit_faction)])
 
 # 画布右键 → 按当前层：地形=取色 / 区域=从当前区域移除格 / 单位=删除该格单位 / 地点=删注记
 # 线层右键（擦边）走 line_paint_edge(add=false)，不进这里。
@@ -2860,6 +3221,154 @@ func new_map(w: int, h: int) -> void:
 	_update_file_label()
 	_refresh_map_highlight()
 	set_status("新建地图 %d×%d" % [width, height])
+
+# ==================== 地图尺寸调整（§30 2026-07-13：扩/裁当前地图，非新建）====================
+
+# 顶栏「调整尺寸…」：弹确认对话框（预填当前尺寸；裁剪丢出界内容的说明在框内）
+func _on_resize_pressed() -> void:
+	if _resize_dlg == null:
+		return
+	_resize_w_spin.value = width
+	_resize_h_spin.value = height
+	_resize_dlg.popup_centered()
+
+# 调整当前地图尺寸：tiles 扩（新格草原）/裁 + 全数据层出界钳制（_clamp_layers_to_bounds）。
+# 整个调整＝一次撤销快照（快照含 width/height/tiles+全层，undo 一步全量回退）。
+func resize_map(w: int, h: int) -> void:
+	var nw := clampi(w, 1, MAX_W)
+	var nh := clampi(h, 1, MAX_H)
+	if nw == width and nh == height:
+		return
+	_close_unit_edit()   # 尺寸变化可能删单位 → 下标失效，先关深编面板
+	_push_undo(_snapshot(), "调整尺寸 %d×%d" % [nw, nh])
+	var nt := []
+	for r in nh:
+		var line := []
+		for c in nw:
+			line.append(tiles[r][c] if (r < height and c < width) else {"terrain": DEFAULT_TERRAIN, "variant": DEFAULT_VARIANT})
+		nt.append(line)
+	tiles = nt
+	width = nw
+	height = nh
+	var dropped := _clamp_layers_to_bounds()
+	if _active_loc_cell.x >= width or _active_loc_cell.y >= height:
+		_active_loc_cell = Vector2i(-1, -1)
+	_dirty = true
+	if width_spin: width_spin.value = width
+	if height_spin: height_spin.value = height
+	_refresh_canvas()
+	_refresh_region_list()
+	_refresh_loc_list()
+	_load_loc_form()
+	if _trigger_panel != null and _trigger_panel.visible:
+		_load_trigger_form()   # spawn 坐标可能被钳 → 重灌表单
+	_update_file_label()
+	if canvas: canvas.request_fit()
+	var extra := ""
+	if not dropped.is_empty():
+		extra = "；出界处理：" + "、".join(dropped)
+	set_status("已调整尺寸 %d×%d（可撤销）%s" % [width, height, extra])
+
+# 出界内容逐层钳制（尺寸调整用）：LAYERS 注册表逐行分派——**加新数据层须在此补分支**。
+# 策略：单位/地点注记出界＝删除（留着必成孤儿/错位）；区域格/线特征格对＝过滤丢弃；
+# 触发器 when/do 里的 col/row＝钳入界内（运行时本就按地图 clamp，删整条触发器过重）；
+# terrain_overrides/environment 无坐标语义不处理。返回人读摘要（状态栏提示）。
+func _clamp_layers_to_bounds() -> Array:
+	var out := []
+	for l in LAYERS:
+		match str(l[0]):
+			"regions":
+				var n := 0
+				for r in regions:
+					var cells: Dictionary = r["cells"]
+					for k in cells.keys():
+						if not _cell_in_bounds(k):
+							cells.erase(k)
+							n += 1
+				if n > 0:
+					out.append("区域格 -%d" % n)
+			"map_units":
+				var n := 0
+				for i in range(map_units.size() - 1, -1, -1):
+					var e = map_units[i]
+					if typeof(e) != TYPE_DICTIONARY or not _cell_in_bounds(Vector2i(int(e.get("col", -1)), int(e.get("row", -1)))):
+						map_units.remove_at(i)
+						n += 1
+				if n > 0:
+					out.append("单位删 %d" % n)
+			"map_triggers":
+				var n := 0
+				for t in map_triggers:
+					if typeof(t) != TYPE_DICTIONARY:
+						continue
+					n += _clamp_coord_keys(t.get("when"))
+					var dolist = t.get("do", [])
+					if typeof(dolist) == TYPE_ARRAY:
+						for a in dolist:
+							n += _clamp_coord_keys(a)
+				if n > 0:
+					out.append("触发器坐标钳 %d" % n)
+			"map_locations":
+				var n := 0
+				for i in range(map_locations.size() - 1, -1, -1):
+					var e = map_locations[i]
+					if typeof(e) != TYPE_DICTIONARY or not _cell_in_bounds(Vector2i(int(e.get("col", -1)), int(e.get("row", -1)))):
+						map_locations.remove_at(i)
+						n += 1
+				if n > 0:
+					out.append("地点注记删 %d" % n)
+			"map_rivers", "map_roads":
+				var n := 0
+				for f in get(str(l[0])):
+					if typeof(f) != TYPE_DICTIONARY:
+						continue
+					var pairs = f.get("pairs", [])
+					if typeof(pairs) != TYPE_ARRAY:
+						continue
+					for i in range(pairs.size() - 1, -1, -1):
+						if not _pair_in_bounds(pairs[i]):
+							pairs.remove_at(i)
+							n += 1
+				if n > 0:
+					out.append("%s段 -%d" % ["河" if str(l[0]) == "map_rivers" else "路", n])
+			"map_bridges":
+				var n := 0
+				for i in range(map_bridges.size() - 1, -1, -1):
+					if not _pair_in_bounds(map_bridges[i]):
+						map_bridges.remove_at(i)
+						n += 1
+				if n > 0:
+					out.append("桥 -%d" % n)
+			_:
+				pass   # map_terrain_overrides / map_environment：无坐标语义
+	return out
+
+func _cell_in_bounds(c: Vector2i) -> bool:
+	return c.x >= 0 and c.x < width and c.y >= 0 and c.y < height
+
+# 线特征格对（[[x,y],[x,y]]）两端都在界内才保留
+func _pair_in_bounds(p) -> bool:
+	if typeof(p) != TYPE_ARRAY or p.size() < 2:
+		return false
+	for cp in p:
+		if typeof(cp) != TYPE_ARRAY or cp.size() < 2:
+			return false
+		if not _cell_in_bounds(Vector2i(int(cp[0]), int(cp[1]))):
+			return false
+	return true
+
+# 字典里的 col/row 键（触发器 when 条件 / spawn 类动作坐标）钳入界内；返回钳了几个键
+func _clamp_coord_keys(d) -> int:
+	if typeof(d) != TYPE_DICTIONARY:
+		return 0
+	var n := 0
+	if d.has("col") and (int(d["col"]) < 0 or int(d["col"]) >= width):
+		d["col"] = clampi(int(d["col"]), 0, width - 1)
+		n += 1
+	if d.has("row") and (int(d["row"]) < 0 or int(d["row"]) >= height):
+		d["row"] = clampi(int(d["row"]), 0, height - 1)
+		n += 1
+	return n
 
 # ==================== 地形工具（2026-07-07：画笔半径 / 油漆桶 / 矩形·直线 两点工具）====================
 # 三者最终都逐格走 paint_cell（放置物笔刷/橡皮/去重/分块重绘 逻辑单一实现）；一次 stroke 一步撤销照旧。
@@ -3106,7 +3615,9 @@ func begin_stroke() -> void:
 	_stroke_snapshot = _snapshot()
 	_stroke_dirty = false
 	_stroke_count = 0
-	_unit_stroke_action = ""   # 单位层：新一次拖动重置动作锁（第一格再定 编辑/落子）
+	_unit_stroke_action = ""   # 单位层：新一次拖动重置动作锁（第一格再定 拖移/落子/取样）
+	_unit_drag_index = -1
+	_unit_drag_ever_moved = false
 	_road_last_cell = Vector2i(-1, -1)   # 路刷：新一次拖动重起连线
 	_fill_stroke_done = false            # 油漆桶：新一次按下允许再填
 	_shape_anchor = Vector2i(-1, -1)     # rect/line：新一次拖动重定起点
@@ -3118,11 +3629,21 @@ func end_stroke() -> void:
 		_shape_anchor = Vector2i(-1, -1)
 		if canvas:
 			canvas.queue_redraw()
+	# §8 单位层拖移收尾：松开在原格＝净零变化不入撤销——其中从未动过＝点击语义（打开深编，原行为）
+	if current_layer == "unit" and _unit_stroke_action == "move":
+		var di := _unit_drag_index
+		_unit_drag_index = -1
+		if di >= 0 and di < map_units.size():
+			var de = map_units[di]
+			if Vector2i(int(de.get("col", -1)), int(de.get("row", -1))) == _unit_drag_from:
+				_stroke_dirty = false
+				if not _unit_drag_ever_moved:
+					_edit_placed_unit(di)
 	if _stroke_dirty and _stroke_snapshot != null:
 		var lbl := ""
 		match current_layer:
 			"region": lbl = "区域编辑"
-			"unit": lbl = "单位编辑"
+			"unit": lbl = "移动单位" if _unit_stroke_action == "move" else "单位编辑"
 			"line": lbl = "线特征编辑"
 			"location": lbl = "地点编辑"
 			_: lbl = "绘制 %s ×%d" % [PALETTE[brush_index].label, _stroke_count]

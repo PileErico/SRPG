@@ -2,7 +2,9 @@ extends SceneTree
 ## 线特征 + 地形 scope 回归（地块美术升级 P1/P2/P3 转正）：
 ## MapIO v4 rivers/roads/bridges 往返与旧图缺省 / HexGrid.edge_key / TerrainDB.in_scope 与新地形 /
 ## Overworld 边感知通行（河阻断·桥豁免·道路折扣＝寻路与扣时同源）/ WorldSim 游荡吃边 /
-## 编辑器线特征与地点层纯逻辑（画/擦/撤销/存盘往返，不进树）/ decor 扰动确定性。
+## 编辑器线特征与地点层纯逻辑（画/擦/撤销/存盘往返，不进树）/ decor 扰动确定性 /
+## 编辑器批次 2026-07-13：单位拖移·Ctrl取样复制（§8）/ 尺寸调整逐层钳制（§30）/
+## Ctrl+S 静默保存（§13）/ 全局地形脏旗（§19）/ 原型过滤（§20）/ 地点移注记。
 ## 运行：..._console.exe --headless --path "D:/1战棋" -s res://tools/test_mapfeatures.gd（退出码 0=PASS）
 
 const MapIO := preload("res://MapIO.gd")
@@ -16,6 +18,7 @@ const HexTileRender := preload("res://HexTileRender.gd")
 const LocationDB := preload("res://LocationDB.gd")
 
 const TMP_MAP := "user://_test_feat_map.json"
+const TMP_SAVE := "user://_test_feat_save.json"
 var _fail := 0
 
 func ck(cond: bool, msg: String) -> void:
@@ -285,6 +288,120 @@ func _initialize() -> void:
 	e2.undo()
 	ck(str(e2.tiles[3][0].get("terrain")) == "plain", "直线一步撤销")
 	e2.free()
+
+	# 10) 编辑器批次 2026-07-13：§8 单位拖移/取样复制 + §30 尺寸调整逐层钳制 + §13/§19/§20 纯逻辑
+	var e3 = MapEditorScript.new()
+	e3._load_terrains()
+	e3.new_map(6, 6)
+	e3.map_units = [
+		{"proto": {"id": "ua", "name": "甲"}, "col": 1, "row": 1, "faction": "enemy"},
+		{"proto": {"id": "ub", "name": "乙"}, "col": 2, "row": 2, "faction": "player"},
+	]
+	# §8 拖移：首格锁 move（headless 无 Ctrl）→ 拖到空格＝挪格，一次拖动一步撤销，proto 不丢
+	var undo_before: int = e3._undo_stack.size()
+	e3.begin_stroke()
+	e3._unit_paint(1, 1)
+	e3._unit_paint(3, 1)
+	e3._unit_paint(4, 2)
+	e3.end_stroke()
+	ck(int(e3.map_units[0]["col"]) == 4 and int(e3.map_units[0]["row"]) == 2, "§8 拖移落点 (4,2)")
+	ck(str((e3.map_units[0]["proto"] as Dictionary).get("name", "")) == "甲", "§8 拖移不丢 proto 数据")
+	ck(e3._undo_stack.size() == undo_before + 1, "§8 一次拖动＝一步撤销")
+	e3.undo()
+	ck(int(e3.map_units[0]["col"]) == 1 and int(e3.map_units[0]["row"]) == 1, "§8 拖移撤销回原位")
+	e3.redo()
+	# §8 拖到已占格＝拒绝（继续拖到空格落下）
+	e3.begin_stroke()
+	e3._unit_paint(4, 2)
+	e3._unit_paint(2, 2)   # 乙占着 → 拒绝
+	ck(int(e3.map_units[0]["col"]) == 4 and int(e3.map_units[0]["row"]) == 2, "§8 拖到已占格拒绝")
+	e3._unit_paint(3, 3)
+	e3.end_stroke()
+	ck(int(e3.map_units[0]["col"]) == 3 and int(e3.map_units[0]["row"]) == 3, "§8 拒绝后继续拖到空格")
+	ck(int(e3.map_units[1]["col"]) == 2 and int(e3.map_units[1]["row"]) == 2, "§8 被占单位不动")
+	# §8 Ctrl 取样复制：深拷 proto 成当前笔刷（隔离），再落子＝副本
+	e3._sample_unit(1)
+	ck(str((e3._unit_proto as Dictionary).get("id", "")) == "ub" and e3._unit_faction == "player", "§8 取样得 proto+阵营")
+	e3._unit_proto["name"] = "乙改"
+	ck(str((e3.map_units[1]["proto"] as Dictionary).get("name", "")) == "乙", "§8 取样深拷贝隔离")
+	e3.begin_stroke()
+	e3._unit_paint(5, 5)   # 空格 → place（放取样副本）
+	e3.end_stroke()
+	ck(e3.map_units.size() == 3 and str((e3.map_units[2]["proto"] as Dictionary).get("name", "")) == "乙改" \
+		and str(e3.map_units[2]["faction"]) == "player", "§8 取样后连放副本")
+	e3.free()
+
+	# §30 尺寸调整：裁剪逐层钳制 + 一步撤销全量回退 + 扩图铺草原
+	var e4 = MapEditorScript.new()
+	e4._load_terrains()
+	e4.new_map(6, 6)
+	e4.map_type = "overworld"
+	e4.tiles[5][5] = {"terrain": "mountain", "variant": "mountain"}
+	e4.regions = [{"id": "r1", "label": "区", "color": "#FFFFFF", "kind": "aggro", "cells": {Vector2i(1, 1): true, Vector2i(5, 5): true}}]
+	e4.map_units = [{"proto": {"id": "u1"}, "col": 1, "row": 1, "faction": "enemy"}, {"proto": {"id": "u2"}, "col": 5, "row": 2, "faction": "enemy"}]
+	e4.map_locations = [{"col": 2, "row": 2, "label": "内"}, {"col": 5, "row": 5, "label": "外"}]
+	e4.map_rivers = [{"id": "r", "label": "河", "pairs": [[[1, 1], [1, 2]], [[5, 4], [5, 5]]]}]
+	e4.map_bridges = [[[1, 1], [1, 2]], [[5, 4], [5, 5]]]
+	e4.map_triggers = [{"id": "t1", "label": "触", "when": {"event": "enter_region"}, "do": [{"action": "spawn_unit", "col": 5, "row": 5}]}]
+	e4.resize_map(4, 4)
+	ck(e4.width == 4 and e4.height == 4 and e4.tiles.size() == 4 and (e4.tiles[0] as Array).size() == 4, "§30 裁剪后尺寸/tiles 4×4")
+	ck(e4.map_units.size() == 1 and int(e4.map_units[0]["col"]) == 1, "§30 出界单位删除、界内保留")
+	ck((e4.regions[0]["cells"] as Dictionary).size() == 1 and (e4.regions[0]["cells"] as Dictionary).has(Vector2i(1, 1)), "§30 区域出界格过滤")
+	ck(e4.map_locations.size() == 1 and int(e4.map_locations[0]["col"]) == 2, "§30 出界地点注记删除")
+	ck(((e4.map_rivers[0] as Dictionary)["pairs"] as Array).size() == 1 and (e4.map_bridges as Array).size() == 1, "§30 出界线特征格对丢弃")
+	var act0: Dictionary = (e4.map_triggers[0]["do"] as Array)[0]
+	ck(int(act0["col"]) == 3 and int(act0["row"]) == 3, "§30 触发器 spawn 坐标钳入界内")
+	e4.undo()
+	ck(e4.width == 6 and e4.map_units.size() == 2 and e4.map_locations.size() == 2 \
+		and ((e4.map_rivers[0] as Dictionary)["pairs"] as Array).size() == 2 and (e4.map_bridges as Array).size() == 2, "§30 一步撤销全量回退")
+	ck(int(((e4.map_triggers[0]["do"] as Array)[0] as Dictionary)["col"]) == 5, "§30 撤销回退触发器坐标")
+	e4.resize_map(8, 8)
+	ck(e4.width == 8 and str((e4.tiles[7][7] as Dictionary)["terrain"]) == "plain", "§30 扩图新格铺草原")
+	ck(str((e4.tiles[5][5] as Dictionary)["terrain"]) == "mountain", "§30 扩图保留原内容")
+	ck(str(e4.map_type) == "overworld", "§30 尺寸调整不动 map_type")
+	e4.free()
+
+	# §13 静默保存 + §19 全局地形脏旗 + §20 原型过滤 + §8 地点移注记（纯逻辑）
+	var e5 = MapEditorScript.new()
+	e5._load_terrains()
+	e5.new_map(3, 3)
+	e5.current_path = TMP_SAVE
+	e5._dirty = true
+	e5._save_shortcut()   # §13：有路径＝直接写盘（不再弹确认——headless 直调可过即证明无对话框依赖）
+	ck(FileAccess.file_exists(TMP_SAVE) and not e5._dirty, "§13 Ctrl+S 静默保存写盘+清脏")
+	DirAccess.remove_absolute(TMP_SAVE)
+	e5._terr_scope = "global"
+	e5._terr_edit_touched()
+	ck(e5._terr_global_dirty, "§19 全局地形改动标脏")
+	e5._terr_global_dirty = false
+	e5._dirty = false
+	e5._terr_scope = "map"
+	e5._terr_edit_touched()
+	ck(not e5._terr_global_dirty and e5._dirty, "§19 本图范围只标地图脏、不动全局旗")
+	e5._unit_protos = [
+		{"id": "empire_infantry", "name": "帝国步兵", "level": 1, "race": "human", "default_faction": "enemy"},
+		{"id": "belooz", "name": "比路兹", "level": 5, "race": "harpy", "default_faction": "player"},
+	]
+	e5._unit_filter = "帝国"
+	ck(e5._unit_rows_filtered() == [0], "§20 过滤：中文名匹配")
+	e5._unit_filter = "belooz"
+	ck(e5._unit_rows_filtered() == [1], "§20 过滤：id 匹配")
+	e5._unit_filter = "lv5"
+	ck(e5._unit_rows_filtered() == [1], "§20 过滤：等级文本匹配（大小写不敏感）")
+	e5._unit_filter = ""
+	ck(e5._unit_rows_filtered().size() == 2, "§20 空过滤＝全部")
+	ck(e5._unit_row_text(e5._unit_protos[0]).contains("Lv1"), "§20 行文本含等级")
+	# §8 地点移注记：注记搬格（含撤销）；目标已有注记拒绝
+	e5.map_locations = [{"col": 1, "row": 1, "id": "loc_a", "label": "甲"}, {"col": 2, "row": 2, "id": "loc_b"}]
+	e5._active_loc_cell = Vector2i(1, 1)
+	e5._loc_move_ann_to(2, 2)
+	ck(int(e5.map_locations[0]["col"]) == 1, "§8 移注记：目标已有注记拒绝")
+	e5._loc_move_ann_to(0, 2)
+	ck(int(e5.map_locations[0]["col"]) == 0 and int(e5.map_locations[0]["row"]) == 2 \
+		and str(e5.map_locations[0]["id"]) == "loc_a", "§8 移注记：搬格保注记内容")
+	e5.undo()
+	ck(int(e5.map_locations[0]["col"]) == 1, "§8 移注记可撤销")
+	e5.free()
 
 	# 8) decor 扰动（HexTileRender 单一实现）：确定性（同种子同输出）+ 幅度有界（±2.5px）+ seed 0=零偏移（笔刷缩略图规整）
 	var a: Vector2 = HexTileRender._jo(12345, 0)
