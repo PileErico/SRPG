@@ -220,6 +220,21 @@ func _initialize() -> void:
 		"无敌图：草原直线 3 格成本 3、原地 0")
 	ck(not b5.has(Vector2i(4, 3)), "预算 3 不含第 4 格")
 
+	# —— 5) 甲伤因子 armor_f（🔒 决策33）：只放大啃甲、人身溢出按原口径；f=1 与旧行为等价 ——
+	var CR := preload("res://CombatResolver.gd")
+	var t_arm = mk("重甲", "enemy", 6, 3)
+	t_arm.stats["armor"] = 20
+	var comp := [{"lane": "armor_first", "damage_category": "physical", "ratio": 1.0}]
+	var r_base: Dictionary = CR.resolve(t_arm, 10.0, 1.0, comp)             # 10 全进甲，池够
+	ck(is_equal_approx(float(r_base["armor_loss"]), 10.0) and is_equal_approx(float(r_base["hp_loss"]), 0.0),
+		"f=1 基线：啃甲 10、无溢出")
+	var r_f2: Dictionary = CR.resolve(t_arm, 10.0, 1.0, comp, 2.0)          # 甲伤 ×2：啃 20、仍无人身溢出
+	ck(is_equal_approx(float(r_f2["armor_loss"]), 20.0) and is_equal_approx(float(r_f2["hp_loss"]), 0.0),
+		"f=2：啃甲翻倍 20、溢出仍按原口径为 0（甲伤只多毁甲不多打人）")
+	var r_of: Dictionary = CR.resolve(t_arm, 30.0, 1.0, comp, 2.0)          # 原口径溢出 30−20=10 不受 f 影响
+	ck(is_equal_approx(float(r_of["armor_loss"]), 20.0) and is_equal_approx(float(r_of["hp_loss"]), 10.0),
+		"f=2 破甲：armor_loss 封顶池 20、人身溢出 10＝原口径")
+
 	if _fail == 0:
 		print("=== 战斗结算链 全 PASS ===")
 		quit(0)

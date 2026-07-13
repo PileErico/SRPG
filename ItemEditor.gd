@@ -14,6 +14,7 @@ const SkillDB := preload("res://SkillDB.gd")             # 武器技能引用位
 const ProfDB := preload("res://ProfDB.gd")               # EWS 解锁条件（技艺域下拉+档位名提示）
 const SkillEditorScript := preload("res://SkillEditor.gd")   # §26 「↗」跳转静态传参口（_open_with_id）
 const UnitFactory := preload("res://UnitFactory.gd")         # §18 反向引用感知（原型 equip/bag 引用物品）
+const EffectDB := preload("res://EffectDB.gd")               # On-Hit Effects 引用位（🔒 决策33）
 # EditorTheme / EditorUI / TextureCache 由 ListEditorShell 继承
 
 const ICON_DIR := {
@@ -23,6 +24,10 @@ const ICON_DIR := {
 	"item": "res://icons/Items",
 }
 const OPS := [["flat", "固定"], ["pct", "百分比%"]]
+# 武器固有属性（🔒 决策33 2026-07-13 用户拍板）：必填字段非可选 mod——0=无此项；词条/附加修正仍走 mods。
+# 甲伤=对护甲额外伤害%（钝器特色；结算=CombatResolver armor_f 只放大啃甲）。
+const WEAPON_INTRINSIC := [["atk", "攻击"], ["acc", "命中"], ["block_rate", "格挡率"],
+	["block_power", "格挡性能"], ["armor_dmg", "甲伤（对护甲额外伤害%）"]]
 const PREFER_PAIRS := [["", "（无）"], ["ground", "地面（落地换进主手）"], ["air", "空中（起飞换进主手）"]]   # 比路兹式起降换手
 # 物品大类下拉（基础区，id 上方）：kind 选择器——替掉旧的 4 个「＋类别」按钮
 const KIND_PAIRS := [["weapon", "武器"], ["armor", "防具"], ["accessory", "饰品"], ["item", "物品"]]
@@ -37,7 +42,8 @@ const MANAGED_CATS := ["rarity", "wtype", "wcat_melee", "wcat_ranged", "wcat_cat
 	"wcat_shield", "handedness", "gear_type", "armor_weight", "weapon_attr"]
 
 # 自定义 tag 下拉的类别过滤（据「物品前面已填选项」排除无意义项，见 _tag_offered 各 mode）：
-const NON_ITEM_CATS := ["faction", "movement", "terrain", "unit_status"]   # 描述单位/世界，永不属于物品 → 全排除
+const NON_ITEM_CATS := ["faction", "movement", "terrain", "unit_status",
+	"skill_weapon", "biotype"]   # 描述单位/世界/技能，永不属于物品 → 全排除（skill_weapon 为技能动态 tag、biotype 为生物类别——用户校准 2026-07-13）
 const REQUIRE_CATS := ["char", "race"]                                     # 「装备需求」只给"谁能装"＝身份类
 const ATTACK_CATS := ["target", "damage", "skill_type", "effect"]          # 「攻击标签」只给攻击/技能行为类
 const CATEGORY_CN := {   # 下拉分隔标题的类别中文（缺省回退原 id）
@@ -107,6 +113,9 @@ var _w_weight: OptionButton
 # 修正 / 武器技能（🔒 决策25/26 引用制：BWS 普攻位 + EWS 额外技能位；招式本体在技能编辑器）
 var _mods_box: VBoxContainer
 var _mod_rows: Array = []
+var _w_intr: Dictionary = {}     # 武器固有属性 spins（🔒 决策33）：stat 键 → SpinBox
+var _onhit_rows: Array = []      # On-Hit Effects 行：[{row, effect:OptionButton, chance:SpinBox}]
+var _onhit_box: VBoxContainer
 var _w_bws: OptionButton         # 普攻 BWS 下拉（weapon_skill 勾选过滤，🔒 决策29；（无）＝不提供普攻，如盾）
 var _w_prefer: OptionButton      # 地/空偏好（比路兹式起降换手；一般武器（无））
 var _ews_box: VBoxContainer      # EWS 行容器
@@ -367,6 +376,8 @@ func _clear_form() -> void:
 		c.queue_free()
 	_mod_rows.clear()
 	_ews_rows = []
+	_w_intr = {}
+	_onhit_rows = []
 	_free_tags = []
 	_requires = []
 	_baseline = ""   # §14：重建期间预览刷新不比脏（基线由 _load_item/_do_new_item/_shell_after_save 设）
@@ -424,8 +435,15 @@ func _build_form() -> void:
 	_free_tags = _collect_free_from(_current.get("tags", []))
 	_build_free_tag_ui(_form, "other", "其他标签", _free_tags)
 
+	# 2b. 武器固有属性（🔒 决策33：必填字段——0=无此项；额外修正/词条走下方 mods）
+	if _current_kind == "weapon":
+		_form.add_child(EditorUI.section_title("武器固有属性（必填——0=无此项；额外修正/词条走下方 mods）"))
+		for p in WEAPON_INTRINSIC:
+			_w_intr[str(p[0])] = EditorUI.add_spin(_form, "%s %s" % [str(p[1]), str(p[0])],
+				float(_current.get(str(p[0]), 0)), -999, 9999, 0.5, _refresh_preview)
+
 	# 3. 修正 mods
-	_form.add_child(EditorUI.section_title("修正 mods（每条加在装备者属性上）"))
+	_form.add_child(EditorUI.section_title("修正 mods（每条加在装备者属性上——词条/附魔等额外修正）"))
 	_mods_box = VBoxContainer.new()
 	_mods_box.add_theme_constant_override("separation", 4)
 	_form.add_child(_mods_box)
@@ -438,6 +456,22 @@ func _build_form() -> void:
 		_add_mod_row("atk", "flat", 0.0)
 		_refresh_preview())
 	_form.add_child(addmod)
+
+	# 3b. On-Hit Effects（🔒 决策33：武器打中施加——普攻与武器技能都触发，与技能自带 inflict 独立叠加）
+	if _current_kind == "weapon":
+		_form.add_child(EditorUI.section_title("On-Hit Effects（打中施加；普攻/武器技能/借机都触发，与技能 inflict 叠加）"))
+		_onhit_box = VBoxContainer.new()
+		_onhit_box.add_theme_constant_override("separation", 4)
+		_form.add_child(_onhit_box)
+		for e in _current.get("on_hit_effects", []):
+			if typeof(e) == TYPE_DICTIONARY:
+				_add_onhit_row(str(e.get("effect", "")), float(e.get("chance", 100)))
+		var addoh := Button.new()
+		addoh.text = "＋ 添加 On-Hit 效果"
+		addoh.pressed.connect(func():
+			_add_onhit_row("", 100.0)
+			_refresh_preview())
+		_form.add_child(addoh)
 
 	# 4. 武器技能（仅武器，放底部）：BWS/EWS 引用位（🔒 决策25/26）
 	if _current_kind == "weapon":
@@ -632,7 +666,69 @@ func _on_wtype_changed() -> void:
 	_refresh_preview()
 
 
+# 一条 On-Hit：效果下拉（EffectDB 引用）+ 概率% + ✕（🔒 决策33）
+func _add_onhit_row(effect_id: String, chance: float) -> void:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	var ob := OptionButton.new()
+	ob.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	ob.add_item("（选效果…）")
+	ob.set_item_metadata(0, "")
+	for id in EffectDB.all():
+		var e = EffectDB.all()[id]
+		ob.add_item("%s（%s）" % [str(e.get("name", id)), str(id)])
+		ob.set_item_metadata(ob.item_count - 1, str(id))
+	_ensure_meta_option(ob, effect_id)
+	_select_meta(ob, effect_id)
+	ob.item_selected.connect(func(_i): _refresh_preview())
+	row.add_child(ob)
+	row.add_child(EditorUI.label("概率%"))
+	var ch := SpinBox.new()
+	ch.min_value = 1
+	ch.max_value = 100
+	ch.step = 1
+	ch.value = chance
+	ch.value_changed.connect(func(_v): _refresh_preview())
+	row.add_child(ch)
+	var rm := Button.new()
+	rm.text = "✕"
+	var entry := {"row": row, "effect": ob, "chance": ch}
+	rm.pressed.connect(func():
+		_onhit_rows.erase(entry)
+		row.queue_free()
+		_refresh_preview())
+	row.add_child(rm)
+	_onhit_box.add_child(row)
+	_onhit_rows.append(entry)
+
+
 # ============ 武器技能段（🔒 决策25/26 引用制：只引用技能库、不内嵌创建；招式参数去技能编辑器改）============
+
+# 武器技能可选清单（🔒 决策29 + 2026-07-13 用户校准「选取一视同仁」）：勾了「武器技能」∧ 适用种类匹配本武器。
+# BWS/EWS 只是引用方式（BWS=应用层当普攻、EWS=有解锁条件，除此无异）——两下拉同源；
+# EWS 位另排掉当前 BWS 所选（一技不占两位）。kinds 空＝通用（徒手等）；
+# 匹配面＝表单当前种类所选 + 条目现有 tags（活状态：没存盘也按所选算）。
+func _ws_option_ids(exclude := "") -> Array:
+	var wtags := {}
+	if _w_wcat != null and is_instance_valid(_w_wcat):
+		wtags[str(_w_wcat.get_selected_metadata())] = true
+	for t in _current.get("tags", []):
+		wtags[str(t)] = true
+	var out := []
+	for id in SkillDB.all():
+		if str(id) == exclude:
+			continue
+		var def = SkillDB.get_skill(id)
+		if not SkillDB.is_weapon_skill(def):
+			continue
+		var kinds: Array = def.get("weapon_kinds", [])
+		var ok := kinds.is_empty()
+		for k in kinds:
+			if wtags.has(str(k)):
+				ok = true
+		if ok:
+			out.append(str(id))
+	return out
 
 # BWS 普攻位（🔒 决策29 勾选制：列＝勾了「武器技能」的条目；BWS/EWS 之分由本编辑器的引用位决定）+ 地/空偏好
 # + EWS 行（每条：技能引用+复数 AND 解锁条件）。同一技能可既是 A 武器 BWS 又是 B 武器 EWS。
@@ -641,11 +737,10 @@ func _build_weapon_skills_section() -> void:
 	_w_bws = OptionButton.new()
 	_w_bws.add_item("（无——不提供普攻，如盾）")
 	_w_bws.set_item_metadata(0, "")
-	for id in SkillDB.all():
+	for id in _ws_option_ids():   # 一视同仁清单：勾选+种类匹配（🔒 决策29+用户校准）
 		var def = SkillDB.get_skill(id)
-		if SkillDB.is_weapon_skill(def):
-			_w_bws.add_item("%s（%s）" % [str(def.get("name", id)), str(id)])
-			_w_bws.set_item_metadata(_w_bws.item_count - 1, str(id))
+		_w_bws.add_item("%s（%s）" % [str(def.get("name", id)), str(id)])
+		_w_bws.set_item_metadata(_w_bws.item_count - 1, str(id))
 	var cur_bws := SkillDB.weapon_bws_id(_current)   # 双读单口（§1-6）
 	_ensure_meta_option(_w_bws, cur_bws)
 	_select_meta(_w_bws, cur_bws)
@@ -721,13 +816,13 @@ func _add_ews_row(skill_id: String, requires) -> void:
 	pick.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	pick.add_item("（选技能…）")
 	pick.set_item_metadata(0, "")
-	for id in SkillDB.all():
+	# 一视同仁清单（2026-07-13 用户校准）：勾选+种类匹配、排掉当前 BWS 所选——不再按可跑块过滤
+	# （纯 attack 形 EWS 可入库；施放接线＝阶段6，战斗菜单先灰显提示）
+	var cur_bws_pick := str(_w_bws.get_selected_metadata()) if _w_bws != null and is_instance_valid(_w_bws) else ""
+	for id in _ws_option_ids(cur_bws_pick):
 		var def = SkillDB.get_skill(id)
-		# 列＝勾了「武器技能」的条目（🔒 决策29 勾选制）；纯 attack 块仍排除：能力路径跑不了
-		# （apply_skill 守卫拒发）——attack 类 EWS＝阶段6 放开；lint 规则8 同闸
-		if SkillDB.is_weapon_skill(def) and bool(def.get("active", false)) and SkillDB.has_runnable_block(def):
-			pick.add_item("%s（%s）" % [str(def.get("name", id)), str(id)])
-			pick.set_item_metadata(pick.item_count - 1, str(id))
+		pick.add_item("%s（%s）" % [str(def.get("name", id)), str(id)])
+		pick.set_item_metadata(pick.item_count - 1, str(id))
 	_ensure_meta_option(pick, skill_id)
 	_select_meta(pick, skill_id)
 	pick.item_selected.connect(func(_i): _refresh_preview())
@@ -1097,11 +1192,32 @@ func _collect() -> Dictionary:
 				out["prefer"] = prefer
 			else:
 				out.erase("prefer")
-			# EWS：每条 {skill, requires:[{prof,value},…]}（requires 空省略＝装备即用；空技能行跳过）
+			# 固有属性（🔒 决策33：四键必填恒写——0=无此项；armor_dmg 0 不落键）
+			for k in ["atk", "acc", "block_rate", "block_power"]:
+				if _w_intr.has(k):
+					out[k] = _num(float(_w_intr[k].value))
+			if _w_intr.has("armor_dmg"):
+				var adm := float(_w_intr["armor_dmg"].value)
+				if adm != 0.0:
+					out["armor_dmg"] = _num(adm)
+				else:
+					out.erase("armor_dmg")
+			# On-Hit Effects（空行跳过；全空＝不落键）
+			var ohs := []
+			for e in _onhit_rows:
+				var oe := str(e["effect"].get_selected_metadata())
+				if oe != "":
+					ohs.append({"effect": oe, "chance": _num(float(e["chance"].value))})
+			if ohs.is_empty():
+				out.erase("on_hit_effects")
+			else:
+				out["on_hit_effects"] = ohs
+			# EWS：每条 {skill, requires:[{prof,value},…]}（requires 空省略＝装备即用；空技能行跳过；
+			# 与 BWS 同技＝跳过——一技不占两位，2026-07-13 用户校准）
 			var ews := []
 			for e in _ews_rows:
 				var sid := str(e["skill"].get_selected_metadata())
-				if sid == "":
+				if sid == "" or sid == bws_id:
 					continue
 				var entry := {"skill": sid}
 				var reqs := []
@@ -1130,6 +1246,9 @@ func _collect() -> Dictionary:
 		_:
 			tags.append("accessory")
 			slot = "accessory_1"
+	if _current_kind != "weapon":
+		for k in ["atk", "acc", "block_rate", "block_power", "armor_dmg", "on_hit_effects"]:
+			out.erase(k)   # 武器固有键/On-Hit 只属武器（🔒 决策33）——大类切换残留清除
 
 	for t in _free_tags:
 		if not tags.has(t):
@@ -1151,8 +1270,9 @@ func _collect() -> Dictionary:
 # 物品（非装备类）表单 → 物品字典：kind=item、类型多选 tag、消耗品时含 on_use/设置。无 slot/mods/requires。
 func _collect_item(out: Dictionary) -> Dictionary:
 	out["kind"] = "item"
-	for k in ["slot", "mods", "requires", "two_handed", "innate", "attack", "bws", "bas", "ews", "prefer", "use_scope"]:
-		out.erase(k)   # 装备专属 + 废弃字段：物品一律不带
+	for k in ["slot", "mods", "requires", "two_handed", "innate", "attack", "bws", "bas", "ews", "prefer", "use_scope",
+			"atk", "acc", "block_rate", "block_power", "armor_dmg", "on_hit_effects"]:
+		out.erase(k)   # 装备专属 + 废弃字段 + 武器固有键（决策33）：物品一律不带
 	var tags: Array = [_w_rarity.get_selected_metadata()]
 	if _w_usable.button_pressed:
 		tags.append("usable")

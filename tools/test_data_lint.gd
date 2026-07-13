@@ -15,7 +15,7 @@ extends SceneTree
 ##     per_level 长度==max_level / costs.ap 与顶层 ap_cost 禁双写 / 阶段6 前 hits.size()>1 或 riders 出现即 FAIL
 ##     （防「可编不可跑」内容入库）。WS 形约束已随决策27 关系制移到规则8 引用处执法。
 ##  8) weapons.json 武器技能引用（🔒 决策25/26/29 勾选制）：bws/bas → 技能存在+勾 weapon_skill+含 attack 块；
-##     ews → 技能存在+勾选+主动+含 ≥1 可跑块（纯 attack＝阶段6），requires 的 prof/value 合法。
+##     ews → 技能存在+勾选（一视同仁 2026-07-13——主动/可跑块闸已撤，攻击形施放=阶段6），requires 的 prof/value 合法。
 ##     BWS/EWS＝武器引用位而非技能种类（武器侧决定）：同一技能可既是 A 的 BWS 又是 B 的 EWS。
 ##     内联 attack 残留＝FAIL（2026-07-12 技改 §4-11 收口：weapons.json 已全量迁引用制）。
 ##  9) 原型引用完整性（技改 §4-1）：unit_prototypes 的 equip/bag→ItemDB、trait→TraitDB、race→RaceDB、
@@ -300,7 +300,7 @@ func _initialize() -> void:
 
 	# 8) weapons.json 的武器技能引用（🔒 决策25/26/29 勾选制）：
 	#    bws/bas（双键桥）→ 技能存在 + 勾了 weapon_skill + 含 attack 块（无块＝flatten 空→普攻退化徒手）；
-	#    ews → 技能存在+勾选+主动+可跑块、requires 的 prof/value 合法；
+	#    ews → 技能存在+勾选、requires 的 prof/value 合法（主动/可跑块闸已撤 2026-07-13）；
 	#    内联 attack 残留＝窗口期提示（迁移后应为 0；收口后改 FAIL）。
 	var wd = _read_json("res://data/weapons.json")
 	if wd != null:
@@ -327,9 +327,8 @@ func _initialize() -> void:
 					var sdef = SkillDB.get_skill(sid)
 					ck(sdef != null, "%s：ews 引用的技能存在：%s" % [wid, sid])
 					ck(sdef == null or SkillDB.is_weapon_skill(sdef), "%s：ews「%s」须勾选「武器技能」（🔒 决策29）" % [wid, sid])
-					ck(sdef == null or bool(sdef.get("active", false)), "%s：ews「%s」须为主动技能（被动 EWS＝阶段4）" % [wid, sid])
-					ck(sdef == null or SkillDB.has_runnable_block(sdef),
-						"%s：ews「%s」须含 ≥1 可跑块（%s）——纯 attack 块经能力路径拒发（attack 类 EWS＝阶段6）" % [wid, sid, "/".join(SkillDB.RUNNABLE_KINDS)])
+					# 主动/可跑块闸已撤（2026-07-13 用户校准：BWS/EWS 只是引用方式、选取一视同仁）——
+					# 纯 attack 形 EWS 合法入库；施放接线＝阶段6（战斗菜单灰显、apply_skill 守卫兜底零消耗）
 					if typeof(e) == TYPE_DICTIONARY:
 						for r in e.get("requires", []):
 							if typeof(r) != TYPE_DICTIONARY:

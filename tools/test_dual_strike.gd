@@ -74,6 +74,12 @@ func _initialize() -> void:
 				{"stat": "block_power", "op": "flat", "value": 35}]},
 		{"id": "d31_parry", "name": "格挡剑", "slot": "main_hand", "tags": ["one_handed"], "bws": "d31_off",
 			"mods": [{"stat": "block_rate", "op": "flat", "value": 10}]},
+		# 决策33 试料：固有属性顶层键 + 甲伤 + On-Hit Effects
+		{"id": "d33_hammer", "name": "破甲锤", "slot": "main_hand", "tags": ["one_handed"], "bws": "d31_main",
+			"atk": 6, "acc": 10, "block_rate": 0, "block_power": 0, "armor_dmg": 50,
+			"on_hit_effects": [{"effect": "bleeding", "chance": 100}]},
+		{"id": "d33_off", "name": "副刀", "slot": "main_hand", "tags": ["one_handed"], "bws": "d31_off",
+			"atk": 2, "acc": 5, "block_rate": 0, "block_power": 0},
 	]
 	var wf = FileAccess.open("user://test_d31_weapons.json", FileAccess.WRITE)
 	wf.store_string(JSON.stringify(weapons, "  "))
@@ -196,6 +202,37 @@ func _initialize() -> void:
 	ck(t.effective_stat_f("block_rate") == 5.0, "防具来源格挡恒计（不受 weapon_block 影响）")
 	t.modifiers.append({"stat": "block_rate", "op": "flat", "value": 5, "source": "buff:架势"})
 	ck(t.effective_stat_f("block_rate") == 10.0, "buff 非装备源恒计并叠加其上（5+5）")
+
+	# —— 7) 决策33：固有属性装备合成 + 甲伤件归属 + On-Hit Effects ——
+	var h = mk("锤手", "player", 2, 5)
+	h.equipment["main_hand"] = ItemInstances.create("d33_hammer")
+	h.equipment["off_hand"] = ItemInstances.create("d33_off")
+	h._apply_item_mods(ItemInstances.view(int(h.equipment["main_hand"])), int(h.equipment["main_hand"]))
+	h._apply_item_mods(ItemInstances.view(int(h.equipment["off_hand"])), int(h.equipment["off_hand"]))
+	ck(h.effective_stat_f("atk") == 28.0 and h.effective_stat_f("acc") == 215.0,
+		"固有键装备合成进修正管线：atk 20+6+2、acc 200+10+5（🔒 决策33 非 mods）")
+	ck(is_equal_approx(sb._state._seg_armor_dmg_factor(h, {}), 1.5), "主手段甲伤因子＝1+50%（件固有键）")
+	ck(is_equal_approx(sb._state._seg_armor_dmg_factor(h, {"weapon_source": "off_hand"}), 1.0),
+		"副手段甲伤因子＝1（件归属：不吃主手件甲伤——同 offhand_eff/格挡休眠先例）")
+	h.modifiers.append({"stat": "armor_dmg", "op": "flat", "value": 25, "source": "skill:破甲者"})
+	ck(is_equal_approx(sb._state._seg_armor_dmg_factor(h, {}), 1.75)
+		and is_equal_approx(sb._state._seg_armor_dmg_factor(h, {"weapon_source": "off_hand"}), 1.25),
+		"perk 非装备源甲伤两段都吃（+25%，修正是对象）")
+	# On-Hit：主手件 100% 流血（靶 body_fort 0＝无豁免）——命中即挂；与技能 inflict 无关
+	var v = mk("受害者", "enemy", 2, 6)
+	sb.units = [h, v]
+	var oh_applied := false
+	for seedv in range(1, 41):
+		v.stats["HP"] = 500
+		h.morale = 25
+		sb._state.rng.seed = seedv
+		var rr: Dictionary = sb._state._resolve_compute(h, v, {"coeff": 1.0})
+		if bool(rr.get("hit", false)):
+			ck(rr.has("on_hit") and not v.effects.is_empty(),
+				"命中 → 武器 On-Hit 100% 流血挂上（普攻无技能 inflict 也触发）")
+			oh_applied = true
+			break
+	ck(oh_applied, "样本内出现命中（On-Hit 断言成立）")
 
 	# —— 清场：撤 override、清实例 ——
 	SkillDB._path_override = ""

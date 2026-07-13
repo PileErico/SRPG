@@ -575,6 +575,27 @@ func _main_hand_tags(u) -> Array:
 	var item = ItemInstances.view(int(u.equipment.get("main_hand", 0)))
 	return item.get("tags", []) if item != null else []
 
+# 本段持械槽（🔒 决策33 件归属，同 offhand_eff/格挡休眠先例）：hit 带 weapon_source=off_hand → 副手件，否则主手件
+func _seg_slot(skill) -> String:
+	return "off_hand" if str(skill.get("weapon_source", "")) == "off_hand" else "main_hand"
+
+# 甲伤因子（🔒 决策33 钝器对护甲额外伤害）：1 + (持械件固有 armor_dmg + 该件 mods 词条 + 非装备源修正)/100。
+# 件侧直读（固有键+词条），不走 effective_stat——装备源修正扫描排除（防双计、防双武跨件串味）；
+# perk/buff/特性等非装备源经 _mod_active 照常计入（修正是对象 🔒）。
+func _seg_armor_dmg_factor(attacker, skill) -> float:
+	var pct := 0.0
+	var item = ItemInstances.view(int(attacker.equipment.get(_seg_slot(skill), 0)))
+	if item != null:
+		pct += float(item.get("armor_dmg", 0))
+		for m in item.get("mods", []):
+			if typeof(m) == TYPE_DICTIONARY and str(m.get("stat", "")) == "armor_dmg":
+				pct += float(m.get("value", 0))
+	for m in attacker.modifiers:
+		if typeof(m) == TYPE_DICTIONARY and str(m.get("stat", "")) == "armor_dmg" \
+				and not str(m.get("source", "")).begins_with("equip:") and attacker._mod_active(m):
+			pct += float(m.get("value", 0))
+	return maxf(0.0, 1.0 + pct / 100.0)
+
 func _resolve_compute(attacker, target, skill) -> Dictionary:
 	# 交互语境（🔒 §4.2 阶段4）：结算期内两侧互挂 combat_ctx，when 条件（target_tag/skill_tag/target_effect）
 	# 惰性读取（屠龙者 triple_vs / 受击向条件同口）；出结算即清——结算外交互条件恒不满足。
@@ -643,8 +664,8 @@ func _resolve_compute_body(attacker, target, skill) -> Dictionary:
 		components.append({"lane": "armor_first", "damage_category": dkind, "ratio": 1.0 - pen})
 	else:
 		components.append({"lane": "armor_first", "damage_category": dkind, "ratio": 1.0})
-	# 结算落血（分量减伤链在 CombatResolver：逐分量 甲抗/人抗/固减 + 破甲溢出保留元素）
-	var dres := CombatResolver.resolve(target, out, g, components)
+	# 结算落血（分量减伤链在 CombatResolver：逐分量 甲抗/人抗/固减 + 破甲溢出保留元素；甲伤因子按段取件）
+	var dres := CombatResolver.resolve(target, out, g, components, _seg_armor_dmg_factor(attacker, skill))
 	var hp_loss := int(round(float(dres["hp_loss"])))
 	var armor_loss := int(round(float(dres["armor_loss"])))
 	if armor_loss > 0:
@@ -682,6 +703,16 @@ func _resolve_compute_body(attacker, target, skill) -> Dictionary:
 		r["door_result"] = _door_settle_state(target)
 	# 施加异常（如撕裂的流血）：基础概率 × (1 − 异常抵抗)，命中即挂效果
 	r["inflict"] = _try_inflict_state(target, skill)
+	# 武器 On-Hit Effects（🔒 决策33）：持械件 on_hit_effects 逐条独立掷骰（同 inflict 路径：概率+强韧豁免），
+	# 与技能自带 inflict 叠加；普攻/武器技能/借机同吃（都走本结算）。空手/无实例＝无。
+	var w_item = ItemInstances.view(int(attacker.equipment.get(_seg_slot(skill), 0)))
+	if w_item != null:
+		var onhit := []
+		for e in w_item.get("on_hit_effects", []):
+			if typeof(e) == TYPE_DICTIONARY and str(e.get("effect", "")) != "":
+				onhit.append(_try_inflict_state(target, {"inflict": e}))
+		if not onhit.is_empty():
+			r["on_hit"] = onhit
 	return r
 
 # 命中后尝试施加异常（流血等）：先掷施加概率，命中再掷**强韧豁免**（🔒 模块_属性成长_设计.md §5：

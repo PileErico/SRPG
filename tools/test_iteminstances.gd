@@ -31,15 +31,19 @@ func _initialize() -> void:
 	ck(ItemInstances.create("不存在的模板") == 0, "坏模板返回 0")
 	var v1 = ItemInstances.view(uid1)
 	ck(v1 != null and int(v1["uid"]) == uid1 and str(v1["tpl_id"]) == "long_sword", "view uid/tpl_id")
-	ck((v1["mods"] as Array).size() == 2, "view 继承模板 2 条 mods")
+	ck((v1["mods"] as Array).is_empty(), "view 继承模板 mods（🔒 决策33 固有属性上提顶层键——长剑 mods 空）")
+	ck(is_equal_approx(float(v1.get("atk", 0)), 5.0) and is_equal_approx(float(v1.get("acc", 0)), 30.0),
+		"view 携带固有键 atk5/acc30（决策33）")
 
-	# 2) 雷①：view 是深拷，改视图不污染全局模板
+	# 2) 雷①：view 是深拷，改视图不污染全局模板（固有键/mods 双查）
 	v1["name"] = "被篡改"
+	v1["atk"] = 999
 	(v1["mods"] as Array).append({"stat": "atk", "op": "flat", "value": 999})
 	var tpl = ItemDB.get_item("long_sword")
 	ck(str(tpl.get("name", "")) != "被篡改", "模板 name 未被污染")
-	ck((tpl.get("mods", []) as Array).size() == 2, "模板 mods 未被污染")
-	ck((ItemInstances.view(uid1)["mods"] as Array).size() == 2, "重取 view 干净")
+	ck(is_equal_approx(float(tpl.get("atk", 0)), 5.0) and (tpl.get("mods", []) as Array).is_empty(), "模板固有键/mods 未被污染")
+	var rv = ItemInstances.view(uid1)
+	ck((rv["mods"] as Array).is_empty() and is_equal_approx(float(rv.get("atk", 0)), 5.0), "重取 view 干净")
 
 	# 3) equip 模板便捷入口（兼容路径）：equipment 存 int uid、模板 mods 生效
 	var u1 = _fresh_unit("甲")

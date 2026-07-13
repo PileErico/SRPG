@@ -1585,10 +1585,8 @@ func _ews_active_entries(u) -> Array:
 		var def = SkillDB.get_skill(str(e["id"]))
 		if def == null or not def.get("active", false) or u.has_skill(str(e["id"])):
 			continue
-		# 无可跑块（纯 attack 形——副手 bws 按 EWS 论后天然会出现，🔒 决策31）不进能力菜单：
-		# attack 经能力路径施放＝阶段6（与 _learned_active_skills 同口守卫，apply_skill 亦同）
-		if not SkillDB.has_runnable_block(def):
-			continue
+		# 纯 attack 形照常入列（2026-07-13 用户校准：BWS/EWS 只是引用方式）——菜单侧灰显
+		# 「攻击形施放＝阶段6 待接线」，apply_skill 守卫仍兜底零消耗
 		out.append(e)
 	return out
 
@@ -1613,10 +1611,13 @@ func _build_skill_submenu(u) -> void:
 		var def = SkillDB.get_skill(id)
 		var silenced: bool = u.has_state("silenced") and (def.get("tags", []) as Array).has("verbal")
 		var unlocked := bool(e["unlocked"])
-		var ready: bool = unlocked and u.ews_ready(id) and u.ap >= SkillDB.skill_ap_cost(def) and not silenced
+		var castable := SkillDB.has_runnable_block(def)   # 纯 attack 形＝阶段6 待接线（显示不隐身，2026-07-13 用户校准）
+		var ready: bool = castable and unlocked and u.ews_ready(id) and u.ap >= SkillDB.skill_ap_cost(def) and not silenced
 		var label := "🗡 " + str(def.get("name", id))
 		var st = u.ews_state.get(id, {})
-		if not unlocked:
+		if not castable:
+			label += "（攻击形施放待接线·阶段6）"
+		elif not unlocked:
 			label += "（需 %s）" % _ews_req_text(e["requires"])
 		elif int(st.get("cd", 0)) > 0:
 			label += "（冷却 %d）" % int(st.get("cd", 0))
@@ -2112,12 +2113,10 @@ func _resolve_one(attacker, target, skill, show_target := false) -> Dictionary:
 		_log_door_settle(target, str(r["door_result"]))
 	var inf: Dictionary = r.get("inflict", {})
 	if not inf.is_empty():
-		var seg := "%s %s%%（骰%s）" % [str(inf["name"]), _numf(inf["base_ch"]), _numf(inf["roll"])]
-		if bool(inf.get("shrugged", false)):
-			seg += " → [color=#7FD5A0]强韧豁免[/color]（韧%s%%·骰%s）" % [_numf(inf["fort"]), _numf(inf["fort_roll"])]
-		else:
-			seg += " → %s" % _oc(bool(inf["applied"]), "施加", "未中")
-		lines.append(seg)
+		lines.append(_inflict_log_seg(inf))
+	for oh in r.get("on_hit", []):   # 武器 On-Hit Effects（🔒 决策33）：与技能 inflict 同格式，前缀标武器来源
+		if not (oh as Dictionary).is_empty():
+			lines.append("　[武器] " + _inflict_log_seg(oh))
 	var att_shift := _morale_band_shift(attacker, int(r.get("morale_att", 0)))
 	if att_shift != "":
 		lines.append(att_shift)
@@ -2149,6 +2148,15 @@ func _clear_effects_and_buffs(u) -> void:
 # 移除单位身上所有带某 tag 的效果（如治疗清「bleeding」流血类）+ 连带摘掉它们挂的修正；返回移除条数。
 func _cleanse_effects_with_tag(u, tag: String) -> int:
 	return _state._cleanse_effects_with_tag(u, tag)
+
+# 施加掷骰一行（技能 inflict 与武器 on_hit 同格式）：「名 概率%（骰x）→ 施加/未中/强韧豁免」
+func _inflict_log_seg(inf: Dictionary) -> String:
+	var seg := "%s %s%%（骰%s）" % [str(inf["name"]), _numf(inf["base_ch"]), _numf(inf["roll"])]
+	if bool(inf.get("shrugged", false)):
+		seg += " → [color=#7FD5A0]强韧豁免[/color]（韧%s%%·骰%s）" % [_numf(inf["fort"]), _numf(inf["fort_roll"])]
+	else:
+		seg += " → %s" % _oc(bool(inf["applied"]), "施加", "未中")
+	return seg
 
 # —— 战斗记录 BBCode 小工具 ——
 func _hl(x) -> String:                       # 高亮加粗数字（金）

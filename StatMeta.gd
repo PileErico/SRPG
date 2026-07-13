@@ -20,6 +20,9 @@ const LABELS := {
 	"dr_flat_armor": "甲固减", "dr_flat_human": "人固减",
 	# 能力键 stat（🔒 决策31：0/1 语义、perk 经被动桥 passive_stat_mods 走修正管线授予，≥1＝解锁）
 	"offhand_ws": "副手武技", "dual_strike": "双武连携", "weapon_block": "武器格挡",
+	# 甲伤（🔒 决策33）：对护甲额外伤害%（0=无）——武器固有键/件上词条按段读件；perk/buff 非装备源经修正对象计入。
+	# 不入 SERIALIZABLE/EDITOR（非单位面板 stat：件侧+修正侧结算态）。
+	"armor_dmg": "甲伤",
 }
 
 # ============ stat 分组元数据（单一源；序列化/编辑器 两个白名单同处维护）============

@@ -17,7 +17,9 @@ const RES_SUFFIX := {"physical": "phys", "fire": "nature", "ice": "nature", "thu
 #   g          = 全域减伤 G = max(0,1−格挡性能/100) × 减伤效能（Sandbox 已算好并 clamp）
 #   components = [{lane:"armor_first"|"human", damage_category:String, ratio:float}]
 #                普攻 = 单分量(armor_first, 物理)；穿甲比例p = human(p) + armor_first(1−p)；附魔 = 按比例拆多 damage_category。
-static func resolve(target, out: float, g: float, components: Array) -> Dictionary:
+#   armor_f    = 甲伤因子（🔒 决策33：1+甲伤%/100，钝器对护甲的额外伤害）——**只放大啃甲**，
+#                人身溢出仍按原伤害口径（甲伤不多打人，只多毁甲；f=1 与旧行为完全等价）。
+static func resolve(target, out: float, g: float, components: Array, armor_f := 1.0) -> Dictionary:
 	var pool := float(target.stats.get("armor", 0))   # 局部模拟护甲池消耗，不改 target
 	var armor_loss := 0.0
 	var hp_loss := 0.0
@@ -30,13 +32,11 @@ static func resolve(target, out: float, g: float, components: Array) -> Dictiona
 		else:
 			# 非穿甲：先进甲（过甲抗 + 甲固减）；破甲溢出**保留原伤害类型**再过人抗 + 人固减
 			var to_armor := maxf(0.0, amt * _res_factor(target, "armor_res_", dkind) - _flat(target, "dr_flat_armor"))
-			if to_armor <= pool:
-				pool -= to_armor
-				armor_loss += to_armor
-			else:
-				var overflow := to_armor - pool
-				armor_loss += pool
-				pool = 0.0
+			var overflow := maxf(0.0, to_armor - pool)   # 溢出按原口径（甲伤不参与）
+			var bite := to_armor * armor_f               # 啃甲按甲伤放大
+			armor_loss += minf(pool, bite)
+			pool = maxf(0.0, pool - bite)
+			if overflow > 0.0:
 				hp_loss += maxf(0.0, overflow * _res_factor(target, "res_", dkind) - _flat(target, "dr_flat_human"))
 	return {"armor_loss": armor_loss, "hp_loss": hp_loss}
 

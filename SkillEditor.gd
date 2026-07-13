@@ -34,7 +34,8 @@ const BLOCK_KINDS := [["attack", "攻击 attack"], ["heal", "治疗 heal"],
 	["conditional_mod", "条件修正 conditional_mod"],
 	["apply_effect", "施加效果 apply_effect"], ["scripted", "脚本 scripted"]]
 # 技能 tag 下拉预设的类别（§2.1 tags：verbal 等玩家可读/可筛词；其余手动）
-const SKILL_TAG_CATS := ["skill_type", "target", "damage"]
+# damage 类已摘（2026-07-13）：创伤定型走攻击块 damage_type 字段，不再从 tag 口进
+const SKILL_TAG_CATS := ["skill_type", "target"]
 const WARN_COLOR := Color(0.95, 0.8, 0.35)    # 黄＝可编不可跑警示
 const LOCK_COLOR := Color(0.92, 0.5, 0.45)    # 红＝阶段6 前禁入库（块锁定）
 const HINT_COLOR := Color(0.55, 0.75, 0.55)   # 绿＝纯说明（字段已生效，非警示）
@@ -676,6 +677,27 @@ func _build_attack_block(box: VBoxContainer, entry: Dictionary) -> void:
 		str(hit.get("damage_type", "")), _mark_dirty)
 	entry["armor_pen"] = EditorUI.add_spin(box, "破甲 armor_pen（0~1：0.3=30% 直击人体，1=无视护甲）", clampf(float(hit.get("armor_pen", 0)), 0.0, 1.0), 0.0, 1.0, 0.01, _mark_dirty)
 	entry["sure_hit"] = EditorUI.add_check(box, "必中 sure_hit（无视命中对抗）", bool(hit.get("sure_hit", false)), _mark_dirty)
+	# 命中施加 inflict（🔒 §2.2 引用形 {effect,chance}；技能招式自带——武器 On-Hit Effects 另算叠加）
+	var inf0 = hit.get("inflict", null)
+	if typeof(inf0) == TYPE_DICTIONARY and not inf0.is_empty() and not inf0.has("effect"):
+		entry["inflict_locked"] = true
+		box.add_child(_warn("inflict 为旧内联形（无 effect 引用键）——本行锁定，保存原样保留", LOCK_COLOR))
+	else:
+		var iob := OptionButton.new()
+		iob.add_item("（无）")
+		iob.set_item_metadata(0, "")
+		for eid in EffectDB.all():
+			var e = EffectDB.all()[eid]
+			iob.add_item("%s（%s）" % [str(e.get("name", eid)), str(eid)])
+			iob.set_item_metadata(iob.item_count - 1, str(eid))
+		var cur_ie := str(inf0.get("effect", "")) if typeof(inf0) == TYPE_DICTIONARY else ""
+		_ensure_meta_option(iob, cur_ie)
+		_select_meta(iob, cur_ie)
+		iob.item_selected.connect(func(_i): _mark_dirty())
+		box.add_child(EditorUI.field_row("命中施加 inflict（打中挂效果；（无）=不施加）", iob))
+		entry["inflict_eff"] = iob
+		entry["inflict_ch"] = EditorUI.add_spin(box, "　　施加概率 %（resist 效果另有强韧豁免）",
+			float(inf0.get("chance", 100)) if typeof(inf0) == TYPE_DICTIONARY else 100.0, 1, 100, 1, _mark_dirty)
 	box.add_child(_warn("aoe / bonus / ignore_* 等高级字段本版不编辑，保存原样保留", WARN_COLOR))
 
 func _build_heal_block(box: VBoxContainer, entry: Dictionary) -> void:
@@ -1028,6 +1050,16 @@ func _collect_block(entry: Dictionary) -> Dictionary:
 				hit["armor_pen"] = _num(pen)
 			else:
 				hit.erase("armor_pen")
+			if not entry.get("inflict_locked", false) and entry.has("inflict_eff"):
+				var ieid := str(entry["inflict_eff"].get_selected_metadata())
+				if ieid == "":
+					hit.erase("inflict")
+				else:
+					# duplicate 原对象只更新两键（ignore_fort 等原样保留——canonical 往返）
+					var inf: Dictionary = (hit.get("inflict") as Dictionary).duplicate(true) if typeof(hit.get("inflict")) == TYPE_DICTIONARY else {}
+					inf["effect"] = ieid
+					inf["chance"] = _num(float(entry["inflict_ch"].value))
+					hit["inflict"] = inf
 			if entry["sure_hit"].button_pressed:
 				hit["sure_hit"] = true
 			else:
