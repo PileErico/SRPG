@@ -1,10 +1,13 @@
 extends RefCounted
 ## 地点注册表（M7；DB 范式：preload + static，无 class_name）：读 res://data/locations.json，类型/服务定义单一源。
-## 三层分工：类型与服务定义＝本文件的数据（数据/代码分离）；地点实例（谁在哪）＝地图 locations 字段
-## （与 units/triggers 同级，MapIO 透传）；运行时状态（据点上次肃清时刻）＝WorldState.location_cleared_at（随档）。
+## 三层分工（瓦片=地点 🔒 2026-07-13）：类型与服务定义＝本文件的数据（数据/代码分离）；
+## 地点**存在性**＝瓦片（terrains.json 条目 location_type，画上即是）；地图 locations 字段降级为**注记层**
+## （按格挂 id/label/battle_map/dialogue_id——身份与内容；type 由瓦片推导不再手选；MapIO 照旧透传）；
+## 运行时状态（据点上次肃清时刻）＝WorldState.location_cleared_at（随档，按地点 id 记账）。
 ## 据点刷新 🔒 语义＝惰性判定（site_ready 读时算），不占 WorldClock 每小时调度——无状态可漏算。
 
 const JsonRegistry := preload("res://JsonRegistry.gd")
+const TerrainDB := preload("res://TerrainDB.gd")
 const PATH := "res://data/locations.json"
 
 static var _types := []          # 有序类型定义
@@ -73,7 +76,49 @@ static func services_of(type_id: String) -> Array:
 			push_warning("LocationDB：类型「%s」引用未登记服务「%s」" % [type_id, str(sid)])
 	return out
 
-# ============ 据点刷新（惰性判定；loc=地图实例 {id,type,…}，状态在 ws.location_cleared_at）============
+# ============ 瓦片=地点派生（🔒 2026-07-13；Overworld/MapEditor/lint 三方共用的单一实现）============
+
+# tiles（行主序 [[{terrain,variant}…]…]）× annotations（地图 locations 注记数组）→
+#   {list:[{id,type,label,col,row,battle_map?,dialogue_id?}…] 行主序, by_cell:{Vector2i:loc}, orphans:[注记…]}
+# 无注记的地点格自动兜底：id="<type>_c<col>_r<row>"（格坐标稳定可入存档/引用）、label=类型名；
+# site 型（lair/ruin）缺 battle_map 给默认可打图（原编辑器放置默认，语义搬到派生）。
+# 注记落在非地点瓦片格＝孤儿（改图后没同步的死引用），进 orphans 由调用方告警/lint FAIL。
+# 同格多条注记后者胜（与旧 _loc_index_at 倒序检索同序）；注记里残留的 type 字段一律忽略（瓦片说了算）。
+static func derive_locations(tiles: Array, annotations: Array) -> Dictionary:
+	var ann_by_cell := {}
+	for a in annotations:
+		if typeof(a) == TYPE_DICTIONARY:
+			ann_by_cell[Vector2i(int(a.get("col", -1)), int(a.get("row", -1)))] = a
+	var list := []
+	var by_cell := {}
+	for r in tiles.size():
+		var row = tiles[r]
+		if typeof(row) != TYPE_ARRAY:
+			continue
+		for c in (row as Array).size():
+			var lt := TerrainDB.location_type_of(row[c])
+			if lt == "":
+				continue
+			var cell := Vector2i(c, r)
+			var ann: Dictionary = ann_by_cell.get(cell, {})
+			ann_by_cell.erase(cell)
+			var loc := {
+				"id": str(ann["id"]) if str(ann.get("id", "")) != "" else "%s_c%d_r%d" % [lt, c, r],
+				"type": lt,
+				"label": str(ann["label"]) if str(ann.get("label", "")) != "" else type_label(lt),
+				"col": c, "row": r,
+			}
+			if str(ann.get("battle_map", "")) != "":
+				loc["battle_map"] = str(ann["battle_map"])
+			elif is_site(lt):
+				loc["battle_map"] = "res://maps/sandbox.json"
+			if str(ann.get("dialogue_id", "")) != "":
+				loc["dialogue_id"] = str(ann["dialogue_id"])
+			list.append(loc)
+			by_cell[cell] = loc
+	return {"list": list, "by_cell": by_cell, "orphans": ann_by_cell.values()}
+
+# ============ 据点刷新（惰性判定；loc=派生地点 {id,type,…}，状态在 ws.location_cleared_at）============
 
 # 据点当前是否可挑战：从未肃清＝可；respawn_hours<=0＝一次性（肃清即永久关）；否则到点刷新
 static func site_ready(loc: Dictionary, ws) -> bool:

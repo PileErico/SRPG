@@ -29,11 +29,12 @@ func _draw() -> void:
 	super()   # 地形 + 悬停高亮；draw_set_transform 已是视图变换，下面直接用世界坐标
 	if editor == null:
 		return
-	# 地点标记（M7）：按类型线稿符号 + 名字（据点已肃清＝灰显）——绘制单一实现在 HexCanvas.draw_location_marker（编辑器地点层同用）
+	# 地点名字标签（M7·瓦片=地点 🔒）：地点长相＝瓦片美术；这里只补名字+据点状态（已肃清＝灰纱+灰字）
+	# ——绘制单一实现在 HexCanvas.draw_location_label（编辑器地点层同用）
 	var font := get_theme_default_font()
 	for loc in editor.locations_for_draw():
 		var cell2: Vector2i = loc["cell"]
-		draw_location_marker(hex_center(cell2.x, cell2.y), str(loc.get("type", "")), loc["color"], str(loc["label"]), loc["active"], str(loc.get("icon", "")))
+		draw_location_label(hex_center(cell2.x, cell2.y), str(loc["label"]), loc["active"])
 	# 动态单位 token（WorldSim v1）：派系色圆 + 类型字形；敌对加红外环
 	for wu in editor.world_units_for_draw():
 		var wfrom: Vector2i = wu["from"]

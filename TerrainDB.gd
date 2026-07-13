@@ -179,6 +179,13 @@ static func tags_cn(entry) -> String:
 		names.append(TagDB.cn(str(tg)))
 	return "、".join(names)
 
+# 瓦片=地点 🔒（2026-07-13）：地点类瓦片（城市/村落/营地/遗迹）在条目上挂 location_type，
+# 画上瓦片＝该格是地点（存在性真值）；派生/注记合并的单一实现在 LocationDB.derive_locations。
+# 仅 overworld 图消费此语义；战斗图画同款瓦片＝纯装饰。返回 ""＝非地点瓦片。
+static func location_type_of(tile) -> String:
+	var e = entry_for(tile)
+	return str(e.get("location_type", "")) if e != null else ""
+
 # 地形条目是否适用于某图类型（map_type: "battle"|"overworld"）。
 # scope: "battle"=仅战场 / "overworld"=仅大地图 / "both"（缺省，旧数据零迁移）。
 # 编辑器笔刷栏过滤的单一判定——只影响 authoring，渲染/通行照常认 tile（旧图越 scope 地形不受影响）。

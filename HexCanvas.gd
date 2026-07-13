@@ -5,10 +5,9 @@ extends Control
 ## 坐标系：flat-top（平顶），odd-q 偏移（奇数列向下错半格）。
 ## 视图变换由 view_offset(平移) + view_zoom(缩放) 表达，绘制时统一套用。
 
-const HexGrid := preload("res://HexGrid.gd")   # 纯六边形几何前置（取整器 single source）
+const HexGrid := preload("res://HexGrid.gd")
+const TextureCache := preload("res://TextureCache.gd")   # 纹理加载缓存（子类画布 token/图标用，经继承共享）   # 纯六边形几何前置（取整器 single source）
 const HexTileRender := preload("res://HexTileRender.gd")   # 地块渲染单一实现（底色+decor；笔刷缩略图同用）
-const LocationMarker := preload("res://LocationMarker.gd")   # 地点标记线稿库（按类型画符号；将来位图素材可覆盖）
-const TextureCache := preload("res://TextureCache.gd")   # 纹理加载缓存（地点位图素材覆盖用）
 const TerrainDB := preload("res://TerrainDB.gd")   # 取地形 entry 的手绘瓦片 art（有则优先于程序烘）
 const HEX_SIZE := 24.0
 const MIN_ZOOM := 0.2
@@ -545,18 +544,11 @@ func _edge_from_pair(p) -> Array:
 		return []
 	return [va, vb]
 
-# 地点旗帜（大地图地点 / 编辑器地点层共用）：底座 + 旗杆 + 旗面 + 名字（缩放够大才画字）
-# 地点标记（大地图地点 / 编辑器地点层共用）：按类型画矢量线稿符号（LocationMarker）+ 名字。
-# active=false（据点已肃清）→ 灰显。icon 非空且能载入 → **优先画位图**（将来引入更精细素材的替换口：
-# 位图按 token 尺寸居中绘，锐/糊由画布 texture_filter 决定，源分辨率建议见 docs/模块_地图美术.md）；否则回退矢量。
-func draw_location_marker(c2: Vector2, type_id: String, base_col: Color, loc_label: String, active := true, icon := "") -> void:
-	var col := base_col if active else Color(0.52, 0.52, 0.55)
-	var tex: Texture2D = TextureCache.get_tex(icon) if icon != "" else null
-	if tex != null:
-		var s := HEX_SIZE * 1.15   # 位图显示尺寸（约一格宽）
-		draw_texture_rect(tex, Rect2(c2 - Vector2(s, s) * 0.5 + Vector2(0, -2), Vector2(s, s)), false, Color(1, 1, 1) if active else Color(0.6, 0.6, 0.62))
-	else:
-		LocationMarker.draw(self, c2, type_id, col)
+# 地点名字标签（大地图地点 / 编辑器地点层共用）：瓦片=地点 🔒 后图标退役（地点长相＝瓦片美术本身），
+# 只补瓦片给不了的两样——名字 + 据点状态：active=false（据点已肃清）→ 格上罩薄灰纱 + 名字灰显。
+func draw_location_label(c2: Vector2, loc_label: String, active := true) -> void:
+	if not active:
+		draw_colored_polygon(hex_corners(c2), Color(0.05, 0.05, 0.08, 0.32))
 	if view_zoom >= DECOR_MIN_ZOOM and loc_label != "":
 		var font := get_theme_default_font()
 		var fs := 9

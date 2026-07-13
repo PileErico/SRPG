@@ -135,19 +135,15 @@ func _load_map() -> void:
 		push_warning("Overworld：读不到 %s，回退全草原 %d×%d" % [MAP_PATH, width, height])
 		tiles = MapIO.grassland(width, height)
 
-# 装地点实例：校验（id/类型/在界内）+ 建落格索引。状态（据点肃清时刻）在档里，这里只有静态定义。
+# 装地点（瓦片=地点 🔒）：存在性由瓦片 location_type 派生、locations 数组＝注记层（id/label/battle_map/dialogue_id），
+# 派生单一实现在 LocationDB.derive_locations（越界/类型天然由瓦片保证）。状态（据点肃清时刻）在档里。
 func _setup_locations(raw: Array) -> void:
-	_map_locations = []
-	_loc_by_cell = {}
-	for loc in raw:
-		if typeof(loc) != TYPE_DICTIONARY:
-			continue
-		var cell := Vector2i(int(loc.get("col", -1)), int(loc.get("row", -1)))
-		if str(loc.get("id", "")) == "" or LocationDB.type_def(str(loc.get("type", ""))) == null or not _cell_in_bounds(cell.x, cell.y):
-			push_warning("Overworld：地点「%s」缺 id/类型未登记/越界，跳过" % str(loc.get("label", loc.get("id", "?"))))
-			continue
-		_map_locations.append(loc)
-		_loc_by_cell[cell] = loc
+	var d := LocationDB.derive_locations(tiles, raw)
+	_map_locations = d["list"]
+	_loc_by_cell = d["by_cell"]
+	for a in d["orphans"]:
+		push_warning("Overworld：注记「%s」落在非地点瓦片 (%d,%d)——已忽略（地点＝画上城市/村落/营地/遗迹瓦片的格）"
+			% [str(a.get("id", a.get("label", "?"))), int(a.get("col", -1)), int(a.get("row", -1))])
 
 # 装线特征（v4）：留原始数据（渲染）+ 建边索引（通行）。坏格对（非相邻/越界）忽略。
 func _setup_line_features(res: Dictionary) -> void:
@@ -877,18 +873,16 @@ func world_units_for_draw() -> Array:
 		})
 	return out
 
-# 地点标记数据（画布逐帧调；量级＝个位数地点，无需缓存）：active＝据点可挑战/服务型恒真（灰显已肃清据点）
+# 地点标签数据（画布逐帧调；量级＝个位数地点，无需缓存）：瓦片=地点 🔒 后只剩名字+状态——
+# active＝据点可挑战/服务型恒真（已肃清据点＝灰纱+灰字，draw_location_label 兑现）
 func locations_for_draw() -> Array:
 	var out := []
 	for loc in _map_locations:
 		var type_id := str(loc.get("type", ""))
 		out.append({
 			"cell": Vector2i(int(loc.get("col", -1)), int(loc.get("row", -1))),
-			"color": LocationDB.type_color(type_id),
 			"label": str(loc.get("label", "")),
 			"active": not LocationDB.is_site(type_id) or LocationDB.site_ready(loc, WorldState.current),
-			"type": type_id,
-			"icon": str(loc.get("icon", "")),
 		})
 	return out
 

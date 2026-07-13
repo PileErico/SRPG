@@ -153,21 +153,19 @@ var _line_mode := "river"
 var _line_panel: Control
 var _road_last_cell := Vector2i(-1, -1)   # 路刷：一次拖动中上一格（连线成对）
 
-# —— 地点层（大地图专属）：放置/编辑地图 locations 实例（类型定义在 data/locations.json）——
+# —— 地点层（大地图专属·瓦片=地点 🔒 2026-07-13）：地点增删＝地形层画/铲地点瓦片（location_type），
+# 本层只编辑**注记**（map_locations＝[{col,row,id?,label?,battle_map?,dialogue_id?}]，身份与内容；
+# 类型由瓦片推导只读显示）。派生单一实现在 LocationDB.derive_locations（与 Overworld/lint 同源）。——
 var _loc_panel: Control
-var _loc_type_list: ItemList        # 放置用类型列表（LocationDB.all_types）
-var _loc_types := []                # 与类型列表行对应的类型定义
-var _loc_type_idx := 0              # 当前选中的放置类型
-var _loc_list: ItemList             # 已放置地点列表
-var _active_loc_idx := -1           # 选中的已放置地点（表单编辑对象）
+var _loc_list: ItemList             # 派生地点列表（孤儿注记附 ⚠ 行）
+var _loc_rows := []                 # 列表行 → {"cell": Vector2i, "orphan": bool}（选中/居中映射）
+var _active_loc_cell := Vector2i(-1, -1)   # 选中的地点格（表单编辑对象；按格认人，撤销/改图后自校验）
 var _loc_id_edit: LineEdit
 var _loc_label_edit: LineEdit
-var _loc_type_opt: OptionButton     # 选中地点的类型下拉
+var _loc_type_label: Label          # 类型只读显示（要改类型＝改画瓦片）
 var _loc_battle_edit: LineEdit
 var _loc_dialogue_edit: LineEdit
 var _loc_loading := false           # 填表单时抑制回写
-var _loc_stroke_placed := false     # place 模式下一次拖动只放一个地点（防拖动连放）
-var _loc_stroke_action := ""        # 一次拖动的动作锁（""未定 / "select" 首格命中地点 / "place" 首格空）——仿单位层，防「点选地点后拖出误放」
 
 # —— 触发器层：authoring 关卡事件（when 条件 → do 动作），存进地图 triggers 字段 ——
 const TRIG_FACTIONS := [["player", "玩家"], ["any", "任意"]]
@@ -534,7 +532,7 @@ func _set_layer(id: String) -> void:
 		"trigger":
 			set_status("触发器层：＋新建 → 选区域 + 事件 + 配 do 动作（关卡事件）")
 		"location":
-			set_status("地点层：选类型 → 左键放置 / 点已放地点编辑 / 右键删除")
+			set_status("地点层：点地点格编辑注记（id/名字/讨伐图/对话），右键删注记；地点增删＝地形层画/铲地点瓦片")
 		_:
 			set_status("当前层：地形")
 
@@ -1350,58 +1348,49 @@ func _feature_remove_edge(features: Array, a: Vector2i, b: Vector2i) -> bool:
 func line_features() -> Dictionary:
 	return {"rivers": map_rivers, "roads": map_roads, "bridges": map_bridges}
 
-# ============ 地点层（大地图 locations 实例 authoring）============
+# ============ 地点层（瓦片=地点 🔒：本层只编辑注记，地点增删走地形层画/铲瓦片）============
 
 func _build_location_tools() -> Control:
 	var v := VBoxContainer.new()
 	v.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	v.add_child(EditorUI.section_title("地点（左键放置/选中，右键删）"))
-	v.add_child(_make_label("放置类型"))
-	_loc_type_list = ItemList.new()
-	_loc_type_list.custom_minimum_size = Vector2(0, 92)
-	_loc_type_list.item_selected.connect(func(idx: int):
-		_loc_type_idx = idx
-		if idx >= 0 and idx < _loc_types.size():
-			set_status("将放置：%s——左键点格放置" % str(_loc_types[idx].get("label", ""))))
-	v.add_child(_loc_type_list)
-	_loc_types = LocationDB.all_types()
-	for t in _loc_types:
-		_loc_type_list.add_item(str(t.get("label", t.get("id", "地点"))))
-	if not _loc_types.is_empty():
-		_loc_type_list.select(0)
-	v.add_child(HSeparator.new())
-	v.add_child(_make_label("已放置"))
+	v.add_child(EditorUI.section_title("地点（瓦片=地点）"))
+	var hint := _make_label("地点增删＝地形层画/铲 城市/村落/营地/遗迹 瓦片；\n本层点地点格编辑注记（id/名字/讨伐图/对话）")
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	v.add_child(hint)
 	_loc_list = ItemList.new()
-	_loc_list.custom_minimum_size = Vector2(0, 92)
+	_loc_list.custom_minimum_size = Vector2(0, 120)
 	_loc_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_loc_list.item_selected.connect(func(idx: int):
-		_active_loc_idx = idx
+		if idx < 0 or idx >= _loc_rows.size():
+			return
+		var cell: Vector2i = _loc_rows[idx]["cell"]
+		_active_loc_cell = cell
 		_load_loc_form()
-		var loc := active_location()
-		if not loc.is_empty() and canvas:
-			canvas.center_on_cell(int(loc.get("col", 0)), int(loc.get("row", 0))))
+		if canvas:
+			canvas.center_on_cell(cell.x, cell.y)
+		if bool(_loc_rows[idx]["orphan"]):
+			set_status("⚠ 孤儿注记：该格已非地点瓦片——右键该格删注记，或在地形层补画地点瓦片"))
 	v.add_child(_loc_list)
 	v.add_child(HSeparator.new())
 	v.add_child(_make_label("选中地点"))
+	_loc_type_label = _make_label("类型：—")
+	_loc_type_label.tooltip_text = "类型由瓦片推导（要改类型＝地形层改画其他地点瓦片）"
+	v.add_child(_loc_type_label)
 	_loc_id_edit = _loc_form_line("id（改名慎重：触发器/存档肃清账/world_units.json 的 home 均按此 id 引用，改了会断）", func(t: String): _set_loc_field("id", t))
 	v.add_child(_loc_id_edit)
 	_loc_label_edit = _loc_form_line("名字", func(t: String):
 		_set_loc_field("label", t)
 		_refresh_loc_list())
 	v.add_child(_loc_label_edit)
-	var trow := HBoxContainer.new()
-	trow.add_child(_make_label("类型"))
-	_loc_type_opt = OptionButton.new()
-	for t in _loc_types:
-		_loc_type_opt.add_item(str(t.get("label", "")))
-	_loc_type_opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_loc_type_opt.item_selected.connect(_on_loc_type_changed)
-	trow.add_child(_loc_type_opt)
-	v.add_child(trow)
 	_loc_battle_edit = _loc_form_line("battle_map（据点讨伐地图路径）", func(t: String): _set_loc_field_or_erase("battle_map", t))
 	v.add_child(_loc_battle_edit)
 	_loc_dialogue_edit = _loc_form_line("dialogue_id（交谈对话）", func(t: String): _set_loc_field_or_erase("dialogue_id", t))
 	v.add_child(_loc_dialogue_edit)
+	var clr := Button.new()
+	clr.text = "删除注记（恢复自动 id/名字）"
+	clr.tooltip_text = "只删注记不删地点（地点跟着瓦片走）；孤儿注记删后彻底消失"
+	clr.pressed.connect(func(): _loc_remove(_active_loc_cell.x, _active_loc_cell.y))
+	v.add_child(clr)
 	return v
 
 func _loc_form_line(placeholder: String, cb: Callable) -> LineEdit:
@@ -1411,99 +1400,95 @@ func _loc_form_line(placeholder: String, cb: Callable) -> LineEdit:
 	le.text_changed.connect(cb)
 	return le
 
-func active_location() -> Dictionary:
-	if _active_loc_idx >= 0 and _active_loc_idx < map_locations.size():
-		var loc = map_locations[_active_loc_idx]
-		if typeof(loc) == TYPE_DICTIONARY:
-			return loc
-	return {}
+# 派生视图（每次现算：全图 O(格数) 字典查表，编辑频度下可忽略；单一实现在 LocationDB）
+func derived_locations() -> Dictionary:
+	return LocationDB.derive_locations(tiles, map_locations)
 
-func _loc_index_at(col: int, row: int) -> int:
+# 选中地点的派生形（EditorCanvas 金圈 / 表单填充用）；选中格已非地点＝空
+func active_location() -> Dictionary:
+	if _active_loc_cell.x < 0:
+		return {}
+	return derived_locations()["by_cell"].get(_active_loc_cell, {})
+
+# 该格的注记下标（同格多条＝后者胜，与派生同序）；-1＝无注记
+func _ann_index_at(col: int, row: int) -> int:
 	for i in range(map_locations.size() - 1, -1, -1):
 		var e = map_locations[i]
 		if typeof(e) == TYPE_DICTIONARY and int(e.get("col", -1)) == col and int(e.get("row", -1)) == row:
 			return i
 	return -1
 
-func _unique_loc_id(type_id: String) -> String:
-	var used := {}
-	for l in map_locations:
-		used[str(l.get("id", ""))] = true
-	var n := 1
-	while used.has("%s_%d" % [type_id, n]):
-		n += 1
-	return "%s_%d" % [type_id, n]
+# 该格注记（无则建 {col,row} 挂进 map_locations——表单首次回写时物化）
+func _ensure_ann(col: int, row: int) -> Dictionary:
+	var i := _ann_index_at(col, row)
+	if i >= 0:
+		return map_locations[i]
+	var ann := {"col": col, "row": row}
+	map_locations.append(ann)
+	return ann
 
-# 地点层左键：一次拖动在首格锁定动作——首格命中地点=选中它（拖出不放子）；首格空=放置当前类型（拖动只放一个）。
+# 地点层左键：点地点格＝选中（编辑注记）；点非地点格＝提示去地形层画瓦片
 func _loc_paint(col: int, row: int) -> void:
-	if _loc_stroke_action == "":
-		var idx0 := _loc_index_at(col, row)
-		_loc_stroke_action = "select" if idx0 >= 0 else "place"
-		if _loc_stroke_action == "select":
-			_active_loc_idx = idx0
-			_refresh_loc_list()
-			_load_loc_form()
-			set_status("选中地点：%s（左侧表单可编辑）" % str(map_locations[idx0].get("label", "")))
-			return
-	if _loc_stroke_action == "select":
-		return   # 选中模式：后续拖动格不落子
-	if _loc_stroke_placed:
-		return
-	if _loc_type_idx < 0 or _loc_type_idx >= _loc_types.size():
-		set_status("先在左侧选一个地点类型")
-		return
-	var tdef: Dictionary = _loc_types[_loc_type_idx]
-	var tid := str(tdef.get("id", ""))
-	_push_undo(_snapshot(), "放置地点")
-	var loc := {"id": _unique_loc_id(tid), "type": tid, "label": str(tdef.get("label", "地点")), "col": col, "row": row}
-	if bool(tdef.get("site", false)):
-		loc["battle_map"] = "res://maps/sandbox.json"   # 据点型默认给个可打的图，表单可改
-	map_locations.append(loc)
-	_active_loc_idx = map_locations.size() - 1
-	_loc_stroke_placed = true
-	_dirty = true
-	_update_file_label()
-	_refresh_loc_list()
-	_load_loc_form()
-	set_status("已放置：%s @(%d,%d)" % [str(loc["label"]), col, row])
-	if canvas: canvas.refresh_static()
+	var cell := Vector2i(col, row)
+	if cell == _active_loc_cell:
+		return   # 拖动重复格不刷
+	var d := derived_locations()
+	if (d["by_cell"] as Dictionary).has(cell):
+		_active_loc_cell = cell
+		_refresh_loc_list()
+		_load_loc_form()
+		set_status("选中地点：%s（表单编辑注记；类型由瓦片决定）" % str((d["by_cell"][cell] as Dictionary).get("label", "")))
+	elif _ann_index_at(col, row) >= 0:
+		_active_loc_cell = cell
+		_refresh_loc_list()
+		_load_loc_form()
+		set_status("⚠ 孤儿注记：该格已非地点瓦片——右键删注记，或地形层补画地点瓦片")
+	else:
+		set_status("该格不是地点瓦片——在地形层画 城市/村落/营地/遗迹 瓦片即创建地点")
 
+# 地点层右键：删该格注记（地点本体跟瓦片走，不受影响；孤儿注记删后彻底消失）
 func _loc_remove(col: int, row: int) -> void:
-	var idx := _loc_index_at(col, row)
+	var idx := _ann_index_at(col, row)
 	if idx < 0:
 		return
-	_push_undo(_snapshot(), "删除地点")
-	var nm := str(map_locations[idx].get("label", ""))
+	_push_undo(_snapshot(), "删除地点注记")
+	var nm := str(map_locations[idx].get("label", map_locations[idx].get("id", "")))
 	map_locations.remove_at(idx)
-	if _active_loc_idx == idx:
-		_active_loc_idx = -1
-	elif _active_loc_idx > idx:
-		_active_loc_idx -= 1
 	_dirty = true
 	_update_file_label()
 	_refresh_loc_list()
 	_load_loc_form()
-	set_status("已删除地点：%s" % nm)
-	if canvas: canvas.refresh_static()
+	var still := (derived_locations()["by_cell"] as Dictionary).has(Vector2i(col, row))
+	set_status("已删注记「%s」%s" % [nm, "——地点保留（恢复自动 id/名字）" if still else ""])
 
 func _refresh_loc_list() -> void:
 	if _loc_list == null:
 		return
 	_loc_list.clear()
-	for l in map_locations:
-		if typeof(l) != TYPE_DICTIONARY:
-			continue
-		var tdef = LocationDB.type_def(str(l.get("type", "")))
-		var tl := str(tdef.get("label", l.get("type", "?"))) if tdef != null else str(l.get("type", "?"))
-		_loc_list.add_item("%s〔%s〕(%d,%d)" % [str(l.get("label", "")), tl, int(l.get("col", 0)), int(l.get("row", 0))])
-	if _active_loc_idx >= 0 and _active_loc_idx < map_locations.size():
-		_loc_list.select(_active_loc_idx)
+	_loc_rows = []
+	var d := derived_locations()
+	var sel := -1
+	for loc in d["list"]:
+		var cell := Vector2i(int(loc["col"]), int(loc["row"]))
+		var annotated := _ann_index_at(cell.x, cell.y) >= 0
+		_loc_list.add_item("%s %s〔%s〕(%d,%d)" % ["●" if annotated else "○", str(loc["label"]), LocationDB.type_label(str(loc["type"])), cell.x, cell.y])
+		if cell == _active_loc_cell:
+			sel = _loc_rows.size()
+		_loc_rows.append({"cell": cell, "orphan": false})
+	for a in d["orphans"]:
+		var cell := Vector2i(int(a.get("col", -1)), int(a.get("row", -1)))
+		_loc_list.add_item("⚠ %s (%d,%d) 非地点瓦片" % [str(a.get("label", a.get("id", "?"))), cell.x, cell.y])
+		if cell == _active_loc_cell:
+			sel = _loc_rows.size()
+		_loc_rows.append({"cell": cell, "orphan": true})
+	if sel >= 0:
+		_loc_list.select(sel)
 
 func _load_loc_form() -> void:
 	if _loc_id_edit == null:
 		return
 	_loc_loading = true
-	var loc := active_location()
+	var loc := active_location()   # 派生形（含兜底 id/label/site 默认图）——表单展示即最终生效值
 	var has := not loc.is_empty()
 	for le in [_loc_id_edit, _loc_label_edit, _loc_battle_edit, _loc_dialogue_edit]:
 		le.editable = has
@@ -1511,75 +1496,49 @@ func _load_loc_form() -> void:
 	_loc_label_edit.text = str(loc.get("label", "")) if has else ""
 	_loc_battle_edit.text = str(loc.get("battle_map", "")) if has else ""
 	_loc_dialogue_edit.text = str(loc.get("dialogue_id", "")) if has else ""
-	if has:
-		var tid := str(loc.get("type", ""))
-		for i in _loc_types.size():
-			if str(_loc_types[i].get("id", "")) == tid:
-				_loc_type_opt.select(i)
-				break
+	if _loc_type_label != null:
+		_loc_type_label.text = "类型：%s" % (LocationDB.type_label(str(loc.get("type", ""))) if has else "—")
 	_loc_loading = false
 
-# 表单回写（文本高频输入不逐击入撤销栈——与区域颜色同待遇，只标脏）
+# 表单回写 → 该格注记（无则物化）；文本高频输入不逐击入撤销栈——与区域颜色同待遇，只标脏
 func _set_loc_field(key: String, val: String) -> void:
-	if _loc_loading:
-		return
-	var loc := active_location()
-	if loc.is_empty():
+	if _loc_loading or active_location().is_empty():
 		return
 	if key == "id":
 		var v := val.strip_edges()
 		if v == "":
-			set_status("id 不能为空")
+			set_status("id 不能为空（要回自动 id 用「删除注记」）")
 			return
-		for i in map_locations.size():
-			if i != _active_loc_idx and str(map_locations[i].get("id", "")) == v:
-				set_status("⚠ id 与「%s」重复——触发器/存档按 id 引用，请改成唯一" % str(map_locations[i].get("label", "")))
-		loc["id"] = v
+		for loc in derived_locations()["list"]:
+			if Vector2i(int(loc["col"]), int(loc["row"])) != _active_loc_cell and str(loc["id"]) == v:
+				set_status("⚠ id 与「%s」重复——触发器/存档按 id 引用，请改成唯一" % str(loc["label"]))
+		_ensure_ann(_active_loc_cell.x, _active_loc_cell.y)["id"] = v
 	else:
-		loc[key] = val
+		_ensure_ann(_active_loc_cell.x, _active_loc_cell.y)[key] = val
 	_dirty = true
 	_update_file_label()
 
-# 可选字段：清空文本＝删键（保持 schema 干净，不落空串）
+# 可选字段：清空文本＝删键（保持注记干净，不落空串；site 默认图由派生兜底）
 func _set_loc_field_or_erase(key: String, val: String) -> void:
-	if _loc_loading:
-		return
-	var loc := active_location()
-	if loc.is_empty():
+	if _loc_loading or active_location().is_empty():
 		return
 	if val.strip_edges() == "":
-		loc.erase(key)
+		var i := _ann_index_at(_active_loc_cell.x, _active_loc_cell.y)
+		if i >= 0:
+			map_locations[i].erase(key)
 	else:
-		loc[key] = val.strip_edges()
+		_ensure_ann(_active_loc_cell.x, _active_loc_cell.y)[key] = val.strip_edges()
 	_dirty = true
 	_update_file_label()
 
-func _on_loc_type_changed(idx: int) -> void:
-	if _loc_loading or idx < 0 or idx >= _loc_types.size():
-		return
-	var loc := active_location()
-	if loc.is_empty():
-		return
-	var tid := str(_loc_types[idx].get("id", ""))
-	if str(loc.get("type", "")) == tid:
-		return
-	_push_undo(_snapshot(), "地点类型")
-	loc["type"] = tid
-	_dirty = true
-	_update_file_label()
-	_refresh_loc_list()
-	if canvas: canvas.refresh_static()
-
-# 画布地点层数据（EditorCanvas 画旗帜用；颜色走 LocationDB 类型色）
+# 画布地点层数据（EditorCanvas 画名字标签用；孤儿注记标红圈警示）
 func locations_for_draw() -> Array:
 	var out := []
-	for l in map_locations:
-		if typeof(l) != TYPE_DICTIONARY:
-			continue
-		var type_id := str(l.get("type", ""))
-		var tdef = LocationDB.type_def(type_id)
-		var col := Color.html(str(tdef.get("color", "#CCCCCC"))) if tdef != null else Color(0.8, 0.8, 0.8)
-		out.append({"cell": Vector2i(int(l.get("col", 0)), int(l.get("row", 0))), "color": col, "label": str(l.get("label", "")), "active": true, "type": type_id, "icon": str(l.get("icon", ""))})
+	var d := derived_locations()
+	for loc in d["list"]:
+		out.append({"cell": Vector2i(int(loc["col"]), int(loc["row"])), "label": str(loc["label"]), "active": true})
+	for a in d["orphans"]:
+		out.append({"cell": Vector2i(int(a.get("col", -1)), int(a.get("row", -1))), "label": "⚠" + str(a.get("label", a.get("id", "?"))), "active": true, "orphan": true})
 	return out
 
 # 区域工具：列表（选当前）+ 新建/改名/删除 + 颜色
@@ -2657,7 +2616,7 @@ func pick_brush_at(col: int, row: int) -> void:
 
 # ------------------------------------------------------------------ 图层分派 + 区域
 
-# 画布左键 → 按当前层：地形=画地形 / 区域=把格加入当前区域 / 线(路刷)=沿格连路 / 地点=放置或选中
+# 画布左键 → 按当前层：地形=画地形 / 区域=把格加入当前区域 / 线(路刷)=沿格连路 / 地点=选中（编辑注记）
 # 线层的河/桥走边拾取入口 line_paint_edge（EditorCanvas 按 _line_mode 分流，不进这里）。
 func primary_paint(col: int, row: int) -> void:
 	if current_layer == "region":
@@ -2692,7 +2651,7 @@ func _unit_paint(col: int, row: int) -> void:
 		return
 	_place_unit(col, row)
 
-# 画布右键 → 按当前层：地形=取色 / 区域=从当前区域移除格 / 单位=删除该格单位 / 地点=删除地点
+# 画布右键 → 按当前层：地形=取色 / 区域=从当前区域移除格 / 单位=删除该格单位 / 地点=删注记
 # 线层右键（擦边）走 line_paint_edge(add=false)，不进这里。
 func secondary_paint(col: int, row: int) -> void:
 	if current_layer == "region":
@@ -2886,7 +2845,7 @@ func new_map(w: int, h: int) -> void:
 		set(l[0], _layer_empty(l[2]))
 	map_type = "battle"          # 新图：回缺省战斗图
 	_active_region_idx = -1
-	_active_loc_idx = -1
+	_active_loc_cell = Vector2i(-1, -1)
 	current_path = ""
 	_dirty = false
 	if width_spin: width_spin.value = width
@@ -3021,9 +2980,9 @@ func hover_text(col: int, row: int) -> String:
 	var rtxt := _regions_at(col, row)
 	if rtxt != "":
 		base += "\n区域：" + rtxt
-	var li := _loc_index_at(col, row)
-	if li >= 0:
-		base += "\n地点：%s（%s）" % [str(map_locations[li].get("label", "")), str(map_locations[li].get("id", ""))]
+	var loc: Dictionary = derived_locations()["by_cell"].get(Vector2i(col, row), {})
+	if not loc.is_empty():
+		base += "\n地点：%s〔%s〕（%s）" % [str(loc.get("label", "")), LocationDB.type_label(str(loc.get("type", ""))), str(loc.get("id", ""))]
 	var ln := _line_summary_at(col, row)
 	if ln != "":
 		base += "\n" + ln
@@ -3128,7 +3087,7 @@ func _apply_snapshot(snap: Dictionary) -> void:
 	map_type = str(snap.get("map_type", map_type))
 	_active_region_idx = clampi(_active_region_idx, -1, regions.size() - 1)
 	_active_trigger_idx = clampi(_active_trigger_idx, -1, map_triggers.size() - 1)
-	_active_loc_idx = clampi(_active_loc_idx, -1, map_locations.size() - 1)
+	# _active_loc_cell 无需回滚校正：按格认人，active_location() 对非地点格自然返回空
 	if width_spin: width_spin.value = width
 	if height_spin: height_spin.value = height
 	_apply_map_type()         # map_type 可能随快照回退 → 同步顶栏下拉/笔刷过滤/层门禁
@@ -3149,8 +3108,6 @@ func begin_stroke() -> void:
 	_stroke_count = 0
 	_unit_stroke_action = ""   # 单位层：新一次拖动重置动作锁（第一格再定 编辑/落子）
 	_road_last_cell = Vector2i(-1, -1)   # 路刷：新一次拖动重起连线
-	_loc_stroke_placed = false           # 地点层：place 模式一次拖动只放一个
-	_loc_stroke_action = ""              # 地点层：新一次拖动重置动作锁（首格再定 选中/放置）
 	_fill_stroke_done = false            # 油漆桶：新一次按下允许再填
 	_shape_anchor = Vector2i(-1, -1)     # rect/line：新一次拖动重定起点
 
@@ -3302,7 +3259,7 @@ func load_from_file(path: String) -> void:
 			set(l[0], res.get(l[1], _layer_empty(l[2])))
 	map_type = str(res.get("map_type", "battle"))   # 地图类型（顶栏可切换；决定笔刷过滤/层门禁）
 	_active_region_idx = -1 if regions.is_empty() else 0
-	_active_loc_idx = -1
+	_active_loc_cell = Vector2i(-1, -1)
 	current_path = path
 	_dirty = false
 	if width_spin: width_spin.value = width

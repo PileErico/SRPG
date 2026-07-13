@@ -161,28 +161,36 @@ func _initialize() -> void:
 	ed.end_stroke()
 	ed.undo()
 	ck(((ed.map_rivers[0] as Dictionary)["pairs"] as Array).size() == before_rivers, "线特征撤销回退")
-	# 地点层：放置/唯一 id/删除/撤销
-	ed._loc_types = LocationDB.all_types()
-	ed._loc_type_idx = 0
-	ed.begin_stroke()
-	ed._loc_paint(2, 2)
-	ed.end_stroke()
-	ck(ed.map_locations.size() == 1 and str(ed.map_locations[0].get("type", "")) == str(ed._loc_types[0].get("id", "")), "地点放置")
-	var lid := str(ed.map_locations[0].get("id", ""))
-	ed.begin_stroke()
-	ed._loc_paint(3, 3)
-	ed.end_stroke()
-	ck(ed.map_locations.size() == 2 and str(ed.map_locations[1].get("id", "")) != lid, "地点 id 唯一")
-	ed._loc_remove(3, 3)
-	ck(ed.map_locations.size() == 1, "地点删除")
+	# 地点层（瓦片=地点 🔒）：画瓦片即地点（兜底 id/类型推导）→ 表单回写物化注记 → 删注记/撤销 → 铲瓦片出孤儿
+	ed.tiles[2][2] = {"terrain": "fh", "variant": "city_center"}
+	var dv0: Dictionary = ed.derived_locations()
+	var dloc: Dictionary = (dv0["by_cell"] as Dictionary).get(Vector2i(2, 2), {})
+	ck((dv0["list"] as Array).size() == 1 and str(dloc.get("id", "")) == "city_c2_r2", "画瓦片即地点（兜底 id）")
+	ck(str(dloc.get("type", "")) == "city" and str(dloc.get("label", "")) == LocationDB.type_label("city"), "类型/名字由瓦片推导")
+	ed._active_loc_cell = Vector2i(2, 2)
+	ed._set_loc_field("label", "试炼城")
+	ck(ed.map_locations.size() == 1 and str(ed.map_locations[0].get("label", "")) == "试炼城", "表单回写物化注记")
+	ed._set_loc_field("id", "city_trial")
+	var dloc2: Dictionary = (ed.derived_locations()["by_cell"] as Dictionary).get(Vector2i(2, 2), {})
+	ck(str(dloc2.get("id", "")) == "city_trial" and str(dloc2.get("label", "")) == "试炼城", "注记 id/label 覆盖兜底")
+	ed.tiles[3][3] = {"terrain": "fh", "variant": "barbarian_encampment"}
+	var dloc3: Dictionary = (ed.derived_locations()["by_cell"] as Dictionary).get(Vector2i(3, 3), {})
+	ck(str(dloc3.get("type", "")) == "lair" and str(dloc3.get("battle_map", "")) == "res://maps/sandbox.json", "site 型兜底可打图")
+	ed._loc_remove(2, 2)
+	ck(ed.map_locations.is_empty() and (ed.derived_locations()["by_cell"] as Dictionary).has(Vector2i(2, 2)), "删注记不删地点（回兜底）")
 	ed.undo()
-	ck(ed.map_locations.size() == 2, "地点删除可撤销")
+	ck(ed.map_locations.size() == 1, "删注记可撤销")
+	ed.tiles[3][3] = {"terrain": "plain", "variant": "grassland"}   # 铲掉营地瓦片（注记在 (2,2)，不受影响）
+	ed.tiles[2][2] = {"terrain": "plain", "variant": "grassland"}   # 铲掉城市瓦片 → (2,2) 注记成孤儿
+	var dv1: Dictionary = ed.derived_locations()
+	ck((dv1["orphans"] as Array).size() == 1 and not (dv1["by_cell"] as Dictionary).has(Vector2i(2, 2)), "铲瓦片→注记成孤儿")
+	ed.tiles[2][2] = {"terrain": "fh", "variant": "city_center"}   # 补画回去（后续断言以 1 条注记为基）
 	# 快照含 map_type：撤销跨类型切换不丢
 	ck(str(ed._snapshot().get("map_type", "")) == "overworld", "快照含 map_type")
 	# 存盘往返：to_json_dict 带全部新字段
 	var d := ed.to_json_dict()
 	var norm := MapIO.normalize(d)
-	ck((norm["rivers"] as Array).size() == 1 and (norm["roads"] as Array).size() == 1 and (norm["locations"] as Array).size() == 2, "编辑器存盘往返（试玩直传同形）")
+	ck((norm["rivers"] as Array).size() == 1 and (norm["roads"] as Array).size() == 1 and (norm["locations"] as Array).size() == 1, "编辑器存盘往返（试玩直传同形；locations=注记）")
 	ck(str(norm.get("map_type", "")) == "overworld", "map_type 随存")
 	# 笔刷全通用（SCOPE_FILTER_ON=false）：不分大/小地图，road 和 swamp 两种地图都出现（scope 机制仍在，见上 in_scope 断言，只是编辑器不再据此过滤）
 	ed.map_type = "battle"
@@ -222,7 +230,7 @@ func _initialize() -> void:
 	ck(ed.map_triggers.size() == 1 and str(ed.map_triggers[0].get("id", "")) == "t1", "回滚：触发器层")
 	ck(int((ed.map_terrain_overrides.get("plain/grassland", {}) as Dictionary).get("move", {}).get("cost", 0)) == 2, "回滚：图级地形覆盖")
 	ck(str(ed.map_environment.get("time", "")) == "night", "回滚：环境层")
-	ck(ed.map_locations.size() == 2 and ed.map_rivers.size() == 1 and ed.map_roads.size() == 1, "回滚：地点/线特征层")
+	ck(ed.map_locations.size() == 1 and ed.map_rivers.size() == 1 and ed.map_roads.size() == 1, "回滚：地点注记/线特征层")
 	ck(ed.map_type == "overworld", "回滚：map_type 随快照")
 	ed.free()
 

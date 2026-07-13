@@ -43,7 +43,8 @@ func _draw_hover_edge() -> void:
 	var pts := edge_points(_hover_edge[0], _hover_edge[1])
 	draw_line(pts[0], pts[1], Color(1.0, 0.95, 0.2, 0.9), 3.0 / view_zoom)
 
-# 地点层：按类型画标记（绘制单一实现在 HexCanvas.draw_location_marker，与大地图同款）；选中地点加金圈
+# 地点层：地点长相＝瓦片美术（瓦片=地点 🔒），这里只画名字标签（单一实现在 HexCanvas.draw_location_label，
+# 与大地图同款）；选中地点加金圈；孤儿注记（落在非地点瓦片的死引用）画红圈警示
 func _draw_locations() -> void:
 	if not editor.has_method("locations_for_draw"):
 		return
@@ -58,7 +59,9 @@ func _draw_locations() -> void:
 		var c := hex_center(cell.x, cell.y)
 		if editor.current_layer == "location" and cell == acell:
 			draw_arc(c, HEX_SIZE * 0.72, 0.0, TAU, 24, Color(1.0, 0.85, 0.25, 0.95), 2.5 / view_zoom)
-		draw_location_marker(c, str(loc.get("type", "")), loc["color"], str(loc["label"]), true, str(loc.get("icon", "")))
+		if bool(loc.get("orphan", false)):
+			draw_arc(c, HEX_SIZE * 0.55, 0.0, TAU, 24, Color(0.95, 0.3, 0.25, 0.9), 2.0 / view_zoom)
+		draw_location_label(c, str(loc["label"]), true)
 
 # 单位层：画「这一关的单位」棋子（阵营色圆 + 黑描边 + 原型图标）。
 # 非单位层时半透明，便于一边看地形/区域一边知道单位在哪。

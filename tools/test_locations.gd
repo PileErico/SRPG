@@ -1,5 +1,6 @@
 extends SceneTree
-## M7 回归：LocationDB 注册表 / 据点刷新惰性判定 / WorldState gold+location_cleared_at 往返
+## M7 回归：LocationDB 注册表 / 瓦片=地点派生 🔒（存在性=瓦片 location_type、locations=注记层）
+## / 据点刷新惰性判定 / WorldState gold+location_cleared_at 往返
 ## / MapIO locations 透传 / BattleIO context 落肃清账 / Overworld 地点消费（索引·悬停·休整·讨伐）。
 ## 注意：不触碰 "auto" 存档槽；用独立槽并清理。
 ## 运行：..._console.exe --headless --path "D:/1战棋" -s res://tools/test_locations.gd（退出码 0=PASS）
@@ -36,6 +37,28 @@ func _initialize() -> void:
 	ck(str(LocationDB.service("rest").get("status")) == "in_use", "rest 已接入标记")
 	ck(int(LocationDB.service("rest").get("gold", 0)) > 0, "rest 带占位价格")
 	ck(LocationDB.services_of("village").size() == 2, "村落 2 服务")
+
+	# 1b) 瓦片=地点派生 🔒：存在性由瓦片 location_type、注记按格合并（id/label/图/对话）、
+	#     无注记兜底 id/label、site 型兜底可打图、孤儿注记（落在非地点瓦片）检出、注记残留 type 忽略
+	var g := {"terrain": "plain", "variant": "grassland"}
+	var tl := [
+		[{"terrain": "fh", "variant": "city_center"}, g],
+		[{"terrain": "fh", "variant": "ancient_ruins"}, g],
+	]
+	var anns := [
+		{"id": "cap", "label": "王都", "col": 0, "row": 0, "dialogue_id": "dlg_x", "type": "ruin"},   # type 残留＝忽略（瓦片说了算）
+		{"id": "ghost", "label": "幽灵", "col": 1, "row": 1},                                          # 草地格＝孤儿
+	]
+	var dv := LocationDB.derive_locations(tl, anns)
+	ck((dv["list"] as Array).size() == 2, "派生地点数=地点瓦片数")
+	var cap: Dictionary = (dv["by_cell"] as Dictionary).get(Vector2i(0, 0), {})
+	ck(str(cap.get("id", "")) == "cap" and str(cap.get("label", "")) == "王都" and str(cap.get("dialogue_id", "")) == "dlg_x", "注记合并（id/label/对话）")
+	ck(str(cap.get("type", "")) == "city", "类型由瓦片推导（注记残留 type 忽略）")
+	var rn: Dictionary = (dv["by_cell"] as Dictionary).get(Vector2i(0, 1), {})
+	ck(str(rn.get("id", "")) == "ruin_c0_r1" and str(rn.get("label", "")) == LocationDB.type_label("ruin"), "无注记兜底 id/label")
+	ck(str(rn.get("battle_map", "")) == "res://maps/sandbox.json", "site 型兜底可打图")
+	var orphs: Array = dv["orphans"]
+	ck(orphs.size() == 1 and str((orphs[0] as Dictionary).get("id", "")) == "ghost", "孤儿注记检出")
 
 	# 2) 据点刷新（惰性判定 🔒）：未肃清=可 → 肃清=关 → lair 到点刷新 / ruin 一次性永久关
 	var ws = WorldState.start_new()

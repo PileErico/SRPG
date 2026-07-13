@@ -23,7 +23,8 @@ extends SceneTree
 ## 10) 事件/对话/地图引用（技改 §4-2/§4-6，EventEngine.ACTIONS 注册表驱动）：events.json 与 maps/*.json 触发器的
 ##     do[] 动作——action id 已注册 + proto_id/faction(_id)/dialogue_id/item_id/map/weather 按键查对应 DB；
 ##     dialogues.json 节点 next/choices.next 指向存在节点、choices.rep 派系已登记；effects.json on_expire_apply→EffectDB；
-##     maps 的 locations[].type→LocationDB、world_units.json battle_map 文件存在。
+##     maps 地点（瓦片=地点 🔒）：overworld 图派生校验（注记无孤儿/同格唯一/id 全图唯一/battle_map 存在）、
+##     world_units.json battle_map 文件存在。
 ##     maps/*.json 同时纳入规则 1/5/6 扫描集（禁键/damage_kind/tags）。
 ## 11) 战中快照白名单（技改 §1-3 lint 化）：Unit 脚本字段 vs unit_to_battle_snapshot 键集 diff——
 ##     新运行态字段忘扩白名单＝suspend 静默丢数据；瞬态豁免表（faction 视图/last_hit_by 另存/combat_ctx 瞬态）。
@@ -374,13 +375,31 @@ func _initialize() -> void:
 		for tg2 in md.get("triggers", []):
 			if typeof(tg2) == TYPE_DICTIONARY:
 				do_sources.append(["%s:%s" % [mp.get_file(), str(tg2.get("id", "?"))], tg2.get("do", [])])
-		# 地图地点实例：类型在 LocationDB 登记 + battle_map 文件存在
-		for loc in md.get("locations", []):
-			if typeof(loc) == TYPE_DICTIONARY:
-				ck(LocationDB.type_def(str(loc.get("type", ""))) != null,
-					"%s：地点「%s」类型已登记：%s" % [mp.get_file(), str(loc.get("id", "?")), str(loc.get("type", ""))])
+		# 地图地点（瓦片=地点 🔒）：overworld 图走派生校验——注记无孤儿（落在非地点瓦片＝改图后死引用）、
+		# 同格无重复注记、派生 id 全图唯一、battle_map 文件存在；非 overworld 图 locations＝透传数据只查 battle_map
+		if str(md.get("map_type", "battle")) == "overworld":
+			var dv := LocationDB.derive_locations(md.get("tiles", []), md.get("locations", []))
+			for orph in dv["orphans"]:
+				ck(false, "%s：注记「%s」落在非地点瓦片 (%d,%d)——画地点瓦片或删注记" % [mp.get_file(), str(orph.get("id", orph.get("label", "?"))), int(orph.get("col", -1)), int(orph.get("row", -1))])
+			var loc_cells := {}
+			for a2 in md.get("locations", []):
+				if typeof(a2) != TYPE_DICTIONARY:
+					continue
+				var ckey := "%d,%d" % [int(a2.get("col", -1)), int(a2.get("row", -1))]
+				ck(not loc_cells.has(ckey), "%s：格 (%s) 只有一条注记（后者会静默压掉前者）" % [mp.get_file(), ckey])
+				loc_cells[ckey] = true
+			var loc_ids := {}
+			for loc in dv["list"]:
+				var lid := str(loc["id"])
+				ck(not loc_ids.has(lid), "%s：地点 id 全图唯一：%s" % [mp.get_file(), lid])
+				loc_ids[lid] = true
 				var bm := str(loc.get("battle_map", ""))
-				ck(bm == "" or FileAccess.file_exists(bm), "%s：地点「%s」battle_map 文件存在：%s" % [mp.get_file(), str(loc.get("id", "?")), bm])
+				ck(bm == "" or FileAccess.file_exists(bm), "%s：地点「%s」battle_map 文件存在：%s" % [mp.get_file(), lid, bm])
+		else:
+			for loc in md.get("locations", []):
+				if typeof(loc) == TYPE_DICTIONARY:
+					var bm := str(loc.get("battle_map", ""))
+					ck(bm == "" or FileAccess.file_exists(bm), "%s：地点「%s」battle_map 文件存在：%s" % [mp.get_file(), str(loc.get("id", "?")), bm])
 	for src in do_sources:
 		for a in (src[1] as Array):
 			if typeof(a) != TYPE_DICTIONARY:
