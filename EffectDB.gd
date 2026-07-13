@@ -8,6 +8,7 @@ extends RefCounted
 
 const FILE := "res://data/effects.json"
 const JsonRegistry := preload("res://JsonRegistry.gd")   # 读写盘口单一源（技改 §4-4）
+const TagDB := preload("res://TagDB.gd")                 # 异常族判定（🔒 决策34）
 
 static var _effects := {}
 static var _loaded := false
@@ -32,6 +33,18 @@ static func get_effect(id: String):
 static func all() -> Dictionary:
 	_ensure()
 	return _effects
+
+# 异常族 tag（🔒 决策34）：效果 tags ∩ 注册为 cat=effect 的异常词（bleeding/incapacitated/silenced…）。
+# 同族异 id → 优先级 `priority` 高者起效（覆盖判定在 BattleState._add_effect_by_id）；同族禁同级（lint 执法）。
+static func family_tags(def) -> Array:
+	var out := []
+	if typeof(def) != TYPE_DICTIONARY:
+		return out
+	var fam_ids: Array = TagDB.ids_in_cat("effect")
+	for t in def.get("tags", []):
+		if fam_ids.has(str(t)):
+			out.append(str(t))
+	return out
 
 # 重新加载（清缓存再读）——保存后刷新内存表。（命名铁律见文件头）
 static func reload_data() -> void:

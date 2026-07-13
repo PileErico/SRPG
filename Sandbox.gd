@@ -1714,12 +1714,9 @@ func _do_skill(caster, skill_id: String, cell: Vector2i) -> void:
 			"cleanse":
 				lines.append("　清除 %d 个「%s」效果" % [int(ev["count"]), str(ev["tag"])])
 			"inflict":
+				# 只报成功施加（用户口径 2026-07-13）：未中/豁免/被高优先级压制一律沉默
 				if bool(ev.get("applied", false)):
 					lines.append("　施加「%s」" % str(ev.get("name", "")))
-				elif bool(ev.get("shrugged", false)):
-					lines.append("　[color=#7FD5A0]%s 凭强韧挣脱了「%s」[/color]" % [_cname(target), str(ev.get("name", ""))])
-				else:
-					lines.append("　「%s」未命中" % str(ev.get("name", "")))
 	_push_log(lines)
 	_clear_selection()
 	_refresh_info()
@@ -2111,12 +2108,14 @@ func _resolve_one(attacker, target, skill, show_target := false) -> Dictionary:
 	if r.has("door_gauge"):
 		lines.append("[color=#C86BD5]%s 死门 −1（条 %+d）[/color]" % [_cname(target), int(r["door_gauge"])])
 		_log_door_settle(target, str(r["door_result"]))
+	# 施加播报（用户口径 2026-07-13：**只报成功施加**——凭空施加或刷新时长都算；未掷中/豁免/免疫/
+	# 被高优先级压制一律沉默，信息精炼不解释失败原因）
 	var inf: Dictionary = r.get("inflict", {})
-	if not inf.is_empty():
-		lines.append(_inflict_log_seg(inf))
-	for oh in r.get("on_hit", []):   # 武器 On-Hit Effects（🔒 决策33）：与技能 inflict 同格式，前缀标武器来源
-		if not (oh as Dictionary).is_empty():
-			lines.append("　[武器] " + _inflict_log_seg(oh))
+	if bool(inf.get("applied", false)):
+		lines.append("　施加「%s」" % str(inf.get("name", "")))
+	for oh in r.get("on_hit", []):
+		if bool((oh as Dictionary).get("applied", false)):
+			lines.append("　施加「%s」" % str((oh as Dictionary).get("name", "")))
 	var att_shift := _morale_band_shift(attacker, int(r.get("morale_att", 0)))
 	if att_shift != "":
 		lines.append(att_shift)
@@ -2148,15 +2147,6 @@ func _clear_effects_and_buffs(u) -> void:
 # 移除单位身上所有带某 tag 的效果（如治疗清「bleeding」流血类）+ 连带摘掉它们挂的修正；返回移除条数。
 func _cleanse_effects_with_tag(u, tag: String) -> int:
 	return _state._cleanse_effects_with_tag(u, tag)
-
-# 施加掷骰一行（技能 inflict 与武器 on_hit 同格式）：「名 概率%（骰x）→ 施加/未中/强韧豁免」
-func _inflict_log_seg(inf: Dictionary) -> String:
-	var seg := "%s %s%%（骰%s）" % [str(inf["name"]), _numf(inf["base_ch"]), _numf(inf["roll"])]
-	if bool(inf.get("shrugged", false)):
-		seg += " → [color=#7FD5A0]强韧豁免[/color]（韧%s%%·骰%s）" % [_numf(inf["fort"]), _numf(inf["fort_roll"])]
-	else:
-		seg += " → %s" % _oc(bool(inf["applied"]), "施加", "未中")
-	return seg
 
 # —— 战斗记录 BBCode 小工具 ——
 func _hl(x) -> String:                       # 高亮加粗数字（金）

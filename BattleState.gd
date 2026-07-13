@@ -701,19 +701,66 @@ func _resolve_compute_body(attacker, target, skill) -> Dictionary:
 		target.stats["HP"] = 0
 		r["door_gauge"] = target.door_gauge
 		r["door_result"] = _door_settle_state(target)
-	# 施加异常（如撕裂的流血）：基础概率 × (1 − 异常抵抗)，命中即挂效果
-	r["inflict"] = _try_inflict_state(target, skill)
-	# 武器 On-Hit Effects（🔒 决策33）：持械件 on_hit_effects 逐条独立掷骰（同 inflict 路径：概率+强韧豁免），
-	# 与技能自带 inflict 叠加；普攻/武器技能/借机同吃（都走本结算）。空手/无实例＝无。
+	# 施加异常 + 武器 On-Hit Effects——单击合并规则（🔒 决策33/34，用户口径）：
+	# ①同 effect id：**概率取高只掷一次**（施加概率在武器/技能侧、不在异常本身；ignore_fort 取或）；
+	# ②异 id 同族（共享 cat=effect 异常 tag——各种出血变体都带 bleeding）：**只按优先级更高的那条施加**
+	#   （概率与效果都取高者，低者本次不掷）；③无关异常各自独立掷。
+	# 目标身上已挂同族旧效果的覆盖/压制＝_add_effect_by_id 优先级闸（跨击语义）。空手/无实例＝无武器侧。
+	var cands := []   # [{inf, from_skill}]
+	var sinf = skill.get("inflict", null)
+	if typeof(sinf) == TYPE_DICTIONARY:
+		cands.append({"inf": sinf.duplicate(true), "from_skill": true})
 	var w_item = ItemInstances.view(int(attacker.equipment.get(_seg_slot(skill), 0)))
 	if w_item != null:
-		var onhit := []
 		for e in w_item.get("on_hit_effects", []):
 			if typeof(e) == TYPE_DICTIONARY and str(e.get("effect", "")) != "":
-				onhit.append(_try_inflict_state(target, {"inflict": e}))
-		if not onhit.is_empty():
-			r["on_hit"] = onhit
+				cands.append({"inf": e.duplicate(true), "from_skill": false})
+	var final := []
+	for c in cands:
+		var cinf: Dictionary = c["inf"]
+		var ceid := str(cinf.get("effect", ""))
+		var absorbed := false
+		for f in final:
+			var finf: Dictionary = f["inf"]
+			var fid := str(finf.get("effect", ""))
+			if ceid != "" and ceid == fid:                      # ①同 id：概率取高
+				finf["chance"] = maxf(float(finf.get("chance", 100.0)), float(cinf.get("chance", 100.0)))
+				if bool(cinf.get("ignore_fort", false)):
+					finf["ignore_fort"] = true
+				f["from_skill"] = bool(f["from_skill"]) or bool(c["from_skill"])
+				absorbed = true
+				break
+			if ceid != "" and fid != "" and _same_effect_family(ceid, fid):   # ②同族异 id：高优先级独占
+				if _effect_priority(ceid) > _effect_priority(fid):
+					f["inf"] = cinf
+					f["from_skill"] = c["from_skill"]
+				absorbed = true   # 低者本次直接丢弃（不掷）
+				break
+		if not absorbed:
+			final.append(c)
+	r["inflict"] = {}
+	var onhit := []
+	for f in final:
+		var ires := _try_inflict_state(target, {"inflict": f["inf"]})
+		if bool(f["from_skill"]):
+			r["inflict"] = ires
+		else:
+			onhit.append(ires)
+	if not onhit.is_empty():
+		r["on_hit"] = onhit
 	return r
+
+# 决策34 小工具：两效果是否同族（共享 cat=effect 异常 tag）/ 效果优先级（缺省 0）
+func _same_effect_family(a: String, b: String) -> bool:
+	var fa: Array = EffectDB.family_tags(EffectDB.get_effect(a))
+	for t in EffectDB.family_tags(EffectDB.get_effect(b)):
+		if fa.has(t):
+			return true
+	return false
+
+func _effect_priority(eid: String) -> int:
+	var d = EffectDB.get_effect(eid)
+	return int(d.get("priority", 0)) if d != null else 0
 
 # 命中后尝试施加异常（流血等）：先掷施加概率，命中再掷**强韧豁免**（🔒 模块_属性成长_设计.md §5：
 # 遭受第一时间豁免一次，成功＝完全不受影响；之后每回合豁免见 _apply_turn_start_effects）。
@@ -744,14 +791,17 @@ func _try_inflict_state(target, skill) -> Dictionary:
 				if fort > 0.0:
 					fort_roll = rng.randf() * 100.0
 					shrugged = fort_roll < fort
+	var landed := true   # 决策34：优先级压制＝掷中但不生效，如实回报（suppressed 供播报区分「未中」）
+	if eid != "":
 		if applied and not shrugged:
-			_add_effect(target, {"id": eid, "ignore_fort": ignore_fort})   # id 路径：定义查 EffectDB
+			landed = _add_effect(target, {"id": eid, "ignore_fort": ignore_fort})   # id 路径：定义查 EffectDB
 	else:
 		nm = str(inf.get("name", ""))          # 旧内联形态
 		if applied:
 			_add_effect(target, inf)
-	return {"name": nm, "base_ch": base_ch, "roll": iroll, "applied": applied and not shrugged,
-		"fort": fort, "fort_roll": fort_roll, "shrugged": shrugged}
+	return {"name": nm, "base_ch": base_ch, "roll": iroll, "applied": applied and not shrugged and landed,
+		"fort": fort, "fort_roll": fort_roll, "shrugged": shrugged,
+		"suppressed": applied and not shrugged and not landed}
 
 # ============ 技能施放（阶段2 下沉 🔒 模块_技能_设计 §3/§10）：模型算+结构化事件出，宿主只渲染 ============
 # 修「heal 逻辑违例在宿主」（§3 注*）：AP/冷却/次数消耗与效果块结算全在模型层，Sandbox._do_skill 退成薄渲染壳。
@@ -820,12 +870,13 @@ func _fort_key_for(tags_arr) -> String:
 # 给单位挂一个效果。**分派🔒（§2.2）**：入参带非空 id → EffectDB id 路径（同 id 刷新 / stackable 叠层）；
 # 无 id 但有 name（+可选 mods）→ 匿名内联旧路径（死门/重伤/内联 inflict/旧测试，行为原样不动）。
 # **buff↔modifier 桥 🔒**：带 mods 时同时往 target.modifiers 挂（source="buff:<id|name>"）。
-func _add_effect(target, inf: Dictionary) -> void:
+# 返回是否实际生效（🔒 决策34：被更高优先级同族异常压制＝false——施加方据此如实播报）。
+func _add_effect(target, inf: Dictionary) -> bool:
 	var eid := str(inf.get("id", ""))
 	if eid != "":
-		_add_effect_by_id(target, inf, eid)
-	else:
-		_add_effect_anonymous(target, inf)
+		return _add_effect_by_id(target, inf, eid)
+	_add_effect_anonymous(target, inf)
+	return true
 
 # 匿名内联路径（旧行为逐字保留）：同 name 刷新时长/DoT、不叠层；source="buff:<name>"。
 func _add_effect_anonymous(target, inf: Dictionary) -> void:
@@ -853,11 +904,38 @@ func _add_effect_anonymous(target, inf: Dictionary) -> void:
 
 # EffectDB id 路径（§2.2）：查定义 → 同 id 刷新时长 / stackable 叠层（≤max_stacks）；source="buff:<id>"。
 # 入参 inf 只需带 id（+可选运行时覆盖）；定义本体（duration/dot/mods…）从 EffectDB 取。
-func _add_effect_by_id(target, inf: Dictionary, eid: String) -> void:
+func _add_effect_by_id(target, inf: Dictionary, eid: String) -> bool:
 	var def = EffectDB.get_effect(eid)
 	if def == null:
 		push_warning("_add_effect: 未知效果 id=%s（EffectDB 无此条目，跳过）" % eid)
-		return
+		return false
+	# 异常优先级（🔒 决策34）：同族（共享 cat=effect 异常 tag）异 id → 恒高优先级起效——
+	# 已挂更高者＝新效果被压制不生效；新者更高＝顶掉旧低者（修正一并摘）。
+	# 同级＝数据错误（lint 同族禁同级；运行时保守压制新者+告警）。同 id 不走此闸（刷新/叠层照旧）。
+	var fam: Array = EffectDB.family_tags(def)
+	if not fam.is_empty():
+		var prio := int(def.get("priority", 0))
+		for e in target.effects.duplicate():
+			if str(e.get("id", "")) == eid:
+				continue
+			var edef = EffectDB.get_effect(str(e.get("id", "")))
+			if edef == null:
+				continue   # 匿名/悬空效果不参与优先级
+			var shared := false
+			for t in EffectDB.family_tags(edef):
+				if fam.has(t):
+					shared = true
+					break
+			if not shared:
+				continue
+			var eprio := int(edef.get("priority", 0))
+			if eprio > prio:
+				return false   # 高者在场：新效果不起效
+			if eprio == prio:
+				push_warning("_add_effect: 同族同级异常「%s」vs「%s」（priority %d）——数据应错开优先级（lint 拦）；保守压制新者" % [eid, str(e.get("id", "")), prio])
+				return false
+			_remove_mods_by_source(target, str(e.get("source", "")))   # 新者更高：顶掉旧低者
+			target.effects.erase(e)
 	var source := "buff:" + eid
 	_remove_mods_by_source(target, source)   # 刷新/叠层：先摘旧修正、按最新（含叠层后应有的 mods）重挂
 	var dur := _eval_effect_duration(def)
@@ -895,6 +973,7 @@ func _add_effect_by_id(target, inf: Dictionary, eid: String) -> void:
 			e["stacks"] = 1
 		target.effects.append(e)
 	_hang_effect_mods(target, def.get("mods", []), source, str(def.get("kind", "debuff")))
+	return true
 
 # buff↔modifier 桥：把效果的 mods 挂进 target.modifiers（同 source）。
 func _hang_effect_mods(target, mods, source: String, nature: String) -> void:

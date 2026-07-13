@@ -480,6 +480,23 @@ func _initialize() -> void:
 	for kn in snap_keys:
 		ck(unit_vars.has(kn), "快照键「%s」对应 Unit 字段存在（死键＝白名单腐化）" % kn)
 
+	# 12) 异常优先级（🔒 决策34）：同族（共享 cat=effect 异常 tag）异 id 效果**禁同级**——
+	# 高者恒起效的覆盖顺序必须确定；priority 缺省 0，单成员族天然合法
+	var eff_arr = _read_json("res://data/effects.json")
+	if typeof(eff_arr) == TYPE_ARRAY:
+		var fam_map := {}   # 族 tag → {prio: id}
+		for ef in eff_arr:
+			if typeof(ef) != TYPE_DICTIONARY:
+				continue
+			var eid2 := str(ef.get("id", "?"))
+			var pr := int(ef.get("priority", 0))
+			for t in EffectDB.family_tags(ef):
+				if not fam_map.has(t):
+					fam_map[t] = {}
+				ck(not (fam_map[t] as Dictionary).has(pr),
+					"异常族「%s」同级冲突：%s 与 %s 均 priority=%d（决策34 同族禁同级）" % [t, eid2, str((fam_map[t] as Dictionary).get(pr, "")), pr])
+				fam_map[t][pr] = eid2
+
 	if _fail == 0:
 		print("=== 数据 lint 全 PASS ===")
 		quit(0)

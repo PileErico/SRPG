@@ -16,6 +16,7 @@ const SkillDB := preload("res://SkillDB.gd")
 const ItemDB := preload("res://ItemDB.gd")
 const ItemInstances := preload("res://ItemInstances.gd")
 const EquipSlots := preload("res://EquipSlots.gd")
+const EffectDB := preload("res://EffectDB.gd")   # 决策34 试料注入（§8）
 
 var _fail := 0
 func ck(cond: bool, msg: String) -> void:
@@ -80,6 +81,9 @@ func _initialize() -> void:
 			"on_hit_effects": [{"effect": "bleeding", "chance": 100}]},
 		{"id": "d33_off", "name": "副刀", "slot": "main_hand", "tags": ["one_handed"], "bws": "d31_off",
 			"atk": 2, "acc": 5, "block_rate": 0, "block_power": 0},
+		# 决策34 试料：On-Hit 带高级出血变体
+		{"id": "d34_saw", "name": "锯刃", "slot": "main_hand", "tags": ["one_handed"], "bws": "d31_main",
+			"on_hit_effects": [{"effect": "bleed_high", "chance": 100}]},
 	]
 	var wf = FileAccess.open("user://test_d31_weapons.json", FileAccess.WRITE)
 	wf.store_string(JSON.stringify(weapons, "  "))
@@ -234,11 +238,70 @@ func _initialize() -> void:
 			break
 	ck(oh_applied, "样本内出现命中（On-Hit 断言成立）")
 
+	# —— 8) 决策34：同 id 概率取高 / 同族异 id 优先级独占（单击） / 跨击覆盖与压制 ——
+	var effs := [
+		{"id": "bleed_low", "name": "低级出血", "kind": "debuff", "tags": ["bleeding"], "priority": 1,
+			"duration_model": "fixed", "duration": {"base": 2}, "dot_pct_max_hp": 3, "mods": []},
+		{"id": "bleed_high", "name": "高级出血", "kind": "debuff", "tags": ["bleeding"], "priority": 2,
+			"duration_model": "fixed", "duration": {"base": 2}, "dot_pct_max_hp": 6, "mods": []},
+	]
+	var ef = FileAccess.open("user://test_d34_effects.json", FileAccess.WRITE)
+	ef.store_string(JSON.stringify(effs, "  "))
+	ef.close()
+	EffectDB._path_override = "user://test_d34_effects.json"
+	EffectDB.reload_data()
+	var s8 = mk("锯手", "player", 1, 6)
+	s8.equipment["main_hand"] = ItemInstances.create("d34_saw")
+	var v8 = mk("靶8", "enemy", 1, 7)
+	sb.units = [s8, v8]
+	# ①同 id 概率取高：技能 inflict bleed_high 0% + 武器 bleed_high 100% → 合并单掷、概率 100
+	var got8 := false
+	for seedv in range(1, 41):
+		v8.effects = []
+		v8.modifiers = []
+		s8.morale = 25
+		sb._state.rng.seed = seedv
+		var r8: Dictionary = sb._state._resolve_compute(s8, v8, {"coeff": 1.0, "inflict": {"effect": "bleed_high", "chance": 0}})
+		if bool(r8.get("hit", false)):
+			ck(is_equal_approx(float(r8["inflict"]["base_ch"]), 100.0) and not r8.has("on_hit"),
+				"同 id 概率取高：技能 0% + 武器 100% → 合并单掷 100%（施加概率在武器/技能侧）")
+			ck(bool(r8["inflict"]["applied"]), "合并后 100% 必施加")
+			got8 = true
+			break
+	ck(got8, "§8a 样本内出现命中")
+	# ②同族异 id（都带 bleeding tag）：技能带低级 100%、武器带高级 100% → 只按高优先级施加、低者不掷
+	got8 = false
+	for seedv in range(1, 41):
+		v8.effects = []
+		v8.modifiers = []
+		s8.morale = 25
+		sb._state.rng.seed = seedv
+		var r8b: Dictionary = sb._state._resolve_compute(s8, v8, {"coeff": 1.0, "inflict": {"effect": "bleed_low", "chance": 100}})
+		if bool(r8b.get("hit", false)):
+			ck((r8b.get("inflict", {}) as Dictionary).is_empty(), "技能低级条目被高优先级独占——本次不掷")
+			var names8 := []
+			for oh in r8b.get("on_hit", []):
+				names8.append(str(oh.get("name", "")))
+			ck(names8 == ["高级出血"], "只施加武器侧高级出血（概率与效果都按高者）")
+			ck(v8.effects.size() == 1 and str(v8.effects[0]["id"]) == "bleed_high", "落地效果＝bleed_high")
+			got8 = true
+			break
+	ck(got8, "§8b 样本内出现命中")
+	# ③跨击优先级闸：已挂低级→高级顶掉；已挂高级→低级被压制（_add_effect 返回 false 如实回报）
+	var t8 = mk("靶9", "enemy", 2, 7)
+	ck(sb._state._add_effect(t8, {"id": "bleed_low"}), "先挂低级出血")
+	ck(sb._state._add_effect(t8, {"id": "bleed_high"}), "高级施加成功（顶掉低级）")
+	ck(t8.effects.size() == 1 and str(t8.effects[0]["id"]) == "bleed_high", "低级被顶掉、只剩高级")
+	ck(not sb._state._add_effect(t8, {"id": "bleed_low"}), "已挂高级 → 低级被压制（返回 false）")
+	ck(t8.effects.size() == 1 and str(t8.effects[0]["id"]) == "bleed_high", "压制后仍只有高级")
+
 	# —— 清场：撤 override、清实例 ——
 	SkillDB._path_override = ""
 	SkillDB.reload_data()
 	ItemDB._paths_override = {}
 	ItemDB.reload_data()
+	EffectDB._path_override = ""
+	EffectDB.reload_data()
 	ItemInstances.clear()
 	sb.free()
 

@@ -99,6 +99,7 @@ func _initialize() -> void:
 	if slayer_id != "":
 		var s = BattleState.new()
 		s._new_grassland(9, 7)
+		s.rng.seed = 20260713   # 注入定序（战斗骰统一过 BattleState.rng——技改 §1-1；防抽签碎裂）
 		var slayer = Unit.new("屠龙者", "player", 3, 3)
 		slayer.set_trait(slayer_id)
 		var beast = Unit.new("野兽", "enemy", 4, 3)
@@ -110,6 +111,7 @@ func _initialize() -> void:
 			if str(m.get("stat", "")) == "atk_eff":
 				base_mult = 1.0 + float(m.get("value", 0)) * 3.0 / 100.0   # 三倍口径：5% → 15%
 		slayer.stats["atk"] = 20
+		slayer.stats["acc"] = 200.0   # hc 钳 95：64 次内必出命中样本（本段测 aeff 数学，不测命运）
 		var rb := {}
 		for _i in range(64):
 			slayer.morale = 25

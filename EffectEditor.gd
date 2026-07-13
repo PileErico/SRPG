@@ -42,6 +42,7 @@ var _w_perm: CheckBox
 var _w_timing: OptionButton
 var _w_stackable: CheckBox
 var _w_maxstacks: SpinBox
+var _w_priority: SpinBox    # 异常优先级（🔒 决策34）
 var _w_dot: SpinBox
 var _w_hot: SpinBox
 var _w_expire_apply: OptionButton
@@ -227,6 +228,9 @@ func _build_form() -> void:
 	_w_stackable = EditorUI.add_check(_form, "可叠层 stackable（关＝同 id 重置时长不叠）", bool(_current.get("stackable", false)), _mark_dirty)
 	_w_stackable.toggled.connect(func(_v): _update_links())
 	_w_maxstacks = EditorUI.add_spin(_form, "叠层上限 max_stacks（0=无硬上限）", float(_current.get("max_stacks", 0)), 0, 99, 1, _mark_dirty)
+	# 异常优先级（🔒 决策34）：同族（同 cat=effect 异常 tag）异 id → 恒高者起效（高顶低、低不生效）；
+	# 同族禁同级（lint 执法）保证覆盖顺序确定。无族 tag 的效果不参与。0=缺省不落键。
+	_w_priority = EditorUI.add_spin(_form, "异常优先级 priority（同族异 id 高者起效；同族禁同级）", float(_current.get("priority", 0)), -99, 99, 1, _mark_dirty)
 	_w_dot = EditorUI.add_spin(_form, "持续伤害 dot_pct_max_hp（%最大生命/回合末；无视护甲）", float(_current.get("dot_pct_max_hp", 0)), 0, 100, 1, _mark_dirty)
 	_w_hot = EditorUI.add_spin(_form, "持续回复 hot_flat（固定值/回合末）", float(_current.get("hot_flat", 0)), 0, 999, 1, _mark_dirty)
 
@@ -417,6 +421,10 @@ func _shell_collect() -> Dictionary:
 	out["expire_timing"] = str(_w_timing.get_selected_metadata())
 	out["stackable"] = _w_stackable.button_pressed
 	out["max_stacks"] = int(_w_maxstacks.value)
+	if int(_w_priority.value) != 0:
+		out["priority"] = int(_w_priority.value)   # 决策34：0=缺省不落键
+	else:
+		out.erase("priority")
 	out["dot_pct_max_hp"] = int(_w_dot.value)
 	out["hot_flat"] = int(_w_hot.value)
 	var mods := []
