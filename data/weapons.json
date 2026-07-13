@@ -1,19 +1,13 @@
 [
   {
+    "acc": 30,
+    "atk": 5,
+    "block_power": 0,
+    "block_rate": 0,
     "bws": "bws_dragon_lance",
     "icon": "res://icons/Items/Weapons/Special_Veiken.png",
     "id": "spear_dragon_calamity",
     "mods": [
-      {
-        "op": "flat",
-        "stat": "atk",
-        "value": 5
-      },
-      {
-        "op": "flat",
-        "stat": "acc",
-        "value": 30
-      },
       {
         "op": "flat",
         "stat": "res_nature",
@@ -34,22 +28,15 @@
     "two_handed": true
   },
   {
+    "acc": 15,
+    "atk": 9.5,
+    "block_power": 0,
+    "block_rate": 0,
     "bws": "bws_belooz_rend",
     "icon": "res://icons/Items/Weapons/Special_Belooz_1.png",
     "id": "claw_wing",
     "innate": true,
-    "mods": [
-      {
-        "op": "flat",
-        "stat": "atk",
-        "value": 9.5
-      },
-      {
-        "op": "flat",
-        "stat": "acc",
-        "value": 15
-      }
-    ],
+    "mods": [],
     "name": "比路兹的翼爪",
     "prefer": "ground",
     "requires": [
@@ -65,22 +52,15 @@
     "two_handed": false
   },
   {
+    "acc": 15,
+    "atk": 9.5,
+    "block_power": 0,
+    "block_rate": 0,
     "bws": "bws_belooz_grab",
     "icon": "res://icons/Items/Weapons/Special_Belooz_2.png",
     "id": "claw_foot",
     "innate": true,
-    "mods": [
-      {
-        "op": "flat",
-        "stat": "atk",
-        "value": 9.5
-      },
-      {
-        "op": "flat",
-        "stat": "acc",
-        "value": 15
-      }
-    ],
+    "mods": [],
     "name": "比路兹的足爪",
     "prefer": "air",
     "requires": [
@@ -96,22 +76,15 @@
     "two_handed": false
   },
   {
+    "acc": 32,
+    "atk": 9,
+    "block_power": 0,
+    "block_rate": 0,
     "bws": "bws_desmond_claw",
     "icon": "res://icons/Items/Weapons/Special_Desmond_1.png",
     "id": "Desmond_Claw",
     "innate": true,
-    "mods": [
-      {
-        "op": "flat",
-        "stat": "atk",
-        "value": 9
-      },
-      {
-        "op": "flat",
-        "stat": "acc",
-        "value": 32
-      }
-    ],
+    "mods": [],
     "name": "戴斯蒙的狼爪",
     "requires": [
       "char_desmond"
@@ -126,22 +99,15 @@
     "two_handed": false
   },
   {
+    "acc": 30,
+    "atk": 5,
+    "block_power": 0,
+    "block_rate": 0,
     "bws": "bws_slash",
     "icon": "res://icons/Items/Weapons/longsword.png",
     "id": "long_sword",
     "innate": false,
-    "mods": [
-      {
-        "op": "flat",
-        "stat": "atk",
-        "value": 5
-      },
-      {
-        "op": "flat",
-        "stat": "acc",
-        "value": 30
-      }
-    ],
+    "mods": [],
     "name": "长剑",
     "requires": [],
     "slot": "main_hand",
@@ -154,22 +120,15 @@
     "two_handed": false
   },
   {
+    "acc": 25,
+    "atk": 2.5,
+    "block_power": 0,
+    "block_rate": 0,
     "bws": "bws_unarmed",
     "icon": "res://icons/Items/Weapons/weapon_human_unarmed.png",
     "id": "unarmed_fists",
     "innate": true,
-    "mods": [
-      {
-        "op": "flat",
-        "stat": "atk",
-        "value": 2.5
-      },
-      {
-        "op": "flat",
-        "stat": "acc",
-        "value": 25
-      }
-    ],
+    "mods": [],
     "name": "拳脚",
     "natural": true,
     "requires": [],
@@ -182,21 +141,14 @@
     "two_handed": false
   },
   {
+    "acc": 0,
+    "atk": 0,
+    "block_power": 35,
+    "block_rate": 15,
     "icon": "res://icons/Items/Weapons/wood_kite_shield.png",
     "id": "wood_kite_shield",
     "innate": false,
-    "mods": [
-      {
-        "op": "flat",
-        "stat": "block_rate",
-        "value": 15
-      },
-      {
-        "op": "flat",
-        "stat": "block_power",
-        "value": 35
-      }
-    ],
+    "mods": [],
     "name": "斗盾",
     "requires": [],
     "slot": "off_hand",
@@ -208,22 +160,15 @@
     "two_handed": false
   },
   {
+    "acc": 35,
+    "atk": 3,
+    "block_power": 0,
+    "block_rate": 0,
     "bws": "bws_stab",
     "icon": "",
     "id": "rusty_dagger",
     "innate": false,
-    "mods": [
-      {
-        "op": "flat",
-        "stat": "atk",
-        "value": 3
-      },
-      {
-        "op": "flat",
-        "stat": "acc",
-        "value": 35
-      }
-    ],
+    "mods": [],
     "name": "锈匕首",
     "requires": [],
     "slot": "main_hand",
@@ -236,22 +181,15 @@
     "two_handed": false
   },
   {
+    "acc": 20,
+    "atk": 4,
+    "block_power": 0,
+    "block_rate": 0,
     "bws": "bws_bash",
     "icon": "",
     "id": "wooden_club",
     "innate": false,
-    "mods": [
-      {
-        "op": "flat",
-        "stat": "atk",
-        "value": 4
-      },
-      {
-        "op": "flat",
-        "stat": "acc",
-        "value": 20
-      }
-    ],
+    "mods": [],
     "name": "木棒",
     "requires": [],
     "slot": "main_hand",
@@ -262,5 +200,26 @@
       "one_handed"
     ],
     "two_handed": false
+  },
+  {
+    "acc": 0,
+    "atk": 0,
+    "block_power": 0,
+    "block_rate": 0,
+    "bws": "ws_swing",
+    "icon": "res://icons/Items/Weapons/双手巨剑.png",
+    "id": "sword_zweihande",
+    "innate": false,
+    "mods": [],
+    "name": "双手巨剑",
+    "requires": [],
+    "slot": "main_hand",
+    "tags": [
+      "common",
+      "melee",
+      "weapon_sword",
+      "two_handed"
+    ],
+    "two_handed": true
   }
 ]

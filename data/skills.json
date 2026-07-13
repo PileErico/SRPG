@@ -370,6 +370,7 @@
       {
         "hits": [
           {
+            "armor_pen": 0.2,
             "coeff": 0.7,
             "damage_category": "physical",
             "damage_type": "slashing"
@@ -427,7 +428,8 @@
       ]
     },
     "tags": [
-      "aoe"
+      "aoe",
+      "slashing"
     ],
     "target": {
       "ally": false,
