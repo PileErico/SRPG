@@ -725,7 +725,7 @@ func _build_attack_block(box: VBoxContainer, entry: Dictionary) -> void:
 	var hit: Dictionary = hits[0] if hits.size() == 1 and typeof(hits[0]) == TYPE_DICTIONARY else {}
 	if hit.has("weapon_source"):
 		box.add_child(_warn("weapon_source=off_hand：结算吃副手惩罚 ×offhand_eff/100（🔒 决策5 阶段3b 已生效；盾豁免）", HINT_COLOR))
-	entry["coeff"] = _add_formula(box, "伤害系数 coeff", hit.get("coeff", 1.0))
+	entry["coeff"] = _add_formula(box, "伤害系数 coeff", hit.get("coeff", 1.0), false)   # 攻击块无逐级（用户裁定：武器技能无升级，per_level 在此已死）
 	var dk := OptionButton.new()
 	for d in DAMAGE_KINDS:
 		dk.add_item(d)
@@ -734,7 +734,7 @@ func _build_attack_block(box: VBoxContainer, entry: Dictionary) -> void:
 	dk.item_selected.connect(func(_i): _mark_dirty())
 	box.add_child(EditorUI.field_row("伤害类型 damage_kind", dk))
 	entry["damage_kind"] = dk
-	entry["armor_pen"] = EditorUI.add_spin(box, "破甲 armor_pen（0=无）", float(hit.get("armor_pen", 0)), 0, 100, 1, _mark_dirty)
+	entry["armor_pen"] = EditorUI.add_spin(box, "破甲 armor_pen（小数 0~1：0.3=30% 伤害直击人体，1=完全无视护甲）", clampf(float(hit.get("armor_pen", 0)), 0.0, 1.0), 0.0, 1.0, 0.01, _mark_dirty)
 	entry["sure_hit"] = EditorUI.add_check(box, "必中 sure_hit（跳过命中掷骰）", bool(hit.get("sure_hit", false)), _mark_dirty)
 	box.add_child(_warn("aoe / bonus / ignore_* 等高级字段本版不编辑，保存原样保留", WARN_COLOR))
 
@@ -885,8 +885,8 @@ func _build_scripted_block(box: VBoxContainer, entry: Dictionary) -> void:
 
 # —— 公式三段控件（🔒 §2.4：基础值 + 缩放属性×系数 + 逐级数组；无表达式解析器）——
 # 收集规则（canonical 最小键）：无 per_stat 且无 per_level → 落标量；否则对象 {base?, per_stat?, per_level?}
-# （base=0 省略、空段省略——与 first_aid 的 {"per_level":[...]} 形一致，保字节级往返）。
-func _add_formula(box: VBoxContainer, label: String, v) -> Dictionary:
+# （base=0 省略、空段省略——{"per_level":[...]} 最小键形，保字节级往返）。
+func _add_formula(box: VBoxContainer, label: String, v, show_levels := true) -> Dictionary:
 	var base := 0.0
 	var stat := ""
 	var weight := 0.0
@@ -934,11 +934,13 @@ func _add_formula(box: VBoxContainer, label: String, v) -> Dictionary:
 	ws.value_changed.connect(func(_v): _mark_dirty())
 	row.add_child(ws)
 	box.add_child(EditorUI.field_row(label, row))
-	var lv := LineEdit.new()
-	lv.text = levels
-	lv.placeholder_text = "逐级数组 per_level 逗号分隔（长度须==max_level；填了则替代基础值档）"
-	lv.text_changed.connect(func(_t): _mark_dirty())
-	box.add_child(EditorUI.field_row("　　逐级 per_level", lv))
+	var lv: LineEdit = null
+	if show_levels:
+		lv = LineEdit.new()
+		lv.text = levels
+		lv.placeholder_text = "逐级数组 per_level 逗号分隔（长度须==max_level；填了则替代基础值档）"
+		lv.text_changed.connect(func(_t): _mark_dirty())
+		box.add_child(EditorUI.field_row("　　逐级 per_level", lv))
 	var multi_per := typeof(v) == TYPE_DICTIONARY and typeof(v.get("per_stat", {})) == TYPE_DICTIONARY and (v.get("per_stat", {}) as Dictionary).size() > 1
 	if multi_per:
 		box.add_child(_warn("per_stat 多键——控件只编首键，其余保存原样保留", WARN_COLOR))
@@ -951,7 +953,7 @@ func _collect_formula(w: Dictionary):
 	var base := float(w["base"].value)
 	var stat := str(w["stat"].get_selected_metadata())
 	var weight := float(w["weight"].value)
-	var lv_text := str(w["levels"].text).strip_edges()
+	var lv_text := str(w["levels"].text).strip_edges() if w["levels"] != null else ""   # 无逐级控件（攻击块）＝恒空，存盘自然清 per_level
 	var per_level := []
 	if lv_text != "":
 		for p in lv_text.split(","):
@@ -1082,8 +1084,9 @@ func _collect_block(entry: Dictionary) -> Dictionary:
 				return out
 			hit["coeff"] = coeff
 			hit["damage_kind"] = str(entry["damage_kind"].get_selected_metadata())
-			if int(entry["armor_pen"].value) > 0:
-				hit["armor_pen"] = int(entry["armor_pen"].value)
+			var pen := clampf(float(entry["armor_pen"].value), 0.0, 1.0)
+			if pen > 0.0:
+				hit["armor_pen"] = _num(pen)
 			else:
 				hit.erase("armor_pen")
 			if entry["sure_hit"].button_pressed:
