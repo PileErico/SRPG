@@ -24,10 +24,9 @@ const ICON_DIR := {
 	"item": "res://icons/Items",
 }
 const OPS := [["flat", "固定"], ["pct", "百分比%"]]
-# 武器固有属性（🔒 决策33 2026-07-13 用户拍板）：必填字段非可选 mod——0=无此项；词条/附加修正仍走 mods。
-# 甲伤=对护甲额外伤害%（钝器特色；结算=CombatResolver armor_f 只放大啃甲）。
-const WEAPON_INTRINSIC := [["atk", "攻击"], ["acc", "命中"], ["block_rate", "格挡率"],
-	["block_power", "格挡性能"], ["armor_dmg", "甲伤（对护甲额外伤害%）"]]
+# 武器固有属性（🔒 决策33 2026-07-13 用户拍板）：**严格四项**必填字段非可选 mod——0=无此项；词条/附加修正仍走 mods。
+# 甲伤 armor_dmg 不在此列（用户校准：甲伤也是一种 On-Hit——不论用什么技能挥舞都破坏护甲）→ 住 On-Hit 板块。
+const WEAPON_INTRINSIC := [["atk", "攻击"], ["acc", "命中"], ["block_rate", "格挡率"], ["block_power", "格挡性能"]]
 const PREFER_PAIRS := [["", "（无）"], ["ground", "地面（落地换进主手）"], ["air", "空中（起飞换进主手）"]]   # 比路兹式起降换手
 # 物品大类下拉（基础区，id 上方）：kind 选择器——替掉旧的 4 个「＋类别」按钮
 const KIND_PAIRS := [["weapon", "武器"], ["armor", "防具"], ["accessory", "饰品"], ["item", "物品"]]
@@ -457,9 +456,12 @@ func _build_form() -> void:
 		_refresh_preview())
 	_form.add_child(addmod)
 
-	# 3b. On-Hit Effects（🔒 决策33：武器打中施加——普攻与武器技能都触发，与技能自带 inflict 独立叠加）
+	# 3b. On-Hit Effects（🔒 决策33：武器打中的附带行为——普攻与武器技能都触发，与技能自带 inflict 独立叠加。
+	#     甲伤同属此族：不论用什么技能挥舞都破坏护甲——用户校准 2026-07-13）
 	if _current_kind == "weapon":
-		_form.add_child(EditorUI.section_title("On-Hit Effects（打中施加；普攻/武器技能/借机都触发，与技能 inflict 叠加）"))
+		_form.add_child(EditorUI.section_title("On-Hit Effects（打中附带；普攻/武器技能/借机都触发，与技能 inflict 叠加）"))
+		_w_intr["armor_dmg"] = EditorUI.add_spin(_form, "甲伤 armor_dmg（对护甲额外伤害%；0=无）",
+			float(_current.get("armor_dmg", 0)), -999, 9999, 0.5, _refresh_preview)
 		_onhit_box = VBoxContainer.new()
 		_onhit_box.add_theme_constant_override("separation", 4)
 		_form.add_child(_onhit_box)
