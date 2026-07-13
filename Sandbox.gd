@@ -12,7 +12,7 @@ const ItemInstances := preload("res://ItemInstances.gd")    # 物品实例门面
 const BattleBottomBar := preload("res://BattleBottomBar.gd")  # 常驻底边栏（独立 UI，自决布局；宿主喂数据）
 const TextureCache := preload("res://TextureCache.gd")      # 立绘/图标加载 + 缓存单一入口
 
-# damage_kind → 抗性中文标签（战斗记录用；element 已废弃 §7.2）
+# damage_category → 抗性中文标签（战斗记录用；原 damage_kind 已改词 2026-07-13；element 已废弃 §7.2）
 const ELEM_RES_CN := {"physical": "物抗", "fire": "火抗", "ice": "冰抗", "thunder": "雷抗", "holy": "神圣抗"}
 const TerrainDB := preload("res://TerrainDB.gd")
 const EnvDB := preload("res://EnvDB.gd")   # 环境注册表（天气/日夜 → sight 修正）
@@ -2098,7 +2098,7 @@ func _resolve_one(attacker, target, skill, show_target := false) -> Dictionary:
 	var reductions := []
 	if float(r["bp"]) > 0.0: reductions.append("格挡性能%s%%" % _numf(r["bp"]))
 	if float(r["def_factor"]) != 1.0: reductions.append("防御效能×%s" % _numf(r["def_factor"]))
-	if float(r["res_pct"]) != 0.0: reductions.append("%s%s%%" % [str(ELEM_RES_CN.get(r["damage_kind"], "抗")), _numf(r["res_pct"])])
+	if float(r["res_pct"]) != 0.0: reductions.append("%s%s%%" % [str(ELEM_RES_CN.get(r["damage_category"], "抗")), _numf(r["res_pct"])])
 	if float(r["armor_res_pct"]) != 0.0 and r["had_armor"]: reductions.append("甲抗%s%%" % _numf(r["armor_res_pct"]))
 	if float(r["pen"]) > 0.0: reductions.append("穿甲%s%%" % _numf(float(r["pen"]) * 100.0))
 	lines.append("减伤：%s" % ("、".join(reductions) if reductions.size() > 0 else "无"))

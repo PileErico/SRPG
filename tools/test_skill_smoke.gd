@@ -21,7 +21,7 @@ const T_HEAL := {"id": "t_heal", "name": "试料救护", "icon": "", "category":
 	"active": true, "tags": [],
 	"costs": {"ap": 1}, "cooldown": {"base": 2}, "uses_per_battle": {"base": 0},
 	"max_level": 3, "target": {"enemy": false, "ally": true, "self": true},
-	"range": 1, "requires_hands": [],
+	"range": 1,
 	"effects": [{"kind": "heal", "heal_pct_max_hp": {"per_level": [15, 25, 35]}, "cleanse_tags": ["bleeding"]}]}
 
 var _fail := 0

@@ -25,8 +25,10 @@ const ICON_DIR := "res://icons/Skills"
 # 适用武器种类的 tag 类别（🔒 决策29：词表＝TagDB wcat_*，与武器 tag/动态技能 tag 三位一体）
 const WEAPON_KIND_CATS := [["wcat_melee", "近战"], ["wcat_ranged", "远程"], ["wcat_catalyst", "触媒"], ["wcat_shield", "盾"]]
 const CATEGORIES := [["skill", "技巧 skill"], ["spell", "魔法 spell（魔法系统后置）"]]   # ⚠ 2026-07-13 用户改词：键 nature→category（与修正对象的 nature〔buff/debuff〕分家）
-const DAMAGE_KINDS := ["physical", "fire", "ice", "thunder", "holy"]
-const HAND_SLOTS := [["main_hand", "主手"], ["off_hand", "副手"]]
+# 伤害属性（大类：物理/元素；真伤=将来位）＋伤害类型（创伤，词表同 tags.json cat damage）——两正交下拉（2026-07-13 用户拍板）
+const DAMAGE_CATEGORIES := [["physical", "物理"], ["fire", "火"], ["ice", "冰"], ["thunder", "雷"], ["holy", "神圣"]]
+const DAMAGE_TYPES := [["", "（未设）"], ["slashing", "斩击"], ["piercing", "穿刺"], ["bludgeoning", "打击"]]
+const HAND_SLOTS := [["main_hand", "主手"], ["off_hand", "副手"]]   # when equip_state 槽位词表（requires_hands 已删 2026-07-13）
 const BLOCK_KINDS := [["attack", "攻击 attack"], ["heal", "治疗 heal"],
 	["passive_stat_mods", "被动修正 passive_stat_mods"],
 	["conditional_mod", "条件修正 conditional_mod"],
@@ -40,7 +42,6 @@ const HINT_COLOR := Color(0.55, 0.75, 0.55)   # 绿＝纯说明（字段已生�
 # —— 状态 ——
 var _current: Dictionary = {}
 var _tags: Array = []
-var _hand_rows: Array = []    # requires_hands 行：[{row, slot:OptionButton, all:LineEdit, any:LineEdit}]
 var _blocks: Array = []       # 效果块：[{data, kind, panel, ...控件}]（data＝原始块，collect 时 duplicate+更新）
 
 # —— 控件 ——
@@ -71,7 +72,6 @@ var _w_pick: Control               # 选取形 HexShapePicker
 var _w_effect: Control             # 作用形 HexShapePicker
 var _w_anchor: OptionButton        # 作用形锚点 caster/target
 var _w_ff: CheckBox                # 友伤 friendly_fire
-var _hands_box: VBoxContainer
 var _blocks_box: VBoxContainer
 var _block_pick: OptionButton
 
@@ -192,7 +192,7 @@ func _skeleton() -> Dictionary:
 		"active": true, "tags": [],
 		"costs": {"ap": 1}, "cooldown": {"base": 0}, "uses_per_battle": {"base": 0},
 		"max_level": 1, "target": {"enemy": true, "ally": false, "self": false},
-		"range": 1, "requires_hands": [], "effects": []}
+		"range": 1, "effects": []}
 
 func _open_skill(def: Dictionary, is_new: bool) -> void:
 	_current = def
@@ -214,7 +214,6 @@ func _clear_form() -> void:
 	for c in _form.get_children():
 		c.queue_free()
 	_tags = []
-	_hand_rows = []
 	_blocks = []
 
 func _build_form() -> void:
@@ -343,22 +342,9 @@ func _build_form() -> void:
 	_w_active.toggled.connect(func(_v): _update_passive_gray())
 	_update_passive_gray()
 
-	# 4. 手部门槛 requires_hands（§2.5；BAS 必须空）
-	_form.add_child(EditorUI.section_title("手部门槛 requires_hands（逐槽查武器 tag；BAS 必须空）"))
-	_hands_box = VBoxContainer.new()
-	_hands_box.add_theme_constant_override("separation", 4)
-	_form.add_child(_hands_box)
-	for h in _current.get("requires_hands", []):
-		if typeof(h) == TYPE_DICTIONARY:
-			_add_hand_row(str(h.get("slot", "main_hand")), h.get("all_tags", []), h.get("any_tags", []))
-	var addh := Button.new()
-	addh.text = "＋ 添加手部门槛"
-	addh.pressed.connect(func():
-		_add_hand_row("main_hand", [], [])
-		_mark_dirty())
-	_form.add_child(addh)
-
-	# 5. 效果块 effects[]（§3 调色盘；v1 五种可编）
+	# 4. 效果块 effects[]（§3 调色盘；v1 五种可编）
+	# （手部门槛 requires_hands 已删 2026-07-13 用户拍板——位置语义〔决策31〕后零用例：
+	#   盾击=盾种类 WS 手位自定、双手斩=双手武器自己的 WS；collect 随存清键）
 	_form.add_child(EditorUI.section_title("效果块 effects（技能＝效果块拼装；按序结算）"))
 	_blocks_box = VBoxContainer.new()
 	_blocks_box.add_theme_constant_override("separation", 8)
@@ -533,7 +519,7 @@ func _open_icon_dialog() -> void:
 	_file_dialog.current_dir = ICON_DIR
 	_file_dialog.popup_centered(Vector2i(760, 520))
 
-# 技能 tag 下拉预设：技能行为类别 + 手动（weapon_* 等门槛词走 requires_hands，不进 tags）
+# 技能 tag 下拉预设：技能行为类别 + 手动（weapon_* 种类词走 weapon_kinds〔决策29〕，不进 tags）
 func _tag_options() -> Array:
 	var out := []
 	for c in SKILL_TAG_CATS:
@@ -545,50 +531,6 @@ func _tag_options() -> Array:
 			out.append([id, "%s（%s）" % [TagDB.cn(id), id]])
 	return out
 
-
-# —— requires_hands 行 ——
-
-func _add_hand_row(slot: String, all_tags, any_tags) -> void:
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 6)
-	var sl := OptionButton.new()
-	for p in HAND_SLOTS:
-		sl.add_item(str(p[1]))
-		sl.set_item_metadata(sl.item_count - 1, str(p[0]))
-	_select_meta(sl, slot)
-	sl.item_selected.connect(func(_i): _mark_dirty())
-	row.add_child(sl)
-	row.add_child(EditorUI.label("全要"))
-	var al := LineEdit.new()
-	al.text = ", ".join(_str_arr(all_tags))
-	al.placeholder_text = "all_tags 逗号分隔（如 two_handed, weapon_sword）"
-	al.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	al.text_changed.connect(func(_t): _mark_dirty())
-	row.add_child(al)
-	row.add_child(EditorUI.label("任一"))
-	var an := LineEdit.new()
-	an.text = ", ".join(_str_arr(any_tags))
-	an.placeholder_text = "any_tags 逗号分隔"
-	an.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	an.text_changed.connect(func(_t): _mark_dirty())
-	row.add_child(an)
-	var rm := Button.new()
-	rm.text = "✕"
-	var entry := {"row": row, "slot": sl, "all": al, "any": an}
-	rm.pressed.connect(func():
-		_hand_rows.erase(entry)
-		row.queue_free()
-		_mark_dirty())
-	row.add_child(rm)
-	_hands_box.add_child(row)
-	_hand_rows.append(entry)
-
-func _str_arr(v) -> PackedStringArray:
-	var out := PackedStringArray()
-	if typeof(v) == TYPE_ARRAY:
-		for e in v:
-			out.append(str(e))
-	return out
 
 func _split_tags(text: String) -> Array:
 	var out := []
@@ -604,7 +546,7 @@ func _split_tags(text: String) -> Array:
 func _block_skeleton(kind: String) -> Dictionary:
 	match kind:
 		"attack":
-			return {"kind": "attack", "hits": [{"coeff": 1.0, "damage_kind": "physical"}]}
+			return {"kind": "attack", "hits": [{"coeff": 1.0, "damage_category": "physical"}]}
 		"heal":
 			return {"kind": "heal", "heal_pct_max_hp": 0, "cleanse_tags": []}
 		"passive_stat_mods":
@@ -711,7 +653,7 @@ func _warn(text: String, color: Color) -> Label:
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	return l
 
-# attack：v1 只编单 hit 的 coeff/damage_kind/armor_pen/sure_hit；多 hits/riders＝阶段6 禁入库→锁定只读。
+# attack：v1 编单 hit 的 系数/修正/命中/伤害属性/伤害类型/破甲/必中（2026-07-13 用户定序）；多 hits/riders＝阶段6 禁入库→锁定只读。
 func _build_attack_block(box: VBoxContainer, entry: Dictionary) -> void:
 	var hits: Array = entry["data"].get("hits", [])
 	var has_riders := false
@@ -726,16 +668,13 @@ func _build_attack_block(box: VBoxContainer, entry: Dictionary) -> void:
 	if hit.has("weapon_source"):
 		box.add_child(_warn("weapon_source=off_hand：结算吃副手惩罚 ×offhand_eff/100（🔒 决策5 阶段3b 已生效；盾豁免）", HINT_COLOR))
 	entry["coeff"] = _add_formula(box, "伤害系数 coeff", hit.get("coeff", 1.0), false)   # 攻击块无逐级（用户裁定：武器技能无升级，per_level 在此已死）
-	var dk := OptionButton.new()
-	for d in DAMAGE_KINDS:
-		dk.add_item(d)
-		dk.set_item_metadata(dk.item_count - 1, d)
-	_select_meta(dk, str(hit.get("damage_kind", "physical")))
-	dk.item_selected.connect(func(_i): _mark_dirty())
-	box.add_child(EditorUI.field_row("伤害类型 damage_kind", dk))
-	entry["damage_kind"] = dk
+	entry["hit"] = EditorUI.add_spin(box, "命中 hit（技能基准命中率%；总命中=此值+角色命中修正−敌闪避项，0=无面板）", clampf(float(hit.get("hit", 0)), 0.0, 100.0), 0.0, 100.0, 1.0, _mark_dirty)
+	entry["damage_category"] = EditorUI.add_dropdown(box, "伤害属性 damage_category（大类：物理/元素）", DAMAGE_CATEGORIES,
+		str(hit.get("damage_category", hit.get("damage_kind", "physical"))), _mark_dirty)   # 旧键 damage_kind 随存即迁
+	entry["damage_type"] = EditorUI.add_dropdown(box, "伤害类型 damage_type（创伤：斩击/穿刺/打击）", DAMAGE_TYPES,
+		str(hit.get("damage_type", "")), _mark_dirty)
 	entry["armor_pen"] = EditorUI.add_spin(box, "破甲 armor_pen（小数 0~1：0.3=30% 伤害直击人体，1=完全无视护甲）", clampf(float(hit.get("armor_pen", 0)), 0.0, 1.0), 0.0, 1.0, 0.01, _mark_dirty)
-	entry["sure_hit"] = EditorUI.add_check(box, "必中 sure_hit（跳过命中掷骰）", bool(hit.get("sure_hit", false)), _mark_dirty)
+	entry["sure_hit"] = EditorUI.add_check(box, "必中 sure_hit（跳过命中对抗——命中/闪避是加减对抗、可破 100，必中直接无视）", bool(hit.get("sure_hit", false)), _mark_dirty)
 	box.add_child(_warn("aoe / bonus / ignore_* 等高级字段本版不编辑，保存原样保留", WARN_COLOR))
 
 func _build_heal_block(box: VBoxContainer, entry: Dictionary) -> void:
@@ -903,9 +842,6 @@ func _add_formula(box: VBoxContainer, label: String, v, show_levels := true) -> 
 			var pl = v.get("per_level", [])
 			if typeof(pl) == TYPE_ARRAY and pl.size() > 0:
 				levels = ", ".join(pl.map(func(x): return str(x)))
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 6)
-	row.add_child(EditorUI.label("基础"))
 	var bs := SpinBox.new()
 	bs.min_value = 0
 	bs.max_value = 999
@@ -913,8 +849,10 @@ func _add_formula(box: VBoxContainer, label: String, v, show_levels := true) -> 
 	bs.value = base
 	bs.custom_minimum_size = Vector2(90, 0)
 	bs.value_changed.connect(func(_v): _mark_dirty())
-	row.add_child(bs)
-	row.add_child(EditorUI.label("＋属性"))
+	box.add_child(EditorUI.field_row(label, bs))
+	# 属性修正独立行（2026-07-13 用户令：不与基础值同行）——可选 per_stat：值＝基础＋属性×系数
+	var row2 := HBoxContainer.new()
+	row2.add_theme_constant_override("separation", 6)
 	var st := OptionButton.new()
 	st.add_item("（无）")
 	st.set_item_metadata(0, "")
@@ -923,8 +861,8 @@ func _add_formula(box: VBoxContainer, label: String, v, show_levels := true) -> 
 		st.set_item_metadata(st.item_count - 1, str(key))
 	_select_meta(st, stat)
 	st.item_selected.connect(func(_i): _mark_dirty())
-	row.add_child(st)
-	row.add_child(EditorUI.label("×"))
+	row2.add_child(st)
+	row2.add_child(EditorUI.label("×"))
 	var ws := SpinBox.new()
 	ws.min_value = -99
 	ws.max_value = 99
@@ -932,8 +870,8 @@ func _add_formula(box: VBoxContainer, label: String, v, show_levels := true) -> 
 	ws.value = weight
 	ws.custom_minimum_size = Vector2(90, 0)
 	ws.value_changed.connect(func(_v): _mark_dirty())
-	row.add_child(ws)
-	box.add_child(EditorUI.field_row(label, row))
+	row2.add_child(ws)
+	box.add_child(EditorUI.field_row("　　＋属性修正 per_stat（可选：随属性成长）", row2))
 	var lv: LineEdit = null
 	if show_levels:
 		lv = LineEdit.new()
@@ -1039,18 +977,7 @@ func _shell_collect() -> Dictionary:
 		out["shape"] = shp
 	if _range_superseded():
 		out.erase("range")   # 被形状顶掉＝随存清键（火球型〔锚落点无选取形〕仍留 range 定投掷距离）
-	# requires_hands
-	var hands := []
-	for h in _hand_rows:
-		var row := {"slot": str(h["slot"].get_selected_metadata())}
-		var al := _split_tags(str(h["all"].text))
-		var an := _split_tags(str(h["any"].text))
-		if not al.is_empty():
-			row["all_tags"] = al
-		if not an.is_empty():
-			row["any_tags"] = an
-		hands.append(row)
-	out["requires_hands"] = hands
+	out.erase("requires_hands")   # 手部门槛已删（2026-07-13 用户拍板）——旧键随存即清
 	# effects[]
 	var effects := []
 	for b in _blocks:
@@ -1083,7 +1010,18 @@ func _collect_block(entry: Dictionary) -> Dictionary:
 			if _collect_err != "":
 				return out
 			hit["coeff"] = coeff
-			hit["damage_kind"] = str(entry["damage_kind"].get_selected_metadata())
+			hit["damage_category"] = str(entry["damage_category"].get_selected_metadata())
+			hit.erase("damage_kind")   # 旧键随存即迁（→damage_category，2026-07-13 改词）
+			var dt := str(entry["damage_type"].get_selected_metadata())
+			if dt != "":
+				hit["damage_type"] = dt
+			else:
+				hit.erase("damage_type")
+			var bh := clampf(float(entry["hit"].value), 0.0, 100.0)
+			if bh > 0.0:
+				hit["hit"] = _num(bh)
+			else:
+				hit.erase("hit")
 			var pen := clampf(float(entry["armor_pen"].value), 0.0, 1.0)
 			if pen > 0.0:
 				hit["armor_pen"] = _num(pen)

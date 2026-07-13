@@ -102,13 +102,13 @@ func _initialize() -> void:
 	var r8 := hit(s, a0, mk({}), {"coeff": 1.0, "bonus": {"stats": ["atk"], "mult": 0.5}})
 	ck(is_equal_approx(float(r8["bonus"]), 10.0) and int(r8["hp_loss"]) == 30, "补正+10：out=30 hp_loss=30")
 
-	# 9) 伤害类型与抗性归轨（§7.2 正字 + 🔒 属性重做 §5 两轨）：damage_kind 保留细分（fire/holy…），
+	# 9) 伤害属性与抗性归轨（§7.2 正字 + 🔒 属性重做 §5 两轨）：damage_category 保留细分（fire/holy…；原 damage_kind 已改词），
 	#    减伤统一归轨 nature——res_nature=50 对火伤减半、物抗不参与。此条即元素归轨的判决点。
-	var rf := hit(s, a0, mk({"res_nature": 50, "res_phys": 0}), {"coeff": 1.0, "damage_kind": "fire"})
-	ck(str(rf["damage_kind"]) == "fire", "结果携带 damage_kind=fire")
+	var rf := hit(s, a0, mk({"res_nature": 50, "res_phys": 0}), {"coeff": 1.0, "damage_category": "fire"})
+	ck(str(rf["damage_category"]) == "fire", "结果携带 damage_category=fire")
 	ck(int(rf["hp_loss"]) == 10, "火伤取自然抗50 → hp_loss=10（元素归轨 nature）")
 	#    神圣=自然伤害（🔒 §5）：holy 同轨取 res_nature
-	var rh := hit(s, a0, mk({"res_nature": 50}), {"coeff": 1.0, "damage_kind": "holy"})
+	var rh := hit(s, a0, mk({"res_nature": 50}), {"coeff": 1.0, "damage_category": "holy"})
 	ck(int(rh["hp_loss"]) == 10, "神圣伤同取自然抗 → hp_loss=10")
 
 	# 10) 规格招牌样例（docs/模块_战斗_设计.md「减伤链」验算：out=50 打进 甲20+甲抗50%+人抗20%）——
@@ -123,7 +123,7 @@ func _initialize() -> void:
 	# 11) 甲道归轨：fire 伤害打进厚甲目标，甲道须取 armor_res_nature（非 armor_res_phys）。
 	#     armor_res_nature=50/armor_res_phys=0：归轨对→到甲 20×0.5=10；误取物理键→20。守护甲道后缀映射。
 	var t11 = mk({"HP": 100, "armor": 100, "armor_res_nature": 50, "armor_res_phys": 0, "res_nature": 0})
-	var r11 := hit(s, a0, t11, {"coeff": 1.0, "damage_kind": "fire"})
+	var r11 := hit(s, a0, t11, {"coeff": 1.0, "damage_category": "fire"})
 	ck(int(r11["armor_loss"]) == 10 and int(r11["hp_loss"]) == 0, "火伤取甲自然抗50 → armor_loss=10（甲道归轨）")
 	ck(int(t11.stats["armor"]) == 90, "落甲写回：armor=90")
 

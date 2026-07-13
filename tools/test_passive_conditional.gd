@@ -26,13 +26,13 @@ func _initialize() -> void:
 	var skills := [
 		{"id": "t_elite", "name": "精锐化", "nature": "skill", "active": false, "tags": [],
 			"costs": {"ap": 1}, "cooldown": {"base": 0}, "uses_per_battle": {"base": 0},
-			"max_level": 2, "target": {"enemy": false, "ally": false, "self": true}, "range": 0, "requires_hands": [],
+			"max_level": 2, "target": {"enemy": false, "ally": false, "self": true}, "range": 0,
 			"effects": [{"kind": "passive_stat_mods", "mods": [
 				{"stat": "atk", "op": "flat", "value": {"per_level": [3, 6]}},
 				{"stat": "HP_max", "op": "flat", "value": 10}]}]},
 		{"id": "t_trained", "name": "训练有素", "nature": "skill", "active": false, "tags": [],
 			"costs": {"ap": 1}, "cooldown": {"base": 0}, "uses_per_battle": {"base": 0},
-			"max_level": 1, "target": {"enemy": false, "ally": false, "self": true}, "range": 0, "requires_hands": [],
+			"max_level": 1, "target": {"enemy": false, "ally": false, "self": true}, "range": 0,
 			"effects": [{"kind": "conditional_mod",
 				"when": [{"type": "stat_threshold", "stat": "HP", "op": "<=", "value": 50, "pct_of": "HP_max"}],
 				"mods": [{"stat": "acc", "op": "flat", "value": 10}]}]},

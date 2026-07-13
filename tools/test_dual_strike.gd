@@ -49,15 +49,15 @@ func _initialize() -> void:
 	var skills := [
 		{"id": "d31_main", "name": "重斩", "active": true, "weapon_skill": true, "tags": [],
 			"costs": {"ap": 2}, "cooldown": {"base": 0}, "max_level": 1,
-			"target": {"enemy": true, "ally": false, "self": false}, "range": 1, "requires_hands": [],
+			"target": {"enemy": true, "ally": false, "self": false}, "range": 1,
 			"effects": [{"kind": "attack", "hits": [{"coeff": 1.0}]}]},
 		{"id": "d31_off", "name": "快刺", "active": true, "weapon_skill": true, "tags": [],
 			"costs": {"ap": 1}, "cooldown": {"base": 0}, "max_level": 1,
-			"target": {"enemy": true, "ally": false, "self": false}, "range": 1, "requires_hands": [],
+			"target": {"enemy": true, "ally": false, "self": false}, "range": 1,
 			"effects": [{"kind": "attack", "hits": [{"coeff": 1.0}]}]},
 		{"id": "d31_bash", "name": "盾击", "active": true, "weapon_skill": true, "tags": [],
 			"costs": {"ap": 1}, "cooldown": {"base": 0}, "max_level": 1,
-			"target": {"enemy": true, "ally": false, "self": false}, "range": 1, "requires_hands": [],
+			"target": {"enemy": true, "ally": false, "self": false}, "range": 1,
 			"effects": [{"kind": "attack", "hits": [{"coeff": 0.8}]}]},
 	]
 	var sf = FileAccess.open("user://test_d31_skills.json", FileAccess.WRITE)

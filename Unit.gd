@@ -622,7 +622,7 @@ func remap_equip_uid(old_uid: int, new_uid: int) -> void:
 # 仅无种族/无天生武器配置的裸单位（编辑器草稿、测试）与快照缺实例时兜底。unarmed tag：喂养徒手系技艺。
 const UNARMED_ATTACK := {
 	"name": "徒手", "coeff": 1.0, "range": 1, "ap_cost": 1,
-	"damage_kind": "physical", "tags": ["unarmed"], "aoe": null,
+	"damage_category": "physical", "tags": ["unarmed"], "aoe": null,
 }
 
 # 飞行状态：带 flying tag = 在空中。比路兹起飞后主手换足爪（抓取）、落地换翼爪（撕裂）——见 set_airborne 换手。

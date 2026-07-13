@@ -514,17 +514,21 @@ func _apply_terrain_ticks(u) -> Array:
 
 # ============ 战斗结算（掷骰/伤害/异常；展示渲染在宿主 _resolve_one）============
 
-# 命中率（%）= clamp( (武器命中+技巧 − 闪避−灵活) × Π命中效能, 5, 95 )　🔒 §10.6 数值定案：
-# 人身命中＝技巧（acc 面板底 0、由武器 mods 承载）；人身闪避＝灵活（eva 面板底 0、修正落点）。
+# 命中率（%）= clamp( (技能基准命中+武器命中+技巧 − 闪避−灵活) × Π命中效能, 5, 95 )　🔒 §10.6 数值定案
+# （⚠ 2026-07-13 用户拍板追加：技能基准命中＝武器技能 hit 字段〔攻击块 hits[0]，flatten 透传顶层〕，缺省 0 零回归）：
+# 角色命中修正＝技巧＋acc 属性桶（面板底 0——武器/饰品 mods、熟练度 stage_mods、特性全汇入）；人身闪避＝灵活（eva 同理）。
 # Π命中效能 = 攻方命中效能(增益向) × 守方闪避效能(减免向) × 攻方地块命中效能 × 守方地块闪避效能（森林掩蔽）——
 # 无效能修正 / 无地块效果时 =1.0（与旧行为一致）。地块贡献惰性读取，见 _terrain_eff_factor。
-func _hit_chance(attacker, target) -> int:
-	return int(_hit_chance_detail(attacker, target)["hc"])
+func _hit_chance(attacker, target, skill = null) -> int:
+	return int(_hit_chance_detail(attacker, target, skill)["hc"])
 
-# 明细版（技改 §1-5 判定/展示口径合一）：{hc, acc, eva}——acc/eva＝含技巧/灵活/士气的合计口径，
+# 明细版（技改 §1-5 判定/展示口径合一）：{hc, acc, eva}——acc/eva＝含技能基准/技巧/灵活/士气的合计口径，
 # 判定（_resolve_compute_body 掷骰）与展示（战斗记录）同吃这一份，不再各自分算。
-func _hit_chance_detail(attacker, target) -> Dictionary:
-	var acc: int = int(round(attacker.effective_stat_f("acc") + attacker.effective_stat_f("finesse"))) \
+func _hit_chance_detail(attacker, target, skill = null) -> Dictionary:
+	var base_hit := 0.0
+	if typeof(skill) == TYPE_DICTIONARY:
+		base_hit = float(skill.get("hit", 0.0))   # 武器技能面板命中（横扫低/刺击高——逐技能定基准）
+	var acc: int = int(round(base_hit + attacker.effective_stat_f("acc") + attacker.effective_stat_f("finesse"))) \
 		+ attacker.morale_combat_mod()   # 士气档位 🔒 §10.7：命中平加 ±5/10（稳定 0）
 	var eva := int(round(target.effective_stat_f("eva") + target.effective_stat_f("agility")))
 	var eff: float = attacker.eff_mult("hit_eff") * target.eff_reduce("eva_eff")
@@ -585,8 +589,8 @@ func _resolve_compute(attacker, target, skill) -> Dictionary:
 	return r
 
 func _resolve_compute_body(attacker, target, skill) -> Dictionary:
-	# 命中：判定与展示同吃 _hit_chance_detail 一份明细（§1-5 口径合一；acc/eva 供战斗记录展示）
-	var hd := _hit_chance_detail(attacker, target)
+	# 命中：判定与展示同吃 _hit_chance_detail 一份明细（§1-5 口径合一；acc/eva 供战斗记录展示；技能基准命中入 acc 项）
+	var hd := _hit_chance_detail(attacker, target, skill)
 	var hc := int(hd["hc"])
 	var roll := int(rng.randf() * 100.0)
 	var hit := roll < hc
@@ -630,15 +634,15 @@ func _resolve_compute_body(attacker, target, skill) -> Dictionary:
 	var deff: float = float(target.effective_stat_f("def_eff"))
 	var def_factor := maxf(0.0, 2.0 - deff / 100.0) * _terrain_eff_factor(target, "def_eff", false)   # ×守方地块防御效能（减免向，折进减伤链）
 	var g := maxf(0.0, 1.0 - bp / 100.0) * def_factor
-	# 分量：普攻单分量(先进甲)；穿甲 armor_pen 拆 人/甲 两分量。damage_kind 默认物理（element 已废弃 §7.2）。
-	var dkind := str(skill.get("damage_kind", "physical"))
+	# 分量：普攻单分量(先进甲)；穿甲 armor_pen 拆 人/甲 两分量。damage_category 默认物理（damage_kind 已改词 2026-07-13；element 已废弃 §7.2）。
+	var dkind := str(skill.get("damage_category", "physical"))
 	var pen := clampf(float(skill.get("armor_pen", 0.0)), 0.0, 1.0)
 	var components := []
 	if pen > 0.0:
-		components.append({"lane": "human", "damage_kind": dkind, "ratio": pen})
-		components.append({"lane": "armor_first", "damage_kind": dkind, "ratio": 1.0 - pen})
+		components.append({"lane": "human", "damage_category": dkind, "ratio": pen})
+		components.append({"lane": "armor_first", "damage_category": dkind, "ratio": 1.0 - pen})
 	else:
-		components.append({"lane": "armor_first", "damage_kind": dkind, "ratio": 1.0})
+		components.append({"lane": "armor_first", "damage_category": dkind, "ratio": 1.0})
 	# 结算落血（分量减伤链在 CombatResolver：逐分量 甲抗/人抗/固减 + 破甲溢出保留元素）
 	var dres := CombatResolver.resolve(target, out, g, components)
 	var hp_loss := int(round(float(dres["hp_loss"])))
@@ -662,7 +666,7 @@ func _resolve_compute_body(attacker, target, skill) -> Dictionary:
 	r["br"] = br
 	r["bp"] = bp
 	r["def_factor"] = def_factor
-	r["damage_kind"] = dkind
+	r["damage_category"] = dkind
 	r["pen"] = pen
 	r["res_pct"] = float(target.effective_stat_f("res_" + CombatResolver.res_suffix(dkind)))
 	r["armor_res_pct"] = float(target.effective_stat_f("armor_res_" + CombatResolver.res_suffix(dkind)))

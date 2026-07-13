@@ -34,19 +34,19 @@ func _initialize() -> void:
 			"active": true, "tags": ["single_target"],
 			"costs": {"ap": 1}, "cooldown": {"base": 0}, "uses_per_battle": {"base": 0},
 			"max_level": 1, "target": {"enemy": true, "ally": false, "self": false},
-			"range": 2, "requires_hands": [],
-			"effects": [{"kind": "attack", "hits": [{"coeff": 0.9, "damage_kind": "fire", "armor_pen": 5}]}]},
+			"range": 2,
+			"effects": [{"kind": "attack", "hits": [{"coeff": 0.9, "damage_category": "fire", "damage_type": "slashing", "armor_pen": 0.3, "hit": 60}]}]},
 		{"id": "t_ews_heal", "name": "战地包扎", "icon": "", "category": "skill", "desc": "",
 			"active": true, "tags": [],
 			"costs": {"ap": 1}, "cooldown": {"base": 2}, "uses_per_battle": {"base": 1},
 			"max_level": 1, "target": {"enemy": false, "ally": true, "self": true},
-			"range": 1, "requires_hands": [],
+			"range": 1,
 			"effects": [{"kind": "heal", "heal_pct_max_hp": 20, "cleanse_tags": []}]},
 		{"id": "t_ews_guard", "name": "戒备", "icon": "", "category": "skill", "desc": "",
 			"active": true, "tags": [],
 			"costs": {"ap": 1}, "cooldown": {"base": 1}, "uses_per_battle": {"base": 0},
 			"max_level": 1, "target": {"enemy": false, "ally": false, "self": true},
-			"range": 0, "requires_hands": [],
+			"range": 0,
 			"effects": [{"kind": "heal", "heal_pct_max_hp": 5, "cleanse_tags": []}]},
 	]
 	var f = FileAccess.open("user://test_ws_skills.json", FileAccess.WRITE)
@@ -59,8 +59,10 @@ func _initialize() -> void:
 	var flat: Dictionary = SkillDB.flatten_bws(SkillDB.get_skill("t_bws"))
 	ck(str(flat.get("name")) == "试斩" and int(flat.get("range")) == 2 and int(flat.get("ap_cost")) == 1
 		and str(flat.get("icon")) == "res://x.png", "flatten 顶层字段（name/icon/range/ap_cost 双键桥）")
-	ck(absf(float(flat.get("coeff", 0)) - 0.9) < 0.0001 and str(flat.get("damage_kind")) == "fire"
-		and int(flat.get("armor_pen", 0)) == 5, "flatten hit 键透传（coeff/damage_kind/armor_pen）")
+	ck(absf(float(flat.get("coeff", 0)) - 0.9) < 0.0001 and str(flat.get("damage_category")) == "fire"
+		and str(flat.get("damage_type")) == "slashing"
+		and absf(float(flat.get("armor_pen", 0)) - 0.3) < 0.0001 and int(flat.get("hit", 0)) == 60,
+		"flatten hit 键透传（coeff/damage_category/damage_type/armor_pen 0~1 小数/hit 技能基准命中）")
 	ck((flat.get("tags") as Array) == ["single_target"], "flatten tags 从技能级取")
 	ck(SkillDB.flatten_bws({"name": "空壳"}).is_empty(), "无 attack 块 → 空 dict（勿造幻影攻击；basic_attack 兜 UNARMED）")
 	ck(SkillDB.flatten_bws(SkillDB.get_skill("t_ews_heal")).is_empty(), "heal 技能被引用为 BWS → 空 dict（审查确认项2）")

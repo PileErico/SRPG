@@ -1,17 +1,17 @@
 extends SceneTree
 ## 数据 lint（模块_技能_设计.md §10 全程护栏#1，阶段1 起）——机械执法数据规范、防回流。
 ## 当前覆盖（随阶段推进增补 bas→skills / 树/原型引用 / 双键期收口等）：
-##  1) 禁键 element：data/*.json 任意层出现即 FAIL——守 damage_kind 正字（§7.2）不回流。
+##  1) 禁键 element：data/*.json 任意层出现即 FAIL——守 damage_category 正字（§7.2；原 damage_kind 已改词 2026-07-13）不回流。
 ##  2) effects.json 形状：id 非空且唯一 / kind∈{buff,debuff} / tags 是数组 / duration_model∈{fixed,resist} /
 ##     stackable 为 bool / dot_pct_max_hp、hot_flat 数值。
 ##  3) 效果引用完整性：weapons/skills 里 inflict/apply 的 {effect:<id>} 引用必须在 EffectDB 存在
 ##     （当前无引用形态即空过；阶段1.2b bleed 迁引用后此项开始守护悬空 id）。
 ##  4) 强韧不入物品（🔒 模块_属性成长_设计.md §5）：weapons/armor/accessories 的 mods 出现 will_fort/body_fort 即 FAIL。
-##  5) damage_kind 白名单：data/ 任意处的 damage_kind 值必须 ∈ {physical,fire,ice,thunder,holy}
+##  5) damage_category 白名单 ∈ {physical,fire,ice,thunder,holy} + damage_type 白名单 ∈ {slashing,piercing,bludgeoning} + 禁键 damage_kind
 ##     （未知种别在 CombatResolver 会告警回退物理轨；数据侧在此挡住）。
 ##  6) tag 引用完整性（🔒 tag 统一词表）：data/*.json 与 terrains.json 里任意 "tags" 数组的字符串
 ##     必须 ∈ tags.json——防「用了没注册」的词表漂移（曾漏 cold/road/wall）。
-##  7) skills.json 阶段2 形状闸门（🔒 设计 §10 护栏#1 机械执法）：target 三旗不得全 false / seq·nature 禁回流（2026-07-13 废除/改词）/
+##  7) skills.json 阶段2 形状闸门（🔒 设计 §10 护栏#1 机械执法）：target 三旗不得全 false / seq·nature·requires_hands 禁回流（2026-07-13 废除/改词/删除）/
 ##     per_level 长度==max_level / costs.ap 与顶层 ap_cost 禁双写 / 阶段6 前 hits.size()>1 或 riders 出现即 FAIL
 ##     （防「可编不可跑」内容入库）。WS 形约束已随决策27 关系制移到规则8 引用处执法。
 ##  8) weapons.json 武器技能引用（🔒 决策25/26/29 勾选制）：bws/bas → 技能存在+勾 weapon_skill+含 attack 块；
@@ -25,7 +25,7 @@ extends SceneTree
 ##     dialogues.json 节点 next/choices.next 指向存在节点、choices.rep 派系已登记；effects.json on_expire_apply→EffectDB；
 ##     maps 地点（瓦片=地点 🔒）：overworld 图派生校验（注记无孤儿/同格唯一/id 全图唯一/battle_map 存在）、
 ##     world_units.json battle_map 文件存在。
-##     maps/*.json 同时纳入规则 1/5/6 扫描集（禁键/damage_kind/tags）。
+##     maps/*.json 同时纳入规则 1/5/6 扫描集（禁键/damage_category/tags）。
 ## 11) 战中快照白名单（技改 §1-3 lint 化）：Unit 脚本字段 vs unit_to_battle_snapshot 键集 diff——
 ##     新运行态字段忘扩白名单＝suspend 静默丢数据；瞬态豁免表（faction 视图/last_hit_by 另存/combat_ctx 瞬态）。
 ## 运行：..._console.exe --headless --path "D:/1战棋" -s res://tools/test_data_lint.gd（退出码 0=PASS）
@@ -235,14 +235,22 @@ func _initialize() -> void:
 			_find_stat_refs(data, str(key), path.get_file(), fort_hits)
 		ck(fort_hits.is_empty(), "物品数据无强韧 mod（命中：%s）" % ", ".join(fort_hits))
 
-	# 5) damage_kind 白名单（直接取 CombatResolver.RES_SUFFIX 键集单一源；未知种别=抗性旁路陷阱）
+	# 5) damage_category 白名单（直接取 CombatResolver.RES_SUFFIX 键集单一源；未知种别=抗性旁路陷阱）
+	#    + damage_type 白名单（创伤类型词表：斩击/穿刺/打击——2026-07-13 两正交字段）
+	#    + 禁键 damage_kind（已改词 damage_category，同 element 先例禁回流）
 	for path in scan_all:
 		var data = _read_json(path)
 		if data == null:
 			continue
 		var bad_kinds := []
-		_collect_bad_values(data, "damage_kind", CombatResolver.RES_SUFFIX.keys(), bad_kinds)
-		ck(bad_kinds.is_empty(), "%s damage_kind 全在白名单（越界：%s）" % [path.get_file(), ", ".join(bad_kinds)])
+		_collect_bad_values(data, "damage_category", CombatResolver.RES_SUFFIX.keys(), bad_kinds)
+		ck(bad_kinds.is_empty(), "%s damage_category 全在白名单（越界：%s）" % [path.get_file(), ", ".join(bad_kinds)])
+		var bad_types := []
+		_collect_bad_values(data, "damage_type", ["slashing", "piercing", "bludgeoning"], bad_types)
+		ck(bad_types.is_empty(), "%s damage_type 全在白名单 斩击/穿刺/打击（越界：%s）" % [path.get_file(), ", ".join(bad_types)])
+		var dk_hits := []
+		_find_key(data, "damage_kind", path.get_file(), dk_hits)
+		ck(dk_hits.is_empty(), "禁键 damage_kind（已改词 damage_category 2026-07-13）未出现于 %s（命中：%s）" % [path.get_file(), ", ".join(dk_hits)])
 
 	# 6) tag 引用完整性：所有 tag 承载键成员必须在 tags.json 注册（tags.json 自身除外——它是词表本体；
 	#    键集扩五类见 _collect_tag_uses；maps/ 一并扫描）
@@ -276,6 +284,7 @@ func _initialize() -> void:
 					"%s：target 三旗不得全 false（永不可施放）" % sid)
 			ck(not s.has("seq"), "%s：seq 已废（2026-07-13 通用序列退役）——禁回流" % sid)
 			ck(not s.has("nature"), "%s：nature 已改词 category（2026-07-13）——禁回流" % sid)
+			ck(not s.has("requires_hands"), "%s：requires_hands 已删（2026-07-13 位置语义后零用例）——禁回流" % sid)
 			var pls := []
 			_collect_key_arrays(s, "per_level", pls)
 			for pl in pls:

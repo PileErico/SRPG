@@ -129,15 +129,21 @@ static func render(item: Dictionary) -> Control:
 		v.add_child(_kv("距离", "%d" % SkillDB.skill_reach(atk)))   # 形状掩码优先、range 兜底（决策30）
 		v.add_child(_kv("伤害系数", "%d%%" % int(round(float(atk.get("coeff", 1.0)) * 100.0))))
 		v.add_child(_kv("AP 消耗", "%d" % SkillDB.skill_ap_cost(atk)))
-		var dk := str(atk.get("damage_kind", ""))
-		if dk != "":
-			v.add_child(_kv("伤害类型", dk))
+		var dc := str(atk.get("damage_category", ""))
+		if dc != "":
+			v.add_child(_kv("伤害属性", dc))
+		var dt := str(atk.get("damage_type", ""))
+		if dt != "":
+			v.add_child(_kv("伤害类型", TagDB.cn(dt)))
 		var bspec = atk.get("bonus", null)
 		if typeof(bspec) == TYPE_DICTIONARY:
 			var ns := []
 			for s in bspec.get("stats", []):
 				ns.append(StatMeta.label(str(s)))
 			v.add_child(_kv("伤害补正", "（%s）×%s（不吃效能）" % ["＋".join(ns), _num(float(bspec.get("mult", 0)))]))
+		var bhit := float(atk.get("hit", 0))
+		if bhit > 0.0:
+			v.add_child(_kv("命中", "%s%%（技能基准，角色命中修正叠加其上）" % _num(bhit)))
 		var pen := float(atk.get("armor_pen", 0))
 		if pen > 0.0:
 			v.add_child(_kv("穿甲", "%s%%（按比例无视护甲）" % _num(pen * 100.0)))

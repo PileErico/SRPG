@@ -49,7 +49,7 @@ func _run() -> int:
 			continue   # 幂等：已迁 / 本就无攻击（盾/防具）
 		var atk: Dictionary = w["attack"]
 		var sid := str(ID_MAP.get(wid, "bws_" + wid))
-		# hit＝attack 去上提键（coeff/damage_kind/aoe/inflict/armor_pen/sure_hit… 全透传）
+		# hit＝attack 去上提键（coeff/damage_category〔原 damage_kind〕/aoe/inflict/armor_pen/sure_hit… 全透传）
 		var hit: Dictionary = atk.duplicate(true)
 		for k in HOIST_KEYS:
 			hit.erase(k)
@@ -67,7 +67,6 @@ func _run() -> int:
 			"max_level": 1,
 			"target": {"enemy": true, "ally": false, "self": false},
 			"range": int(atk.get("range", 1)),
-			"requires_hands": [],
 			"effects": [{"kind": "attack", "hits": [hit]}],
 		}
 		if not SkillDB.save_skill(skill):

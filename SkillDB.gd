@@ -140,7 +140,7 @@ static func skill_reach(def) -> int:
 # BWS 扁平化（🔒 §6.2 blocker + 决策26 阶段3a）：BWS 技能条目 → legacy attack dict——
 # 保下游 _resolve_compute / Sandbox / 借机 / AI 的顶层读点零改动。
 # 顶层字段从技能级取（name/icon/range/ap_cost〔经 skill_ap_cost 双键桥〕/tags）；
-# attack 块 hits[0] 其余键全部透传（coeff/damage_kind/aoe/inflict/armor_pen/sure_hit…）。
+# attack 块 hits[0] 其余键全部透传（coeff/hit/damage_category/damage_type/aoe/inflict/armor_pen/sure_hit…）。
 # 无（合法）attack 块 → 返回 {}（勿凭顶层字段造「幻影全额物理攻击」；basic_attack 自然兜 UNARMED）。
 # 取「首个 hits 合法的 attack 块」，异形块跳过继续扫。shape/weapon_skill/weapon_kinds 顶层透传
 # （决策29/30：攻击路径要认形状掩码、动态 tag 解析要认勾选与适用种类）。

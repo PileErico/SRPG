@@ -70,6 +70,10 @@ func _initialize() -> void:
 	s.units = [u, e]
 	# 命中 = 拳脚25 + 技巧10 − (闪避0 + 灵活10) = 25
 	ck(s._hit_chance(u, e) == 25, "命中公式：25+10−10=25（实际 %d）" % s._hit_chance(u, e))
+	# 技能基准命中（2026-07-13 用户拍板：命中链＝武器技能面板 hit + 角色命中修正）——平加进命中侧、缺省 0 零回归
+	ck(s._hit_chance(u, e, {"hit": 20}) == 45, "技能基准命中 hit=20 → 25+20=45（实际 %d）" % s._hit_chance(u, e, {"hit": 20}))
+	ck(int(s._hit_chance_detail(u, e, {"hit": 20})["acc"]) == int(s._hit_chance_detail(u, e)["acc"]) + 20,
+		"技能基准并入 acc 展示项（判定/战斗记录口径合一）")
 	# 暴击 = 0 + 技巧10×0.5 − 对方运气5 = 0（钳底）；技巧 20 → 10−5 = 5
 	s.rng.seed = 20260707   # 注入定序（战斗骰统一过 BattleState.rng——技改 §1-1）
 	var r: Dictionary = s._resolve_compute(u, e, {"coeff": 1.0})

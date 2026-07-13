@@ -60,7 +60,7 @@ func _initialize() -> void:
 		"active": false, "tags": [],
 		"costs": {"ap": 1}, "cooldown": {"base": 0}, "uses_per_battle": {"base": 0},
 		"max_level": 1, "target": {"enemy": false, "ally": false, "self": true},
-		"range": 0, "requires_hands": [],
+		"range": 0,
 		"effects": [{"kind": "conditional_mod",
 			"when": [
 				{"type": "stat_threshold", "stat": "HP", "op": "<=", "value": 50, "pct_of": "HP_max"},
@@ -76,7 +76,7 @@ func _initialize() -> void:
 		"active": true, "tags": [],
 		"costs": {"ap": 1}, "cooldown": {"base": 2}, "uses_per_battle": {"base": 0},
 		"max_level": 3, "target": {"enemy": false, "ally": true, "self": true},
-		"range": 1, "requires_hands": [],
+		"range": 1,
 		"effects": [{"kind": "heal", "heal_pct_max_hp": {"per_level": [15, 25, 35]}, "cleanse_tags": ["bleeding"]}]})
 	SkillDB._write_array("user://test_skills.json", arr0)
 	SkillDB._write_array("user://test_skills.json", SkillDB._read_array("user://test_skills.json"))
