@@ -515,8 +515,10 @@
       "effects": [],
       "id": "fh_ancient_ruins_jungle",
       "label": "远古遗迹-丛林",
+      "location_type": "ruin",
       "move": {
         "cost": 1,
+        "overworld_cost": 3,
         "passable_by": "all"
       },
       "scope": "both",
@@ -535,6 +537,7 @@
       "effects": [],
       "id": "fh_ancient_ruins_sand",
       "label": "远古遗迹-沙漠",
+      "location_type": "ruin",
       "move": {
         "cost": 1,
         "overworld_cost": 3,
@@ -556,6 +559,7 @@
       "effects": [],
       "id": "fh_ancient_ruins_snow",
       "label": "远古遗迹-雪原",
+      "location_type": "ruin",
       "move": {
         "cost": 1,
         "overworld_cost": 3,
@@ -577,8 +581,10 @@
       "effects": [],
       "id": "fh_ancient_ruins",
       "label": "远古遗迹",
+      "location_type": "ruin",
       "move": {
         "cost": 1,
+        "overworld_cost": 3,
         "passable_by": "all"
       },
       "scope": "both",
@@ -597,8 +603,10 @@
       "effects": [],
       "id": "fh_ancient_ruins2",
       "label": "远古遗迹2",
+      "location_type": "ruin",
       "move": {
         "cost": 1,
+        "overworld_cost": 3,
         "passable_by": "all"
       },
       "scope": "both",
@@ -637,6 +645,7 @@
       "effects": [],
       "id": "fh_barbarian_encampment_snow",
       "label": "野蛮人营地-雪原",
+      "location_type": "lair",
       "move": {
         "cost": 1,
         "overworld_cost": 3,
@@ -658,6 +667,7 @@
       "effects": [],
       "id": "fh_barbarian_encampment",
       "label": "野蛮人营地",
+      "location_type": "lair",
       "move": {
         "cost": 1,
         "overworld_cost": 3,
@@ -940,8 +950,10 @@
       "effects": [],
       "id": "fh_city_center_classical_era",
       "label": "City center-Classical era",
+      "location_type": "city",
       "move": {
         "cost": 1,
+        "overworld_cost": 2,
         "passable_by": "all"
       },
       "scope": "both",
@@ -960,6 +972,7 @@
       "effects": [],
       "id": "fh_city_center_medieval_era",
       "label": "City center-Medieval era",
+      "location_type": "city",
       "move": {
         "cost": 1,
         "overworld_cost": 2,
@@ -981,6 +994,7 @@
       "effects": [],
       "id": "fh_city_center",
       "label": "城市据点（一级）",
+      "location_type": "city",
       "move": {
         "cost": 1,
         "overworld_cost": 2,
@@ -1002,8 +1016,10 @@
       "effects": [],
       "id": "fh_city_ruins",
       "label": "City ruins",
+      "location_type": "ruin",
       "move": {
         "cost": 1,
+        "overworld_cost": 3,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1022,8 +1038,10 @@
       "effects": [],
       "id": "fh_city_ancient_era_middle_eastern",
       "label": "City-Ancient_era_Middle_Eastern",
+      "location_type": "city",
       "move": {
         "cost": 1,
+        "overworld_cost": 2,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1042,8 +1060,10 @@
       "effects": [],
       "id": "fh_city_medieval_era_asian",
       "label": "City-Medieval_era_Asian",
+      "location_type": "city",
       "move": {
         "cost": 1,
+        "overworld_cost": 2,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1062,8 +1082,10 @@
       "effects": [],
       "id": "fh_city_medieval_era_middle_eastern",
       "label": "City-Medieval_era_Middle_Eastern",
+      "location_type": "city",
       "move": {
         "cost": 1,
+        "overworld_cost": 2,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1224,8 +1246,10 @@
       "effects": [],
       "id": "fh_encampment",
       "label": "Encampment",
+      "location_type": "lair",
       "move": {
         "cost": 1,
+        "overworld_cost": 3,
         "passable_by": "all"
       },
       "scope": "both",
@@ -1502,6 +1526,7 @@
       "effects": [],
       "id": "fh_grassland_farm",
       "label": "草原-农场",
+      "location_type": "village",
       "move": {
         "cost": 1,
         "overworld_cost": 2,
@@ -2090,6 +2115,7 @@
       "label": "Plains+Farm",
       "move": {
         "cost": 1,
+        "overworld_cost": 2,
         "passable_by": "all"
       },
       "scope": "both",
@@ -2388,6 +2414,7 @@
       "effects": [],
       "id": "fh_snow_farm",
       "label": "Snow+Farm",
+      "location_type": "village",
       "move": {
         "cost": 1,
         "overworld_cost": 3,
