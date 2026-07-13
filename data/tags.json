@@ -75,9 +75,9 @@
   {"id": "multi_target", "cn": "群体", "cat": "target", "status": "planned"},
   {"id": "aoe", "cn": "范围", "cat": "target", "status": "in_use"},
 
-  {"id": "piercing", "cn": "突刺", "cat": "damage", "status": "in_use"},
-  {"id": "bludgeoning", "cn": "打击", "cat": "damage", "status": "planned"},
-  {"id": "slashing", "cn": "斩击", "cat": "damage", "status": "in_use"},
+  {"id": "piercing", "cn": "穿刺", "cat": "damage", "status": "in_use", "desc": "伤害类型 damage_type 词表（攻击块字段，非技能 tag——2026-07-13 迁移）"},
+  {"id": "bludgeoning", "cn": "打击", "cat": "damage", "status": "in_use", "desc": "伤害类型 damage_type 词表（攻击块字段，非技能 tag——2026-07-13 迁移）"},
+  {"id": "slashing", "cn": "斩击", "cat": "damage", "status": "in_use", "desc": "伤害类型 damage_type 词表（攻击块字段，非技能 tag——2026-07-13 迁移）"},
 
   {"id": "bleeding", "cn": "流血类", "cat": "effect", "status": "in_use", "desc": "回合末按最大生命%掉血；可被清流血类技能整批移除"},
   {"id": "incapacitated", "cn": "失能", "cat": "effect", "status": "in_use", "desc": "眩晕/麻痹等：该单位回合直接跳过（不行动即不行使 ZOC/借机）；Unit.has_state 消费"},
