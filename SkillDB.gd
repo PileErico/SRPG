@@ -9,6 +9,7 @@ const FILES := [
 	"res://data/skills.json",
 ]
 const JsonRegistry := preload("res://JsonRegistry.gd")
+const HexGrid := preload("res://HexGrid.gd")   # 形状掩码可及距离（决策30）
 
 static var _skills := {}     # id -> def
 static var _loaded := false
@@ -90,37 +91,59 @@ static func has_attack_block(def: Dictionary) -> bool:
 			return true
 	return false
 
-# WS 形（武器技能形）判定（🔒 决策27 关系制；⚠ 2026-07-13 用户改词：普攻形/BAS 形→**武器技能/WS 形**，
-# bws/ews 家族统一 ws 词缀）：BWS/EWS 不是技能种类而是武器引用方式，技能「可被引为 BWS」看形状——
-# 含 attack 块（≥1 hit 对象）∧ 冷却0 ∧ 无级 ∧ 无手门槛 ∧ 次数无限（攻击路径不结算冷却/次数/等级，
-# 形状不符＝语义静默丢失；次数条件＝决策18「BAS＝无次数限制」+ 决策27 rationale 同款，审查补齐）。
-# 单一判定口：ItemEditor BWS 下拉过滤 / lint 规则8（在武器引用处执法）/ SkillEditor 左栏分组 共用。
-# attack 块扫描口径＝「首个 hits 合法的 attack 块」——与 flatten_bws 同口（gate 放行 ⇔ 运行时可扁平）。
-static func is_ws_shaped(def: Dictionary) -> bool:
-	var cd = def.get("cooldown", {})
-	if typeof(cd) == TYPE_DICTIONARY and int(cd.get("base", 0)) != 0:
-		return false
-	if int(def.get("max_level", 1)) != 1:
-		return false
-	var hands = def.get("requires_hands", [])
-	if typeof(hands) == TYPE_ARRAY and not (hands as Array).is_empty():
-		return false
-	var uses = def.get("uses_per_battle", {})
-	if typeof(uses) == TYPE_DICTIONARY and int(uses.get("base", 0)) != 0:
-		return false
-	for b in def.get("effects", []):
-		if typeof(b) == TYPE_DICTIONARY and str(b.get("kind", "")) == "attack":
-			var hits = b.get("hits", [])
-			if typeof(hits) == TYPE_ARRAY and hits.size() >= 1 and typeof(hits[0]) == TYPE_DICTIONARY:
-				return true
-	return false
+# ============ 武器技能（🔒 决策29 显式勾选制 2026-07-13——翻案决策27 形状判定制）============
+# 勾选 weapon_skill=true ＝「是武器技能」＝ 可被武器选取（BWS/EWS 之分由**武器侧**配置时决定，
+# 技能库不管引用位）；weapon_kinds=[wcat tag…]＝适用武器种类（可多选：横扫可配剑+戟）。
+# 单一判定口：ItemEditor 武器技能选取过滤 / lint 规则8 / SkillEditor 左栏分组 共用。
+# ⚠ 引擎事实（非门槛）：普攻路径不结算冷却/次数/等级——带这些的技能放 BWS 位时该三项不生效。
+static func is_weapon_skill(def) -> bool:
+	return typeof(def) == TYPE_DICTIONARY and bool(def.get("weapon_skill", false))
+
+# 动态武器技能 tag（🔒 决策29 核心）：技能本体**不**静态携带 skill_<种类>，只在被适用种类的武器
+# 持有/引用结算时「视为」拥有——weapon_sword→skill_sword、weapon_halberd→skill_halberd（去 weapon_ 前缀）；
+# 占位 skill_weapon＝所有武器技能恒有。同一技能随引用武器换 tag 吃对应加成（熟练度 perk 经
+# when.skill_tag 只喂对应种类）。三位一体：武器 tag ↔ 适用武器种类 ↔ 武器技能 tag。
+# 返回本次结算的技能 tag 全集（本体 tags + 占位 + 动态）；非武器技能＝只回本体 tags。
+static func skill_ctx_tags(def: Dictionary, weapon_tags: Array) -> Array:
+	var out: Array = []
+	for t in def.get("tags", []):
+		out.append(str(t))
+	if not is_weapon_skill(def):
+		return out
+	out.append("skill_weapon")
+	for k in def.get("weapon_kinds", []):
+		if str(k) in weapon_tags:
+			out.append("skill_" + str(k).trim_prefix("weapon_"))
+	return out
+
+# 形状掩码（🔒 决策30 图形化范围）：{pick:[[dq,dr]…]=选取形（可瞄格，取代 range 标量——环形射程等），
+# effect:[[dq,dr]…]=作用形（AOE；空=单体只打所点格）, anchor:"caster"（绕施放者旋转，横扫弧）|"target"
+# （平移到落点，火球），friendly_fire:bool（AOE 可空放，故不设对敌/对友、只设友伤）}。
+# 双读桥：无 shape/掩码为空 → 回退 range 圆盘/单体（旧数据零迁移）。掩码数学单源＝HexGrid.mask_cells。
+static func shape_of(def) -> Dictionary:
+	if typeof(def) != TYPE_DICTIONARY:
+		return {}
+	var s = def.get("shape", {})
+	return s if typeof(s) == TYPE_DICTIONARY else {}
+
+# 技能可及距离（AI/预览粗口径）：pick 有则取其最远格，否则 effect（caster 锚），否则 range
+static func skill_reach(def) -> int:
+	var shp := shape_of(def)
+	var pick: Array = shp.get("pick", [])
+	if not pick.is_empty():
+		return HexGrid.mask_reach(pick)
+	var eff: Array = shp.get("effect", [])
+	if not eff.is_empty() and str(shp.get("anchor", "caster")) == "caster":
+		return HexGrid.mask_reach(eff)
+	return int(def.get("range", 1)) if typeof(def) == TYPE_DICTIONARY else 1
 
 # BWS 扁平化（🔒 §6.2 blocker + 决策26 阶段3a）：BWS 技能条目 → legacy attack dict——
 # 保下游 _resolve_compute / Sandbox / 借机 / AI 的顶层读点零改动。
 # 顶层字段从技能级取（name/icon/range/ap_cost〔经 skill_ap_cost 双键桥〕/tags）；
 # attack 块 hits[0] 其余键全部透传（coeff/damage_kind/aoe/inflict/armor_pen/sure_hit…）。
 # 无（合法）attack 块 → 返回 {}（勿凭顶层字段造「幻影全额物理攻击」；basic_attack 自然兜 UNARMED）。
-# 取「首个 hits 合法的 attack 块」，异形块跳过继续扫——与 is_ws_shaped 同口径（gate 放行 ⇔ 此处必有产出）。
+# 取「首个 hits 合法的 attack 块」，异形块跳过继续扫。shape/weapon_skill/weapon_kinds 顶层透传
+# （决策29/30：攻击路径要认形状掩码、动态 tag 解析要认勾选与适用种类）。
 static func flatten_bws(def: Dictionary) -> Dictionary:
 	for b in def.get("effects", []):
 		if typeof(b) == TYPE_DICTIONARY and str(b.get("kind", "")) == "attack":
@@ -136,6 +159,11 @@ static func flatten_bws(def: Dictionary) -> Dictionary:
 			for t in def.get("tags", []):
 				tags.append(str(t))
 			out["tags"] = tags
+			if typeof(def.get("shape")) == TYPE_DICTIONARY:
+				out["shape"] = (def["shape"] as Dictionary).duplicate(true)
+			if is_weapon_skill(def):
+				out["weapon_skill"] = true
+				out["weapon_kinds"] = (def.get("weapon_kinds", []) as Array).duplicate()
 			return out
 	return {}
 

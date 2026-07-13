@@ -1670,9 +1670,13 @@ func _enter_skill_mode(skill_id: String) -> void:
 	skill_mode = true
 	active_skill_id = skill_id
 	skill_cells = {}
-	var rng := int(def.get("range", 1))
-	for c in _cells_within({Vector2i(u.col, u.row): true}, rng):
-		skill_cells[c] = true
+	var pickc: Dictionary = _state._shape_pick_cells(u, def)   # 选取形优先（🔒 决策30），空回 range 圆盘
+	if not pickc.is_empty():
+		skill_cells = pickc
+	else:
+		var rng := int(def.get("range", 1))
+		for c in _cells_within({Vector2i(u.col, u.row): true}, rng):
+			skill_cells[c] = true
 	_update_overlays()
 
 # 技能目标资格（🔒 §2.7 三旗 {enemy,ally,self} 正交自由组合）：判 target 相对 caster 归哪类、查对应旗。
@@ -1967,9 +1971,15 @@ func _enter_attack_mode() -> void:
 	var skill = u.basic_attack()
 	var rng := int(skill.get("range", 1))
 	var start := Vector2i(u.col, u.row)
+	var pickc: Dictionary = _state._shape_pick_cells(u, skill)
 	var aoe = skill.get("aoe", null)
-	if typeof(aoe) == TYPE_DICTIONARY and aoe.get("shape", "") == "line":
-		# 直线 AoE：标 6 方向的直线格（spoke），点哪条线就打哪条
+	if not pickc.is_empty():
+		# 形状掩码（🔒 决策30）：选取形直落 / 作用形（锚自身）六旋转并集＝可点方向盘
+		for c in pickc:
+			if c != start and _has_los(start, c):
+				attack_cells[c] = true
+	elif typeof(aoe) == TYPE_DICTIONARY and aoe.get("shape", "") == "line":
+		# 直线 AoE（legacy）：标 6 方向的直线格（spoke），点哪条线就打哪条
 		for d in 6:
 			var cur := start
 			for _i in rng:
@@ -1991,8 +2001,10 @@ func _do_attack(attacker, cell: Vector2i) -> void:
 	var skill = attacker.basic_attack()
 	var targets := _attack_targets(attacker, cell, skill)
 	var aoe = skill.get("aoe", null)
-	# 单体且点到空格/非敌 → 取消、不耗 AP
-	if targets.is_empty() and typeof(aoe) != TYPE_DICTIONARY:
+	var is_aoe: bool = typeof(aoe) == TYPE_DICTIONARY \
+		or not (SkillDB.shape_of(skill).get("effect", []) as Array).is_empty()   # 形状作用形＝AOE（可空放，🔒 决策30）
+	# 单体且点到空格/非敌 → 取消、不耗 AP；AOE 空放照常消耗（挥了就是挥了）
+	if targets.is_empty() and not is_aoe:
 		_clear_selection()
 		return
 	attacker.ap -= SkillDB.skill_ap_cost(skill)

@@ -261,7 +261,7 @@ func _compute_ranges(unit) -> Dictionary:
 	var best: Dictionary = data["best"]
 	best.erase(start)
 	var reach := best
-	var rng := int(unit.basic_attack().get("range", 1))
+	var rng := SkillDB.skill_reach(unit.basic_attack())   # 形状掩码优先、range 兜底（决策30 粗口径）
 	var standable := {start: true}
 	for c in reach:
 		standable[c] = true
@@ -549,11 +549,19 @@ func _offhand_is_shield(u) -> bool:
 	var item = ItemInstances.view(int(u.equipment.get("off_hand", 0)))
 	return item != null and (item.get("tags", []) as Array).has("shield")
 
+# 主手武器 tag（动态武器技能 tag 解析用；空手/天生武器无实例＝[]）
+func _main_hand_tags(u) -> Array:
+	var item = ItemInstances.view(int(u.equipment.get("main_hand", 0)))
+	return item.get("tags", []) if item != null else []
+
 func _resolve_compute(attacker, target, skill) -> Dictionary:
 	# 交互语境（🔒 §4.2 阶段4）：结算期内两侧互挂 combat_ctx，when 条件（target_tag/skill_tag/target_effect）
 	# 惰性读取（屠龙者 triple_vs / 受击向条件同口）；出结算即清——结算外交互条件恒不满足。
-	attacker.combat_ctx = {"target": target, "skill_tags": skill.get("tags", [])}
-	target.combat_ctx = {"target": attacker, "skill_tags": skill.get("tags", [])}
+	# skill_tags 含动态武器技能 tag（🔒 决策29）：占位 skill_weapon + 按主手武器种类解析 skill_<种类>
+	# （恒读主手 🔒 与普攻同族——武器技能被谁持有＝主手武器说了算）。
+	var ctx_tags := SkillDB.skill_ctx_tags(skill, _main_hand_tags(attacker))
+	attacker.combat_ctx = {"target": target, "skill_tags": ctx_tags}
+	target.combat_ctx = {"target": attacker, "skill_tags": ctx_tags}
 	var r := _resolve_compute_body(attacker, target, skill)
 	attacker.combat_ctx = {}
 	target.combat_ctx = {}
@@ -1248,9 +1256,12 @@ func _ai_plan(unit) -> Dictionary:
 		return {"action": "none"}
 	var here := Vector2i(unit.col, unit.row)
 	var tcell := Vector2i(target.col, target.row)
-	var atk_range := int(unit.basic_attack().get("range", 1))
+	var atk_range := SkillDB.skill_reach(unit.basic_attack())   # 形状掩码优先（决策30）
 	if _hex_dist(here, tcell) <= atk_range and unit.ap >= SkillDB.skill_ap_cost(unit.basic_attack()):
-		return {"action": "attack", "cell": tcell, "target": target}
+		# 形状精确校验：选取形（环形射程等）外的目标不打（_attack_targets 同口设防；空=旧圆盘语义）
+		var pickc := _shape_pick_cells(unit, unit.basic_attack())
+		if pickc.is_empty() or pickc.has(tcell):
+			return {"action": "attack", "cell": tcell, "target": target}
 	var budget := _ai_move_budget(unit)
 	if budget <= 0:
 		return {"action": "none"}
@@ -1410,16 +1421,29 @@ func restore(d: Dictionary) -> bool:
 
 # ============ Targeting ============
 
-# 点击格 → 命中单位列表：直线 AoE 取该方向直线上的单位（友伤按 friendly_fire），否则取该格的敌对单位
+# 点击格 → 命中单位列表：形状掩码 AOE（🔒 决策30，作用形+友伤）＞直线 AoE（legacy）＞该格敌对单位。
+# 选取形（pick）在此处也设防：形状外的点击＝非法瞄准返回 []（AI/宿主双保险，UI 层 attack_cells 已先拦）。
 func _attack_targets(attacker, cell: Vector2i, skill) -> Array:
 	var out := []
+	var shp := SkillDB.shape_of(skill)
+	var pickc := _shape_pick_cells(attacker, skill)
+	if not pickc.is_empty() and not pickc.has(cell):
+		return out
+	var eff: Array = shp.get("effect", [])
+	if not eff.is_empty():
+		var cells := _shape_effect_cells(attacker, shp, cell)
+		var ff := bool(shp.get("friendly_fire", false))
+		for u in units:
+			if Vector2i(u.col, u.row) in cells and u != attacker and (ff or _is_hostile(attacker, u)):
+				out.append(u)
+		return out
 	var aoe = skill.get("aoe", null)
 	if typeof(aoe) == TYPE_DICTIONARY and aoe.get("shape", "") == "line":
-		var cells = _line_cells(Vector2i(attacker.col, attacker.row), cell, int(aoe.get("length", 1)))
-		var ff = bool(aoe.get("friendly_fire", false))
+		var cells2 = _line_cells(Vector2i(attacker.col, attacker.row), cell, int(aoe.get("length", 1)))
+		var ff2 = bool(aoe.get("friendly_fire", false))
 		for u in units:
 			var p := Vector2i(u.col, u.row)
-			if p in cells and (ff or _is_hostile(attacker, u)):
+			if p in cells2 and (ff2 or _is_hostile(attacker, u)):
 				out.append(u)
 	else:
 		var t = unit_at(cell.x, cell.y)
@@ -1428,3 +1452,36 @@ func _attack_targets(attacker, cell: Vector2i, skill) -> Array:
 			and _can_see_cell(cell) and _has_los(Vector2i(attacker.col, attacker.row), cell):
 			out.append(t)
 	return out
+
+# 选取形 → 世界格集合（🔒 决策30）：pick 掩码直落；pick 空但作用形锚自身 → 六旋转并集＝可点方向盘；
+# 都空 → {}（调用方回退 range 圆盘）。越界格裁掉。
+func _shape_pick_cells(u, skill) -> Dictionary:
+	var out := {}
+	var shp := SkillDB.shape_of(skill)
+	var origin := Vector2i(u.col, u.row)
+	var pick: Array = shp.get("pick", [])
+	if not pick.is_empty():
+		for c in HexGrid.mask_cells(origin, pick):
+			if _cell_in_bounds(c.x, c.y):
+				out[c] = true
+		return out
+	var eff: Array = shp.get("effect", [])
+	if not eff.is_empty() and str(shp.get("anchor", "caster")) == "caster":
+		for k in 6:
+			for c in HexGrid.mask_cells(origin, eff, k):
+				if _cell_in_bounds(c.x, c.y):
+					out[c] = true
+	return out
+
+# 作用形落地（🔒 决策30）：anchor=target→掩码平移到所点格（火球）；anchor=caster→取「包含所点格」
+# 的 60° 旋转档（横扫弧点哪打哪个方向；多解取首个）。找不到＝[]（点在形外）。
+func _shape_effect_cells(attacker, shp: Dictionary, clicked: Vector2i) -> Array:
+	var mask: Array = shp.get("effect", [])
+	if str(shp.get("anchor", "caster")) == "target":
+		return HexGrid.mask_cells(clicked, mask)
+	var origin := Vector2i(attacker.col, attacker.row)
+	for k in 6:
+		var cells := HexGrid.mask_cells(origin, mask, k)
+		if clicked in cells:
+			return cells
+	return []

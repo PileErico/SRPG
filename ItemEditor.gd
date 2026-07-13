@@ -107,7 +107,7 @@ var _w_weight: OptionButton
 # 修正 / 武器技能（🔒 决策25/26 引用制：BWS 普攻位 + EWS 额外技能位；招式本体在技能编辑器）
 var _mods_box: VBoxContainer
 var _mod_rows: Array = []
-var _w_bws: OptionButton         # 普攻 BWS 下拉（is_ws_shaped 形状过滤，决策27；（无）＝不提供普攻，如盾）
+var _w_bws: OptionButton         # 普攻 BWS 下拉（weapon_skill 勾选过滤，🔒 决策29；（无）＝不提供普攻，如盾）
 var _w_prefer: OptionButton      # 地/空偏好（比路兹式起降换手；一般武器（无））
 var _ews_box: VBoxContainer      # EWS 行容器
 var _ews_rows: Array = []        # EWS 行：[{panel, skill:OptionButton, reqs:[{row,prof,value,hint}], reqs_box}]
@@ -634,7 +634,7 @@ func _on_wtype_changed() -> void:
 
 # ============ 武器技能段（🔒 决策25/26 引用制：只引用技能库、不内嵌创建；招式参数去技能编辑器改）============
 
-# BWS 普攻位（is_ws_shaped 形状过滤——决策27 关系制：BWS 身份由本引用决定，技能库不声明） + 地/空偏好
+# BWS 普攻位（🔒 决策29 勾选制：列＝勾了「武器技能」的条目；BWS/EWS 之分由本编辑器的引用位决定）+ 地/空偏好
 # + EWS 行（每条：技能引用+复数 AND 解锁条件）。同一技能可既是 A 武器 BWS 又是 B 武器 EWS。
 func _build_weapon_skills_section() -> void:
 	_form.add_child(EditorUI.section_title("武器技能（引用技能库条目；招式参数在技能编辑器改——决策25 引用制）"))
@@ -643,7 +643,7 @@ func _build_weapon_skills_section() -> void:
 	_w_bws.set_item_metadata(0, "")
 	for id in SkillDB.all():
 		var def = SkillDB.get_skill(id)
-		if SkillDB.is_ws_shaped(def):
+		if SkillDB.is_weapon_skill(def):
 			_w_bws.add_item("%s（%s）" % [str(def.get("name", id)), str(id)])
 			_w_bws.set_item_metadata(_w_bws.item_count - 1, str(id))
 	var cur_bws := SkillDB.weapon_bws_id(_current)   # 双读单口（§1-6）
@@ -655,7 +655,7 @@ func _build_weapon_skills_section() -> void:
 	_w_bws.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bws_row.add_child(_w_bws)
 	bws_row.add_child(_skill_jump_btn(_w_bws))
-	_form.add_child(EditorUI.field_row("普攻 BWS（装备即用；列 WS 形＝含攻击块·无冷却·无级·无手门槛·次数无限）", bws_row))
+	_form.add_child(EditorUI.field_row("普攻 BWS（装备即用；列＝勾了「武器技能」的条目——⚠ 普攻路径不结算冷却/次数/等级）", bws_row))
 	# prefer 初值双读 attack.prefer（同 Unit._weapon_prefer 口径）：未迁移武器打开不丢偏好
 	var atk0 = _current.get("attack", {})
 	var prefer0 := str(_current.get("prefer", atk0.get("prefer", "") if typeof(atk0) == TYPE_DICTIONARY else ""))
@@ -723,8 +723,9 @@ func _add_ews_row(skill_id: String, requires) -> void:
 	pick.set_item_metadata(0, "")
 	for id in SkillDB.all():
 		var def = SkillDB.get_skill(id)
-		# 纯 attack 块技能排除：能力路径跑不了（apply_skill 守卫拒发）——attack 类 EWS＝阶段6 放开；lint 规则8 同闸
-		if bool(def.get("active", false)) and SkillDB.has_runnable_block(def):
+		# 列＝勾了「武器技能」的条目（🔒 决策29 勾选制）；纯 attack 块仍排除：能力路径跑不了
+		# （apply_skill 守卫拒发）——attack 类 EWS＝阶段6 放开；lint 规则8 同闸
+		if SkillDB.is_weapon_skill(def) and bool(def.get("active", false)) and SkillDB.has_runnable_block(def):
 			pick.add_item("%s（%s）" % [str(def.get("name", id)), str(id)])
 			pick.set_item_metadata(pick.item_count - 1, str(id))
 	_ensure_meta_option(pick, skill_id)

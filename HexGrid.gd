@@ -48,6 +48,39 @@ static func cube_round(xf: float, yf: float, zf: float) -> Vector3i:
 		rz = -rx - ry
 	return Vector3i(rx, ry, rz)
 
+# ============ 形状掩码（🔒 技能图形化范围 2026-07-13）============
+# 掩码＝axial 相对偏移集 [[dq,dr],…]（⚠ 不能用 offset 偏移——odd-q 下同一位移随列奇偶错半格，
+# cube/axial 空间平移与 60° 旋转才恒正确）。编辑器点格产出掩码、战斗侧经 mask_cells 落地世界格。
+
+# axial 偏移绕原点顺时针旋转 60°×k：cube (x,y,z) 顺转一步 → (-z,-x,-y)
+static func axial_rotate(d: Vector2i, k: int) -> Vector2i:
+	var v := Vector3i(d.x, -d.x - d.y, d.y)
+	for _i in ((k % 6) + 6) % 6:
+		v = Vector3i(-v.z, -v.x, -v.y)
+	return Vector2i(v.x, v.z)
+
+# 掩码落地：以 origin（offset 格）为锚，旋转 k 档后平移成世界格数组（越界格不裁，调用方判界）
+static func mask_cells(origin: Vector2i, mask: Array, k := 0) -> Array:
+	var oc := offset_to_cube(origin)
+	var out := []
+	for m in mask:
+		if typeof(m) != TYPE_ARRAY or (m as Array).size() < 2:
+			continue
+		var d := axial_rotate(Vector2i(int(m[0]), int(m[1])), k)
+		out.append(cube_to_offset(Vector3i(oc.x + d.x, oc.y - d.x - d.y, oc.z + d.y)))
+	return out
+
+# 掩码可及半径（AI/预览粗口径）：掩码内最远偏移的六边形距离；空掩码=0
+static func mask_reach(mask: Array) -> int:
+	var best := 0
+	for m in mask:
+		if typeof(m) != TYPE_ARRAY or (m as Array).size() < 2:
+			continue
+		var q := int(m[0])
+		var r := int(m[1])
+		best = maxi(best, int((abs(q) + abs(-q - r) + abs(r)) / 2))
+	return best
+
 # ============ 邻居 ============
 
 # 某格的 6 个邻居（odd-q，含越界格，通行性/边界由调用方判）

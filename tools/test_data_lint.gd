@@ -14,9 +14,9 @@ extends SceneTree
 ##  7) skills.json 阶段2 形状闸门（🔒 设计 §10 护栏#1 机械执法）：target 三旗不得全 false / seq·nature 禁回流（2026-07-13 废除/改词）/
 ##     per_level 长度==max_level / costs.ap 与顶层 ap_cost 禁双写 / 阶段6 前 hits.size()>1 或 riders 出现即 FAIL
 ##     （防「可编不可跑」内容入库）。WS 形约束已随决策27 关系制移到规则8 引用处执法。
-##  8) weapons.json 武器技能引用（🔒 决策25/26/27）：bws/bas → 技能存在+WS 形（is_ws_shaped：含 attack 块+
-##     冷却0+无级+无手门槛——攻击路径不结算冷却/次数/等级）；ews → 技能存在+主动+含 ≥1 可跑块（纯 attack＝阶段6），
-##     requires 的 prof/value 合法。BWS/EWS＝武器引用方式非技能种类：同一技能可既是 A 的 BWS 又是 B 的 EWS。
+##  8) weapons.json 武器技能引用（🔒 决策25/26/29 勾选制）：bws/bas → 技能存在+勾 weapon_skill+含 attack 块；
+##     ews → 技能存在+勾选+主动+含 ≥1 可跑块（纯 attack＝阶段6），requires 的 prof/value 合法。
+##     BWS/EWS＝武器引用位而非技能种类（武器侧决定）：同一技能可既是 A 的 BWS 又是 B 的 EWS。
 ##     内联 attack 残留＝FAIL（2026-07-12 技改 §4-11 收口：weapons.json 已全量迁引用制）。
 ##  9) 原型引用完整性（技改 §4-1）：unit_prototypes 的 equip/bag→ItemDB、trait→TraitDB、race→RaceDB、
 ##     profs.known/slots/xp→ProfDB、skills→SkillDB——改 id 即静默断链，逐类存在性校验。
@@ -269,7 +269,7 @@ func _initialize() -> void:
 			ck(not (s.has("ap_cost") and typeof(costs) == TYPE_DICTIONARY and costs.has("ap")),
 				"%s：costs.ap 与顶层 ap_cost 禁双写（双键桥在读取器，数据侧只留一个）" % sid)
 			# 禁键（决策27 关系制，同 element 先例）：BWS 身份由武器引用决定，技能库不做角色声明
-			ck(not s.has("usable_as_bas"), "%s：usable_as_bas 已废（决策27）——禁回流，WS 形＝is_ws_shaped 计算判定" % sid)
+			ck(not s.has("usable_as_bas"), "%s：usable_as_bas 已废（决策27→29 勾选制 weapon_skill）——禁回流" % sid)
 			var tg = s.get("target", null)
 			if typeof(tg) == TYPE_DICTIONARY:
 				ck(bool(tg.get("enemy", false)) or bool(tg.get("ally", false)) or bool(tg.get("self", false)),
@@ -289,9 +289,9 @@ func _initialize() -> void:
 			for h in hits:
 				ck((h as Array).size() <= 1, "%s：hits>1 属阶段6（护栏#1）——现禁入库" % sid)
 
-	# 8) weapons.json 的武器技能引用（🔒 决策25/26/27）：
-	#    bws/bas（双键桥）→ 技能存在 + WS 形（约束长在引用处：没被引用的技能不受形状约束）；
-	#    ews → 技能存在+主动+可跑块、requires 的 prof/value 合法；
+	# 8) weapons.json 的武器技能引用（🔒 决策25/26/29 勾选制）：
+	#    bws/bas（双键桥）→ 技能存在 + 勾了 weapon_skill + 含 attack 块（无块＝flatten 空→普攻退化徒手）；
+	#    ews → 技能存在+勾选+主动+可跑块、requires 的 prof/value 合法；
 	#    内联 attack 残留＝窗口期提示（迁移后应为 0；收口后改 FAIL）。
 	var wd = _read_json("res://data/weapons.json")
 	if wd != null:
@@ -301,8 +301,10 @@ func _initialize() -> void:
 		for b in bas_refs:
 			var bdef = SkillDB.get_skill(b)
 			ck(bdef != null, "weapons 引用的 BWS 技能存在：%s" % b)
-			ck(bdef == null or SkillDB.is_ws_shaped(bdef),
-				"%s：被引为 BWS 须 WS 形（含 attack 块·冷却0·无级·无手门槛·次数无限——攻击路径不结算冷却/次数/等级）" % b)
+			ck(bdef == null or SkillDB.is_weapon_skill(bdef),
+				"%s：被引为 BWS 须勾选「武器技能」（🔒 决策29 勾选制——勾了才可被武器选取）" % b)
+			ck(bdef == null or not SkillDB.flatten_bws(bdef).is_empty(),
+				"%s：被引为 BWS 须含合法 attack 块（无块＝flatten 空→普攻退化徒手）" % b)
 		var inline_left := 0
 		if typeof(wd) == TYPE_ARRAY:
 			for w in wd:
@@ -315,6 +317,7 @@ func _initialize() -> void:
 					var sid := str(e.get("skill", "")) if typeof(e) == TYPE_DICTIONARY else str(e)
 					var sdef = SkillDB.get_skill(sid)
 					ck(sdef != null, "%s：ews 引用的技能存在：%s" % [wid, sid])
+					ck(sdef == null or SkillDB.is_weapon_skill(sdef), "%s：ews「%s」须勾选「武器技能」（🔒 决策29）" % [wid, sid])
 					ck(sdef == null or bool(sdef.get("active", false)), "%s：ews「%s」须为主动技能（被动 EWS＝阶段4）" % [wid, sid])
 					ck(sdef == null or SkillDB.has_runnable_block(sdef),
 						"%s：ews「%s」须含 ≥1 可跑块（%s）——纯 attack 块经能力路径拒发（attack 类 EWS＝阶段6）" % [wid, sid, "/".join(SkillDB.RUNNABLE_KINDS)])

@@ -11,6 +11,7 @@ extends SceneTree
 ## 运行：..._console.exe --headless --path "D:/1战棋" -s res://tools/test_weapon_skills.gd（退出码 0=PASS）
 
 const SkillDB := preload("res://SkillDB.gd")
+const HexGrid := preload("res://HexGrid.gd")
 const Unit := preload("res://Unit.gd")
 const UnitFactory := preload("res://UnitFactory.gd")
 const BattleState := preload("res://BattleState.gd")
@@ -55,26 +56,53 @@ func _initialize() -> void:
 	ck(SkillDB.flatten_bws({"name": "空壳"}).is_empty(), "无 attack 块 → 空 dict（勿造幻影攻击；basic_attack 兜 UNARMED）")
 	ck(SkillDB.flatten_bws(SkillDB.get_skill("t_ews_heal")).is_empty(), "heal 技能被引用为 BWS → 空 dict（审查确认项2）")
 
-	# 1b) is_ws_shaped 正反两向（🔒 决策27；FAIL 方向＝lint 规则8/ItemEditor 过滤的守卫本体）
-	var bas_ok := {"cooldown": {"base": 0}, "max_level": 1, "requires_hands": [], "uses_per_battle": {"base": 0},
+	# 1b) 武器技能勾选制（🔒 决策29——翻案决策27 形状判定）：is_weapon_skill 判勾选、不判形状
+	var ws_ok := {"weapon_skill": true, "weapon_kinds": ["weapon_sword", "weapon_halberd"],
+		"tags": ["aoe"], "cooldown": {"base": 0}, "max_level": 1,
 		"effects": [{"kind": "attack", "hits": [{"coeff": 1.0}]}]}
-	ck(SkillDB.is_ws_shaped(bas_ok), "标准 WS 形 → true")
-	var v: Dictionary
-	v = bas_ok.duplicate(true); v["cooldown"] = {"base": 2}
-	ck(not SkillDB.is_ws_shaped(v), "冷却≠0 → 非 WS 形")
-	v = bas_ok.duplicate(true); v["max_level"] = 3
-	ck(not SkillDB.is_ws_shaped(v), "有级 → 非 WS 形")
-	v = bas_ok.duplicate(true); v["requires_hands"] = [{"slot": "main_hand"}]
-	ck(not SkillDB.is_ws_shaped(v), "有手门槛 → 非 WS 形")
-	v = bas_ok.duplicate(true); v["uses_per_battle"] = {"base": 2}
-	ck(not SkillDB.is_ws_shaped(v), "限次 → 非 WS 形（攻击路径不结算次数——决策18 BAS 无次数限制）")
-	v = bas_ok.duplicate(true); v["effects"] = [{"kind": "heal"}]
-	ck(not SkillDB.is_ws_shaped(v), "无 attack 块 → 非 WS 形")
-	# 1c) 多 attack 块口径同一：gate 放行 ⇔ flatten 有产出（首个异形块跳过继续扫，勿分叉）
-	v = bas_ok.duplicate(true)
+	ck(SkillDB.is_weapon_skill(ws_ok), "勾选 → 武器技能")
+	ck(not SkillDB.is_weapon_skill({"effects": [{"kind": "attack", "hits": [{"coeff": 1.0}]}]}),
+		"未勾选 → 非武器技能（形状再像也不算——勾选制）")
+	var v: Dictionary = ws_ok.duplicate(true)
+	v["cooldown"] = {"base": 3}
+	ck(SkillDB.is_weapon_skill(v), "勾选＝唯一门槛：带冷却照样是武器技能（普攻位不结算冷却＝引擎事实非门槛）")
+
+	# 1c) 动态武器技能 tag（🔒 决策29 核心）：占位恒有；种类 tag 按持有武器解析、不静态携带
+	var ct: Array = SkillDB.skill_ctx_tags(ws_ok, ["melee", "weapon_sword"])
+	ck("skill_weapon" in ct and "skill_sword" in ct and "aoe" in ct, "持剑 → skill_weapon 占位 + skill_sword 动态解析 + 本体 tags")
+	ck(not ("skill_halberd" in ct), "持剑 ≠ 戟：适用但未持有的种类 tag 不出现")
+	ct = SkillDB.skill_ctx_tags(ws_ok, ["melee", "weapon_halberd"])
+	ck("skill_halberd" in ct and not ("skill_sword" in ct), "同一技能换戟持有 → 换 skill_halberd（随武器换 tag 吃对应加成）")
+	ct = SkillDB.skill_ctx_tags(ws_ok, ["melee", "weapon_hammer"])
+	ck("skill_weapon" in ct and not ("skill_hammer" in ct), "持锤（不在适用种类）→ 只剩占位")
+	ck(SkillDB.skill_ctx_tags({"tags": ["verbal"]}, ["weapon_sword"]) == ["verbal"], "非武器技能 → 只回本体 tags")
+
+	# 1d) 多 attack 块口径：flatten 取首个合法块；shape/weapon_skill/weapon_kinds 顶层透传（决策30）
+	v = ws_ok.duplicate(true)
 	v["effects"] = [{"kind": "attack", "hits": []}, {"kind": "attack", "hits": [{"coeff": 0.5}]}]
-	ck(SkillDB.is_ws_shaped(v) and absf(float(SkillDB.flatten_bws(v).get("coeff", 0)) - 0.5) < 0.0001,
-		"首块异形+次块合法 → gate 放行且 flatten 取到合法块（口径同一）")
+	v["shape"] = {"effect": [[0, -1], [1, -1], [1, 0]], "anchor": "caster", "friendly_fire": true}
+	var fv: Dictionary = SkillDB.flatten_bws(v)
+	ck(absf(float(fv.get("coeff", 0)) - 0.5) < 0.0001, "首块异形+次块合法 → flatten 取到合法块")
+	ck(bool(fv.get("weapon_skill", false)) and (fv.get("weapon_kinds", []) as Array).has("weapon_sword")
+		and typeof(fv.get("shape")) == TYPE_DICTIONARY, "flatten 透传 weapon_skill/weapon_kinds/shape")
+
+	# 1e) 形状掩码几何（🔒 决策30；掩码=axial，odd-q 平移/旋转恒正确）
+	ck(HexGrid.axial_rotate(Vector2i(1, 0), 0) == Vector2i(1, 0), "旋转 0 档＝原样")
+	ck(HexGrid.axial_rotate(Vector2i(1, 0), 6) == Vector2i(1, 0), "旋转 6 档＝转满一圈回原位")
+	var arc := [[0, -1], [1, -1], [1, 0]]
+	# 奇偶列锚点各落一次（odd-q 错半格：同掩码在奇/偶列展开的 offset 格不同，但都与锚相邻）
+	for origin in [Vector2i(4, 4), Vector2i(5, 4)]:
+		var cells: Array = HexGrid.mask_cells(origin, arc)
+		ck(cells.size() == 3, "三格弧展开 3 格（锚 %s）" % str(origin))
+		for c in cells:
+			ck(HexGrid.distance(origin, c) == 1, "弧格均与锚相邻（锚 %s → %s）" % [str(origin), str(c)])
+	# 六旋转并集＝整圈邻居
+	var ring := {}
+	for k in 6:
+		for c in HexGrid.mask_cells(Vector2i(4, 4), arc, k):
+			ring[c] = true
+	ck(ring.size() == 6, "三格弧六旋转并集＝6 邻居圈（弧连续、旋转封闭）")
+	ck(HexGrid.mask_reach([[2, -1], [0, 1]]) == 2, "mask_reach＝掩码内最远六边形距离")
 
 	# 2) EWS 解锁判定（🔒 决策26：复数 AND + 裸数值）
 	var u = Unit.new("试兵", "player", 0, 0)

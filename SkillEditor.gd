@@ -18,8 +18,11 @@ const StatMeta := preload("res://StatMeta.gd")
 const EffectEditorScript := preload("res://EffectEditor.gd")   # §26 apply_effect 引用位「↗」静态传参口
 const ItemDB := preload("res://ItemDB.gd")                     # §18 反向引用感知（武器 bws/ews 引用技能）
 const UnitFactory := preload("res://UnitFactory.gd")           # §18 反向引用感知（原型 skills 引用技能）
+const HexShapePicker := preload("res://HexShapePicker.gd")     # 🔒 决策30 图形化范围（选取形/作用形点格）
 
 const ICON_DIR := "res://icons/Skills"
+# 适用武器种类的 tag 类别（🔒 决策29：词表＝TagDB wcat_*，与武器 tag/动态技能 tag 三位一体）
+const WEAPON_KIND_CATS := [["wcat_melee", "近战"], ["wcat_ranged", "远程"], ["wcat_catalyst", "触媒"], ["wcat_shield", "盾"]]
 const CATEGORIES := [["skill", "技巧 skill"], ["spell", "魔法 spell（魔法系统后置）"]]   # ⚠ 2026-07-13 用户改词：键 nature→category（与修正对象的 nature〔buff/debuff〕分家）
 const DAMAGE_KINDS := ["physical", "fire", "ice", "thunder", "holy"]
 const HAND_SLOTS := [["main_hand", "主手"], ["off_hand", "副手"]]
@@ -58,6 +61,14 @@ var _w_t_enemy: CheckBox
 var _w_t_ally: CheckBox
 var _w_t_self: CheckBox
 var _w_passive_hint: Label   # §25 被动灰化联动的说明条（active=false 时可见）
+# —— 武器技能（🔒 决策29 勾选制）+ 形状（🔒 决策30 图形化）——
+var _w_wskill: CheckBox            # 武器技能勾选（勾＝可被武器选取）
+var _kind_box: Control             # 适用武器种类区（勾选时显示）
+var _kind_checks := {}             # wcat tag id -> CheckBox
+var _w_pick: Control               # 选取形 HexShapePicker
+var _w_effect: Control             # 作用形 HexShapePicker
+var _w_anchor: OptionButton        # 作用形锚点 caster/target
+var _w_ff: CheckBox                # 友伤 friendly_fire
 var _hands_box: VBoxContainer
 var _blocks_box: VBoxContainer
 var _block_pick: OptionButton
@@ -140,13 +151,13 @@ func _shell_populate_list(q: String) -> void:
 		var nm := str(s.get("name", id))
 		if searching and not (str(id).to_lower().contains(q) or nm.to_lower().contains(q)):
 			continue
-		if SkillDB.is_ws_shaped(s):
-			groups["bws"].append(s)   # 计算判定非声明（决策27）：分组只是导航便利，编辑器不感知 BWS/EWS 角色
+		if SkillDB.is_weapon_skill(s):
+			groups["bws"].append(s)   # 勾选制（🔒 决策29）：勾了武器技能＝可被武器选取；BWS/EWS 之分在武器侧
 		elif bool(s.get("active", true)):
 			groups["active"].append(s)
 		else:
 			groups["passive"].append(s)
-	for g in [["active", "主动能力"], ["passive", "被动能力"], ["bws", "武器技能（WS 形，可被武器引为 BWS）"]]:
+	for g in [["active", "主动能力"], ["passive", "被动能力"], ["bws", "武器技能（勾选制——可被武器选取）"]]:
 		var key := str(g[0])
 		var arr: Array = groups[key]
 		arr.sort_custom(func(a, b): return _sort_key(a) < _sort_key(b))
@@ -220,8 +231,57 @@ func _build_form() -> void:
 	# 类别 category（旧键 nature 兼容读——数据已迁，残档兜底；写盘只落 category）
 	_w_category = _dropdown_pairs("类别 category", CATEGORIES, str(_current.get("category", _current.get("nature", "skill"))))
 	_w_active = EditorUI.add_check(_form, "主动能力 active（关＝被动，状态页圆框陈列）", bool(_current.get("active", true)), _mark_dirty)
-	# 无 usable_as_bas 勾选（决策27 关系制）：技能编辑器只管技能做什么；能否被引为 BWS＝形状（is_ws_shaped）在物品编辑器/lint 判
 	# 无 seq 槽位（2026-07-13 废除）：旧「13 通用序列」随通用能力页退役，陈列排序归技能树轮
+
+	# —— 武器技能（🔒 决策29 显式勾选制，翻案决策27 形状判定）：勾＝可被武器选取（BWS/EWS 之分武器侧定）——
+	_w_wskill = EditorUI.add_check(_form, "武器技能 weapon_skill（勾＝可被武器选取为 BWS/EWS）",
+		bool(_current.get("weapon_skill", false)), func(_v = false):
+			_mark_dirty()
+			if _kind_box != null:
+				_kind_box.visible = _w_wskill.button_pressed)
+	_kind_box = VBoxContainer.new()
+	_kind_box.add_theme_constant_override("separation", 2)
+	var kb_hint := Label.new()
+	kb_hint.text = "适用武器种类（动态 tag：被剑引用时才视为拥有 skill_sword——平时只带占位 skill_weapon）"
+	kb_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	kb_hint.add_theme_font_size_override("font_size", 12)
+	kb_hint.add_theme_color_override("font_color", Color(0.7, 0.72, 0.78))
+	_kind_box.add_child(kb_hint)
+	_kind_checks = {}
+	var cur_kinds: Array = _current.get("weapon_kinds", [])
+	for cat in WEAPON_KIND_CATS:
+		var flow := HFlowContainer.new()
+		flow.add_theme_constant_override("h_separation", 8)
+		var cl := Label.new()
+		cl.text = str(cat[1]) + "："
+		cl.add_theme_font_size_override("font_size", 12)
+		flow.add_child(cl)
+		for t in TagDB.by_cat(str(cat[0])):
+			var tid := str(t.get("id", ""))
+			var cb := CheckBox.new()
+			cb.text = str(t.get("cn", tid))
+			cb.tooltip_text = tid
+			cb.button_pressed = tid in cur_kinds
+			cb.toggled.connect(func(_on): _mark_dirty())
+			flow.add_child(cb)
+			_kind_checks[tid] = cb
+		_kind_box.add_child(flow)
+	_kind_box.visible = bool(_current.get("weapon_skill", false))
+	_form.add_child(_kind_box)
+
+	# —— 范围与形状（🔒 决策30 图形化）：掩码空＝按射程 range 圆盘/单体（旧数据零迁移）——
+	_form.add_child(EditorUI.section_title("范围与形状（点格设形；两盘全空＝按下方 range 圆盘/单体）"))
+	var shp0: Dictionary = _current.get("shape", {}) if typeof(_current.get("shape")) == TYPE_DICTIONARY else {}
+	var shp_row := HBoxContainer.new()
+	shp_row.add_theme_constant_override("separation", 14)
+	_w_pick = _shape_picker_col(shp_row, "选取形（可瞄准的格；如长柄空出内圈）", shp0.get("pick", []))
+	_w_effect = _shape_picker_col(shp_row, "作用形（AOE 打到的格；空＝单体打所点格）", shp0.get("effect", []))
+	_form.add_child(shp_row)
+	_w_anchor = EditorUI.add_dropdown(_form, "作用形锚点 anchor",
+		[["caster", "锚定自身（按目标方向 60° 旋转——横扫弧）"], ["target", "锚定落点（平移到所点格——火球）"]],
+		str(shp0.get("anchor", "caster")), func(_i = 0): _mark_dirty())
+	_w_ff = EditorUI.add_check(_form, "友伤 friendly_fire（AOE 可空放，故不设对敌/对友、只设是否伤及友军）",
+		bool(shp0.get("friendly_fire", false)), _mark_dirty)
 
 	# 2. 标签
 	_form.add_child(EditorUI.section_title("技能标签（verbal=需发声、失语时禁用）"))
@@ -327,6 +387,29 @@ func _dropdown_pairs(label: String, pairs: Array, sel: String) -> OptionButton:
 	ob.item_selected.connect(func(_i): _mark_dirty())
 	_form.add_child(EditorUI.field_row(label, ob))
 	return ob
+
+# 形状盘列（标题 + 六边形点格盘 + 清空钮）——选取形/作用形两处共用（🔒 决策30）
+func _shape_picker_col(parent: Control, title: String, mask) -> Control:
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 3)
+	var l := Label.new()
+	l.text = title
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.custom_minimum_size = Vector2(170, 0)
+	l.add_theme_font_size_override("font_size", 12)
+	l.add_theme_color_override("font_color", Color(0.7, 0.72, 0.78))
+	col.add_child(l)
+	var p := HexShapePicker.new()
+	p.set_mask(mask if typeof(mask) == TYPE_ARRAY else [])
+	p.changed.connect(_mark_dirty)
+	col.add_child(p)
+	var clr := Button.new()
+	clr.text = "清空"
+	clr.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	clr.pressed.connect(p.clear_mask)
+	col.add_child(clr)
+	parent.add_child(col)
+	return p
 
 func _build_icon_row() -> void:
 	var row := HBoxContainer.new()
@@ -845,6 +928,31 @@ func _shell_collect() -> Dictionary:
 	out["target"] = {"enemy": _w_t_enemy.button_pressed, "ally": _w_t_ally.button_pressed, "self": _w_t_self.button_pressed}
 	out["range"] = int(_w_range.value)
 	out.erase("seq")   # 旧键随存即清（2026-07-13 通用序列废除）
+	# 武器技能（🔒 决策29）：勾了才落键；适用种类按 wcat 词表序收集（确定序，字节往返友好）
+	if _w_wskill != null and _w_wskill.button_pressed:
+		out["weapon_skill"] = true
+		var kinds := []
+		for tid in _kind_checks:
+			if (_kind_checks[tid] as CheckBox).button_pressed:
+				kinds.append(tid)
+		out["weapon_kinds"] = kinds
+	else:
+		out.erase("weapon_skill")
+		out.erase("weapon_kinds")
+	# 形状（🔒 决策30）：两盘全空＝删键（回退 range 圆盘/单体）；anchor/friendly_fire 只随作用形落键
+	var pickm: Array = _w_pick.mask()
+	var effm: Array = _w_effect.mask()
+	if pickm.is_empty() and effm.is_empty():
+		out.erase("shape")
+	else:
+		var shp := {}
+		if not pickm.is_empty():
+			shp["pick"] = pickm
+		if not effm.is_empty():
+			shp["effect"] = effm
+			shp["anchor"] = str(_w_anchor.get_selected_metadata())
+			shp["friendly_fire"] = _w_ff.button_pressed
+		out["shape"] = shp
 	# requires_hands
 	var hands := []
 	for h in _hand_rows:
