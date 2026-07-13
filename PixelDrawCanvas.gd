@@ -2,9 +2,12 @@ extends Control
 ## 内置像素画布：在 N×N 网格上画部件贴图，底下叠**洋葱皮**（角色其余部件）作对齐参照。
 ## 大视口 + 滚轮缩放（光标锚定）+ 中键拖动平移；NEAREST 采样＝像素硬边不溢色。
 ## 工具：铅笔/橡皮/填充/吸管/直线/矩形/实心矩形 + 水平镜像；选区(矩形)/魔棒 + 复制/剪切/粘贴/删除/拖动移动浮动块。
-## 直线矩形拖动实时预览、松手落定；undo 快照栈。就着角色本体画→锚点天然对齐。未来完整像素编辑器的地基。
+## 直线矩形拖动实时预览、松手落定；undo/redo 快照栈（新笔画清空 redo，标准语义）；笔刷粗细 1/2/3px（stamp_pts）；
+## 悬停像素框+坐标角标；img 内容每变一次发 image_changed（宿主接 mini 拼贴/棋子实时预览，提案 §28）。
+## 就着角色本体画→锚点天然对齐。未来完整像素编辑器的地基。
 
 signal color_picked(c: Color)
+signal image_changed(img: Image)   # img 内容变更（落笔/撤销/清空/载入…）——只报不复制，勿在处理器里改它
 
 const CHECK_A := Color(0.16, 0.17, 0.20)
 const CHECK_B := Color(0.21, 0.22, 0.26)
@@ -16,6 +19,7 @@ var px_size := 32          # 画布宽（向后兼容：setup(size) 时 px_h 也
 var px_h := 32             # 画布高（非方形瓦片用；setup_wh 分别设）
 var paint_mask := {}       # {Vector2i:true} 限定可落笔像素（空＝自由画）；工坊用它把笔锁在六边形内
 var brush := Color(0.5, 0.5, 0.5, 1.0)
+var brush_px := 1          # 笔刷粗细 1/2/3（铅笔/橡皮/直线/矩形落点经 stamp_pts 扩展；填充/选区不受影响）
 var tool := "pencil"          # pencil/eraser/fill/pick/line/rect/rectf/select/wand
 var mirror_x := false
 var show_grid := true
@@ -31,6 +35,8 @@ var _last := Vector2i(-999, -999)
 var _start := Vector2i(0, 0)
 var _preview: Array[Vector2i] = []
 var _undo: Array[Image] = []
+var _redo: Array[Image] = []
+var _hover := Vector2i(-999, -999)   # 悬停像素（界外/移出＝-999）
 
 # 选区
 var _sel := {}                # {Vector2i: true}
@@ -93,7 +99,14 @@ func clear_img() -> void:
 func undo() -> void:
 	if _undo.is_empty():
 		return
+	_redo.append(img.duplicate())
 	img = _undo.pop_back(); _float = []; _clear_sel(); _rebuild()
+
+func redo() -> void:
+	if _redo.is_empty():
+		return
+	_undo.append(img.duplicate())
+	img = _redo.pop_back(); _float = []; _clear_sel(); _rebuild()
 
 func set_grid(on: bool) -> void:
 	show_grid = on; queue_redraw()
@@ -105,6 +118,7 @@ func fit() -> void: _fit(); queue_redraw()
 func _rebuild() -> void:
 	_tex = ImageTexture.create_from_image(img)
 	queue_redraw()
+	image_changed.emit(img)
 
 # —— 视口 ——
 func _fit() -> void:
@@ -151,10 +165,10 @@ func _draw() -> void:
 			var fp: Vector2i = e["p"] + _float_off
 			if _in(fp):
 				draw_rect(Rect2(pan + Vector2(fp) * zoom, Vector2(zoom, zoom)), e["c"])
-	# 形状预览
+	# 形状预览（先按笔刷粗细扩展、再镜像——与 _release 落定同一路径，预览＝所得）
 	if _drawing and not _preview.is_empty():
 		var pc := Color(brush.r, brush.g, brush.b, 0.75)
-		for p in _all_pts(_preview):
+		for p in _all_pts(_expand(_preview)):
 			if _in(p):
 				draw_rect(Rect2(pan + Vector2(p) * zoom, Vector2(zoom, zoom)), pc)
 	if show_grid and zoom >= 8:
@@ -170,6 +184,19 @@ func _draw() -> void:
 		var xa := mini(_sel_rect_a.x, _sel_rect_b.x); var xb := maxi(_sel_rect_a.x, _sel_rect_b.x)
 		var ya := mini(_sel_rect_a.y, _sel_rect_b.y); var yb := maxi(_sel_rect_a.y, _sel_rect_b.y)
 		draw_rect(Rect2(pan + Vector2(xa, ya) * zoom, Vector2((xb - xa + 1) * zoom, (yb - ya + 1) * zoom)), Color(1, 1, 1, 0.9), false, 1.0)
+	# 悬停像素指示（§29）：落点框（画笔类工具按笔刷粗细显示实际足迹）+ 左下坐标角标
+	if _in(_hover):
+		var foot: Array = stamp_pts(_hover) if tool in ["pencil", "eraser", "line", "rect", "rectf"] else [_hover]
+		for q in foot:
+			if _in(q):
+				var r := Rect2(pan + Vector2(q) * zoom, Vector2(zoom, zoom))
+				draw_rect(r, Color(0, 0, 0, 0.8), false, 3.0)
+				draw_rect(r, Color(1, 1, 1, 0.9), false, 1.0)
+		var f := get_theme_default_font()
+		if f != null:
+			var txt := "%d, %d" % [_hover.x, _hover.y]
+			draw_string(f, Vector2(9, size.y - 7), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0, 0, 0, 0.9))
+			draw_string(f, Vector2(8, size.y - 8), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 1, 1, 0.9))
 	draw_rect(Rect2(pan, Vector2(w, h)), Color(0, 0, 0, 0.6), false, 1.0)
 
 func _draw_sel_outline() -> void:
@@ -214,6 +241,10 @@ func _gui_input(e: InputEvent) -> void:
 			else:
 				_release(p)
 	elif e is InputEventMouseMotion:
+		var hp := _px(e.position)
+		if hp != _hover:
+			_hover = hp
+			queue_redraw()
 		if _panning:
 			pan = e.position - _pan_start; queue_redraw()
 		elif _moving:
@@ -254,10 +285,15 @@ func _release(_p: Vector2i) -> void:
 	elif _moving:
 		_moving = false
 	elif _drawing and tool in ["line", "rect", "rectf"]:
-		for q in _all_pts(_preview):
+		for q in _all_pts(_expand(_preview)):
 			_put(q)
 		_preview = []; _rebuild()
 	_drawing = false; _last = Vector2i(-999, -999)
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_MOUSE_EXIT and _hover.x > -900:
+		_hover = Vector2i(-999, -999)
+		queue_redraw()
 
 func _key(e: InputEventKey) -> void:
 	if e.ctrl_pressed or e.meta_pressed:
@@ -266,7 +302,11 @@ func _key(e: InputEventKey) -> void:
 			KEY_X: _snapshot(); _copy(); _delete_sel(); accept_event()
 			KEY_V: _paste(); accept_event()
 			KEY_A: _select_rect(Vector2i(0, 0), Vector2i(px_size - 1, px_h - 1)); accept_event()
-			KEY_Z: undo(); accept_event()
+			KEY_Z:
+				if e.shift_pressed: redo()
+				else: undo()
+				accept_event()
+			KEY_Y: redo(); accept_event()
 	else:
 		match e.keycode:
 			KEY_DELETE, KEY_BACKSPACE: _snapshot(); _delete_sel(); accept_event()
@@ -298,10 +338,33 @@ func _put(p: Vector2i) -> void:
 func _mask_ok(p: Vector2i) -> bool:
 	return paint_mask.is_empty() or paint_mask.has(p)
 
+# 笔刷落点扩展（§29，纯函数供测试）：以 p 为锚的 brush_px×brush_px 块——1＝单点；2＝p 起向右下 2×2；3＝居中 3×3。
+func stamp_pts(p: Vector2i) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	var o := -1 if brush_px >= 3 else 0
+	for dy in brush_px:
+		for dx in brush_px:
+			out.append(p + Vector2i(o + dx, o + dy))
+	return out
+
+# 点集按笔刷粗细扩展（去重）；1px 原样返回。形状落定/预览用（镜像在扩展之后做，保证左右对称）。
+func _expand(list: Array) -> Array:
+	if brush_px <= 1:
+		return list
+	var seen := {}
+	var out := []
+	for p in list:
+		for q in stamp_pts(p):
+			if not seen.has(q):
+				seen[q] = true
+				out.append(q)
+	return out
+
 func _paint(p: Vector2i) -> void:
-	_put(p)
-	if mirror_x:
-		_put(_mir(p))
+	for q in stamp_pts(p):
+		_put(q)
+		if mirror_x:
+			_put(_mir(q))
 
 func _line(a: Vector2i, b: Vector2i) -> void:
 	for q in _bresenham(a, b):
@@ -470,5 +533,6 @@ func delete_sel() -> void: _snapshot(); _delete_sel()
 
 func _snapshot() -> void:
 	_undo.append(img.duplicate())
+	_redo.clear()   # 新笔画清空 redo（标准语义）
 	if _undo.size() > 40:
 		_undo.pop_front()

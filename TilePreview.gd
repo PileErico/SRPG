@@ -11,14 +11,15 @@ var _accent := Color(0.5, 0.7, 0.4)
 var _decor := "grass"
 var _art: Array = []
 var _idx := 0
+var _anchor := -1.0   # 赤道锚行覆盖（绘制中 live 预览钉 hex 赤道，免半成品最宽行乱窜）；-1＝按贴图自算
 
 func _ready() -> void:
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	custom_minimum_size = Vector2(260, 260)
 	clip_contents = true
 
-func set_tile(color: Color, accent: Color, decor: String, art: Array, idx: int) -> void:
-	_color = color; _accent = accent; _decor = decor; _art = art; _idx = idx
+func set_tile(color: Color, accent: Color, decor: String, art: Array, idx: int, anchor := -1.0) -> void:
+	_color = color; _accent = accent; _decor = decor; _art = art; _idx = idx; _anchor = anchor
 	queue_redraw()
 
 func _draw() -> void:
@@ -34,4 +35,4 @@ func _draw() -> void:
 	for i in offs.size():
 		# 中心＝所选变体（seed=_idx 使 pick_art 命中该张）；邻格散不同 seed，看拼贴混合效果
 		var seed := _idx if i == 0 else (i * 911 + 7)
-		HexTileRender.draw_tile(self, c + offs[i], R, _color, _accent, _decor, seed, true, _art)
+		HexTileRender.draw_tile(self, c + offs[i], R, _color, _accent, _decor, seed, true, _art, _anchor)

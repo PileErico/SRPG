@@ -9,10 +9,11 @@ const EditorTheme := preload("res://EditorTheme.gd")
 const AppearanceDB := preload("res://AppearanceDB.gd")
 const PaperDoll := preload("res://PaperDoll.gd")
 const TextureCache := preload("res://TextureCache.gd")
-const PixelDrawCanvas := preload("res://PixelDrawCanvas.gd")
+const PixelDrawOverlay := preload("res://PixelDrawOverlay.gd")
 const UnitFactory := preload("res://UnitFactory.gd")
 const PiecePreview := preload("res://PiecePreview.gd")
 const UnitPiece := preload("res://UnitPiece.gd")
+const TagDB := preload("res://TagDB.gd")
 
 # 棋子放置微调（存进 look，供战场 UnitPiece 用）：scale 0=自动
 const FAC_COLORS := {"player": Color(0.36, 0.62, 0.32), "enemy": Color(0.72, 0.28, 0.26), "ally": Color(0.30, 0.55, 0.70), "neutral": Color(0.55, 0.55, 0.58)}
@@ -20,7 +21,6 @@ const SWATCHES_PATH := "res://data/appearance_swatches.json"   # 取色器色块
 
 const PREVIEW_SCALE := 8
 const TILE := 52
-const TOOL_KEYS := {"pencil": "B", "eraser": "E", "line": "L", "rect": "R", "rectf": "F", "fill": "G", "pick": "I", "select": "M", "wand": "W"}
 
 var _recipe := {"parts": {}, "palettes": {}}
 var _root: VBoxContainer
@@ -36,11 +36,12 @@ var _piece := {"size_mult": 1.0, "dx": 0.0, "dy": 0.0}   # 棋子微调：size_m
 var _piece_preview: PiecePreview
 var _piece_fac := Color(0.36, 0.62, 0.32)
 var _piece_sliders := {}
-# 绘制态
-var _paint: PixelDrawCanvas
+# 左栏态（§10：跨 _rebuild 保活）
+var _fold := {}                       # slot_id -> bool(collapsed)
+var _left_scroll: ScrollContainer
+# 绘制态（浮层＝PixelDrawOverlay 共享组件 §16）
+var _ov                               # 浮层开着才非 null
 var _draw_slot := ""
-var _draw_id_edit: LineEdit
-var _tool_btns := {}
 
 func _ready() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -70,8 +71,16 @@ func _build_ui() -> void:
 	_refresh_selection()
 	_update_preview()
 
+# §10：重建前记滚动位置、重建后回填（槽位折叠态在 _fold 随开合即时记录，天然跨重建）。
 func _rebuild() -> void:
+	var sv: int = _left_scroll.scroll_vertical if (_left_scroll != null and is_instance_valid(_left_scroll)) else 0
 	_build_ui()
+	_restore_left_scroll(sv)
+
+func _restore_left_scroll(v: int) -> void:
+	await get_tree().process_frame   # 等一帧布局，scroll 上限才就位
+	if _left_scroll != null and is_instance_valid(_left_scroll):
+		_left_scroll.scroll_vertical = v
 
 # —— 顶栏 ——
 func _titlebar() -> Control:
@@ -95,6 +104,7 @@ func _titlebar() -> Control:
 # —— 左栏 ——
 func _build_left() -> Control:
 	var scroll := ScrollContainer.new()
+	_left_scroll = scroll   # §10 滚动位置回填的锚
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.custom_minimum_size = Vector2(370, 0)
 	var vb := VBoxContainer.new()
@@ -105,10 +115,12 @@ func _build_left() -> Control:
 	var slots := AppearanceDB.slots()
 	for i in slots.size():
 		var slot: Dictionary = slots[i]
-		var collapsed := i >= 3
+		var slot_id := str(slot.get("id", ""))
+		var collapsed := bool(_fold.get(slot_id, i >= 3))   # §10 折叠态跨重建保活（首见默认前 3 组展开）
 		var content := _slot_content(slot)
-		var title := "%s  ·  %d 款" % [str(slot.get("cn", slot.get("id"))), AppearanceDB.parts_in_slot(str(slot.get("id"))).size()]
-		vb.add_child(EditorUI.make_foldable(title, content, collapsed))
+		var title := "%s  ·  %d 款" % [str(slot.get("cn", slot.get("id"))), AppearanceDB.parts_in_slot(slot_id).size()]
+		vb.add_child(EditorUI.make_foldable(title, content, collapsed, false,
+			func(open: bool): _fold[slot_id] = not open))
 
 	# 新增部件总类 / 清理失效部件
 	var add_slot := Button.new()
@@ -173,7 +185,7 @@ func _part_tile(slot_id: String, part_id: String, part) -> Button:
 	var b := Button.new()
 	b.custom_minimum_size = Vector2(TILE, TILE)
 	b.focus_mode = Control.FOCUS_NONE
-	b.tooltip_text = (str(part.get("cn", part_id)) + "（右键删除）") if part != null else "无（移除该部件）"
+	b.tooltip_text = (str(part.get("cn", part_id)) + "（右键：属性/删除）") if part != null else "无（移除该部件）"
 	if part != null:
 		var tr := TextureRect.new()
 		tr.texture = _part_preview_texture(part)
@@ -192,7 +204,7 @@ func _part_tile(slot_id: String, part_id: String, part) -> Button:
 		var pid := str(part.get("id", "")); var cn := str(part.get("cn", pid)); var ppath := str(part.get("path", ""))
 		b.gui_input.connect(func(e):
 			if e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_RIGHT and e.pressed:
-				_delete_part_dialog(slot_id, pid, cn, ppath))
+				_part_menu(slot_id, pid, cn, ppath))
 	else:
 		b.text = "∅"
 	b.pressed.connect(func(): _pick_part(slot_id, part_id))
@@ -542,7 +554,78 @@ func _on_import() -> void:
 	dlg.canceled.connect(func(): dlg.queue_free())
 	dlg.popup_centered_ratio(0.7)
 
-# —— 部件删除 / 清理 ——
+# —— 部件右键菜单 / 属性 / 删除 / 清理 ——
+
+# 部件格右键菜单：属性…（§17 元数据编辑口）/ 删除…（原右键直达删除迁入）。
+func _part_menu(slot_id: String, pid: String, cn: String, path: String) -> void:
+	var pm := PopupMenu.new()
+	add_child(pm)
+	pm.add_item("属性…", 0)
+	pm.add_item("删除…", 1)
+	pm.id_pressed.connect(func(id: int):
+		if id == 0:
+			_part_props_dialog(pid)
+		else:
+			_delete_part_dialog(slot_id, pid, cn, path))
+	pm.popup_hide.connect(func(): pm.call_deferred("queue_free"))
+	pm.popup(Rect2i(Vector2i(get_global_mouse_position()), Vector2i.ZERO))
+
+# §17 部件元数据编辑口：cn / recolorable / default_palette / tags——AppearanceDB.save_part 单一写口
+#（id/slot/path 不在此改：改 id＝另存流程、挪槽＝重新导入，避免顺手改出引用断链）。
+func _part_props_dialog(pid: String) -> void:
+	var part = AppearanceDB.get_part(pid)
+	if part == null:
+		return
+	var ov := _make_overlay()
+	var panel := PanelContainer.new()
+	panel.add_theme_stylebox_override("panel", EditorTheme.sb(Color(0.14, 0.15, 0.19), Color(0.4, 0.44, 0.52)))
+	var cc := CenterContainer.new(); cc.set_anchors_preset(Control.PRESET_FULL_RECT); ov.add_child(cc); cc.add_child(panel)
+	var vb := VBoxContainer.new(); vb.add_theme_constant_override("separation", 10); vb.custom_minimum_size = Vector2(420, 0); panel.add_child(vb)
+	var t := Label.new(); t.text = "部件属性 · %s" % pid; t.add_theme_font_size_override("font_size", 16); vb.add_child(t)
+	var info := Label.new(); info.text = "槽位 %s　·　%s" % [str(part.get("slot", "")), str(part.get("path", ""))]
+	info.add_theme_color_override("font_color", Color(0.6, 0.64, 0.7)); info.add_theme_font_size_override("font_size", 11)
+	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; vb.add_child(info)
+	var cn_edit := LineEdit.new(); cn_edit.text = str(part.get("cn", pid))
+	vb.add_child(EditorUI.field_row("中文名", cn_edit, 90))
+	var rec := CheckBox.new(); rec.button_pressed = bool(part.get("recolorable", false)); rec.text = "亮度→调色板换色"
+	vb.add_child(EditorUI.field_row("可换色", rec, 90))
+	var pal_pairs := [["", "（无）"]]
+	for pal in AppearanceDB.palettes():
+		pal_pairs.append([str(pal.get("id", "")), str(pal.get("cn", pal.get("id", "")))])
+	var pal_opt := EditorUI.dropdown(pal_pairs, str(part.get("default_palette", "")))
+	vb.add_child(EditorUI.field_row("默认调色板", pal_opt, 90))
+	var tags_arr: Array = part.get("tags", []).duplicate() if typeof(part.get("tags")) == TYPE_ARRAY else []
+	var tag_opts := []
+	var races := TagDB.by_cat("race")   # 部件 tags 复用种族词表（不新造字段）；无该类则纯手输
+	if not races.is_empty():
+		tag_opts.append(["sep", "种族"])
+		for e in races:
+			tag_opts.append([str(e.get("id", "")), str(e.get("cn", e.get("id", "")))])
+	EditorUI.add_tag_list(vb, "tags", tags_arr, tag_opts)
+	var btns := HBoxContainer.new(); btns.add_theme_constant_override("separation", 8); btns.alignment = BoxContainer.ALIGNMENT_END
+	var cancel := Button.new(); cancel.text = "取消"; cancel.pressed.connect(_close_overlay)
+	var ok := Button.new(); ok.text = "保存"; ok.add_theme_stylebox_override("normal", EditorTheme.sb(Color(0.24, 0.42, 0.24), Color(0.4, 0.7, 0.4)))
+	ok.pressed.connect(func():
+		var np: Dictionary = part.duplicate(true)
+		var cn := cn_edit.text.strip_edges()
+		np["cn"] = cn if cn != "" else pid
+		np["recolorable"] = rec.button_pressed
+		var dp := str(pal_opt.get_item_metadata(pal_opt.selected))
+		if dp == "":
+			np.erase("default_palette")
+		else:
+			np["default_palette"] = dp
+		np["tags"] = tags_arr
+		_close_overlay()
+		if AppearanceDB.save_part(np):
+			_clear_caches()
+			_set_msg("已保存部件属性：%s" % pid, true)
+			_rebuild()
+		else:
+			_set_msg("保存失败（写盘）", false))
+	btns.add_child(cancel); btns.add_child(ok)
+	vb.add_child(btns)
+
 # 统一管理：删条目 + 可选删磁盘 PNG（工坊自绘的默认勾选，外部导入的默认不勾以免误删源文件）。
 func _delete_part_dialog(slot_id: String, pid: String, cn: String, path: String) -> void:
 	var ov := _make_overlay()
@@ -792,7 +875,7 @@ func _delete_slot_confirm(slot_id: String, cn: String) -> void:
 				_set_msg("删除失败（写盘）", false),
 		Callable(), "删除部件总类")
 
-# —— 内置绘制 ——
+# —— 内置绘制（浮层＝PixelDrawOverlay 共享组件 §16；§28 棋子实时预览）——
 func _open_draw(slot_id: String) -> void:
 	_draw_slot = slot_id
 	var slot = AppearanceDB.get_slot(slot_id)
@@ -802,114 +885,65 @@ func _open_draw(slot_id: String) -> void:
 	onion_recipe["parts"].erase(slot_id)
 	var onion := ImageTexture.create_from_image(PaperDoll.compose(onion_recipe))
 
-	var ov := _make_overlay()
-	var pad := MarginContainer.new()
-	pad.set_anchors_preset(Control.PRESET_FULL_RECT)
-	for m in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
-		pad.add_theme_constant_override(m, 18)
-	ov.add_child(pad)
-	var panel := PanelContainer.new()
-	panel.add_theme_stylebox_override("panel", EditorTheme.sb(Color(0.12, 0.13, 0.16), Color(0.4, 0.44, 0.52)))
-	pad.add_child(panel)
-	var col := VBoxContainer.new(); col.add_theme_constant_override("separation", 8); panel.add_child(col)
-	var title := Label.new(); title.text = "绘制部件 · %s　（画布底下淡显角色本体供对齐 · 滚轮缩放 · 中键拖动平移 · 右键吸管）" % slot_cn
-	title.add_theme_font_size_override("font_size", 16); col.add_child(title)
+	# §28 棋子实时预览：配方按本槽 z 拆上下两半，live 画面按叠放序夹中间（z 精确）→ PiecePreview 与战场同渲染。
+	var below := {"parts": {}, "palettes": {}}
+	var above := {"parts": {}, "palettes": {}}
+	var seen_self := false
+	for s in AppearanceDB.slots():
+		var sid := str(s.get("id", ""))
+		if sid == slot_id:
+			seen_self = true
+			continue
+		if not _recipe["parts"].has(sid):
+			continue
+		var tgt: Dictionary = above if seen_self else below
+		tgt["parts"][sid] = _recipe["parts"][sid]
+		tgt["palettes"][sid] = _recipe["palettes"].get(sid, "")
+	var csz := AppearanceDB.canvas_size()
+	var live_tex := ImageTexture.create_from_image(Image.create(csz, csz, false, Image.FORMAT_RGBA8))
+	var mini := PiecePreview.new()
+	mini.custom_minimum_size = Vector2(220, 180)
+	var refresh := func(im: Image):
+		var comp := PaperDoll.compose(below)
+		comp.blend_rect(im, Rect2i(0, 0, im.get_width(), im.get_height()), Vector2i.ZERO)
+		var top := PaperDoll.compose(above)
+		comp.blend_rect(top, Rect2i(0, 0, top.get_width(), top.get_height()), Vector2i.ZERO)
+		live_tex.update(comp)
+		UnitPiece.clear_anchor_cache()   # live 纹理复用同一 RID、内容逐笔变——旧锚点作废
+		mini.set_piece(live_tex, float(_piece["size_mult"]), float(_piece["dx"]), float(_piece["dy"]), _piece_fac)
 
-	var mid := HBoxContainer.new(); mid.add_theme_constant_override("separation", 12)
-	mid.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	col.add_child(mid)
+	var ov = PixelDrawOverlay.new()
+	add_child(ov)
+	ov.setup({
+		"title": "绘制部件 · %s　（画布底下淡显角色本体供对齐 · 滚轮缩放 · 中键拖动平移 · 右键吸管）" % slot_cn,
+		"canvas_w": csz, "canvas_h": csz,
+		"onion": onion,
+		"brush": Color(0.5, 0.5, 0.5, 1.0),
+		"edit_alpha": false,
+		"ramp_label": "颜色（灰度＝换色最佳）",
+		"ramp_colors": _gray_ramp(),
+		"save_text": "💾 保存为部件",
+		"id_label": "部件 id",
+		"id_value": _fresh_part_id(slot_id),
+		"extra_tools": [["载入所选部件", "把该槽当前所选部件载入编辑（灰度源）", func(): _load_selected_into_canvas(slot_id)]],
+		"swatches_path": SWATCHES_PATH,
+		"side_extra": mini,
+		"side_extra_label": "棋子预览（实时）",
+	})
+	_ov = ov
+	ov.canvas.image_changed.connect(refresh)
+	refresh.call(ov.canvas.img)
+	ov.save_pressed.connect(_save_drawn_part)
+	ov.closed.connect(func(): _ov = null)
 
-	# 左：工具
-	var tools := VBoxContainer.new(); tools.add_theme_constant_override("separation", 4); tools.custom_minimum_size = Vector2(120, 0)
-	_tool_btns.clear()
-	for t in [["pencil", "✏ 铅笔"], ["eraser", "◧ 橡皮"], ["line", "／ 直线"], ["rect", "▭ 矩形"], ["rectf", "▬ 实心矩形"], ["fill", "🪣 填充"], ["pick", "💉 吸管"], ["select", "⬚ 选区"], ["wand", "✨ 魔棒"]]:
-		var tid := str(t[0])
-		var key := str(TOOL_KEYS.get(tid, ""))
-		var tb := Button.new(); tb.text = "%s  (%s)" % [str(t[1]), key]; tb.focus_mode = Control.FOCUS_NONE
-		tb.tooltip_text = "快捷键 %s" % key
-		tb.pressed.connect(func(): _set_tool(tid))
-		_tool_btns[tid] = tb
-		tools.add_child(tb)
-	var mir := CheckBox.new(); mir.text = "水平镜像"; mir.toggled.connect(func(on): _paint.mirror_x = on)
-	tools.add_child(mir)
-	# 选区操作
-	var selrow := HFlowContainer.new(); selrow.add_theme_constant_override("h_separation", 3)
-	for sc in [["复制", func(): _paint.copy_sel()], ["剪切", func(): _paint.cut_sel()], ["粘贴", func(): _paint.paste()], ["删除", func(): _paint.delete_sel()]]:
-		var sb := Button.new(); sb.text = str(sc[0]); sb.focus_mode = Control.FOCUS_NONE
-		var cbk: Callable = sc[1]
-		sb.pressed.connect(func(): cbk.call())
-		selrow.add_child(sb)
-	tools.add_child(selrow)
-	var selhint := Label.new(); selhint.text = "选区拖动=移动 · Ctrl+C/V/X · Del"; selhint.add_theme_color_override("font_color", Color(0.55, 0.58, 0.64)); selhint.add_theme_font_size_override("font_size", 10); selhint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	tools.add_child(selhint)
-	tools.add_child(_vsep())
-	var zrow := HBoxContainer.new(); zrow.add_theme_constant_override("separation", 3)
-	var zin := Button.new(); zin.text = "🔍＋"; zin.focus_mode = Control.FOCUS_NONE; zin.pressed.connect(func(): _paint.zoom_in())
-	var zout := Button.new(); zout.text = "🔍－"; zout.focus_mode = Control.FOCUS_NONE; zout.pressed.connect(func(): _paint.zoom_out())
-	var zfit := Button.new(); zfit.text = "适应"; zfit.focus_mode = Control.FOCUS_NONE; zfit.pressed.connect(func(): _paint.fit())
-	zrow.add_child(zin); zrow.add_child(zout); zrow.add_child(zfit)
-	tools.add_child(zrow)
-	tools.add_child(_vsep())
-	var undo := Button.new(); undo.text = "↶ 撤销"; undo.pressed.connect(func(): _paint.undo())
-	var clr := Button.new(); clr.text = "🗑 清空"; clr.pressed.connect(func(): _paint.clear_img())
-	tools.add_child(undo); tools.add_child(clr)
-	var loadsel := Button.new(); loadsel.text = "载入所选部件"; loadsel.tooltip_text = "把该槽当前所选部件载入编辑（灰度源）"
-	loadsel.pressed.connect(func(): _load_selected_into_canvas(slot_id))
-	tools.add_child(loadsel)
-	mid.add_child(tools)
-
-	# 中：画布（填满）
-	var canvas_wrap := PanelContainer.new()
-	canvas_wrap.add_theme_stylebox_override("panel", EditorTheme.sb(Color(0.08, 0.09, 0.11), Color(0.3, 0.33, 0.4)))
-	canvas_wrap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	canvas_wrap.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_paint = PixelDrawCanvas.new()
-	_paint.setup(AppearanceDB.canvas_size(), null, onion)
-	_paint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_paint.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_paint.color_picked.connect(func(c): _sync_color(c))
-	canvas_wrap.add_child(_paint)
-	mid.add_child(canvas_wrap)
-
-	# 右：颜色
-	var side := VBoxContainer.new(); side.add_theme_constant_override("separation", 6); side.custom_minimum_size = Vector2(250, 0)
-	var cl := Label.new(); cl.text = "颜色（灰度＝换色最佳）"; cl.add_theme_font_size_override("font_size", 12); side.add_child(cl)
-	var ramp := HFlowContainer.new()
+func _gray_ramp() -> Array:
+	var out := []
 	for v in [0.0, 0.12, 0.25, 0.4, 0.55, 0.7, 0.85, 1.0]:
-		var sw := Button.new(); sw.custom_minimum_size = Vector2(32, 28); sw.focus_mode = Control.FOCUS_NONE
-		sw.add_theme_stylebox_override("normal", EditorTheme.sb(Color(v, v, v), Color(0.3, 0.33, 0.4)))
-		sw.add_theme_stylebox_override("hover", EditorTheme.sb(Color(v, v, v), Color(0.9, 0.9, 0.9)))
-		var cv := Color(v, v, v, 1.0)
-		sw.pressed.connect(func(): _sync_color(cv))
-		ramp.add_child(sw)
-	side.add_child(ramp)
-	var gridchk := CheckBox.new(); gridchk.text = "像素网格"; gridchk.button_pressed = true
-	gridchk.toggled.connect(func(on): _paint.set_grid(on))
-	side.add_child(gridchk)
-	var cp := ColorPicker.new(); cp.edit_alpha = false; cp.color = _paint.brush; cp.custom_minimum_size = Vector2(240, 0)
-	cp.color_changed.connect(func(c): _paint.brush = c)
-	_color_btn = cp
-	_load_swatches(cp)   # 载入持久化色块预设（先载入再连信号，免载入触发重复保存）
-	cp.preset_added.connect(func(_c): _save_swatches(cp))
-	cp.preset_removed.connect(func(_c): _save_swatches(cp))
-	side.add_child(cp)
-	mid.add_child(side)
-
-	# 底：id + 保存/取消
-	var bottom := HBoxContainer.new(); bottom.add_theme_constant_override("separation", 8); col.add_child(bottom)
-	bottom.add_child(EditorUI.label("部件 id"))
-	_draw_id_edit = LineEdit.new(); _draw_id_edit.text = _fresh_part_id(slot_id); _draw_id_edit.custom_minimum_size = Vector2(200, 0)
-	bottom.add_child(_draw_id_edit)
-	bottom.add_child(_hspacer())
-	var cancel := Button.new(); cancel.text = "取消"; cancel.pressed.connect(_close_overlay)
-	var save := Button.new(); save.text = "💾 保存为部件"; save.add_theme_stylebox_override("normal", EditorTheme.sb(Color(0.24, 0.42, 0.24), Color(0.4, 0.7, 0.4)))
-	save.pressed.connect(_save_drawn_part)
-	bottom.add_child(cancel); bottom.add_child(save)
-
-	_set_tool("pencil")
+		out.append(Color(v, v, v, 1.0))
+	return out
 
 func _load_selected_into_canvas(slot_id: String) -> void:
-	if _paint == null:
+	if _ov == null:
 		return
 	var pid := str(_recipe["parts"].get(slot_id, ""))
 	if pid == "":
@@ -919,52 +953,9 @@ func _load_selected_into_canvas(slot_id: String) -> void:
 		return
 	var im := PaperDoll._part_image(str(part.get("path", "")))
 	if im != null:
-		_paint.load_image(im)
-		_draw_id_edit.text = pid
-
-var _color_btn   # ColorPicker（HSV 大取色器）
-
-func _set_tool(t: String) -> void:
-	if _paint != null:
-		_paint.set_tool(t)
-	_highlight_tool(t)
-
-func _highlight_tool(t: String) -> void:
-	for tid in _tool_btns:
-		var b: Button = _tool_btns[tid]
-		if tid == t:
-			b.add_theme_stylebox_override("normal", EditorTheme.sb(Color(0.24, 0.36, 0.52), Color(0.46, 0.62, 0.85)))
-		else:
-			b.remove_theme_stylebox_override("normal")
-
-# 绘制态键盘快捷键（浮层开着且非文本框聚焦时才触发——_unhandled_key_input 天然让 LineEdit/取色器 hex 优先）。
-func _unhandled_key_input(event: InputEvent) -> void:
-	if _overlay == null or _paint == null or not is_instance_valid(_paint):
-		return
-	if not (event is InputEventKey) or not event.pressed:
-		return
-	var e := event as InputEventKey
-	if e.ctrl_pressed or e.meta_pressed:
-		match e.keycode:
-			KEY_Z: _paint.undo(); accept_event()
-			KEY_C: _paint.copy_sel(); accept_event()
-			KEY_V: _paint.paste(); _highlight_tool("select"); accept_event()
-			KEY_X: _paint.cut_sel(); accept_event()
-		return
-	var km := {KEY_B: "pencil", KEY_E: "eraser", KEY_L: "line", KEY_R: "rect", KEY_F: "rectf", KEY_G: "fill", KEY_I: "pick", KEY_M: "select", KEY_W: "wand"}
-	if km.has(e.keycode):
-		_set_tool(str(km[e.keycode])); accept_event()
-		return
-	match e.keycode:
-		KEY_DELETE, KEY_BACKSPACE: _paint.delete_sel(); accept_event()
-		KEY_BRACKETLEFT: _paint.zoom_out(); accept_event()
-		KEY_BRACKETRIGHT: _paint.zoom_in(); accept_event()
-
-func _sync_color(c: Color) -> void:
-	if _paint != null:
-		_paint.brush = c
-	if _color_btn != null and is_instance_valid(_color_btn):
-		_color_btn.color = c
+		_ov.canvas.load_image(im)
+		if _ov.id_edit != null:
+			_ov.id_edit.text = pid
 
 # 为该槽生成不与现有部件撞车的默认 id：<slot>_new，占用则加序号（免默认 id 撞名静默覆盖前一个）。
 func _fresh_part_id(slot_id: String) -> String:
@@ -976,7 +967,9 @@ func _fresh_part_id(slot_id: String) -> String:
 	return pid
 
 func _save_drawn_part() -> void:
-	var id := _sanitize_id(_draw_id_edit.text)
+	if _ov == null:
+		return
+	var id := _sanitize_id(_ov.id_text())
 	if id == "":
 		_set_msg("部件 id 不能为空", false); return
 	# 撞已有 id＝覆盖：默认 id 已避让，走到这多是「载入编辑后原地存」或手填撞名——覆盖前先确认，别静默压掉别的部件。
@@ -988,10 +981,12 @@ func _save_drawn_part() -> void:
 	_write_drawn_part(id)
 
 func _write_drawn_part(id: String) -> void:
+	if _ov == null:
+		return
 	var dir := "res://icons/Parts/" + _draw_slot
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(dir))
 	var path := "%s/%s.png" % [dir, id]
-	var out_img := _paint.get_image()
+	var out_img: Image = _ov.canvas.get_image()
 	if out_img.save_png(path) != OK:
 		_set_msg("保存失败（写盘）：%s" % path, false); return
 	_clear_caches()   # 避免旧 null/旧图缓存命中
@@ -1002,7 +997,7 @@ func _write_drawn_part(id: String) -> void:
 	if AppearanceDB.save_part(part):
 		_set_msg("已保存部件 %s → %s" % [id, path], true)
 		var slot := _draw_slot
-		_close_overlay()
+		_ov.close()
 		_rebuild()
 		_pick_part(slot, id)
 	else:
@@ -1026,10 +1021,6 @@ func _close_overlay() -> void:
 	if _overlay != null and is_instance_valid(_overlay):
 		_overlay.queue_free()
 	_overlay = null
-	_paint = null
-
-func _vsep() -> Control:
-	var c := Control.new(); c.custom_minimum_size = Vector2(0, 6); return c
 
 func _set_msg(text: String, ok: bool) -> void:
 	if _msg == null:
@@ -1086,27 +1077,5 @@ func _slot_folder_id(s: String) -> String:
 			out += ch
 	return out
 
-# —— 取色器色块预设持久化（RGB hex 列表存 data/appearance_swatches.json；游戏内 ColorPicker 预设默认不落盘）——
-func _load_swatches(cp: ColorPicker) -> void:
-	if not FileAccess.file_exists(SWATCHES_PATH):
-		return
-	var f = FileAccess.open(SWATCHES_PATH, FileAccess.READ)
-	if f == null:
-		return
-	var d = JSON.parse_string(f.get_as_text())
-	f.close()
-	if typeof(d) != TYPE_ARRAY:
-		return
-	for hex in d:
-		var h := str(hex)
-		if Color.html_is_valid(h):
-			cp.add_preset(Color.html(h))
-
-func _save_swatches(cp: ColorPicker) -> void:
-	var arr := []
-	for c in cp.get_presets():
-		arr.append(c.to_html(false))   # RGB hex（edit_alpha=false，不存 alpha）
-	var f = FileAccess.open(SWATCHES_PATH, FileAccess.WRITE)
-	if f != null:
-		f.store_string(JSON.stringify(arr, "  "))
-		f.close()
+# 取色器色块预设持久化已上移 PixelDrawOverlay 共享组件（§16 漂移收敛：两工坊都有）；
+# 本侧仍走 SWATCHES_PATH（data/appearance_swatches.json），经 opts.swatches_path 注入。

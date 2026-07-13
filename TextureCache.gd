@@ -43,6 +43,12 @@ static func get_tex_file(path: String) -> Texture2D:
 	_cache[key] = tex
 	return tex
 
+# 注入/覆盖一条「原始文件」缓存条目（与 get_tex_file 同键）：地块工坊绘制中把内存 live 纹理
+# 挂到虚拟路径（如 "live://terrain_edit"），使 HexTileRender/TilePreview 全链零改动地渲染
+# 未落盘的画布内容（编辑器优化提案 §28 实时拼贴预览）。clear() 一并清。
+static func put_file(path: String, tex: Texture2D) -> void:
+	_cache["f:" + path] = tex
+
 # 清空缓存（如需在换关/换套图后强制重载可调；平时无需）。
 static func clear() -> void:
 	_cache.clear()
