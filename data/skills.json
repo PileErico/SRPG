@@ -84,7 +84,11 @@
     },
     "uses_per_battle": {
       "base": 0
-    }
+    },
+    "weapon_kinds": [
+      "weapon_spear"
+    ],
+    "weapon_skill": true
   },
   {
     "active": true,
@@ -129,7 +133,11 @@
     },
     "uses_per_battle": {
       "base": 0
-    }
+    },
+    "weapon_kinds": [
+      "weapon_claw"
+    ],
+    "weapon_skill": true
   },
   {
     "active": true,
@@ -171,7 +179,11 @@
     },
     "uses_per_battle": {
       "base": 0
-    }
+    },
+    "weapon_kinds": [
+      "weapon_claw"
+    ],
+    "weapon_skill": true
   },
   {
     "active": true,
@@ -212,7 +224,11 @@
     },
     "uses_per_battle": {
       "base": 0
-    }
+    },
+    "weapon_kinds": [
+      "weapon_claw"
+    ],
+    "weapon_skill": true
   },
   {
     "active": true,
@@ -251,7 +267,11 @@
     },
     "uses_per_battle": {
       "base": 0
-    }
+    },
+    "weapon_kinds": [
+      "weapon_sword"
+    ],
+    "weapon_skill": true
   },
   {
     "active": true,
@@ -291,7 +311,9 @@
     },
     "uses_per_battle": {
       "base": 0
-    }
+    },
+    "weapon_kinds": [],
+    "weapon_skill": true
   },
   {
     "active": true,
@@ -330,7 +352,11 @@
     },
     "uses_per_battle": {
       "base": 0
-    }
+    },
+    "weapon_kinds": [
+      "weapon_dagger"
+    ],
+    "weapon_skill": true
   },
   {
     "active": true,
@@ -369,11 +395,14 @@
     },
     "uses_per_battle": {
       "base": 0
-    }
+    },
+    "weapon_kinds": [
+      "weapon_hammer"
+    ],
+    "weapon_skill": true
   },
   {
     "active": true,
-    "category": "skill",
     "cooldown": {
       "base": 0
     },
@@ -385,7 +414,8 @@
       {
         "hits": [
           {
-            "coeff": 1
+            "coeff": 1,
+            "damage_kind": "physical"
           }
         ],
         "kind": "attack"
@@ -397,6 +427,24 @@
     "name": "横扫",
     "range": 1,
     "requires_hands": [],
+    "shape": {
+      "anchor": "caster",
+      "effect": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ],
+        [
+          1,
+          0
+        ]
+      ],
+      "friendly_fire": true
+    },
     "tags": [
       "aoe",
       "slashing"
@@ -408,6 +456,11 @@
     },
     "uses_per_battle": {
       "base": 0
-    }
+    },
+    "weapon_kinds": [
+      "weapon_sword",
+      "weapon_halberd"
+    ],
+    "weapon_skill": true
   }
 ]
