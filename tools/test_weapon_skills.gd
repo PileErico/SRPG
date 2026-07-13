@@ -227,13 +227,16 @@ func _initialize() -> void:
 	dual.modifiers.clear()
 	ck(dual.ews_entries().size() == 1, "摘除 offhand_ws 修正 → 副手条目消失（能力键反向）")
 
-	# 7c) 副手盾（⚠ 盾是否豁免 offhand_ws 待用户定——决策31 只写「副手武器技能解锁」，暂保守一律要 offhand_ws；此段锁现状）
+	# 7c) 副手盾豁免 🔒（2026-07-13 用户裁定）：剑盾非双持——副手盾不吃 offhand_ws 门槛，
+	# 只看条目自身 requires（盾域熟练度）；副手武器仍须 offhand_ws（7b 已验）
 	var sworn = Unit.new("持盾", "player", 6, 0)
 	sworn.equipment["main_hand"] = ItemInstances.create("t_axe")
 	sworn.equipment["off_hand"] = ItemInstances.create("t_shield")
-	ck(sworn.ews_entries().size() == 1, "无 offhand_ws：副手盾的 bws 不供给（保守现状）")
-	sworn.modifiers.append({"stat": "offhand_ws", "op": "flat", "value": 1, "source": "buff:测试"})
-	ck(sworn.ews_entries().size() == 2, "offhand_ws=1：盾的 bws（盾击类）按 EWS 供给")
+	ck(sworn.ews_entries().size() == 2, "无 offhand_ws：副手盾的 bws（盾击类）照常按 EWS 供给（盾豁免双武器门槛）")
+	var shield_e: Dictionary = sworn.ews_entries()[1]
+	ck(str(shield_e.get("slot", "")) == "off_hand", "盾条目标注副手来源")
+	sworn.equipment["off_hand"] = ItemInstances.create("t_saber")
+	ck(sworn.ews_entries().size() == 1, "换副手武器（非盾）：无 offhand_ws → 不供给（门槛仍在）")
 
 	# 8) 连携便捷读口（🔒 决策31）：dual_strike_active＝能力≥1 ∧ 副手非盾武器 ∧ 攻击定义非空
 	var dw = Unit.new("连携", "player", 7, 0)

@@ -883,10 +883,11 @@ func reset_skill_charges() -> void:
 var ews_state := {}   # skill_id -> {cd, uses}（战斗运行态；懒初始化——无表项=就绪满次数）
 
 # 武器 EWS 条目表：[{id, requires, slot, unlocked}]。主手武器的 ews 恒供给（🔒 决策28 恒读主手）；
-# ⚠ 决策28「副手不供给能力表」前半句已被 🔒 决策31 翻案：offhand_ws ≥1 时**副手位武器技能一律按 EWS 论**——
+# ⚠ 决策28「副手不供给能力表」前半句已被 🔒 决策31 翻案：**副手位武器技能一律按 EWS 论**——
 # 副手武器的 ews 全量 + 其 bws 也作一条 EWS（位置语义：bws/ews 键照旧，变的是读取语义）；
-# 条目自身 requires（武器域熟练度）照常判 unlocked。盾同样走 offhand_ws 门控（决策31 只写「副手武器技能解锁」，
-# 未对盾开豁免——盾是否豁免待用户定，暂保守一律要 offhand_ws）。
+# 条目自身 requires（武器域熟练度）照常判 unlocked。
+# 副手门控 🔒（2026-07-13 用户裁定）：副手**武器**＝本域熟练度（条目 requires）+ offhand_ws 能力（双武器 perk）；
+# 副手**盾**＝只看条目 requires（盾域熟练度，如盾击配 requires 盾域阈值）——剑盾非双持，不吃双武器门槛。
 # 键形（🔒 决策26）：对象 {skill, requires:[{prof,value},…]}；决策22 兼容裸字符串＝无条件 EWS。跨槽同 id 首见去重（主手优先）。
 func ews_entries() -> Array:
 	var out := []
@@ -895,11 +896,12 @@ func ews_entries() -> Array:
 	if item != null:
 		for e in item.get("ews", []):
 			_append_ews_entry(out, seen, e, "main_hand")
-	if can_use_offhand_ws():
-		var oh := int(equipment.get("off_hand", 0))
-		if oh != 0 and oh != int(equipment.get("main_hand", 0)):   # 双手武器占双槽＝无独立副手
-			var oitem = ItemInstances.view(oh)
-			if oitem != null:
+	var oh := int(equipment.get("off_hand", 0))
+	if oh != 0 and oh != int(equipment.get("main_hand", 0)):   # 双手武器占双槽＝无独立副手
+		var oitem = ItemInstances.view(oh)
+		if oitem != null:
+			var oh_shield: bool = (oitem.get("tags", []) as Array).has("shield")
+			if oh_shield or can_use_offhand_ws():   # 盾豁免双武器门槛（用户裁定）；武器须 offhand_ws
 				var obws := SkillDB.weapon_bws_id(oitem)
 				if obws != "":
 					_append_ews_entry(out, seen, {"skill": obws}, "off_hand")   # 副手 bws＝EWS（排序最高故置本槽首）
