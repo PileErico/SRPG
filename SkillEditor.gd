@@ -15,6 +15,7 @@ const SkillDB := preload("res://SkillDB.gd")
 const EffectDB := preload("res://EffectDB.gd")
 const TagDB := preload("res://TagDB.gd")
 const StatMeta := preload("res://StatMeta.gd")
+const EffectEditorScript := preload("res://EffectEditor.gd")   # §26 apply_effect 引用位「↗」静态传参口
 
 const ICON_DIR := "res://icons/Skills"
 const NATURES := [["skill", "技巧 skill"], ["spell", "魔法 spell（魔法系统后置）"]]
@@ -59,6 +60,22 @@ var _w_passive_hint: Label   # §25 被动灰化联动的说明条（active=fals
 var _hands_box: VBoxContainer
 var _blocks_box: VBoxContainer
 var _block_pick: OptionButton
+
+
+# —— §26 跨编辑器定位口 ——
+# 其他编辑器（ItemEditor BWS/EWS「↗」）先写本静态位再 change_scene_to_file；_ready 消费即清，
+# 直跑本场景不受影响。同型先例＝SandboxConfig.battle_setup（静态变量跨场景切换存活）。
+static var _open_with_id := ""
+
+func _ready() -> void:
+	super._ready()
+	if _open_with_id != "":
+		var jump_id := _open_with_id
+		_open_with_id = ""
+		if SkillDB.get_skill(jump_id) != null:
+			_shell_load(jump_id)
+		else:
+			_err("跳转定位失败：技能「%s」不在库（悬空引用？）" % jump_id)
 
 
 # —— 外壳钩子（ListEditorShell）——
@@ -662,7 +679,24 @@ func _build_apply_effect_block(box: VBoxContainer, entry: Dictionary) -> void:
 	_ensure_meta_option(ob, str(entry["data"].get("effect", "")))   # 悬空引用保值（§3-1 守卫上提后补挂）
 	_select_meta(ob, str(entry["data"].get("effect", "")))
 	ob.item_selected.connect(func(_i): _mark_dirty())
-	box.add_child(EditorUI.field_row("效果 effect（EffectDB 引用；🔒 对象形禁裸串）", ob))
+	var erow := HBoxContainer.new()   # §26：下拉 + ↗ 跳效果库定位（与 ItemEditor BWS/EWS 同款机制）
+	erow.add_theme_constant_override("separation", 6)
+	ob.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	erow.add_child(ob)
+	var jump := Button.new()
+	jump.text = "↗"
+	jump.tooltip_text = "在效果库中打开该效果（有未保存修改会先确认）"
+	jump.focus_mode = Control.FOCUS_NONE
+	jump.pressed.connect(func():
+		var eid := str(ob.get_selected_metadata())
+		if eid == "":
+			_info("未选效果——无处可跳")
+			return
+		_confirm_discard(func():
+			EffectEditorScript._open_with_id = eid
+			get_tree().change_scene_to_file("res://EffectEditor.tscn")))
+	erow.add_child(jump)
+	box.add_child(EditorUI.field_row("效果 effect（EffectDB 引用；🔒 对象形禁裸串）", erow))
 	entry["effect"] = ob
 	entry["chance"] = EditorUI.add_spin(box, "施加概率 chance（%；resist 效果另有强韧豁免）",
 		float(entry["data"].get("chance", 100)), 1, 100, 1, _mark_dirty)

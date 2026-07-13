@@ -48,6 +48,21 @@ var _w_model_warn: Label    # §25：resist↔fort tag 错配黄条（模型/标
 var _w_chain_hint: Label    # §25：on_expire_apply 连锁链提示（成环/悬空警示）
 
 
+# —— §26 跨编辑器定位口 ——
+# SkillEditor apply_effect 块「↗」先写本静态位再切场景；_ready 消费即清（同型先例＝SandboxConfig.battle_setup）。
+static var _open_with_id := ""
+
+func _ready() -> void:
+	super._ready()
+	if _open_with_id != "":
+		var jump_id := _open_with_id
+		_open_with_id = ""
+		if EffectDB.get_effect(jump_id) != null:
+			_shell_load(jump_id)
+		else:
+			_err("跳转定位失败：效果「%s」不在库（悬空引用？）" % jump_id)
+
+
 # —— 外壳钩子（ListEditorShell）——
 
 func _shell_title() -> String:

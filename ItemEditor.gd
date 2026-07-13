@@ -12,6 +12,7 @@ const ItemTooltip := preload("res://ItemTooltip.gd")     # 物品富 tooltip 通
 const StatMeta := preload("res://StatMeta.gd")           # stat 键→中文单一源（本编辑器不再自带并行对照表）
 const SkillDB := preload("res://SkillDB.gd")             # 武器技能引用位（BWS 下拉/EWS 行，🔒 决策25/26 引用制）
 const ProfDB := preload("res://ProfDB.gd")               # EWS 解锁条件（技艺域下拉+档位名提示）
+const SkillEditorScript := preload("res://SkillEditor.gd")   # §26 「↗」跳转静态传参口（_open_with_id）
 # EditorTheme / EditorUI / TextureCache 由 ListEditorShell 继承
 
 const ICON_DIR := {
@@ -87,6 +88,7 @@ var _icon_thumb: TextureRect
 
 var _w_id: LineEdit
 var _w_name: LineEdit
+var _w_desc: TextEdit                     # §33 风味文本 desc（可选键；空串不落键）
 var _w_rarity: OptionButton
 var _w_icon: LineEdit
 # 武器
@@ -180,8 +182,8 @@ func _shell_populate_list(q: String) -> void:
 	var by_kind := {"weapon": [], "armor": [], "accessory": [], "item": []}
 	for id in items.keys():
 		var itf = items[id]
-		if searching and not (str(id).to_lower().contains(q) or str(itf.get("name", "")).to_lower().contains(q)):
-			continue   # 搜索过滤：id / 名字 子串（不分大小写）
+		if searching and not _search_match(str(id), itf, q):
+			continue   # 搜索过滤：id / 名字 / tags 子串（§22；不分大小写）
 		var k := ItemDB.kind_of(itf)
 		if by_kind.has(k):
 			by_kind[k].append(id)
@@ -209,6 +211,18 @@ func _shell_populate_list(q: String) -> void:
 			hint.add_theme_font_size_override("font_size", 12)
 			section.add_child(hint)
 		_add_fold_group(kind, "%s (%d)" % [ItemDB.kind_cn(kind), ids.size()], section, searching)
+
+
+# §22 清单搜索命中：id / 名字 / tags——tag 既比英文 id 也比 TagDB.cn 中文名（输入「melee」或「近战」都过滤到）。
+# q 已由外壳 strip+to_lower；中文 to_lower 无损，两向统一小写比。
+func _search_match(id: String, item, q: String) -> bool:
+	if id.to_lower().contains(q) or str(item.get("name", "")).to_lower().contains(q):
+		return true
+	for t in item.get("tags", []):
+		var ts := str(t)
+		if ts.to_lower().contains(q) or TagDB.cn(ts).to_lower().contains(q):
+			return true
+	return false
 
 
 # 组内排序键：类型 rank → 种类 rank → 名字（拼字符串比较，避免 Array 比较不确定性）
@@ -366,6 +380,13 @@ func _build_form() -> void:
 	_w_id = _add_line(_form, "id（唯一主键）", str(_current.get("id", "")))
 	_w_name = _add_line(_form, "名字", str(_current.get("name", "")))
 	_build_icon_row()
+	# §33 风味文本 desc（全大类通用可选键；tooltip 置底斜体灰渲染）——空串保存不落键
+	_w_desc = TextEdit.new()
+	_w_desc.text = str(_current.get("desc", ""))
+	_w_desc.custom_minimum_size = Vector2(0, 56)
+	_w_desc.scroll_fit_content_height = true
+	_w_desc.text_changed.connect(_refresh_preview)
+	_form.add_child(EditorUI.field_row("风味文本 desc（可空）", _w_desc))
 
 	# 物品（非装备类：消耗品/任务物品/素材/食物/医疗物品）——独立表单，无装备槽/mods/BAS
 	if _current_kind == "item":
@@ -431,6 +452,7 @@ func _on_kind_changed(new_kind: String) -> void:
 	var kid := _w_id.text.strip_edges()
 	var knm := _w_name.text.strip_edges()
 	var kic := _w_icon.text.strip_edges()
+	var kdc := _w_desc.text.strip_edges() if _w_desc != null and is_instance_valid(_w_desc) else ""
 	_kind_cache[_current_kind] = _collect()   # 离开前存表单态（含 mods/EWS/标签等全部内容）
 	if _kind_cache.has(new_kind):
 		_current = _kind_cache[new_kind]      # 切回：恢复缓存而非骨架
@@ -439,6 +461,10 @@ func _on_kind_changed(new_kind: String) -> void:
 	_current["id"] = kid
 	_current["name"] = knm
 	_current["icon"] = kic
+	if kdc != "":                             # §33 desc 属基础区，随切携带（同 id/名/图标语义）
+		_current["desc"] = kdc
+	else:
+		_current.erase("desc")
 	_current_kind = new_kind
 	_build_form()
 
@@ -613,7 +639,12 @@ func _build_weapon_skills_section() -> void:
 	_ensure_meta_option(_w_bws, cur_bws)
 	_select_meta(_w_bws, cur_bws)
 	_w_bws.item_selected.connect(func(_i): _refresh_preview())
-	_form.add_child(EditorUI.field_row("普攻 BWS（装备即用；列 BAS 形＝含攻击块·无冷却·无级·无手门槛·次数无限）", _w_bws))
+	var bws_row := HBoxContainer.new()               # §26：下拉 + ↗ 跳转钮（引用位回程票）
+	bws_row.add_theme_constant_override("separation", 6)
+	_w_bws.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bws_row.add_child(_w_bws)
+	bws_row.add_child(_skill_jump_btn(_w_bws))
+	_form.add_child(EditorUI.field_row("普攻 BWS（装备即用；列 BAS 形＝含攻击块·无冷却·无级·无手门槛·次数无限）", bws_row))
 	# prefer 初值双读 attack.prefer（同 Unit._weapon_prefer 口径）：未迁移武器打开不丢偏好
 	var atk0 = _current.get("attack", {})
 	var prefer0 := str(_current.get("prefer", atk0.get("prefer", "") if typeof(atk0) == TYPE_DICTIONARY else ""))
@@ -646,6 +677,24 @@ func _build_weapon_skills_section() -> void:
 
 # （_ensure_meta_option 已上提 ListEditorShell——技改 §3-1：EffectEditor/SkillEditor 同享悬空引用守卫）
 
+# §26 引用位「↗」钮工厂（BWS/EWS 共用）：跳技能编辑器并定位当前所选技能。
+# 机制＝静态传参（SandboxConfig.battle_setup 同型先例：静态变量跨 change_scene_to_file 存活）：
+# 脏守卫先行 → 写 SkillEditorScript._open_with_id → 切场景，SkillEditor._ready 消费即清。
+func _skill_jump_btn(ob: OptionButton) -> Button:
+	var b := Button.new()
+	b.text = "↗"
+	b.tooltip_text = "在技能编辑器中打开该技能（有未保存修改会先确认）"
+	b.focus_mode = Control.FOCUS_NONE
+	b.pressed.connect(func():
+		var sid := str(ob.get_selected_metadata())
+		if sid == "":
+			_info("未选技能——无处可跳")
+			return
+		_confirm_discard(func():
+			SkillEditorScript._open_with_id = sid
+			get_tree().change_scene_to_file("res://SkillEditor.tscn")))
+	return b
+
 # 一条 EWS：技能下拉（主动+可跑块过滤）+ ✕；下挂条件行列表 + ＋添加条件
 func _add_ews_row(skill_id: String, requires) -> void:
 	var panel := PanelContainer.new()
@@ -671,6 +720,7 @@ func _add_ews_row(skill_id: String, requires) -> void:
 	_select_meta(pick, skill_id)
 	pick.item_selected.connect(func(_i): _refresh_preview())
 	head.add_child(pick)
+	head.add_child(_skill_jump_btn(pick))   # §26：EWS 引用位同款 ↗ 跳转
 	var rm := Button.new()
 	rm.text = "✕"
 	head.add_child(rm)
@@ -959,6 +1009,12 @@ func _collect() -> Dictionary:
 	out["id"] = _w_id.text.strip_edges()
 	out["name"] = _w_name.text.strip_edges()
 	out["icon"] = _w_icon.text.strip_edges()
+	# §33 desc 可选键：空串不落键（schema 干净；旧数据零迁移——读端 .get 兜底）
+	var dtx := _w_desc.text.strip_edges() if _w_desc != null and is_instance_valid(_w_desc) else str(out.get("desc", ""))
+	if dtx == "":
+		out.erase("desc")
+	else:
+		out["desc"] = dtx
 
 	if _current_kind == "item":
 		return _collect_item(out)

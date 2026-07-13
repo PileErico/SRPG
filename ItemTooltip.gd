@@ -182,6 +182,11 @@ static func render(item: Dictionary) -> Control:
 				if not parts.is_empty():
 					req_txt = "（需 %s）" % " ∧ ".join(parts)
 			v.add_child(_kv("额外技能", ews_nm + req_txt))
+	# 风味文本 desc（§33 可选键，旧数据无此键＝不渲染）：置底斜体灰——RPG tooltip 惯例位
+	var desc := str(item.get("desc", ""))
+	if desc != "":
+		v.add_child(HSeparator.new())
+		v.add_child(_desc_label(desc))
 	return panel
 
 # —— 共用小件（公开：物品/技能/特性 tooltip 与角色状态页复用同一份，字号按场合传）——
@@ -231,6 +236,21 @@ static func mod_line(m: Dictionary, font_px := 13) -> Label:
 	var sgn := "+" if val >= 0.0 else ""
 	l.text = "%s %s%s%s%s" % [StatMeta.label(key), sgn, _num(val), sfx, afx_sfx]
 	l.add_theme_color_override("font_color", MOD_GREEN if val >= 0.0 else MOD_RED)
+	return l
+
+# §33 风味文本行：仿斜体（FontVariation 剪切——参数照引擎默认主题 italics_font 的 Transform2D(1,0.2,0,1,0,0)）
+# + 灰字 + 自动换行。CJK 若走系统回退字体则剪切可能不生效——灰字置底仍与机制段可分辨。
+static func _desc_label(text: String) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.custom_minimum_size = Vector2(220, 0)
+	l.add_theme_font_size_override("font_size", 12)
+	l.add_theme_color_override("font_color", Color(0.64, 0.66, 0.72))
+	var fv := FontVariation.new()
+	fv.base_font = l.get_theme_font("font")
+	fv.variation_transform = Transform2D(Vector2(1.0, 0.2), Vector2(0.0, 1.0), Vector2.ZERO)
+	l.add_theme_font_override("font", fv)
 	return l
 
 static func _kv(k: String, val: String) -> Label:

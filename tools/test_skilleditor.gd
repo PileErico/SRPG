@@ -16,6 +16,8 @@ const EffectDB := preload("res://EffectDB.gd")
 const EditorUI := preload("res://EditorUI.gd")
 const SkillScene := preload("res://SkillEditor.tscn")
 const EffectScene := preload("res://EffectEditor.tscn")
+const SkillEd := preload("res://SkillEditor.gd")     # §26 静态定位口（_open_with_id）回归
+const EffectEd := preload("res://EffectEditor.gd")
 
 var _fail := 0
 func ck(c: bool, m: String) -> void:
@@ -250,6 +252,29 @@ func _initialize() -> void:
 	fe._select_meta(fe._w_expire_apply, "t_chain_b")
 	fe._update_links()
 	ck(fe._w_chain_hint.visible and fe._w_chain_hint.text.contains("成环"), "二环连锁 A→B→A → 成环黄条提示")
+
+	# —— §26 跨编辑器定位静态口：_open_with_id 写→_ready 消费载入→即清 ——
+	SkillEd._open_with_id = "first_aid"
+	var ed2 = SkillScene.instantiate()
+	root.add_child(ed2)
+	if ed2._form == null:
+		ed2._ready()
+	ck(ed2._w_id != null and str(ed2._w_id.text) == "first_aid", "SkillEditor 静态定位口：_ready 消费 _open_with_id 载入条目")
+	ck(SkillEd._open_with_id == "", "SkillEditor 静态口消费即清")
+	SkillEd._open_with_id = "no_such_skill_zzz"
+	var ed3 = SkillScene.instantiate()
+	root.add_child(ed3)
+	if ed3._form == null:
+		ed3._ready()
+	ck(ed3._w_id == null, "SkillEditor 悬空定位 id：不载入（空态+报错消息）")
+	ck(SkillEd._open_with_id == "", "SkillEditor 悬空定位仍消费即清")
+	EffectEd._open_with_id = "bleeding"
+	var fe2 = EffectScene.instantiate()
+	root.add_child(fe2)
+	if fe2._form == null:
+		fe2._ready()
+	ck(fe2._w_id != null and str(fe2._w_id.text) == "bleeding", "EffectEditor 静态定位口：载入条目")
+	ck(EffectEd._open_with_id == "", "EffectEditor 静态口消费即清")
 
 	# —— 复原（同进程后续脚本防污染）——
 	SkillDB._path_override = ""

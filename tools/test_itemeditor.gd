@@ -1,8 +1,10 @@
 extends SceneTree
-## ItemEditor 回归：物品授权路径（物品大类下拉换 kind + 可使用勾选门控 on_use + 动态使用效果行 + 使用距离 + collect 往返）。
+## ItemEditor 回归：物品授权路径（物品大类下拉换 kind + 可使用勾选门控 on_use + 动态使用效果行 + 使用距离 + collect 往返）
+## + 提案 §22 tags 搜索（英文 id/中文名双向）+ §33 desc 风味文本往返（空不落键）+ §26 BWS「↗」跳转钮。
 ## headless 实例化 ItemEditor 场景、驱动 _do_new_item/_on_kind_changed/_add_ou_row/_collect()——纯内存、不写真数据。
 ## 运行：..._console.exe --headless --path "D:/1战棋" -s res://tools/test_itemeditor.gd（退出码 0=PASS）
 const Scene := preload("res://ItemEditor.tscn")
+const TagDB := preload("res://TagDB.gd")
 var _fail := 0
 func ck(c: bool, m: String) -> void:
 	if not c:
@@ -70,6 +72,39 @@ func _initialize() -> void:
 	# 大类切回武器：保留 id
 	ed._on_kind_changed("weapon")
 	ck(ed._current_kind == "weapon" and str(ed._w_id.text) == "potion_x", "切回武器·保留 id")
+
+	# —— §22 清单搜索扩 tags（id/名/tag 英文 id/tag 中文名 四路皆可中）——
+	var probe := {"name": "试剑", "tags": ["melee", "weapon_sword"]}
+	ck(ed._search_match("blade_x", probe, "blade"), "搜索：id 子串命中")
+	ck(ed._search_match("blade_x", probe, "试剑"), "搜索：名字命中")
+	ck(ed._search_match("blade_x", probe, "melee"), "搜索：tag 英文 id 命中")
+	ck(ed._search_match("blade_x", probe, TagDB.cn("melee").to_lower()), "搜索：tag 中文名（%s）命中" % TagDB.cn("melee"))
+	ck(not ed._search_match("blade_x", probe, "ranged"), "搜索：无关词不命中")
+	# 清单集成：搜中文 tag「近战」应滤出至少一件真数据近战武器
+	ed._search.text = TagDB.cn("melee")
+	ed._refresh_list()
+	ck(not ed._rows.is_empty(), "清单搜索中文 tag（近战）：有行命中")
+	ed._search.text = ""
+	ed._refresh_list()
+
+	# —— §33 desc 风味文本：空不落键 / 有值往返 / 载入回填 / 清空抹键 ——
+	ed._do_new_item("weapon")
+	ck(ed._w_desc != null and ed._w_desc.text == "", "新建武器 desc 空")
+	ck(not ed._collect().has("desc"), "desc 空 → collect 不落键（schema 干净）")
+	ed._w_desc.text = "「传说中的一击」"
+	ck(str(ed._collect().get("desc", "")) == "「传说中的一击」", "desc 填写 → collect 落键")
+	ed._current["desc"] = "旧描述"
+	ed._build_form()
+	ck(ed._w_desc.text == "旧描述", "载入带 desc 条目 → 表单回填")
+	ed._w_desc.text = ""
+	ck(not ed._collect().has("desc"), "desc 清空 → collect 抹键")
+
+	# —— §26 BWS 引用位「↗」跳转钮存在（跳转本体＝场景切换；静态口消费回归在 test_skilleditor）——
+	var has_jump := false
+	for c in ed._w_bws.get_parent().get_children():
+		if c is Button and str(c.text) == "↗":
+			has_jump = true
+	ck(has_jump, "BWS 行带「↗」跳转钮")
 
 	if _fail == 0:
 		print("=== 全 PASS ===")
