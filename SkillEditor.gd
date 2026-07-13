@@ -668,13 +668,14 @@ func _build_attack_block(box: VBoxContainer, entry: Dictionary) -> void:
 	if hit.has("weapon_source"):
 		box.add_child(_warn("weapon_source=off_hand：结算吃副手惩罚 ×offhand_eff/100（🔒 决策5 阶段3b 已生效；盾豁免）", HINT_COLOR))
 	entry["coeff"] = _add_formula(box, "伤害系数 coeff", hit.get("coeff", 1.0), false)   # 攻击块无逐级（用户裁定：武器技能无升级，per_level 在此已死）
-	entry["hit"] = EditorUI.add_spin(box, "命中 hit（技能基准命中率%；总命中=此值+角色命中修正−敌闪避项，0=无面板）", clampf(float(hit.get("hit", 0)), 0.0, 100.0), 0.0, 100.0, 1.0, _mark_dirty)
-	entry["damage_category"] = EditorUI.add_dropdown(box, "伤害属性 damage_category（大类：物理/元素）", DAMAGE_CATEGORIES,
+	# 命中系数：设计层可破 100% 也可为负（用户拍板）——编辑器不设 0~100 框，引擎端最终 clamp 5~95 在对抗之后
+	entry["hit"] = EditorUI.add_spin(box, "命中系数 hit（%）", float(hit.get("hit", 0)), -999.0, 999.0, 1.0, _mark_dirty)
+	entry["damage_category"] = EditorUI.add_dropdown(box, "伤害属性 damage_category", DAMAGE_CATEGORIES,
 		str(hit.get("damage_category", hit.get("damage_kind", "physical"))), _mark_dirty)   # 旧键 damage_kind 随存即迁
-	entry["damage_type"] = EditorUI.add_dropdown(box, "伤害类型 damage_type（创伤：斩击/穿刺/打击）", DAMAGE_TYPES,
+	entry["damage_type"] = EditorUI.add_dropdown(box, "伤害类型 damage_type", DAMAGE_TYPES,
 		str(hit.get("damage_type", "")), _mark_dirty)
-	entry["armor_pen"] = EditorUI.add_spin(box, "破甲 armor_pen（小数 0~1：0.3=30% 伤害直击人体，1=完全无视护甲）", clampf(float(hit.get("armor_pen", 0)), 0.0, 1.0), 0.0, 1.0, 0.01, _mark_dirty)
-	entry["sure_hit"] = EditorUI.add_check(box, "必中 sure_hit（跳过命中对抗——命中/闪避是加减对抗、可破 100，必中直接无视）", bool(hit.get("sure_hit", false)), _mark_dirty)
+	entry["armor_pen"] = EditorUI.add_spin(box, "破甲 armor_pen（0~1：0.3=30% 直击人体，1=无视护甲）", clampf(float(hit.get("armor_pen", 0)), 0.0, 1.0), 0.0, 1.0, 0.01, _mark_dirty)
+	entry["sure_hit"] = EditorUI.add_check(box, "必中 sure_hit（无视命中对抗）", bool(hit.get("sure_hit", false)), _mark_dirty)
 	box.add_child(_warn("aoe / bonus / ignore_* 等高级字段本版不编辑，保存原样保留", WARN_COLOR))
 
 func _build_heal_block(box: VBoxContainer, entry: Dictionary) -> void:
@@ -1017,8 +1018,8 @@ func _collect_block(entry: Dictionary) -> Dictionary:
 				hit["damage_type"] = dt
 			else:
 				hit.erase("damage_type")
-			var bh := clampf(float(entry["hit"].value), 0.0, 100.0)
-			if bh > 0.0:
+			var bh := float(entry["hit"].value)   # 可负/可破 100（设计层语义）；0=中性不落键
+			if bh != 0.0:
 				hit["hit"] = _num(bh)
 			else:
 				hit.erase("hit")
