@@ -16,6 +16,8 @@ const EffectDB := preload("res://EffectDB.gd")
 const TagDB := preload("res://TagDB.gd")
 const StatMeta := preload("res://StatMeta.gd")
 const EffectEditorScript := preload("res://EffectEditor.gd")   # §26 apply_effect 引用位「↗」静态传参口
+const ItemDB := preload("res://ItemDB.gd")                     # §18 反向引用感知（武器 bws/ews 引用技能）
+const UnitFactory := preload("res://UnitFactory.gd")           # §18 反向引用感知（原型 skills 引用技能）
 
 const ICON_DIR := "res://icons/Skills"
 const NATURES := [["skill", "技巧 skill"], ["spell", "魔法 spell（魔法系统后置）"]]
@@ -991,3 +993,33 @@ func _shell_after_save(entry: Dictionary, id: String, renaming: bool) -> void:
 
 func _shell_delete_confirm_text(id: String) -> String:
 	return "确认删除能力「%s」(%s)？此操作直接写盘（已学单位/引用不随删）。" % [str(_current.get("name", id)), id]
+
+# §18 反向引用：武器 bws/bas（双读单口 weapon_bws_id）与 ews[].skill（含决策22 裸 id 兼容形）＝lint 规则8
+# 口径；原型 skills（dict {id:level} / 旧 array 双形）＝lint 规则9 口径。effects.json 无技能引用位——不查。
+func _shell_referenced_by(id: String) -> Array[String]:
+	var out: Array[String] = []
+	var items = ItemDB.all()
+	for iid in items:
+		var it = items[iid]
+		if typeof(it) != TYPE_DICTIONARY:
+			continue
+		var hits := PackedStringArray()
+		if SkillDB.weapon_bws_id(it) == id:
+			hits.append("BWS 普攻位")
+		for e in it.get("ews", []):
+			var sid := str(e.get("skill", "")) if typeof(e) == TYPE_DICTIONARY else str(e)
+			if sid == id:
+				hits.append("EWS 额外技能位")
+				break
+		if not hits.is_empty():
+			out.append("武器「%s」(%s)：%s" % [str(it.get("name", iid)), str(iid), "、".join(hits)])
+	for p in UnitFactory.all_prototypes():
+		if typeof(p) != TYPE_DICTIONARY:
+			continue
+		var psk = p.get("skills", [])
+		var sids: Array = psk.keys() if typeof(psk) == TYPE_DICTIONARY else (psk if typeof(psk) == TYPE_ARRAY else [])
+		for s in sids:
+			if str(s) == id:
+				out.append("原型「%s」(%s)：已学 skills" % [str(p.get("name", p.get("id", "?"))), str(p.get("id", "?"))])
+				break
+	return out

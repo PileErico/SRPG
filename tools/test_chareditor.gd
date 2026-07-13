@@ -16,6 +16,8 @@ const EditorUI := preload("res://EditorUI.gd")
 const PROTOS_PATH := "res://data/unit_prototypes.json"
 const TMP_ID := "__ce_test_tmp__"
 const TMP_ID2 := "__ce_test_tmp2__"
+const Shell := preload("res://ListEditorShell.gd")   # §9 状态档测试缝
+const STATE_TMP := "user://test_editor_state.cfg"
 
 var _fail := 0
 
@@ -40,6 +42,10 @@ func _write_text(t: String) -> void:
 
 func _initialize() -> void:
 	print("=== 角色编辑器 测试开始 ===")
+	# §9 测试缝：状态档指临时路径（编辑器进树、退出必写）——绝不碰 user://editor_state.cfg 真档
+	Shell._state_path_override = STATE_TMP
+	if FileAccess.file_exists(STATE_TMP):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_TMP))
 	var orig := _read_text()
 	ck(orig != "", "原型文件可读")
 
@@ -173,6 +179,10 @@ func _test_scene() -> void:
 
 	# 复用真·角色状态页 + editor_mode
 	ck(ed._panel != null and ed._panel.editor_mode, "嵌入 UnitStatusPanel 且 editor_mode 开")
+
+	# 外壳横切冒烟：§14 还原钮存在；§18 角色编辑器不感知引用（地图 units 内嵌 proto＝快照非 id 引用）
+	ck(ed._revert_btn != null, "底栏「↺ 还原」钮存在（外壳 §14）")
+	ck((ed._shell_referenced_by("anything") as Array).is_empty(), "CharacterEditor referenced_by＝空（基类缺省）")
 
 	# 选一个真实原型 → 卡片绑定同一 scratch unit
 	var protos := UnitFactory.all_prototypes()

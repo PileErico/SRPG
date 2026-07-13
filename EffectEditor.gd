@@ -12,6 +12,7 @@ extends "res://ListEditorShell.gd"
 const EffectDB := preload("res://EffectDB.gd")
 const TagDB := preload("res://TagDB.gd")
 const StatMeta := preload("res://StatMeta.gd")
+const SkillDB := preload("res://SkillDB.gd")   # §18 反向引用感知（技能效果块引用效果 id）
 
 const ICON_DIR := "res://icons/Skills"
 const KINDS := [["buff", "增益 buff"], ["debuff", "减益 debuff"]]
@@ -449,3 +450,34 @@ func _shell_after_save(entry: Dictionary, id: String, renaming: bool) -> void:
 
 func _shell_delete_confirm_text(id: String) -> String:
 	return "确认删除效果「%s」(%s)？此操作直接写盘（引用它的技能/武器会悬空，lint 会红）。" % [str(_current.get("name", id)), id]
+
+# §18 反向引用：技能 effects[] 里凡 {…, effect: <id>} 的引用位（apply_effect 块 / attack hit 的 inflict /
+# conditional_mod 的 target_effect 条件——递归扫一网打尽）＋ 其他效果的 on_expire_apply 连锁（lint 10c 口径）。
+func _shell_referenced_by(id: String) -> Array[String]:
+	var out: Array[String] = []
+	for sid in SkillDB.all():
+		var s = SkillDB.all()[sid]
+		if typeof(s) == TYPE_DICTIONARY and _refs_effect(s.get("effects", []), id):
+			out.append("技能「%s」(%s)：效果块引用" % [str(s.get("name", sid)), str(sid)])
+	for eid in EffectDB.all():
+		if str(eid) == id:
+			continue
+		var e = EffectDB.all()[eid]
+		if typeof(e) == TYPE_DICTIONARY and str(e.get("on_expire_apply", "")) == id:
+			out.append("效果「%s」(%s)：到期连锁 on_expire_apply" % [str(e.get("name", eid)), str(eid)])
+	return out
+
+# 递归找 "effect" 键值＝id 的引用位（apply_effect 顶层 / hits[].inflict / when.target_effect 都长这形）
+func _refs_effect(v, id: String) -> bool:
+	match typeof(v):
+		TYPE_DICTIONARY:
+			if str(v.get("effect", "")) == id:
+				return true
+			for k in v:
+				if _refs_effect(v[k], id):
+					return true
+		TYPE_ARRAY:
+			for e in v:
+				if _refs_effect(e, id):
+					return true
+	return false

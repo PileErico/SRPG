@@ -13,6 +13,7 @@ const StatMeta := preload("res://StatMeta.gd")           # stat 键→中文单�
 const SkillDB := preload("res://SkillDB.gd")             # 武器技能引用位（BWS 下拉/EWS 行，🔒 决策25/26 引用制）
 const ProfDB := preload("res://ProfDB.gd")               # EWS 解锁条件（技艺域下拉+档位名提示）
 const SkillEditorScript := preload("res://SkillEditor.gd")   # §26 「↗」跳转静态传参口（_open_with_id）
+const UnitFactory := preload("res://UnitFactory.gd")         # §18 反向引用感知（原型 equip/bag 引用物品）
 # EditorTheme / EditorUI / TextureCache 由 ListEditorShell 继承
 
 const ICON_DIR := {
@@ -111,6 +112,9 @@ var _w_prefer: OptionButton      # 地/空偏好（比路兹式起降换手；�
 var _ews_box: VBoxContainer      # EWS 行容器
 var _ews_rows: Array = []        # EWS 行：[{panel, skill:OptionButton, reqs:[{row,prof,value,hint}], reqs_box}]
 var _building: bool = false      # _build_form 进行中（抑制「选盾自动清 BWS」等用户动作专属逻辑）
+# §14 精确脏判定基线＝载入内容的 JSON 快照（根治「任何信号即脏」假阳性：本编辑器预览刷新兼职脏标记，
+# 重选同一下拉项也会置脏）。""＝无基线（表单构建中/副本未保存态）：保守按原布尔逻辑走。
+var _baseline := ""
 
 
 # —— 外壳钩子（ListEditorShell）——
@@ -295,6 +299,7 @@ func _do_new_item(kind: String) -> void:
 	_loaded_id = ""
 	_select_row("")
 	_build_form()
+	_baseline = JSON.stringify(_collect())   # §14：骨架＝干净基线（填了又删回原样＝不脏）
 	_update_buttons()
 	_info("新建%s——填好后点保存（id 必须唯一）" % ItemDB.kind_cn(kind))
 
@@ -309,6 +314,7 @@ func _load_item(id: String) -> void:
 	_is_new = false
 	_loaded_id = id
 	_build_form()
+	_baseline = JSON.stringify(_collect())   # §14：载入内容＝干净基线（精确脏判定）
 	_update_buttons()
 	_info("编辑「%s」" % str(_current.get("name", id)))
 	_select_row(id)
@@ -333,6 +339,7 @@ func _shell_show_empty() -> void:
 	hint.add_theme_color_override("font_color", Color(0.6, 0.65, 0.72))
 	_form.add_child(hint)
 	_refresh_preview()
+	_baseline = ""
 	_dirty = false
 
 
@@ -362,6 +369,7 @@ func _clear_form() -> void:
 	_ews_rows = []
 	_free_tags = []
 	_requires = []
+	_baseline = ""   # §14：重建期间预览刷新不比脏（基线由 _load_item/_do_new_item/_shell_after_save 设）
 
 
 func _build_form() -> void:
@@ -466,7 +474,10 @@ func _on_kind_changed(new_kind: String) -> void:
 	else:
 		_current.erase("desc")
 	_current_kind = new_kind
+	var bl := _baseline   # §14：换大类不换条目——基线跨重建保留，脏＝与载入内容比（切回原大类＝不脏）
 	_build_form()
+	_baseline = bl
+	_dirty = (JSON.stringify(_collect()) != _baseline) if _baseline != "" else true
 
 
 # —— 物品（非装备类）授权表单 ——
@@ -998,9 +1009,29 @@ func _shell_after_save(entry: Dictionary, id: String, renaming: bool) -> void:
 	else:
 		_info("✓ 已保存「%s」→ %s" % [str(entry.get("name", id)), ItemDB.kind_of(entry) + ".json"])
 	_current = entry
+	_baseline = JSON.stringify(entry)   # §14：保存成功＝新干净基线（副本保存后从「强制脏」态回到精确比对）
 
 func _shell_delete_confirm_text(id: String) -> String:
 	return "确认删除「%s」(%s)？此操作直接写盘。" % [str(_current.get("name", id)), id]
+
+# §18 反向引用：unit_prototypes 的 equip/bag 引用该物品 id（lint 规则9 同口径——删/改名前创作期防呆）
+func _shell_referenced_by(id: String) -> Array[String]:
+	var out: Array[String] = []
+	for p in UnitFactory.all_prototypes():
+		if typeof(p) != TYPE_DICTIONARY:
+			continue
+		var hits := PackedStringArray()
+		for eid in p.get("equip", []):
+			if str(eid) == id:
+				hits.append("装备 equip")
+				break
+		for bid in p.get("bag", []):
+			if str(bid) == id:
+				hits.append("背包 bag")
+				break
+		if not hits.is_empty():
+			out.append("原型「%s」(%s)：%s" % [str(p.get("name", p.get("id", "?"))), str(p.get("id", "?")), "、".join(hits)])
+	return out
 
 
 # 收集表单 → 物品 dict（tags 由 稀有度 + 类型/种类/握持(或部位/甲重) + innate + 自由 组成；slot 自动派生）
@@ -1166,10 +1197,13 @@ func _refresh_preview() -> void:
 		h.add_theme_font_size_override("font_size", 12)
 		_preview.add_child(h)
 		return
-	_dirty = true   # 表单激活时到这＝有改动（_build_form 末尾会清回干净基线）
+	# §14 精确脏判定：与载入基线比（改了又改回＝不脏；重选同一下拉项＝不脏）。
+	# 无基线（表单构建中/副本未保存态）＝保守置脏——构建路径由 _build_form 末尾清回干净、副本保持强制脏。
+	var cur := _collect()
+	_dirty = (JSON.stringify(cur) != _baseline) if _baseline != "" else true
 	if _icon_thumb != null and is_instance_valid(_icon_thumb):
 		_icon_thumb.texture = TextureCache.get_tex(_w_icon.text.strip_edges())
-	_preview.add_child(ItemTooltip.render(_collect()))   # 通用组件（与角色状态页共用一份渲染）
+	_preview.add_child(ItemTooltip.render(cur))   # 通用组件（与角色状态页共用一份渲染）
 
 
 # —— 小工具 ——

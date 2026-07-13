@@ -1,10 +1,15 @@
 extends SceneTree
 ## ItemEditor 回归：物品授权路径（物品大类下拉换 kind + 可使用勾选门控 on_use + 动态使用效果行 + 使用距离 + collect 往返）
-## + 提案 §22 tags 搜索（英文 id/中文名双向）+ §33 desc 风味文本往返（空不落键）+ §26 BWS「↗」跳转钮。
+## + 提案 §22 tags 搜索（英文 id/中文名双向）+ §33 desc 风味文本往返（空不落键）+ §26 BWS「↗」跳转钮
+## + 外壳横切 §9 会话状态持久（_state_path_override 测试缝，不写真档）/ §14 精确脏+还原钮 / §18 反向引用拼装。
 ## headless 实例化 ItemEditor 场景、驱动 _do_new_item/_on_kind_changed/_add_ou_row/_collect()——纯内存、不写真数据。
 ## 运行：..._console.exe --headless --path "D:/1战棋" -s res://tools/test_itemeditor.gd（退出码 0=PASS）
 const Scene := preload("res://ItemEditor.tscn")
 const TagDB := preload("res://TagDB.gd")
+const ItemDB := preload("res://ItemDB.gd")
+const UnitFactory := preload("res://UnitFactory.gd")
+const Shell := preload("res://ListEditorShell.gd")
+const STATE_TMP := "user://test_editor_state.cfg"
 var _fail := 0
 func ck(c: bool, m: String) -> void:
 	if not c:
@@ -13,6 +18,10 @@ func ck(c: bool, m: String) -> void:
 
 func _initialize() -> void:
 	print("=== ItemEditor 物品授权测试开始 ===")
+	# §9 测试缝：状态档指临时路径（编辑器进树、退出必写）——绝不碰 user://editor_state.cfg 真档；清残留保确定性
+	Shell._state_path_override = STATE_TMP
+	if FileAccess.file_exists(STATE_TMP):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_TMP))
 	var ed = Scene.instantiate()
 	root.add_child(ed)
 	if ed._form == null:
@@ -105,6 +114,75 @@ func _initialize() -> void:
 		if c is Button and str(c.text) == "↗":
 			has_jump = true
 	ck(has_jump, "BWS 行带「↗」跳转钮")
+
+	# —— 外壳 §14 脏可见 + 精确脏判定（baseline：改了又改回＝不脏；载入＝干净）——
+	ck(ed._revert_btn != null, "底栏「↺ 还原」钮存在")
+	var iid := ""
+	for k in ItemDB.all():
+		iid = str(k)
+		break
+	ck(iid != "", "物品库非空（取首件作脏判定试料）")
+	ed._load_item(iid)
+	ck(not ed._dirty, "载入条目＝干净基线（不脏）")
+	ck(not str(ed._save_btn.text).begins_with("●"), "干净态保存钮无 ● 前缀")
+	ck(ed._revert_btn.disabled, "干净态还原钮禁用")
+	ed._refresh_preview()   # 无改动的预览刷新（旧实现＝任何信号即脏的假阳性路径）
+	ck(not ed._dirty, "无改动预览刷新不再假阳性置脏（§14 baseline）")
+	var old_name := str(ed._w_name.text)
+	ed._w_name.text = old_name + "改"
+	ed._refresh_preview()
+	ck(ed._dirty, "改名字→脏")
+	ck(str(ed._save_btn.text).begins_with("●"), "脏态保存钮带 ● 前缀")
+	ck(not ed._revert_btn.disabled, "脏态在库条目→还原钮可用")
+	ed._w_name.text = old_name
+	ed._refresh_preview()
+	ck(not ed._dirty, "改回原值→不脏（精确判定，布尔标记做不到）")
+
+	# —— 外壳 §18 反向引用拼装（unit_prototypes 的 equip/bag 引用；期望值独立扫描对照）——
+	var ref_item := ""
+	var ref_cnt := 0
+	for p in UnitFactory.all_prototypes():
+		if ref_item != "":
+			break
+		for eid2 in p.get("equip", []):
+			ref_item = str(eid2)
+			break
+	if ref_item != "":
+		for p in UnitFactory.all_prototypes():
+			var hit := false
+			for eid2 in p.get("equip", []):
+				if str(eid2) == ref_item:
+					hit = true
+			for bid2 in p.get("bag", []):
+				if str(bid2) == ref_item:
+					hit = true
+			if hit:
+				ref_cnt += 1
+		var refs = ed._shell_referenced_by(ref_item)
+		ck(refs.size() == ref_cnt, "referenced_by(%s) 数量=独立扫描（%d）" % [ref_item, ref_cnt])
+		ck(ed._delete_confirm_full_text(ref_item).contains("⚠ 被 %d 处引用" % ref_cnt), "删除确认文案拼进引用警示段")
+	else:
+		print("（跳过：原型库无 equip 引用，反向引用非空路径无试料）")
+	ck((ed._shell_referenced_by("__no_such_item__") as Array).is_empty(), "无引用 id → referenced_by 空")
+	ck(not ed._delete_confirm_full_text("__no_such_item__").contains("⚠ 被"), "无引用→确认文案不带警示段")
+
+	# —— 外壳 §9 会话状态持久：存→新实例恢复（临时档，绝不写真档）——
+	ed._search.text = "试搜索词"
+	ed._selected_id = iid
+	ed._fold_collapsed = {"weapon": true}
+	ed._state_save()
+	ck(FileAccess.file_exists(STATE_TMP), "状态档写到测试缝路径")
+	var ed2 = Scene.instantiate()
+	ed2._ready()   # 不进树（get_tree()==null）＝_ready 不自动吃档，手调恢复口单测纯逻辑
+	ck(str(ed2._search.text) == "", "新实例初始无搜索词（未自动恢复）")
+	var rid := str(ed2._state_restore_ui())
+	ck(rid == iid, "恢复口回选中 id（%s）" % iid)
+	ck(str(ed2._search.text) == "试搜索词", "恢复口回填搜索词")
+	ck(bool(ed2._fold_collapsed.get("weapon", false)), "恢复口回填折叠态")
+	ck(str(ed2._state_section()) == "ItemEditor", "分节键=脚本名（场景互切各回各的状态）")
+	ed2.free()
+	ed._search.text = ""
+	ed._selected_id = ""
 
 	if _fail == 0:
 		print("=== 全 PASS ===")

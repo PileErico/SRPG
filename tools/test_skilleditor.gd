@@ -8,7 +8,9 @@ extends SceneTree
 ##  · §24 效果块调序：↑/↓ 与收集序同步、顶端 no-op
 ##  · §25 EffectEditor：未注册 tag 拒存（lint 规则6 口径）/ resist 缺 fort tag 黄条 / 灰化联动 / 二环连锁提示
 ##  · EffectEditor：bleeding 往返 + 新建效果入库；SkillEditor 被动灰化（成本段只灰不清）
-## 全程 SkillDB/EffectDB._path_override 注入 user:// 临时副本——绝不碰 res://data 真数据。
+##  · 外壳 §18 反向引用拼装（技能←武器 bws / 效果←技能块·on_expire_apply 连锁）
+## 全程 SkillDB/EffectDB._path_override 注入 user:// 临时副本——绝不碰 res://data 真数据；
+## 外壳状态档同理走 ListEditorShell._state_path_override 测试缝（编辑器进树、退出必写）。
 ## 运行：..._console.exe --headless --path "D:/1战棋" -s res://tools/test_skilleditor.gd（退出码 0=PASS）
 
 const SkillDB := preload("res://SkillDB.gd")
@@ -18,6 +20,9 @@ const SkillScene := preload("res://SkillEditor.tscn")
 const EffectScene := preload("res://EffectEditor.tscn")
 const SkillEd := preload("res://SkillEditor.gd")     # §26 静态定位口（_open_with_id）回归
 const EffectEd := preload("res://EffectEditor.gd")
+const ItemDB := preload("res://ItemDB.gd")           # §18 反向引用试料（真 weapons 只读）
+const Shell := preload("res://ListEditorShell.gd")   # §9 状态档测试缝
+const STATE_TMP := "user://test_editor_state.cfg"
 
 var _fail := 0
 func ck(c: bool, m: String) -> void:
@@ -41,6 +46,10 @@ func _same(a, b) -> bool:
 
 func _initialize() -> void:
 	print("=== SkillEditor/EffectEditor 测试开始 ===")
+	# §9 测试缝：状态档指临时路径（编辑器进树、退出必写）——绝不碰 user://editor_state.cfg 真档；清残留保确定性
+	Shell._state_path_override = STATE_TMP
+	if FileAccess.file_exists(STATE_TMP):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_TMP))
 	# —— 数据注入：临时副本 + canonical 归一（先过一遍写盘口，往返比较才有字节基线）——
 	_copy("res://data/skills.json", "user://test_skills.json")
 	SkillDB._path_override = "user://test_skills.json"
@@ -252,6 +261,41 @@ func _initialize() -> void:
 	fe._select_meta(fe._w_expire_apply, "t_chain_b")
 	fe._update_links()
 	ck(fe._w_chain_hint.visible and fe._w_chain_hint.text.contains("成环"), "二环连锁 A→B→A → 成环黄条提示")
+
+	# —— 外壳 §18 反向引用拼装（技能侧：武器 bws；效果侧：技能块 + on_expire_apply 连锁）——
+	var bws_skill := ""
+	var bws_weapon := ""
+	for iid in ItemDB.all():
+		var it = ItemDB.all()[iid]
+		if typeof(it) == TYPE_DICTIONARY and str(it.get("bws", it.get("bas", ""))) != "":
+			bws_skill = str(it.get("bws", it.get("bas", "")))
+			bws_weapon = str(it.get("name", iid))
+			break
+	if bws_skill != "":
+		var srefs = ed._shell_referenced_by(bws_skill)
+		ck(not srefs.is_empty(), "技能 referenced_by：BWS 引用被察觉（%s）" % bws_skill)
+		var has_w := false
+		for r in srefs:
+			if str(r).contains(bws_weapon) and str(r).contains("BWS"):
+				has_w = true
+		ck(has_w, "引用行含武器名+BWS 位（%s）" % bws_weapon)
+		ck(ed._delete_confirm_full_text(bws_skill).contains("⚠ 被"), "技能删除确认文案拼进引用警示段")
+	else:
+		print("（跳过：weapons 无 bws 引用试料）")
+	ck((ed._shell_referenced_by("__no_such_skill__") as Array).is_empty(), "无引用技能 → referenced_by 空")
+	var erefs = fe._shell_referenced_by("bleeding")
+	var has_sk := false
+	for r in erefs:
+		if str(r).contains("技能"):
+			has_sk = true
+	ck(has_sk, "效果 referenced_by：技能效果块引用被察觉（bleeding）")
+	var arefs = fe._shell_referenced_by("t_chain_a")
+	var has_chain := false
+	for r in arefs:
+		if str(r).contains("t_chain_b") and str(r).contains("on_expire_apply"):
+			has_chain = true
+	ck(has_chain, "on_expire_apply 连锁引用被察觉（t_chain_b→t_chain_a）")
+	ck((fe._shell_referenced_by("__no_such_effect__") as Array).is_empty(), "无引用效果 → referenced_by 空")
 
 	# —— §26 跨编辑器定位静态口：_open_with_id 写→_ready 消费载入→即清 ——
 	SkillEd._open_with_id = "first_aid"

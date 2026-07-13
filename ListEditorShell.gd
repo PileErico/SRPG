@@ -5,6 +5,11 @@ extends Control
 ##   · 布局骨架：深色主题+背景 / 标题栏+返回主菜单（带脏守卫）/ 左清单｜右内容 HSplit / 底栏（信息+另存副本+保存）
 ##   · 左清单：＋新建 / 🔍搜索 / 折叠分组（折叠态跨刷新保留）/ 行卡片（图标+名/id 两行）/ 金框选中+滚动定位 / 删除选中
 ##   · CRUD 流程：保存（id 空/字符/撞库三验 + 改名 replace_id 语义）/ 删除（确认框）/ 另存副本（id 唯一化）/ 脏守卫 / Ctrl+S
+##   · 横切便利（编辑器优化提案 2026-07-13）：§9 会话状态持久（user://editor_state.cfg 按场景分节：
+##     选中/搜索词/折叠态——_exit_tree 存、_ready 恢复；测试缝 _state_path_override 防写真档）/
+##     §14 脏可见（保存钮 ● 前缀 + 底栏「↺ 还原」从库重载）/ §15 键盘导航（Ctrl+N 新建 / Ctrl+D 副本 /
+##     Ctrl+F 搜索 / Ctrl+↑↓ 换条目 / Delete 删除——走 _unhandled_key_input，焦点在文本输入不抢键）/
+##     §18 删除/改名反向引用感知（可选钩子 _shell_referenced_by 拼进确认文案，不硬拦）
 ## 子类必须实现：_shell_title / _shell_new_label / _shell_build_right / _shell_populate_list /
 ##   _shell_new_entry / _shell_load / _shell_collect / _shell_exists / _shell_db_save / _shell_db_delete /
 ##   _shell_after_save / _shell_open_as_new / _shell_show_empty / _shell_has_entry / _shell_delete_confirm_text
@@ -14,13 +19,19 @@ const EditorTheme := preload("res://EditorTheme.gd")
 const EditorUI := preload("res://EditorUI.gd")
 const TextureCache := preload("res://TextureCache.gd")
 
+const STATE_PATH := "user://editor_state.cfg"   # §9 会话状态档（按场景分节：选中/搜索词/折叠态）
+static var _state_path_override := ""           # 测试缝（仿 DB _path_override）：headless 测试指临时路径，绝不写真档
+
 # —— 外壳状态 ——
 var _is_new := false
 var _loaded_id := ""          # 载入时的 id（改名判定：保存时 id≠此值 → replace_id 换名而非复制）
-var _dirty := false           # 有未保存改动（切换/新建/删除/返回前确认）
-var _rows: Dictionary = {}    # id -> 行 Button（选中高亮 / 滚动定位）
+var _dirty := false:          # 有未保存改动（切换/新建/删除/返回前确认）；setter 联动 §14 脏可见 UI
+	set(v):
+		_dirty = v
+		_update_dirty_ui()
+var _rows: Dictionary = {}    # id -> 行 Button（选中高亮 / 滚动定位；插入序＝清单显示序，Ctrl+↑↓ 依赖）
 var _selected_id := ""        # 当前高亮 id（"" = 无）
-var _fold_collapsed: Dictionary = {}   # 分组 key -> 折叠态（跨刷新保留）
+var _fold_collapsed: Dictionary = {}   # 分组 key -> 折叠态（跨刷新保留；§9 随会话状态持久）
 
 # —— 外壳控件 ——
 var _list_scroll: ScrollContainer
@@ -28,6 +39,7 @@ var _list_root: VBoxContainer
 var _search: LineEdit
 var _msg: Label
 var _save_btn: Button
+var _revert_btn: Button
 var _dup_btn: Button
 var _del_btn: Button
 
@@ -81,6 +93,13 @@ func _ready() -> void:
 	_msg.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_msg.add_theme_color_override("font_color", Color(0.72, 0.78, 0.86))
 	bottom.add_child(_msg)
+	_revert_btn = Button.new()
+	_revert_btn.text = "↺ 还原"
+	_revert_btn.custom_minimum_size = Vector2(96, 38)
+	_revert_btn.disabled = true
+	_revert_btn.tooltip_text = "丢弃当前条目未保存的修改，从库里重新载入（有确认）"
+	_revert_btn.pressed.connect(_on_revert)
+	bottom.add_child(_revert_btn)
 	_dup_btn = Button.new()
 	_dup_btn.text = "另存副本"
 	_dup_btn.custom_minimum_size = Vector2(110, 38)
@@ -96,10 +115,19 @@ func _ready() -> void:
 	bottom.add_child(_save_btn)
 	root.add_child(bottom)
 
+	# §9 会话状态恢复：搜索词/折叠态须在清单构建前回填（程序赋值不发 text_changed，不会双刷）；
+	# 选中恢复在清单构建后。headless 测试 new() 不进树直调 _ready＝不吃状态档（is_inside_tree 判、
+	# 无 get_tree 噪音），持久化逻辑测试经 _state_path_override + 手调 _state_save/_state_restore_ui 覆盖。
+	var restore_id := ""
+	if is_inside_tree():
+		restore_id = _state_restore_ui()
 	_refresh_list()
 	_shell_show_empty()
+	if restore_id != "" and _shell_exists(restore_id):
+		_shell_load(restore_id)
 
 func _exit_tree() -> void:
+	_state_save()   # §9 会话状态持久：切场景（Skill⇄Effect/返回主菜单）与关窗退出统一经此
 	if get_tree() != null:
 		get_tree().auto_accept_quit = true   # 还原默认（防污染主菜单/其他场景的关窗行为）
 
@@ -269,10 +297,14 @@ func _on_save() -> void:
 	if (_is_new or renaming) and _shell_exists(id):
 		_err("id「%s」已存在，请换一个" % id)   # 改名撞已有 id 也拦：否则会静默覆盖别的条目
 		return
+	# §18 改名引用感知：改名前按旧 id 查引用者（引用数据不随本次保存变，先后皆可——取存前语义最清晰）
+	var old_refs: Array[String] = _shell_referenced_by(_loaded_id) if renaming else ([] as Array[String])
 	if not _shell_db_save(entry, _loaded_id if renaming else ""):
 		_err("保存失败（文件被占用/只读？）")
 		return
 	_shell_after_save(entry, id, renaming)   # 子类：成功消息 + 专属状态更新（如 _current）
+	if not old_refs.is_empty() and _msg != null and is_instance_valid(_msg):
+		_msg.text += "　⚠ %d 处引用仍指旧 id（不自动改写，需手动同步）" % old_refs.size()
 	_is_new = false
 	_loaded_id = id
 	_dirty = false
@@ -285,8 +317,20 @@ func _on_delete() -> void:
 	if _is_new or _loaded_id == "":
 		return
 	var id := _loaded_id
-	EditorUI.confirm(self, _shell_delete_confirm_text(id),
+	EditorUI.confirm(self, _delete_confirm_full_text(id),
 		"删除", func(): _do_delete(id), Callable(), "确认删除")
+
+# §18 删除确认文案＝子类文案 + 反向引用警示段（非空时；只警示不硬拦——创作期防呆，lint 另做数据侧兜底）
+func _delete_confirm_full_text(id: String) -> String:
+	var text := _shell_delete_confirm_text(id)
+	var refs := _shell_referenced_by(id)
+	if refs.is_empty():
+		return text
+	var shown := refs.slice(0, 8)   # 上限防超长引用列表撑爆弹窗
+	var lines := "\n".join(shown)
+	if refs.size() > shown.size():
+		lines += "\n…等 %d 处" % refs.size()
+	return "%s\n\n⚠ 被 %d 处引用（删除后成悬空引用，lint 会红）：\n%s" % [text, refs.size(), lines]
 
 func _do_delete(id: String) -> void:
 	if not _shell_db_delete(id):
@@ -325,7 +369,7 @@ func _unique_copy_id(base: String) -> String:
 	return cand
 
 
-# 按当前编辑态刷新三按钮可用性（保存=有条目；副本=已保存条目；删除=在库条目）
+# 按当前编辑态刷新按钮可用性（保存=有条目；副本=已保存条目；删除/还原=在库条目）
 func _update_buttons() -> void:
 	var has := _shell_has_entry()
 	if _save_btn != null and is_instance_valid(_save_btn):
@@ -334,6 +378,25 @@ func _update_buttons() -> void:
 		_dup_btn.disabled = not has or _is_new
 	if _del_btn != null and is_instance_valid(_del_btn):
 		_del_btn.disabled = not has or _is_new or _loaded_id == ""
+	_update_dirty_ui()
+
+# §14 脏状态可见：保存钮 ● 前缀；还原钮只在「在库条目 + 有未存改动」时可用。
+# 由 _dirty setter 与 _update_buttons 双触发（前者管脏变化、后者管条目切换——两处状态源都盖到）。
+func _update_dirty_ui() -> void:
+	if _save_btn != null and is_instance_valid(_save_btn):
+		_save_btn.text = ("● " if _dirty else "") + "保存 ⤓ (Ctrl+S)"
+	if _revert_btn != null and is_instance_valid(_revert_btn):
+		_revert_btn.disabled = not _dirty or _is_new or _loaded_id == ""
+
+# §14 还原：确认后丢弃未存改动、从库重载当前条目（_shell_load 重建表单自会清回干净基线）
+func _on_revert() -> void:
+	if _is_new or _loaded_id == "" or not _dirty:
+		return
+	var id := _loaded_id
+	EditorUI.confirm(self, "确认还原「%s」？将丢弃未保存的修改，从库里重新载入。" % id,
+		"还原", func():
+			_shell_load(id)
+			_info("↺ 已还原「%s」（库里最后保存的版本）" % id), Callable(), "确认还原")
 
 
 # —— 守卫 / 快捷键 / 校验 / 消息 ——
@@ -343,13 +406,100 @@ func _confirm_discard(on_ok: Callable, on_cancel := Callable()) -> void:
 	EditorUI.confirm_discard(self, _dirty, on_ok, on_cancel,
 		_shell_discard_text(), "丢弃修改", "留下")
 
-# Ctrl+S 保存（表单激活时）
+# Ctrl+S 保存（表单激活时；走 _input＝焦点在文本框也存——既有行为勿破）
 func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo \
 			and event.keycode == KEY_S and event.ctrl_pressed:
 		if _save_btn != null and is_instance_valid(_save_btn) and not _save_btn.disabled:
 			_on_save()
 		get_viewport().set_input_as_handled()
+
+# §15 键盘导航（Ctrl+S 除外，见上）：走 _unhandled_key_input——焦点控件先消费，文本输入天然不被抢键
+# （MapEditor 数字键/AppearanceWorkshop 绘制键同判定法）；Delete/Ctrl+↑↓ 另加焦点显式守卫双保险
+# （空 LineEdit 的 Delete、TextEdit 的 Ctrl+↑↓ 滚动是否吞键因控件态而异，不赌）。
+func _unhandled_key_input(event: InputEvent) -> void:
+	if not (event is InputEventKey) or not event.pressed or event.echo:
+		return
+	var e := event as InputEventKey
+	if e.ctrl_pressed:
+		match e.keycode:
+			KEY_N:   # 新建（同＋新建钮：走脏守卫）
+				_confirm_discard(_shell_new_entry)
+				accept_event()
+			KEY_D:   # 另存副本（绑既有另存动作；未保存新条目时禁用同按钮）
+				if _dup_btn != null and is_instance_valid(_dup_btn) and not _dup_btn.disabled:
+					_on_duplicate()
+				accept_event()
+			KEY_F:   # 聚焦搜索框
+				if _search != null and is_instance_valid(_search) and _search.is_inside_tree():
+					_search.grab_focus()
+					_search.select_all()
+				accept_event()
+			KEY_UP:
+				if not _text_input_focused():
+					_nav_row(-1)
+					accept_event()
+			KEY_DOWN:
+				if not _text_input_focused():
+					_nav_row(1)
+					accept_event()
+	elif e.keycode == KEY_DELETE and not _text_input_focused():
+		if _del_btn != null and is_instance_valid(_del_btn) and not _del_btn.disabled:
+			_on_delete()   # 走既有删除确认（§18 引用警示一并生效）
+		accept_event()
+
+func _text_input_focused() -> bool:
+	if not is_inside_tree():
+		return false
+	var f := get_viewport().gui_get_focus_owner()
+	return f is LineEdit or f is TextEdit   # SpinBox 内嵌 LineEdit 聚焦时也命中
+
+# §15 Ctrl+↑/↓：按清单显示序上下移选（_rows 插入序＝显示序；折叠组内隐藏行跳过）；
+# 经 _on_row_click 换条目＝复用脏守卫，取消丢弃则原地不动。
+func _nav_row(delta: int) -> void:
+	var ids: Array[String] = []
+	for id in _rows:
+		var b = _rows[id]
+		if b != null and is_instance_valid(b) and (not b.is_inside_tree() or b.is_visible_in_tree()):
+			ids.append(str(id))
+	if ids.is_empty():
+		return
+	var i := ids.find(_selected_id)
+	var j := (0 if delta > 0 else ids.size() - 1) if i < 0 else clampi(i + delta, 0, ids.size() - 1)
+	if ids[j] != _selected_id:
+		_on_row_click(ids[j])
+
+
+# —— §9 会话状态持久（user://editor_state.cfg，ConfigFile 按场景分节）——
+
+func _state_path() -> String:
+	return _state_path_override if _state_path_override != "" else STATE_PATH
+
+func _state_section() -> String:   # 分节键＝子类脚本文件名（ItemEditor/SkillEditor/…；场景互切各回各的状态）
+	var sp := str(get_script().resource_path)
+	return sp.get_file().get_basename() if sp != "" else "editor"
+
+func _state_save() -> void:
+	var cf := ConfigFile.new()
+	cf.load(_state_path())   # 加载失败＝首份/损坏：从空档开始（别的场景节丢了也只是回默认，无害）
+	var sec := _state_section()
+	cf.set_value(sec, "selected_id", _selected_id)
+	cf.set_value(sec, "search", _search.text if (_search != null and is_instance_valid(_search)) else "")
+	cf.set_value(sec, "folds", _fold_collapsed)
+	cf.save(_state_path())
+
+# 回填搜索词/折叠态（须在 _refresh_list 前调），返回待恢复的选中 id（""＝无；调用方在清单构建后 _shell_load）
+func _state_restore_ui() -> String:
+	var cf := ConfigFile.new()
+	if cf.load(_state_path()) != OK:
+		return ""
+	var sec := _state_section()
+	var folds = cf.get_value(sec, "folds", {})
+	if typeof(folds) == TYPE_DICTIONARY:
+		_fold_collapsed = folds
+	if _search != null and is_instance_valid(_search):
+		_search.text = str(cf.get_value(sec, "search", ""))
+	return str(cf.get_value(sec, "selected_id", ""))
 
 func _valid_id(id: String) -> bool:
 	if id == "":
@@ -455,3 +605,8 @@ func _shell_open_as_new(_entry: Dictionary) -> void:          # 副本以「新�
 
 func _shell_delete_confirm_text(id: String) -> String:        # 删除确认语
 	return "确认删除「%s」？此操作直接写盘。" % id
+
+# §18 可选钩子：谁在引用该 id（每行一个引用者描述，如「原型「强盗」(bandit)：装备 equip」）。
+# 删除确认与改名保存时消费；返回空＝不感知（CharacterEditor：地图 units 内嵌 proto 是快照非 id 引用，不算）。
+func _shell_referenced_by(_id: String) -> Array[String]:
+	return []
