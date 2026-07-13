@@ -3,11 +3,14 @@ extends "res://ListEditorShell.gd"
 ## 入口 StartMenu →「角色编辑器」；地图编辑器落子 / 沙盒 / 事件 spawn_unit 都读同一份（UnitFactory.all_prototypes）。
 ## CRUD 外壳（清单/行卡/保存删除流程/脏守卫）＝ListEditorShell 基类，本类只管身份条+角色卡。
 ##
-## 界面＝**真·角色状态页照搬**（复用 UnitStatusPanel 的 editor_mode）：
-##   · 右侧一张**可编辑角色状态卡**——头像点选、四维直接填、姓名/等级/特性、装备槽点选（按槽筛物品）、背包（暂不入档）；
-##     其余属性面板＝派生结果只读实时刷新（左改右看在卡内：四维在左、派生在右）。
-##   · 卡上方一条**身份/标签条**（角色卡不显示的编辑器元数据）：id / 默认阵营 / 精英 elite / 种族 / 其他标签 / 敌方 AI。
+## 界面＝**真·角色状态页照搬**（复用 UnitStatusPanel 的 editor_mode），两列布局（编辑器优化 §31）：
+##   · 左列一张**可编辑角色状态卡**——头像点选、姓名/等级/特性、装备槽点选（按槽筛物品）、背包（暂不入档）；
+##     属性面板＝派生结果只读实时刷新（四维直接填已删 🔒 属性重做：底值=种族底值，差异走 proto.stats 覆盖）。
+##   · 右列**编辑列**：身份/标签条（id/默认阵营/精英/种族/生物类型/派系/外观组/棋子图标/其他标签）
+##     ＋ 能力区（SkillDB 技能+等级 → u.skills）＋ 技艺区（已识/装载 → u.prof_known/prof_slots；xp 不在此编、随档原样）。
+##     敌方 AI 编辑已移交关卡编辑器（ai_* 按每处放置决定 🔒）；unit_to_proto 仍写 ai_threat 默认兜底。
 ## 编辑对象＝活的 scratch Unit（表单/卡直接改它）→ 保存时 UnitFactory.unit_to_proto(u) 落盘（复用单一序列化口）。
+## 悬空引用保值：SkillDB 查无的技能 / 不在已识的槽位引用 → ⚠ 行显示、_lost_* 兜回 proto（显式 ✕ 才删，不静默丢）。
 
 const UnitFactory := preload("res://UnitFactory.gd")
 const UnitStatusPanel := preload("res://UnitStatusPanel.gd")   # 复用真·角色状态页（editor_mode 可编辑）
@@ -17,6 +20,8 @@ const EquipSlots := preload("res://EquipSlots.gd")             # 槽位资格（
 const FactionDB := preload("res://FactionDB.gd")              # 派系单一数据源（派系下拉）
 const RaceDB := preload("res://RaceDB.gd")                    # 种族底值（种族下拉同时驱动 race_id+底值，🔒 属性重做 §3）
 const Unit := preload("res://Unit.gd")                        # 换种族先重置引擎基线（防旧种族键残留）
+const SkillDB := preload("res://SkillDB.gd")                  # 能力区下拉（技能注册表）
+const ProfDB := preload("res://ProfDB.gd")                    # 技艺区下拉（熟练度域注册表）
 # EditorTheme / EditorUI / TextureCache 由 ListEditorShell 继承
 
 const FACTIONS := ["player", "ally", "enemy", "neutral"]
@@ -34,6 +39,11 @@ const ICON_DIR := "res://icons/Unit_Icons"
 var _unit                    # 当前编辑的活 scratch Unit
 var _free_tags: Array = []   # 自由标签（char_* + 自定义）
 var _bag: Array = []         # 背包内容（8 格，"" = 空；仅编辑器显示，不入档）
+var _race_applied := ""      # 已生效的种族 tag（换种族确认 §34：取消时下拉回退到它）
+# 悬空引用保值（§7）：make_unit 组装承载不了的引用（SkillDB 查无的技能 / 不在已识的槽位）——
+# 编辑器侧兜住、_collect_proto 原样带回；⚠ 行显示、显式 ✕ 才真删（_ensure_meta_option 同律）。
+var _lost_skills: Dictionary = {}   # skill_id -> level（int）
+var _lost_slots: Array = []         # prof_id 列表
 # —— 外观组（成对绑定：一套外观 = 一张立绘 + 一个棋子；编辑器侧状态，经 proto 出入，不入 Unit）——
 # 每条 = {id, name, portrait, icon}。顶层 proto.portrait/icon 镜像「默认外观」→ 现有消费方零改动。
 # 引用/条件切换是后续步骤；本步只管在编辑器里增删/命名/管理多套。
@@ -46,6 +56,9 @@ var _strip: VBoxContainer
 var _panel                   # UnitStatusPanel 实例
 var _free_box: HBoxContainer
 var _file_dialog: FileDialog
+
+var _skill_box: VBoxContainer       # 能力 chip 行容器（§7）
+var _prof_box: VBoxContainer        # 技艺行容器（§7）
 
 var _f_id: LineEdit
 var _f_faction: OptionButton        # 阵营立场（默认；关卡可改）
@@ -87,23 +100,22 @@ func _shell_discard_text() -> String:
 func _shell_has_entry() -> bool:
 	return _unit != null
 
-# 右侧：身份/标签条（上） + 可编辑角色状态卡（下，填满）
+# 右侧两列（§31）：左＝角色状态卡（CARD_SIZE 定尺寸），右＝编辑列（身份条+能力+技艺，纵向滚动）。
+# 原纵排在 1080p 必滚动、~700px 横向闲置——卡片居左、编辑列右移吃掉闲置宽度。
+# ⚠ 只动本编辑器的容器编排，不碰 UnitStatusPanel（UI 并行线敏感区）。
 func _shell_build_right(split: HSplitContainer) -> void:
-	var right := VBoxContainer.new()
-	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	right.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	right.add_theme_constant_override("separation", 8)
-	split.add_child(right)
+	var cols := HBoxContainer.new()
+	cols.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	cols.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	cols.add_theme_constant_override("separation", 10)
+	split.add_child(cols)
 
-	_strip = VBoxContainer.new()
-	_strip.add_theme_constant_override("separation", 4)
-	right.add_child(EditorUI.panelize(_strip))
-
-	# 角色卡固定尺寸（CARD_SIZE），不随窗口拉伸；套 ScrollContainer 兜住窗口偏小时的溢出。
+	# 左列：角色卡固定尺寸（CARD_SIZE），不随窗口拉伸；套 ScrollContainer 兜住窗口偏小时的溢出。
 	var panel_scroll := ScrollContainer.new()
 	panel_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	panel_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	right.add_child(panel_scroll)
+	panel_scroll.size_flags_stretch_ratio = 1.3   # 卡 900px : 编辑列 ~700px
+	cols.add_child(panel_scroll)
 	_panel = UnitStatusPanel.new()
 	_panel.editor_mode = true
 	_panel.custom_minimum_size = UnitStatusPanel.CARD_SIZE   # 钉死卡片尺寸
@@ -114,6 +126,19 @@ func _shell_build_right(split: HSplitContainer) -> void:
 	_panel.on_bag_slot = _on_bag_slot
 	_panel.on_edit = _on_panel_edit
 	panel_scroll.add_child(_panel)
+
+	# 右列：编辑列（身份/标签条 + 能力 + 技艺；内容超高走纵向滚动、超宽走横向滚动不裁切）
+	var edit_scroll := ScrollContainer.new()
+	edit_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	edit_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	edit_scroll.custom_minimum_size = Vector2(430, 0)
+	cols.add_child(edit_scroll)
+	_strip = VBoxContainer.new()
+	_strip.add_theme_constant_override("separation", 4)
+	_strip.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var strip_panel := EditorUI.panelize(_strip)
+	strip_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	edit_scroll.add_child(strip_panel)
 
 
 # 原型清单：按阵营分折叠组（我方/友方/敌方/中立 + 其它）+ 组内按名字排序 + 行卡片（图标+名字/id）。
@@ -186,6 +211,7 @@ func _open_proto(proto: Dictionary, is_new: bool) -> void:
 	_is_new = is_new
 	_loaded_id = "" if is_new else str(proto.get("id", ""))
 	_bag = ["", "", "", "", "", "", "", ""]   # 背包每次载入清空（不入档）
+	_capture_lost_refs(proto)                 # 悬空引用保值（§7）：make_unit 承载不了的 skills/slots 引用兜进 _lost_*
 	_init_appearances(proto)                  # 外观组：从 proto 载入（缺省=旧 portrait/icon 合成一条 base）
 	_build_strip()
 	_rebuild_panel()
@@ -239,6 +265,7 @@ func _build_strip() -> void:
 	r2.add_theme_constant_override("separation", 8)
 	r2.add_child(_lbl("种族"))
 	_f_race = _cat_dropdown("race", _tag_in_cat("race"), _on_race_changed)
+	_race_applied = str(_f_race.get_selected_metadata())   # §34：记录已生效种族（取消换族时回退基准）
 	r2.add_child(_f_race)
 	r2.add_child(_lbl("生物类型"))
 	_f_biotype = _cat_dropdown("biotype", _tag_in_cat("biotype"), _on_biotype_changed)
@@ -273,6 +300,8 @@ func _build_strip() -> void:
 	r3.add_child(icon_browse)
 	_strip.add_child(r3)
 	_build_free_tag_ui()
+	_build_skill_ui()   # 能力区（§7：SkillDB 技能+等级 → u.skills）
+	_build_prof_ui()    # 技艺区（§7：已识/装载 → u.prof_known/prof_slots）
 
 
 func _rebuild_panel() -> void:
@@ -319,21 +348,47 @@ func _on_faction_changed() -> void:
 	_sync_tags()
 	_rebuild_panel()   # 阵营显示在卡片抬头，重建反映
 
+# 换种族＝按新种族重铺底值 → 会清空 proto.stats 差异覆盖（§34）：
+# 有差异先弹确认（EditorUI.confirm 工程惯例），取消＝下拉回退、数据不动；无差异直接换。
 func _on_race_changed() -> void:
+	if _unit == null:
+		_sync_tags()
+		return
+	var race := str(_f_race.get_selected_metadata())
+	if race == _race_applied:
+		_sync_tags()   # 种族没变（重选同项）——只同步 tags
+		return
+	var diff: Dictionary = UnitFactory.unit_to_proto(_unit).get("stats", {})   # 现存差异覆盖（unit_to_proto 同口径）
+	if diff.is_empty():
+		_apply_race_change(race)
+		return
+	var keys := []
+	for k in diff:
+		keys.append(str(k))
+	EditorUI.confirm(self,
+		"换种族将按新种族重铺底值，清空 %d 项属性差异覆盖：\n%s\n\n（差异覆盖=本角色对种族底值的手工修改，换族后不可恢复）" \
+			% [keys.size(), ", ".join(PackedStringArray(keys))],
+		"换种族并清空", func(): _apply_race_change(race),
+		func(): _select_meta(_f_race, _race_applied),   # 取消＝下拉回退（程序化 select 不发信号，tags 未动无需回滚）
+		"换种族确认")
+
+# 种族 tag 同时驱动种族底值 🔒（模块_属性成长_设计.md §3）：tag id 与 races.json id 同词表。
+# 换族＝先重置引擎基线、再叠新种族底值——防旧种族的键在新种族未定义时残留（对抗 review 发现）；
+# 未建档种族 → 仅记 tag、面板回引擎基线（race_id 清空）。
+# 底值重铺后补走成长轨（与 make_unit/unit_to_proto 的 _walk_growth 同一份 🔒 §10.6）——
+# 否则 level>1 角色换族后 u.stats 缺成长，保存＝负成长值烘焙进 stats 差异。
+func _apply_race_change(race: String) -> void:
+	_race_applied = race
 	_sync_tags()
-	# 种族 tag 同时驱动种族底值 🔒（模块_属性成长_设计.md §3）：tag id 与 races.json id 同词表。
-	# 换族＝先重置引擎基线、再叠新种族底值——防旧种族的键在新种族未定义时残留（对抗 review 发现）；
-	# 未建档种族 → 仅记 tag、面板回引擎基线（race_id 清空）。
-	if _unit != null:
-		var race := str(_f_race.get_selected_metadata())
-		var fresh = Unit.new()
-		for k in fresh.stats:
-			_unit.stats[k] = fresh.stats[k]
-		_unit.race_id = ""
-		if not RaceDB.get_race(race).is_empty():
-			RaceDB.apply_to(_unit, race)   # 内部写 race_id
-		_unit.init_vitals()
-		_rebuild_panel()
+	var fresh = Unit.new()
+	for k in fresh.stats:
+		_unit.stats[k] = fresh.stats[k]
+	_unit.race_id = ""
+	if not RaceDB.get_race(race).is_empty():
+		RaceDB.apply_to(_unit, race)   # 内部写 race_id
+	UnitFactory._walk_growth(_unit, maxi(1, int(_unit.level)))
+	_unit.init_vitals()
+	_rebuild_panel()
 
 func _on_biotype_changed() -> void:
 	_sync_tags()
@@ -702,10 +757,315 @@ func _rebuild_free_box() -> void:
 		_free_box.add_child(chip)
 
 
+# —— 能力 / 技艺编辑（§7；序列化承载＝UnitFactory：skills{id:level} / profs{known,slots,xp}）——
+
+# 载入时捕获 make_unit 承载不了的引用（悬空保值）：
+# · skills：SkillDB 查无 → learn_skill 返 0、u.skills 不收——不兜住则「打开即存」静默丢；
+# · profs.slots：id 不在 known → slot_prof 拒收——同理。known 的未登记 id 直接存活于 u.prof_known，无需兜。
+func _capture_lost_refs(proto: Dictionary) -> void:
+	_lost_skills = {}
+	var sk = proto.get("skills", [])
+	if typeof(sk) == TYPE_DICTIONARY:
+		for sid in sk:
+			if not _unit.skills.has(str(sid)):
+				_lost_skills[str(sid)] = maxi(1, int(sk[sid]))
+	elif typeof(sk) == TYPE_ARRAY:
+		for sid in sk:
+			if not _unit.skills.has(str(sid)):
+				_lost_skills[str(sid)] = 1
+	_lost_slots = []
+	var pf = proto.get("profs", {})
+	if typeof(pf) == TYPE_DICTIONARY:
+		for pid in pf.get("slots", []):
+			if not _unit.prof_slots.has(str(pid)) and not _lost_slots.has(str(pid)):
+				_lost_slots.append(str(pid))
+
+# 能力区：SkillDB 下拉 + 等级 + 添加 → chip 行（名字+等级 SpinBox+✕）
+func _build_skill_ui() -> void:
+	_strip.add_child(EditorUI.section_title("能力（技能 + 等级）"))
+	var adder := HBoxContainer.new()
+	adder.add_theme_constant_override("separation", 6)
+	var pick := OptionButton.new()
+	pick.custom_minimum_size = Vector2(220, 0)
+	pick.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	pick.add_item("（选技能…）")
+	pick.set_item_metadata(0, "")
+	var ids: Array = SkillDB.all().keys()
+	ids.sort()
+	for sid in ids:
+		var def = SkillDB.get_skill(str(sid))
+		var nm := str(def.get("name", sid)) if typeof(def) == TYPE_DICTIONARY else str(sid)
+		pick.add_item("%s（%s）" % [nm, str(sid)])
+		pick.set_item_metadata(pick.item_count - 1, str(sid))
+	adder.add_child(pick)
+	var lv := SpinBox.new()
+	lv.min_value = 1
+	lv.max_value = 9
+	lv.value = 1
+	lv.custom_minimum_size = Vector2(64, 0)
+	lv.tooltip_text = "学到的等级（超出该技能 max_level 自动封顶）"
+	adder.add_child(lv)
+	var addb := Button.new()
+	addb.text = "＋ 添加"
+	addb.pressed.connect(func():
+		var sid := str(pick.get_selected_metadata())
+		if sid != "":
+			_add_skill(sid, int(lv.value))
+		pick.select(0))
+	adder.add_child(addb)
+	_strip.add_child(adder)
+	_skill_box = VBoxContainer.new()
+	_skill_box.add_theme_constant_override("separation", 3)
+	_strip.add_child(_skill_box)
+	_rebuild_skill_box()
+
+func _rebuild_skill_box() -> void:
+	if _skill_box == null or not is_instance_valid(_skill_box):
+		return
+	for c in _skill_box.get_children():
+		c.queue_free()   # ⚠ queue_free：常由行内 ✕/SpinBox 信号中触发，free() 会当场释放发信号控件
+	if _unit == null:
+		return
+	if _unit.skills.is_empty() and _lost_skills.is_empty():
+		_skill_box.add_child(_dim_lbl("（无）"))
+		return
+	for sid_v in _unit.skills.keys():
+		var sid := str(sid_v)
+		var def = SkillDB.get_skill(sid)
+		var maxl := int(def.get("max_level", 1)) if typeof(def) == TYPE_DICTIONARY else 1
+		var nm := str(def.get("name", sid)) if typeof(def) == TYPE_DICTIONARY else sid
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 6)
+		var l := Label.new()
+		l.text = "%s（%s）" % [nm, sid]
+		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		l.clip_text = true
+		row.add_child(l)
+		var lv := SpinBox.new()
+		lv.min_value = 1
+		lv.max_value = maxi(1, maxl)
+		lv.value = _unit.skill_level(sid)
+		lv.editable = maxl > 1
+		lv.custom_minimum_size = Vector2(64, 0)
+		lv.tooltip_text = "等级（max_level=%d）" % maxl
+		var s2 := sid
+		lv.value_changed.connect(func(v): _set_skill_level(s2, int(v)))
+		row.add_child(lv)
+		var rm := Button.new()
+		rm.text = "✕"
+		rm.pressed.connect(func(): _remove_skill(s2))
+		row.add_child(rm)
+		_skill_box.add_child(row)
+	for sid_v in _lost_skills.keys():
+		var sid := str(sid_v)
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 6)
+		var warn := Label.new()
+		warn.text = "⚠ 未登记技能「%s」（等级 %d）——原样保留" % [sid, int(_lost_skills[sid])]
+		warn.add_theme_color_override("font_color", Color(0.95, 0.8, 0.35))
+		warn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		warn.clip_text = true
+		warn.tooltip_text = "SkillDB 查无此 id：保存时原样写回 proto，不静默丢；✕ 显式删除"
+		row.add_child(warn)
+		var rm := Button.new()
+		rm.text = "✕"
+		var s2 := sid
+		rm.pressed.connect(func(): _remove_skill(s2))
+		row.add_child(rm)
+		_skill_box.add_child(row)
+
+# 添加/置级共用：先摘净该技能（含被动修正），再逐级 learn_skill 到目标级——
+# 与 make_unit 的 {id:level} 组装同轨（learn_skill 内部按 max_level 封顶+重挂被动+按比例缩放 vitals）。
+func _set_skill_level(sid: String, lv: int) -> void:
+	if _unit == null or sid == "":
+		return
+	if _unit.skill_level(sid) == lv and _unit.skills.has(sid):
+		return
+	var hp0 := float(_unit.effective_stat_f("HP_max"))
+	var ar0 := float(_unit.effective_stat_f("armor_max"))
+	_unit.skills.erase(sid)
+	_unit.remove_modifiers_by_source("skill:" + sid)
+	_unit._rescale_vitals(hp0, ar0)   # 摘净后先按比例回落（unslot 同律）；learn 再逐级挂回
+	var got := 0
+	for _n in range(maxi(1, lv)):
+		got = int(_unit.learn_skill(sid))
+		if got == 0:
+			break
+	if got == 0:
+		_err("技能「%s」未登记（SkillDB 查无此 id）" % sid)
+	elif got < lv:
+		_info("技能「%s」等级封顶 %d（max_level）" % [sid, got])
+	_rebuild_skill_box()
+	_rebuild_panel()
+	_mark_dirty()
+
+func _add_skill(sid: String, lv: int) -> void:
+	if _unit == null or sid == "":
+		return
+	if _lost_skills.has(sid):
+		_lost_skills.erase(sid)   # 同 id 从悬空转正常（如该 id 后来登记进 SkillDB）
+	_set_skill_level(sid, maxi(1, lv))
+
+func _remove_skill(sid: String) -> void:
+	if _lost_skills.has(sid):
+		_lost_skills.erase(sid)
+	if _unit != null and _unit.skills.has(sid):
+		var hp0 := float(_unit.effective_stat_f("HP_max"))
+		var ar0 := float(_unit.effective_stat_f("armor_max"))
+		_unit.skills.erase(sid)
+		_unit.remove_modifiers_by_source("skill:" + sid)   # 被动桥修正一并摘除（source="skill:<id>"）
+		_unit._rescale_vitals(hp0, ar0)
+	_rebuild_skill_box()
+	_rebuild_panel()
+	_mark_dirty()
+
+# 技艺区：已识（known）行内带「装载」勾选（slots ⊆ known 天然成立）+ ✕；悬空槽位引用 ⚠ 行
+func _build_prof_ui() -> void:
+	_strip.add_child(EditorUI.section_title("技艺（熟练度域：已识 + 装载）"))
+	var adder := HBoxContainer.new()
+	adder.add_theme_constant_override("separation", 6)
+	var pick := OptionButton.new()
+	pick.custom_minimum_size = Vector2(220, 0)
+	pick.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	pick.add_item("（选技艺域…）")
+	pick.set_item_metadata(0, "")
+	var seen := {}
+	for pp in UnitStatusPanel.PROF_PAGES:   # 页名/序与技艺页 UI 同源 🔒（[显示名, page id]）
+		var page := str(pp[1])
+		var pids: Array = ProfDB.ids_by_page(page)
+		if pids.is_empty():
+			continue
+		pick.add_separator(str(pp[0]))
+		for pid in pids:
+			pick.add_item("%s（%s）" % [ProfDB.prof_name(str(pid)), str(pid)])
+			pick.set_item_metadata(pick.item_count - 1, str(pid))
+			seen[str(pid)] = true
+	var rest := []
+	for pid in ProfDB.all_ids():   # 数据新加页兜底（不落在三页词表外静默消失）
+		if not seen.has(str(pid)):
+			rest.append(str(pid))
+	if not rest.is_empty():
+		pick.add_separator("其他")
+		for pid in rest:
+			pick.add_item("%s（%s）" % [ProfDB.prof_name(str(pid)), str(pid)])
+			pick.set_item_metadata(pick.item_count - 1, str(pid))
+	adder.add_child(pick)
+	var addb := Button.new()
+	addb.text = "＋ 已识"
+	addb.tooltip_text = "加入已识列表（known）；「装载」勾选＝占槽挂阶段补正（烘焙 force，不做玩家槽位容量校验 🔒 §6）。\nxp（熟练度值）不在此编辑——随存档/战斗喂养，原样往返。"
+	addb.pressed.connect(func():
+		var pid := str(pick.get_selected_metadata())
+		if pid != "":
+			_add_prof_known(pid)
+		pick.select(0))
+	adder.add_child(addb)
+	_strip.add_child(adder)
+	_prof_box = VBoxContainer.new()
+	_prof_box.add_theme_constant_override("separation", 3)
+	_strip.add_child(_prof_box)
+	_rebuild_prof_box()
+
+func _rebuild_prof_box() -> void:
+	if _prof_box == null or not is_instance_valid(_prof_box):
+		return
+	for c in _prof_box.get_children():
+		c.queue_free()   # ⚠ queue_free：常由行内 ✕/勾选信号中触发
+	if _unit == null:
+		return
+	if _unit.prof_known.is_empty() and _lost_slots.is_empty():
+		_prof_box.add_child(_dim_lbl("（无）"))
+		return
+	for pid_v in _unit.prof_known:
+		var pid := str(pid_v)
+		var registered: bool = not ProfDB.get_prof(pid).is_empty()
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 6)
+		var l := Label.new()
+		if registered:
+			l.text = "%s（%s）" % [ProfDB.prof_name(pid), pid]
+		else:
+			l.text = "⚠ 未登记技艺「%s」——原样保留" % pid
+			l.add_theme_color_override("font_color", Color(0.95, 0.8, 0.35))
+			l.tooltip_text = "ProfDB 查无此 id：保存时原样写回；✕ 显式删除"
+		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		l.clip_text = true
+		row.add_child(l)
+		var slot_cb := CheckBox.new()
+		slot_cb.text = "装载"
+		slot_cb.button_pressed = _unit.prof_slots.has(pid)
+		slot_cb.tooltip_text = "占槽挂阶段补正（slots；烘焙 force 装载）"
+		var p2 := pid
+		slot_cb.toggled.connect(func(v: bool): _toggle_prof_slot(p2, v))
+		row.add_child(slot_cb)
+		var rm := Button.new()
+		rm.text = "✕"
+		rm.pressed.connect(func(): _remove_prof_known(p2))
+		row.add_child(rm)
+		_prof_box.add_child(row)
+	for pid_v in _lost_slots:
+		var pid := str(pid_v)
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 6)
+		var warn := Label.new()
+		warn.text = "⚠ 槽位引用「%s」不在已识列表——原样保留" % pid
+		warn.add_theme_color_override("font_color", Color(0.95, 0.8, 0.35))
+		warn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		warn.clip_text = true
+		warn.tooltip_text = "profs.slots 引用了 known 没有的 id（数据不一致）：保存时原样写回；✕ 显式删除"
+		row.add_child(warn)
+		var rm := Button.new()
+		rm.text = "✕"
+		var p2 := pid
+		rm.pressed.connect(func(): _remove_lost_slot(p2))
+		row.add_child(rm)
+		_prof_box.add_child(row)
+
+func _add_prof_known(pid: String) -> void:
+	if _unit == null or pid == "" or _unit.prof_known.has(pid):
+		return
+	_unit.prof_known.append(pid)   # 直灌（与 make_unit profs.known 同轨；资格校验属游戏内学习渠道，编辑器不设门）
+	if _lost_slots.has(pid):       # 悬空槽位引用因 known 补齐而转正 → 真装载
+		_lost_slots.erase(pid)
+		_unit.slot_prof(pid, true)
+	_rebuild_prof_box()
+	_rebuild_panel()
+	_mark_dirty()
+
+func _remove_prof_known(pid: String) -> void:
+	if _unit == null:
+		return
+	_unit.unslot_prof(pid)          # 先卸载（摘 prof:<id> 阶段补正）
+	_unit.prof_known.erase(pid)
+	_rebuild_prof_box()
+	_rebuild_panel()
+	_mark_dirty()
+
+func _toggle_prof_slot(pid: String, on: bool) -> void:
+	if _unit == null:
+		return
+	if on:
+		_unit.slot_prof(pid, true)   # force＝烘焙路径 🔒 §6（敌方/预设不走玩家槽位容量校验）
+	else:
+		_unit.unslot_prof(pid)
+	_rebuild_panel()
+	_mark_dirty()
+
+func _remove_lost_slot(pid: String) -> void:
+	_lost_slots.erase(pid)
+	_rebuild_prof_box()
+	_mark_dirty()
+
+func _dim_lbl(t: String) -> Label:
+	var l := Label.new()
+	l.text = t
+	l.add_theme_color_override("font_color", Color(0.55, 0.6, 0.66))
+	return l
+
+
 # —— 角色卡编辑回调（UnitStatusPanel editor_mode）——
 
 func _on_panel_edit() -> void:
-	_mark_dirty()   # 卡内改姓名/等级/四维/特性
+	_mark_dirty()   # 卡内改姓名/等级/特性（四维直接填已删 🔒 属性重做）
 
 # 立绘选择（角色卡头像「＋」回调）→ 走通用文件对话框
 func _on_portrait_pick() -> void:
@@ -764,56 +1124,45 @@ func _on_bag_slot(idx: int) -> void:
 			_rebuild_panel())    # 背包不入档 → 不标脏
 
 
-# —— 物品选择器（PopupPanel；allow_clear=显示「清空该槽」）——
+# —— 物品选择器（§23 升级：搜索过滤+行图标+悬停富预览；实现上收 EditorUI.item_picker——
+# DeployPanel（布置期单位编辑）将来可共用同款；本层只备料 entries。allow_clear=显示「清空该槽」）——
 
 func _open_item_picker(title: String, ids: Array, allow_clear: bool, on_pick: Callable) -> void:
-	var pop := PopupPanel.new()
-	add_child(pop)
-	var v := VBoxContainer.new()
-	v.custom_minimum_size = Vector2(360, 440)
-	v.add_theme_constant_override("separation", 6)
-	pop.add_child(v)
-	var t := Label.new()
-	t.text = title
-	t.add_theme_color_override("font_color", Color("#EBBC04"))
-	v.add_child(t)
-	if allow_clear:
-		var cb := Button.new()
-		cb.text = "✕ 清空该槽"
-		cb.pressed.connect(func():
-			on_pick.call("")
-			pop.queue_free())
-		v.add_child(cb)
-	var list := ItemList.new()
-	list.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	var arr: Array = []
+	var entries: Array = []
 	for id in ids:
 		var it = ItemDB.get_item(str(id))
 		if it == null:
 			continue
-		list.add_item("%s（%s）" % [str(it.get("name", id)), str(id)])
 		var hex := _rarity_hex(it)
-		if hex != "":
-			list.set_item_custom_fg_color(list.item_count - 1, Color(hex))
-		arr.append(str(id))
-	if arr.is_empty():
-		v.add_child(_lbl("（无可选物品——先在物品编辑器造）"))
-	list.item_selected.connect(func(i: int):
-		if i >= 0 and i < arr.size():
-			on_pick.call(str(arr[i]))
-		pop.queue_free())
-	v.add_child(list)
-	var cancel := Button.new()
-	cancel.text = "取消"
-	cancel.pressed.connect(func(): pop.queue_free())
-	v.add_child(cancel)
-	pop.popup_centered(Vector2i(400, 480))
+		entries.append({
+			"id": str(id),
+			"label": "%s（%s）" % [str(it.get("name", id)), str(id)],
+			"icon": TextureCache.get_tex(str(it.get("icon", ""))),
+			"color": Color(hex) if hex != "" else null,
+			"item": it,   # 悬停富预览（ItemTooltip.render）
+		})
+	EditorUI.item_picker(self, title, entries, allow_clear, on_pick)
 
 
 # —— 保存 / 删除 ——
 
 func _collect_proto() -> Dictionary:
-	var proto := UnitFactory.unit_to_proto(_unit)   # _unit 已持全部编辑态（含 tags/AI）；工厂单一序列化口
+	var proto := UnitFactory.unit_to_proto(_unit)   # _unit 已持全部编辑态（含 tags/skills/profs；AI 字段＝默认兜底，编辑权在关卡编辑器）
+	# 悬空引用保值（§7）：显式 ✕ 删除前，_lost_* 原样带回 proto——「打开即存」不丢未登记引用。
+	if not _lost_skills.is_empty():
+		var sk: Dictionary = proto.get("skills", {})
+		for sid in _lost_skills:
+			if not sk.has(sid):
+				sk[sid] = int(_lost_skills[sid])
+		proto["skills"] = sk
+	if not _lost_slots.is_empty():
+		var pf: Dictionary = proto.get("profs", {})
+		var sl: Array = pf.get("slots", [])
+		for pid in _lost_slots:
+			if not sl.has(pid):
+				sl.append(pid)
+		pf["slots"] = sl
+		proto["profs"] = pf
 	# 外观组：编辑器侧状态挂回 proto（Unit/Factory 不参与）。
 	# 只在 >1 套时写 appearances/default_appearance——单套即旧格式（顶层 portrait/icon 已由 _unit 携带），零 diff 噪音。
 	if _appearances.size() > 1:

@@ -1,5 +1,6 @@
 extends SceneTree
-## 角色编辑器回归：UnitFactory 原型库读写往返 + unit_to_proto AI 字段 + CharacterEditor 表单构建冒烟。
+## 角色编辑器回归：UnitFactory 原型库读写往返 + unit_to_proto AI 字段 + CharacterEditor 表单构建冒烟
+## + 能力/技艺编辑（§7：skills/profs 编辑往返、悬空引用保值）+ 换种族确认（§34）+ 物品选择器（§23）。
 ## 运行：..._console.exe --headless --path "D:/1战棋" -s res://tools/test_chareditor.gd（退出码 0=PASS）
 ## ⚠️ 本测试会临时写 data/unit_prototypes.json，结尾**逐字节还原原文**——跑完文件零 diff。
 
@@ -9,6 +10,8 @@ const EquipSlots := preload("res://EquipSlots.gd")
 const UnitStatusPanel := preload("res://UnitStatusPanel.gd")
 const TagDB := preload("res://TagDB.gd")
 const FactionDB := preload("res://FactionDB.gd")
+const SkillDB := preload("res://SkillDB.gd")
+const EditorUI := preload("res://EditorUI.gd")
 
 const PROTOS_PATH := "res://data/unit_prototypes.json"
 const TMP_ID := "__ce_test_tmp__"
@@ -114,6 +117,22 @@ func _initialize() -> void:
 	var lp2 := UnitFactory.unit_to_proto(lu2)
 	ck(int((lp2.get("stats", {}) as Dictionary).get("HP_max", 0)) == 99, "level>1 + 手工覆盖：差异仍保留")
 
+	# 5.8) skills/profs 序列化往返（§7 编辑入口的承载面；内存往返不写盘）
+	var sk_all: Array = SkillDB.all().keys()
+	ck(not sk_all.is_empty(), "SkillDB 有技能条目")
+	if not sk_all.is_empty():
+		var s0 := str(sk_all[0])
+		var sp := {"id": "sp_probe", "name": "技兵", "default_faction": "enemy", "tags": ["human"],
+			"race": "human", "level": 1, "skills": {s0: 1},
+			"profs": {"known": ["style_one_handed"], "slots": ["style_one_handed"],
+				"xp": {"style_one_handed": 120}}}
+		var su = UnitFactory.make_unit(sp, "enemy", 0, 0)
+		var sb := UnitFactory.unit_to_proto(su)
+		ck(int((sb.get("skills", {}) as Dictionary).get(s0, 0)) == 1, "skills{id:level} 往返")
+		ck(((sb.get("profs", {}) as Dictionary).get("known", []) as Array).has("style_one_handed"), "profs.known 往返")
+		ck(((sb.get("profs", {}) as Dictionary).get("slots", []) as Array).has("style_one_handed"), "profs.slots 往返")
+		ck(int(((sb.get("profs", {}) as Dictionary).get("xp", {}) as Dictionary).get("style_one_handed", 0)) == 120, "profs.xp 往返")
+
 	# 6) 还原原文（保证零 diff），并校验确实还原
 	_write_text(orig)
 	ck(_read_text() == orig, "原型文件逐字节还原")
@@ -127,6 +146,16 @@ func _initialize() -> void:
 	else:
 		print("=== 失败 %d 项 ===" % _fail)
 		quit(1)
+
+# 树内按引擎类名找首个子孙节点（选择器弹窗内找 ItemList/LineEdit）
+func _find_child_by_class(n: Node, klass: String) -> Node:
+	if n.get_class() == klass:
+		return n
+	for c in n.get_children():
+		var r := _find_child_by_class(c, klass)
+		if r != null:
+			return r
+	return null
 
 func _test_scene() -> void:
 	var packed = load("res://CharacterEditor.tscn")
@@ -267,6 +296,104 @@ func _test_scene() -> void:
 				slot_note = "off_hand=%s" % str(id)
 			break
 	print("  槽位定向装备：", slot_note)
+
+	# —— 能力/技艺编辑（编辑器优化 §7）——
+	var sk_ids: Array = SkillDB.all().keys()
+	ed._do_new_unit()
+	if not sk_ids.is_empty():
+		var sid := str(sk_ids[0])
+		ed._add_skill(sid, 1)
+		ck(ed._unit.skills.has(sid), "添加能力 → unit.skills 承载")
+		var cp: Dictionary = ed._collect_proto()
+		ck(int((cp.get("skills", {}) as Dictionary).get(sid, 0)) == 1, "能力写进 proto.skills{id:level}")
+		ed._remove_skill(sid)
+		ck(not ed._unit.skills.has(sid), "删除能力 → unit.skills 移除")
+		var leftover := 0
+		for m in ed._unit.modifiers:
+			if str(m.get("source", "")) == "skill:" + sid:
+				leftover += 1
+		ck(leftover == 0, "删除能力 → skill:<id> 被动修正一并摘除")
+	# 多级技能：指定等级添加 + chip 改级（摘净重学）
+	var multi := ""
+	for k in sk_ids:
+		var d0 = SkillDB.get_skill(str(k))
+		if typeof(d0) == TYPE_DICTIONARY and int(d0.get("max_level", 1)) >= 2:
+			multi = str(k)
+			break
+	if multi != "":
+		ed._add_skill(multi, 2)
+		ck(int(ed._unit.skill_level(multi)) == 2, "添加能力可指定等级（level=2）")
+		ed._set_skill_level(multi, 1)
+		ck(int(ed._unit.skill_level(multi)) == 1, "chip 改级 → 降级生效（摘净重学）")
+		ed._remove_skill(multi)
+	else:
+		print("  （技能库无 max_level≥2 条目，改级 case 跳过）")
+
+	# 技艺 known/slots 编辑 + proto 往返
+	ed._add_prof_known("style_two_handed")
+	ck(ed._unit.prof_known.has("style_two_handed"), "＋已识 → prof_known")
+	ed._toggle_prof_slot("style_two_handed", true)
+	ck(ed._unit.prof_slots.has("style_two_handed"), "装载 → prof_slots（force 烘焙）")
+	var pp2: Dictionary = ed._collect_proto()
+	ck(((pp2.get("profs", {}) as Dictionary).get("known", []) as Array).has("style_two_handed"), "known 写进 proto.profs")
+	ck(((pp2.get("profs", {}) as Dictionary).get("slots", []) as Array).has("style_two_handed"), "slots 写进 proto.profs")
+	ed._toggle_prof_slot("style_two_handed", false)
+	ck(not ed._unit.prof_slots.has("style_two_handed"), "卸载 → prof_slots 移除")
+	ed._remove_prof_known("style_two_handed")
+	ck(not ed._unit.prof_known.has("style_two_handed"), "删已识 → prof_known 移除")
+	ck(not ed._collect_proto().has("profs"), "清空后 proto 不写 profs 键（旧档零噪音）")
+
+	# 悬空引用保值（§7）：SkillDB 查无的技能 / 不在已识的槽位 → 载入不丢、显式删除才消失
+	ed._open_proto({"id": "dangling_probe", "name": "悬空", "default_faction": "enemy",
+		"tags": ["human"], "race": "human", "level": 1,
+		"skills": {"__no_such_skill__": 2},
+		"profs": {"known": ["style_one_handed"], "slots": ["__no_such_prof__", "style_one_handed"],
+			"xp": {"style_one_handed": 150}}}, true)
+	ck(ed._lost_skills.has("__no_such_skill__"), "悬空技能捕获（SkillDB 查无）")
+	ck(ed._lost_slots.has("__no_such_prof__"), "悬空槽位捕获（不在已识）")
+	ck(ed._unit.prof_known.has("style_one_handed"), "已识技艺载入")
+	ck(ed._unit.prof_slots.has("style_one_handed"), "合法槽位载入")
+	var dp: Dictionary = ed._collect_proto()
+	ck(int((dp.get("skills", {}) as Dictionary).get("__no_such_skill__", 0)) == 2, "悬空技能保值写回（等级保真）")
+	ck(((dp.get("profs", {}) as Dictionary).get("slots", []) as Array).has("__no_such_prof__"), "悬空槽位保值写回")
+	ck(int(((dp.get("profs", {}) as Dictionary).get("xp", {}) as Dictionary).get("style_one_handed", 0)) == 150, "prof xp 不编辑、原样往返")
+	ed._remove_skill("__no_such_skill__")
+	ed._remove_lost_slot("__no_such_prof__")
+	var dp2: Dictionary = ed._collect_proto()
+	ck(not (dp2.get("skills", {}) as Dictionary).has("__no_such_skill__"), "显式删除悬空技能后不再写回")
+	ck(not ((dp2.get("profs", {}) as Dictionary).get("slots", []) as Array).has("__no_such_prof__"), "显式删除悬空槽位后不再写回")
+
+	# —— 换种族确认（§34）：有差异覆盖 → 先确认不立即清；确认路径清差异 + 成长轨重走（level>1 零 diff）——
+	ed._open_proto({"id": "race_probe", "name": "换族兵", "default_faction": "enemy",
+		"tags": ["human"], "race": "human", "level": 5, "stats": {"HP_max": 99}}, true)
+	ck(int((ed._collect_proto().get("stats", {}) as Dictionary).get("HP_max", 0)) == 99, "载入带 stats 差异覆盖")
+	ed._select_meta(ed._f_race, "lizardmen")
+	ed._on_race_changed()
+	ck(int((ed._collect_proto().get("stats", {}) as Dictionary).get("HP_max", 0)) == 99, "有差异换族先确认——未确认不清空")
+	ed._apply_race_change("lizardmen")   # ＝确认路径语义
+	var rp: Dictionary = ed._collect_proto()
+	ck(str(rp.get("race", "")) == "lizardmen", "确认后 race_id 换新")
+	ck((rp.get("stats", {}) as Dictionary).is_empty(), "确认后差异清空 + 成长轨重走（level=5 存回零 diff）")
+
+	# —— 物品选择器（§23：EditorUI.item_picker——搜索过滤+行图标；DeployPanel 将来可共用）——
+	var picked := [""]
+	var pk_entries := [
+		{"id": "sword_a", "label": "铁剑（sword_a）", "icon": null, "color": null, "item": null},
+		{"id": "bow_b", "label": "猎弓（bow_b）", "icon": null, "color": null, "item": null},
+	]
+	var pop := EditorUI.item_picker(ed, "测试选择器", pk_entries, true, func(id): picked[0] = str(id))
+	await process_frame
+	var plist := _find_child_by_class(pop, "ItemList") as ItemList
+	var psearch := _find_child_by_class(pop, "LineEdit") as LineEdit
+	ck(plist != null and psearch != null, "选择器含列表+搜索框")
+	if plist != null and psearch != null:
+		ck(plist.item_count == 2, "选择器列出全部条目")
+		psearch.text = "bow"
+		psearch.text_changed.emit("bow")   # 程序化设 text 不发 text_changed，手动触发过滤
+		ck(plist.item_count == 1, "搜索过滤生效（bow → 1 行）")
+		plist.item_selected.emit(0)
+		ck(picked[0] == "bow_b", "过滤后点选回传 id")
+	await process_frame
 
 	ed.queue_free()
 	await process_frame

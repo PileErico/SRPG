@@ -8,6 +8,7 @@ extends RefCounted
 const EditorTheme := preload("res://EditorTheme.gd")
 const TagDB := preload("res://TagDB.gd")       # 自由 tag 区 chip 中文标签（tag 单一词表）
 const StatMeta := preload("res://StatMeta.gd") # 修正行 stat 中文标签
+const ItemTooltip := preload("res://ItemTooltip.gd")   # 物品选择器悬停富预览（通用渲染组件复用）
 
 # —— 基础构件 ——
 
@@ -610,6 +611,97 @@ static func collect_when_row(entry: Dictionary, errs: Array) -> Dictionary:
 # 数值归一：整数值落 int（JSON 往返 5 与 5.0 字节不同——与 SkillEditor._num / JsonRegistry.intify 同口径）
 static func _numv(v: float):
 	return int(v) if v == floorf(v) else v
+
+
+# —— 物品选择器弹窗（编辑器优化 §23：搜索过滤 + 行图标 + 悬停富预览）——
+# 现用：CharacterEditor 装备/背包选物；DeployPanel（布置期单位编辑）将来可共用同款（宿主备料 entries 即接）。
+# entries=[{id, label, icon(Texture2D|null), color(Color|null), item(Dictionary|null)}, ...]；
+# item 非空 → 悬停该行时右栏 ItemTooltip.render 富预览（接不上传 null 即纯列表）。
+# allow_clear → 顶部「✕ 清空该槽」（on_pick 回传 ""）；点行回传 id 并关闭。返回 PopupPanel（测试/宿主可查）。
+static func item_picker(host: Node, title: String, entries: Array, allow_clear: bool, on_pick: Callable) -> PopupPanel:
+	var pop := PopupPanel.new()
+	host.add_child(pop)
+	var v := VBoxContainer.new()
+	v.custom_minimum_size = Vector2(700, 480)
+	v.add_theme_constant_override("separation", 6)
+	pop.add_child(v)
+	var t := Label.new()
+	t.text = title
+	t.add_theme_color_override("font_color", Color("#EBBC04"))
+	v.add_child(t)
+	var search := LineEdit.new()
+	search.placeholder_text = "🔍 过滤 名字 / id"
+	search.clear_button_enabled = true
+	v.add_child(search)
+	if allow_clear:
+		var cb := Button.new()
+		cb.text = "✕ 清空该槽"
+		cb.pressed.connect(func():
+			on_pick.call("")
+			pop.queue_free())
+		v.add_child(cb)
+	var hb := HBoxContainer.new()
+	hb.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	hb.add_theme_constant_override("separation", 8)
+	v.add_child(hb)
+	var list := ItemList.new()
+	list.custom_minimum_size = Vector2(340, 0)
+	list.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	list.fixed_icon_size = Vector2i(24, 24)
+	hb.add_child(list)
+	var preview := VBoxContainer.new()   # 悬停行的富预览容器（ItemTooltip.render 挂这里）
+	preview.custom_minimum_size = Vector2(320, 0)
+	preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	hb.add_child(preview)
+	var ph := Label.new()
+	ph.text = "（悬停物品行看详情）"
+	ph.add_theme_color_override("font_color", Color(0.55, 0.6, 0.66))
+	preview.add_child(ph)
+	var shown: Array = []   # 过滤后可见 entries（与 list 行号一一对应）
+	var refill := func():
+		list.clear()
+		shown.clear()
+		var q := search.text.strip_edges().to_lower()
+		for e in entries:
+			var eid := str(e.get("id", ""))
+			var lbl := str(e.get("label", eid))
+			if q != "" and not (lbl.to_lower().contains(q) or eid.to_lower().contains(q)):
+				continue
+			var icon = e.get("icon")
+			list.add_item(lbl, icon if icon is Texture2D else null)
+			var col = e.get("color")
+			if col is Color:
+				list.set_item_custom_fg_color(list.item_count - 1, col)
+			shown.append(e)
+		if shown.is_empty():
+			list.add_item("（无匹配物品——先在物品编辑器造 / 换关键词）")
+			list.set_item_disabled(0, true)
+	refill.call()
+	search.text_changed.connect(func(_t2): refill.call())
+	var hovered := [-1]   # 悬停行号（数组包一层供闭包改写）
+	list.gui_input.connect(func(ev: InputEvent):
+		if ev is InputEventMouseMotion:
+			var idx := list.get_item_at_position(ev.position, true)
+			if idx == hovered[0]:
+				return
+			hovered[0] = idx
+			for c in preview.get_children():
+				c.queue_free()
+			if idx >= 0 and idx < shown.size():
+				var it = (shown[idx] as Dictionary).get("item")
+				if it is Dictionary:
+					preview.add_child(ItemTooltip.render(it)))
+	list.item_selected.connect(func(i: int):
+		if i >= 0 and i < shown.size():
+			on_pick.call(str((shown[i] as Dictionary).get("id", "")))
+		pop.queue_free())
+	var cancel := Button.new()
+	cancel.text = "取消"
+	cancel.pressed.connect(func(): pop.queue_free())
+	v.add_child(cancel)
+	pop.popup_centered(Vector2i(720, 520))
+	return pop
 
 
 # —— 通用分段场景切换（workshop_switch 的参数化版）——
