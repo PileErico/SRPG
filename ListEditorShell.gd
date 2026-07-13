@@ -389,17 +389,9 @@ func _ensure_meta_option(ob: OptionButton, key: String) -> void:
 	ob.add_item("⚠ 悬空引用：%s" % key)
 	ob.set_item_metadata(ob.item_count - 1, key)
 
-# OptionButton 按 metadata 选中；找不到＝回退第一个有效项（跳过分隔/占位 null）
+# OptionButton 按 metadata 选中；实现上收 EditorUI.select_meta（单一实现，when 行/裸下拉同用）
 func _select_meta(ob: OptionButton, key) -> void:
-	for i in ob.item_count:
-		var m = ob.get_item_metadata(i)
-		if m != null and str(m) == str(key):
-			ob.select(i)
-			return
-	for i in ob.item_count:
-		if not ob.is_item_disabled(i) and ob.get_item_metadata(i) != null:
-			ob.select(i)
-			return
+	EditorUI.select_meta(ob, key)
 
 
 # —— 子类钩子（override）——

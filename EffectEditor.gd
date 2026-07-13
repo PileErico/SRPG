@@ -4,6 +4,10 @@ extends "res://ListEditorShell.gd"
 ## 与技能编辑器成对（标题栏分段互切）：技能 apply_effect / 武器 inflict 引用这里的效果 id。
 ## 「可编不可跑」警示：duration.per_stat 现引擎只读 base；sustain_by_caster 预留——均黄条，字段保留原样。
 ## （round_end tick 已实现 2026-07-11：BattleState._wrap_round 先 tick 再重排出手序，🔒 §2.2 过渡序。）
+## 矛盾组合联动（§25 提案 2026-07-12）：resist 模型缺 fort_* tag（豁免纯 tag 归轨 🔒 §2.8/§5，缺 tag＝静默按
+##   fixed 走）→ 黄条；on_expire_apply 连锁沿 EffectDB 走链、成环/悬空→ 黄条；stackable/permanent 不适用位灰化。
+## 收集校验与 lint 对齐（编辑器先拦，别让 lint 红）：tags 须在 tags.json 注册（规则6）；其余形状（kind/模型/
+##   数值）由控件天然保证；悬空 on_expire_apply 沿 §3-1 保值决策只警示不拦（lint 10c 另行标红）。
 
 const EffectDB := preload("res://EffectDB.gd")
 const TagDB := preload("res://TagDB.gd")
@@ -40,6 +44,8 @@ var _w_maxstacks: SpinBox
 var _w_dot: SpinBox
 var _w_hot: SpinBox
 var _w_expire_apply: OptionButton
+var _w_model_warn: Label    # §25：resist↔fort tag 错配黄条（模型/标签任一变动即刷新）
+var _w_chain_hint: Label    # §25：on_expire_apply 连锁链提示（成环/悬空警示）
 
 
 # —— 外壳钩子（ListEditorShell）——
@@ -184,20 +190,26 @@ func _build_form() -> void:
 		opts.append(["sep", c])
 		for id in ids:
 			opts.append([id, "%s（%s）" % [TagDB.cn(id), id]])
-	EditorUI.add_tag_list(_form, "tags", _tags, opts, _mark_dirty)
+	EditorUI.add_tag_list(_form, "tags", _tags, opts, _on_tags_changed)
 
 	_form.add_child(EditorUI.section_title("时长"))
 	_w_dmodel = _dropdown_pairs("时长模型 duration_model（🔒 §2.8）", DURATION_MODELS, str(_current.get("duration_model", "fixed")))
+	_w_dmodel.item_selected.connect(func(_i): _update_links())
+	_w_model_warn = _warn("")   # resist↔fort tag 错配黄条（文案在 _update_links 联动填）
+	_w_model_warn.visible = false
+	_form.add_child(_w_model_warn)
 	var dur = _current.get("duration", {})
 	var dur_base := float(dur.get("base", 0)) if typeof(dur) == TYPE_DICTIONARY else float(dur if typeof(dur) in [TYPE_INT, TYPE_FLOAT] else 0)
 	_w_duration = EditorUI.add_spin(_form, "时长 duration.base（回合）", dur_base, 0, 99, 1, _mark_dirty)
 	if typeof(dur) == TYPE_DICTIONARY and typeof(dur.get("per_stat", {})) == TYPE_DICTIONARY and not (dur.get("per_stat", {}) as Dictionary).is_empty():
 		_form.add_child(_warn("duration.per_stat 非空——现引擎只读 base（公式求值待接 resolve_num），字段保留原样"))
 	_w_perm = EditorUI.add_check(_form, "永久 permanent（不递减不到期）", bool(_current.get("permanent", false)), _mark_dirty)
+	_w_perm.toggled.connect(func(_v): _update_links())
 	_w_timing = _dropdown_pairs("到期时点 expire_timing", EXPIRE_TIMINGS, str(_current.get("expire_timing", "turn_end")))
 
 	_form.add_child(EditorUI.section_title("叠层 / 每回合结算"))
 	_w_stackable = EditorUI.add_check(_form, "可叠层 stackable（关＝同 id 重置时长不叠）", bool(_current.get("stackable", false)), _mark_dirty)
+	_w_stackable.toggled.connect(func(_v): _update_links())
 	_w_maxstacks = EditorUI.add_spin(_form, "叠层上限 max_stacks（0=无硬上限）", float(_current.get("max_stacks", 0)), 0, 99, 1, _mark_dirty)
 	_w_dot = EditorUI.add_spin(_form, "持续伤害 dot_pct_max_hp（%最大生命/回合末；无视护甲）", float(_current.get("dot_pct_max_hp", 0)), 0, 100, 1, _mark_dirty)
 	_w_hot = EditorUI.add_spin(_form, "持续回复 hot_flat（固定值/回合末）", float(_current.get("hot_flat", 0)), 0, 999, 1, _mark_dirty)
@@ -230,13 +242,82 @@ func _build_form() -> void:
 		_w_expire_apply.set_item_metadata(_w_expire_apply.item_count - 1, str(id))
 	_ensure_meta_option(_w_expire_apply, str(_current.get("on_expire_apply", "")))   # 悬空引用保值（§3-1 守卫上提后补挂）
 	_select_meta(_w_expire_apply, str(_current.get("on_expire_apply", "")))
-	_w_expire_apply.item_selected.connect(func(_i): _mark_dirty())
+	_w_expire_apply.item_selected.connect(func(_i):
+		_mark_dirty()
+		_update_links())
 	_form.add_child(EditorUI.field_row("消失时施加 on_expire_apply", _w_expire_apply))
+	_w_chain_hint = _warn("")   # 连锁链提示（文案在 _update_chain_hint 联动填）
+	_w_chain_hint.visible = false
+	_form.add_child(_w_chain_hint)
 
 	if str(_current.get("sustain_by_caster", "")) != "" and bool(_current.get("sustain_by_caster", false)):
 		_form.add_child(_warn("sustain_by_caster 预留（光环轮）——现不生效，字段保留原样"))
 
+	_update_links()   # §25 矛盾组合初始联动（灰化/黄条按载入值刷一遍）
 	_dirty = false   # 建表单信号可能置脏——载入完成＝干净基线
+
+# tag 增删回调：置脏 + 刷矛盾联动（resist↔fort tag 黄条跟着标签走）
+func _on_tags_changed() -> void:
+	_mark_dirty()
+	_update_links()
+
+# §25 矛盾组合联动：改到哪刷到哪——只提示/灰化不动值（勿静默清数据；收集仍读原值，字节级保留）
+func _update_links() -> void:
+	if _w_dmodel == null or not is_instance_valid(_w_dmodel):
+		return
+	# 1) resist 模型缺 fort_* tag：豁免纯按 tag 归轨（🔒 §2.8/§5，引擎不读 duration_model）——缺 tag＝静默按 fixed 走
+	var has_fort: bool = _tags.has("fort_will") or _tags.has("fort_body")
+	if str(_w_dmodel.get_selected_metadata()) == "resist" and not has_fort:
+		_w_model_warn.text = "⚠ resist 模型但 tags 缺 fort_will/fort_body——豁免按 tag 归轨（🔒 §2.8），缺维度 tag＝静默按 fixed 走：请补一枚 fort_* tag"
+		_w_model_warn.visible = true
+	else:
+		_w_model_warn.visible = false
+	# 2) 不适用位灰化：max_stacks 只在可叠层时生效；permanent 不递减不到期＝时长/到期时点无意义
+	_w_maxstacks.editable = _w_stackable.button_pressed
+	_w_duration.editable = not _w_perm.button_pressed
+	_w_timing.disabled = _w_perm.button_pressed
+	_update_chain_hint()
+
+# on_expire_apply 连锁链提示（决策20 两段式）：沿 EffectDB 走链——成环（含二环 A→B→A，运行时互相续挂
+# 无限循环）/悬空引用＝黄条警示；多段直链＝纯说明。lint 无环规则故不拦存（口径对齐：只提示）。
+func _update_chain_hint() -> void:
+	var sel := str(_w_expire_apply.get_selected_metadata())
+	if sel == "":
+		_w_chain_hint.visible = false
+		return
+	var self_id := _w_id.text.strip_edges() if (_w_id != null and is_instance_valid(_w_id)) else _loaded_id
+	var names := [self_id if self_id != "" else "（本效果）"]
+	var seen := {}
+	if self_id != "":
+		seen[self_id] = true
+	var cur := sel
+	var cycle := false
+	var dangling := false
+	for _hop in 8:   # 上限防超长链刷屏（8 段足够暴露环）
+		names.append(cur)
+		if seen.has(cur):
+			cycle = true
+			break
+		seen[cur] = true
+		var d = EffectDB.get_effect(cur)
+		if d == null:
+			dangling = true
+			break
+		cur = str(d.get("on_expire_apply", ""))
+		if cur == "":
+			break
+	var chain := " → ".join(PackedStringArray(names))
+	if cycle:
+		_w_chain_hint.text = "⚠ 到期连锁成环：%s——互相续挂＝运行时无限循环，请断开一环" % chain
+		_w_chain_hint.visible = true
+	elif dangling:
+		_w_chain_hint.text = "⚠ 连锁引用不存在：%s（悬空保值可存盘，lint 规则10c 会红）" % chain
+		_w_chain_hint.visible = true
+	elif names.size() > 2:
+		_w_chain_hint.text = "⚠ 到期连锁多段：%s（两段式引信语义，确认是有意为之）" % chain
+		_w_chain_hint.visible = true
+	else:
+		_w_chain_hint.visible = false
 
 func _warn(text: String) -> Label:
 	var l := Label.new()
@@ -299,6 +380,12 @@ func _build_icon_row() -> void:
 # —— 收集（duplicate+按键更新＝保键序/未编辑字段）——
 
 func _shell_collect() -> Dictionary:
+	# —— lint 同步校验（§25：编辑器先拦，别让 lint 红）——规则6：tag 承载键成员须在 tags.json 注册
+	# （手动输入是唯一漏点——下拉/控件天然合规；kind/模型/数值等形状由控件保证，无需重检）
+	for t in _tags:
+		if TagDB.get_tag(str(t)) == null:
+			_err("tag「%s」未注册（data/tags.json＝唯一词表，lint 规则6 会红）——先登记再用" % str(t))
+			return {}
 	var out: Dictionary = _current.duplicate(true)
 	out["id"] = _w_id.text.strip_edges()
 	out["name"] = _w_name.text.strip_edges()

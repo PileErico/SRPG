@@ -2,10 +2,11 @@ extends "res://ListEditorShell.gd"
 ## 技能编辑器（能力 Ability）：拼装/调参 data/skills.json 条目，写盘走 SkillDB.save_skill。
 ## 🔒 设计真值＝docs/模块_技能_设计.md（schema §2.1 / 效果块调色盘 §3 / 公式 §2.4 / 护栏 §10）。
 ## 本质＝用预设「效果块」模板拼装技能（非通用 DSL）；复杂专属逻辑走 scripted 逃生舱。
-## v1 可编块：attack(单 hit+公式) / heal / passive_stat_mods / apply_effect / scripted。
+## v1 可编块：attack(单 hit+公式) / heal / passive_stat_mods / conditional_mod / apply_effect / scripted。
 ## 「可编不可跑」护栏（§10）：多 hits / riders＝阶段6 禁入库（块锁定只读）；weapon_source＝3b、
-##   passive_stat_mods＝阶段4 均已生效（绿条说明）；scripted 需代码注册——黄条警示；未编辑高级字段保存原样保留。
-##   conditional_mod 块＝阶段4 引擎可跑（when 词表 §4 v1），编辑器表单待做——现存原样保留（未知块黄条）。
+##   passive_stat_mods / conditional_mod＝阶段4 均已生效（绿条说明）；scripted 需代码注册——黄条警示；
+##   未编辑高级字段保存原样保留。conditional_mod 的 when 行控件在 EditorUI（词表 §4 v1，将来技能树同词表直取）；
+##   未实现 when 类型（time_of_day 等）＝行级锁定原样保留。块可折叠+↑/↓ 调序（按序结算，序有编辑权）。
 ## 存盘校验与 test_data_lint 规则7 对齐（编辑器先拦，别让 lint 红）：BAS 约束 / target 三旗全 false /
 ##   seq 撞格 / per_level 长度==max_level / costs.ap 与顶层 ap_cost 禁双写（收集时剥旧键）。
 ## 效果库（EffectDB）＝独立 EffectEditor 场景，标题栏分段切换（仿工坊切换器，脏守卫接管）。
@@ -21,6 +22,7 @@ const DAMAGE_KINDS := ["physical", "fire", "ice", "thunder", "holy"]
 const HAND_SLOTS := [["main_hand", "主手"], ["off_hand", "副手"]]
 const BLOCK_KINDS := [["attack", "攻击 attack"], ["heal", "治疗 heal"],
 	["passive_stat_mods", "被动修正 passive_stat_mods"],
+	["conditional_mod", "条件修正 conditional_mod"],
 	["apply_effect", "施加效果 apply_effect"], ["scripted", "脚本 scripted"]]
 # 技能 tag 下拉预设的类别（§2.1 tags：verbal 等玩家可读/可筛词；其余手动）
 const SKILL_TAG_CATS := ["skill_type", "target", "damage"]
@@ -53,6 +55,7 @@ var _w_range: SpinBox
 var _w_t_enemy: CheckBox
 var _w_t_ally: CheckBox
 var _w_t_self: CheckBox
+var _w_passive_hint: Label   # §25 被动灰化联动的说明条（active=false 时可见）
 var _hands_box: VBoxContainer
 var _blocks_box: VBoxContainer
 var _block_pick: OptionButton
@@ -230,6 +233,12 @@ func _build_form() -> void:
 	_w_t_ally = _flag_check(trow, "友方 ally", bool(tg.get("ally", false)))
 	_w_t_self = _flag_check(trow, "自身 self", bool(tg.get("self", false)))
 	_form.add_child(EditorUI.field_row("目标资格 target", trow))
+	# §25 被动灰化联动：被动能力不施放——AP/冷却/次数/射程/目标不适用（只灰不清：收集仍读原值，字节级保留；
+	# 技能等级 max_level 仍有效——训练有素 I/II/III 属被动多级）
+	_w_passive_hint = _warn("被动能力（active 关）不施放：AP/冷却/次数/射程/目标不生效——字段只灰不清、保存原样保留", HINT_COLOR)
+	_form.add_child(_w_passive_hint)
+	_w_active.toggled.connect(func(_v): _update_passive_gray())
+	_update_passive_gray()
 
 	# 4. 手部门槛 requires_hands（§2.5；BAS 必须空）
 	_form.add_child(EditorUI.section_title("手部门槛 requires_hands（逐槽查武器 tag；BAS 必须空）"))
@@ -270,6 +279,17 @@ func _build_form() -> void:
 	_form.add_child(addrow)
 
 	_dirty = false   # 建表单期间控件信号可能置脏——载入完成＝干净基线
+
+# §25 被动灰化联动：active 实时切换成本/限制段可编性——灰化只锁输入不动值（勿静默清数据）
+func _update_passive_gray() -> void:
+	if _w_active == null or not is_instance_valid(_w_active):
+		return
+	var passive := not _w_active.button_pressed
+	_w_passive_hint.visible = passive
+	for sp in [_w_ap, _w_cd, _w_uses, _w_range]:
+		(sp as SpinBox).editable = not passive
+	for cb in [_w_t_enemy, _w_t_ally, _w_t_self]:
+		(cb as CheckBox).disabled = passive
 
 func _flag_check(parent: Node, label: String, v: bool) -> CheckBox:
 	var cb := CheckBox.new()
@@ -406,12 +426,15 @@ func _block_skeleton(kind: String) -> Dictionary:
 			return {"kind": "heal", "heal_pct_max_hp": 0, "cleanse_tags": []}
 		"passive_stat_mods":
 			return {"kind": "passive_stat_mods", "mods": []}
+		"conditional_mod":
+			return {"kind": "conditional_mod", "when": [], "mods": []}
 		"apply_effect":
 			return {"kind": "apply_effect", "effect": "", "chance": 100}
 		_:
 			return {"kind": "scripted", "script_id": "", "params": {}}
 
-# 一个效果块＝带边框面板：头（kind 名 + ✕）+ kind 专属字段。data 原样持有，collect 时 duplicate+更新。
+# 一个效果块＝带边框面板：头（折叠钮 + kind 名 + ↑/↓ 调序 + ✕）+ body（kind 专属字段，可折叠）。
+# data 原样持有，collect 时 duplicate+更新。折叠纯视觉不置脏；调序置脏（§24：效果块按序结算，序有编辑权）。
 func _add_block(data: Dictionary) -> void:
 	var kind := str(data.get("kind", ""))
 	var panel := PanelContainer.new()
@@ -422,6 +445,14 @@ func _add_block(data: Dictionary) -> void:
 	box.add_theme_constant_override("separation", 4)
 	panel.add_child(box)
 	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", 4)
+	# 折叠钮（§24）：块头带 ↑/↓/✕ 操作钮、EditorUI.make_foldable 的整条头按钮容不下——本地小三角同语义
+	var fold := Button.new()
+	fold.toggle_mode = true
+	fold.button_pressed = true
+	fold.text = "▾"
+	fold.focus_mode = Control.FOCUS_NONE
+	head.add_child(fold)
 	var kind_cn := kind
 	for p in BLOCK_KINDS:
 		if str(p[0]) == kind:
@@ -432,31 +463,62 @@ func _add_block(data: Dictionary) -> void:
 	title.add_theme_color_override("font_color", Color(0.75, 0.85, 1.0))
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(title)
+	var up := Button.new()
+	up.text = "↑"
+	up.tooltip_text = "上移（效果块按序结算）"
+	head.add_child(up)
+	var dn := Button.new()
+	dn.text = "↓"
+	dn.tooltip_text = "下移（效果块按序结算）"
+	head.add_child(dn)
 	var rm := Button.new()
 	rm.text = "✕"
 	head.add_child(rm)
 	box.add_child(head)
+	var body := VBoxContainer.new()
+	body.add_theme_constant_override("separation", 4)
+	box.add_child(body)
 	var entry := {"data": data, "kind": kind, "panel": panel, "locked": false}
+	fold.toggled.connect(func(open: bool):
+		body.visible = open
+		fold.text = "▾" if open else "▸")
+	up.pressed.connect(func(): _move_block(entry, -1))
+	dn.pressed.connect(func(): _move_block(entry, +1))
 	rm.pressed.connect(func():
 		_blocks.erase(entry)
 		panel.queue_free()
 		_mark_dirty())
 	match kind:
 		"attack":
-			_build_attack_block(box, entry)
+			_build_attack_block(body, entry)
 		"heal":
-			_build_heal_block(box, entry)
+			_build_heal_block(body, entry)
 		"passive_stat_mods":
-			_build_passive_block(box, entry)
+			_build_passive_block(body, entry)
+		"conditional_mod":
+			_build_conditional_block(body, entry)
 		"apply_effect":
-			_build_apply_effect_block(box, entry)
+			_build_apply_effect_block(body, entry)
 		"scripted":
-			_build_scripted_block(box, entry)
+			_build_scripted_block(body, entry)
 		_:
 			entry["locked"] = true
-			box.add_child(_warn("未知块 kind「%s」——本版不编辑，保存原样保留（运行时警告跳过）" % kind, WARN_COLOR))
+			body.add_child(_warn("未知块 kind「%s」——本版不编辑，保存原样保留（运行时警告跳过）" % kind, WARN_COLOR))
 	_blocks_box.add_child(panel)
 	_blocks.append(entry)
+
+# 块调序（§24）：收集序＝_blocks 数组序——数组交换 + 面板按邻居实际下标换位
+# （✕ 是 queue_free 延迟摘树，按 get_index 取位不受僵尸子节点影响）
+func _move_block(entry: Dictionary, delta: int) -> void:
+	var i := _blocks.find(entry)
+	var j := i + delta
+	if i < 0 or j < 0 or j >= _blocks.size():
+		return
+	var other: Dictionary = _blocks[j]
+	_blocks[i] = other
+	_blocks[j] = entry
+	_blocks_box.move_child(entry["panel"], (other["panel"] as Control).get_index())
+	_mark_dirty()
 
 func _warn(text: String, color: Color) -> Label:
 	var l := Label.new()
@@ -529,6 +591,60 @@ func _build_passive_block(box: VBoxContainer, entry: Dictionary) -> void:
 		EditorUI.add_mod_row(mods_box, rows, StatMeta.EDITOR_STATS, "atk", "flat", 0.0, _mark_dirty)
 		_mark_dirty())
 	box.add_child(addm)
+
+# conditional_mod（🔒 §3/§4）：when[] 激活条件（行控件在 EditorUI，词表 v1 与将来技能树共用）+ mods。
+# 引擎阶段4 已生效：学得挂修正、_mod_active 按 when 惰性判（🔒 §4.3 when 读裸 stats——故 stat 下拉含 HP）。
+func _build_conditional_block(box: VBoxContainer, entry: Dictionary) -> void:
+	box.add_child(_warn("条件被动已生效（🔒 阶段4）：学得即挂修正，when 全满足才计入（数组内 AND；when 读裸 stats §4.3）", HINT_COLOR))
+	# 公式值护栏（同被动块先例）：mod value 为公式对象时本版表单只有标量 Spin——整块锁定只读
+	for m0 in entry["data"].get("mods", []):
+		if typeof(m0) == TYPE_DICTIONARY and not typeof(m0.get("value", 0)) in [TYPE_INT, TYPE_FLOAT]:
+			entry["locked"] = true
+			box.add_child(_warn("含公式值修正（{base/per_stat/per_level}）——本版表单仅编标量，本块锁定只读，保存原样保留", LOCK_COLOR))
+			return
+	var wopts := _when_opts()
+	box.add_child(EditorUI.label("激活条件 when（全部满足才生效；空＝无条件恒生效）"))
+	var when_rows := []
+	entry["when_rows"] = when_rows
+	var when_box := VBoxContainer.new()
+	when_box.add_theme_constant_override("separation", 4)
+	box.add_child(when_box)
+	entry["when_box"] = when_box
+	for c in entry["data"].get("when", []):
+		if typeof(c) == TYPE_DICTIONARY:
+			EditorUI.add_when_row(when_box, when_rows, c, wopts, _mark_dirty)
+	var addw := Button.new()
+	addw.text = "＋ 添加条件"
+	addw.pressed.connect(func():
+		EditorUI.add_when_row(when_box, when_rows, {"type": "stat_threshold"}, wopts, _mark_dirty)
+		_mark_dirty())
+	box.add_child(addw)
+	box.add_child(EditorUI.label("修正 mods（条件满足时计入）"))
+	var rows := []
+	entry["mods"] = rows
+	var mods_box := VBoxContainer.new()
+	mods_box.add_theme_constant_override("separation", 4)
+	box.add_child(mods_box)
+	entry["mods_box"] = mods_box
+	for m in entry["data"].get("mods", []):
+		if typeof(m) == TYPE_DICTIONARY:
+			EditorUI.add_mod_row(mods_box, rows, StatMeta.EDITOR_STATS,
+				str(m.get("stat", "atk")), str(m.get("op", "flat")), float(m.get("value", 0)), _mark_dirty)
+	var addm := Button.new()
+	addm.text = "＋ 添加修正"
+	addm.pressed.connect(func():
+		EditorUI.add_mod_row(mods_box, rows, StatMeta.EDITOR_STATS, "atk", "flat", 0.0, _mark_dirty)
+		_mark_dirty())
+	box.add_child(addm)
+
+# when 行备料（词表控件在 EditorUI、领域数据在这备）：stat 键序＝裸 stats 可阈值键
+# （🔒 §4.3 when 读裸 stats——运行态 HP 也可作阈值，训练有素 HP%≤50 即此形）
+func _when_opts() -> Dictionary:
+	var eo := []
+	for id in EffectDB.all():
+		var e = EffectDB.all()[id]
+		eo.append([str(id), "%s（%s）" % [str(e.get("name", id)), str(id)]])
+	return {"stat_keys": ["HP"] + StatMeta.EDITOR_STATS, "effect_options": eo, "slot_pairs": HAND_SLOTS}
 
 func _build_apply_effect_block(box: VBoxContainer, entry: Dictionary) -> void:
 	# 公式值护栏（同上）：chance 为公式对象（引擎 resolve_num 支持）时锁定只读，防 float() 报错+扁平化
@@ -768,6 +884,21 @@ func _collect_block(entry: Dictionary) -> Dictionary:
 				mods.append({"stat": str(m["stat"].get_selected_metadata()),
 					"op": str(m["op"].get_selected_metadata()), "value": _num(float(m["value"].value))})
 			out["mods"] = mods
+		"conditional_mod":
+			# when 行收集在 EditorUI（字节级保留：类型未变 duplicate 原条件、锁定行原样）；必填缺失＝响亮拒存
+			var werrs := []
+			var conds := []
+			for wr in entry["when_rows"]:
+				conds.append(EditorUI.collect_when_row(wr, werrs))
+			if not werrs.is_empty():
+				_collect_err = "conditional_mod：" + str(werrs[0])
+				return out
+			out["when"] = conds
+			var cmods := []
+			for m in entry["mods"]:
+				cmods.append({"stat": str(m["stat"].get_selected_metadata()),
+					"op": str(m["op"].get_selected_metadata()), "value": _num(float(m["value"].value))})
+			out["mods"] = cmods
 		"apply_effect":
 			var eid := str(entry["effect"].get_selected_metadata())
 			if eid == "":

@@ -150,6 +150,36 @@ static func add_spin(parent: Node, text: String, value: float, mn: float, mx: fl
 	parent.add_child(field_row(text, sb))
 	return sb
 
+# OptionButton 按 metadata 选中；找不到＝回退第一个有效项（跳过分隔/占位 null）。
+# 单一实现（技改 §13 地基件）：ListEditorShell._select_meta 委托这里，别处勿再手抄。
+static func select_meta(ob: OptionButton, key) -> void:
+	for i in ob.item_count:
+		var m = ob.get_item_metadata(i)
+		if m != null and str(m) == str(key):
+			ob.select(i)
+			return
+	for i in ob.item_count:
+		if not ob.is_item_disabled(i) and ob.get_item_metadata(i) != null:
+			ob.select(i)
+			return
+
+# 裸下拉（不带 field_row）：pairs=[[meta, 显示文本], ...]（单元素＝meta 兼作文本）；sel 按 metadata 选中。
+static func dropdown(pairs: Array, sel: String, on_change := Callable()) -> OptionButton:
+	var ob := OptionButton.new()
+	for p in pairs:
+		ob.add_item(str(p[1]) if p.size() > 1 else str(p[0]))
+		ob.set_item_metadata(ob.item_count - 1, str(p[0]))
+	select_meta(ob, sel)
+	if on_change.is_valid():
+		ob.item_selected.connect(func(_i): on_change.call())
+	return ob
+
+# 「标签 + 下拉」一行（add_line/add_spin 同族；技改 §13 地基件）
+static func add_dropdown(parent: Node, text: String, pairs: Array, sel: String, on_change := Callable()) -> OptionButton:
+	var ob := dropdown(pairs, sel, on_change)
+	parent.add_child(field_row(text, ob))
+	return ob
+
 # —— 文件对话框工厂 ——
 # filters：[[pattern, desc], ...]，如 [["*.json","地图 JSON"]]。native RES 对话框不存在→资源访问传 native=false。
 static func make_file_dialog(mode: int, access: int, filters: Array, native := true) -> FileDialog:
@@ -330,6 +360,256 @@ static func add_mod_row(parent: Node, entries: Array, stat_keys: Array, stat: St
 	parent.add_child(row)
 	entries.append(entry)
 	return entry
+
+
+# —— when 条件行（🔒 模块_技能_设计 §4 / Unit._when_met 词表 v1）——
+# conditional_mod 表单与将来技能树（阶段5）同词表直取；词表以引擎实际支持为准，勿发明新词：
+# 单位语境 stat_threshold/equip_state/self_tag ＋ 交互语境 target_tag/skill_tag/target_effect（结算内生效）；
+# time_of_day/nearby_units＝光环轮未实现（引擎 fail-closed）——载入遇到＝行锁定原样保留。
+const WHEN_TYPES := [
+	["stat_threshold", "属性阈值 stat_threshold"],
+	["equip_state", "装备状态 equip_state"],
+	["self_tag", "自身标签 self_tag"],
+	["target_tag", "目标标签 target_tag（结算内）"],
+	["skill_tag", "技能标签 skill_tag（结算内）"],
+	["target_effect", "目标效果 target_effect（结算内）"],
+]
+
+# 一行 when 条件：类型下拉 + 按类型的参数子控件 + ✕。cond＝原始条件 dict（原样持有，
+# collect_when_row 时 duplicate+按键更新——未编辑到的键字节级保留）。
+# opts（调用方备料，本层不 preload 领域 DB）：
+#   stat_keys: [stat键, ...] —— stat_threshold 属性键序（🔒 §4.3 when 读裸 stats，可含 HP 等运行态）
+#   effect_options: [[id, 显示文本], ...] —— target_effect 效果下拉
+#   slot_pairs: [[slot, 中文], ...] —— equip_state 槽位下拉（缺省主/副手）
+# 返回 entry {row, data, type, pbox, params, locked}；entries＝调用方的行数组（✕ 自动 erase）。
+static func add_when_row(parent: Node, entries: Array, cond: Dictionary, opts: Dictionary, on_change := Callable()) -> Dictionary:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	var t := str(cond.get("type", ""))
+	var known := false
+	for p in WHEN_TYPES:
+		if str(p[0]) == t:
+			known = true
+			break
+	var entry := {"row": row, "data": cond, "locked": not known, "params": {}}
+	if not known:
+		# 未实现/未知类型：行锁定只读（收集原样返回）；✕ 仍可显式删除（显式≠静默丢失）
+		var l := label("⚠ 未实现条件类型「%s」——原样保留：%s" % [t, JSON.stringify(cond)])
+		l.add_theme_color_override("font_color", Color(0.95, 0.8, 0.35))
+		l.add_theme_font_size_override("font_size", 12)
+		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		row.add_child(l)
+	else:
+		var tob := dropdown(WHEN_TYPES, t)
+		row.add_child(tob)
+		entry["type"] = tob
+		var pbox := HBoxContainer.new()
+		pbox.add_theme_constant_override("separation", 6)
+		pbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(pbox)
+		entry["pbox"] = pbox
+		_when_build_params(pbox, entry, cond, t, opts, on_change)
+		tob.item_selected.connect(func(_i):
+			# 换类型＝旧类型键作废、参数从骨架起；换回原类型＝回填原值（collect 按类型是否一致决定保留基底）
+			var nt := str(tob.get_selected_metadata())
+			var base: Dictionary = entry["data"] if str((entry["data"] as Dictionary).get("type", "")) == nt else {}
+			_when_build_params(pbox, entry, base, nt, opts, on_change)
+			if on_change.is_valid():
+				on_change.call())
+	var rm := Button.new()
+	rm.text = "✕"
+	rm.pressed.connect(func():
+		entries.erase(entry)
+		row.queue_free()
+		if on_change.is_valid():
+			on_change.call())
+	row.add_child(rm)
+	parent.add_child(row)
+	entries.append(entry)
+	return entry
+
+# when 行参数子控件按类型重建（参数形状＝Unit._when_met 实际读的键，🔒 勿加引擎不认的键）
+static func _when_build_params(pbox: HBoxContainer, entry: Dictionary, cond: Dictionary, t: String, opts: Dictionary, on_change: Callable) -> void:
+	for c in pbox.get_children():
+		c.queue_free()   # ⚠ queue_free：类型下拉发信号中触发，free() 会当场释放发信号控件
+	var w := {}
+	entry["params"] = w
+	var chg := func():
+		if on_change.is_valid():
+			on_change.call()
+	match t:
+		"stat_threshold":   # {stat, op(>=缺省|<=), value, pct_of?}——读裸 stats（§4.3 递归防护）
+			var pairs := []
+			for k in opts.get("stat_keys", []):
+				pairs.append([str(k), "%s %s" % [str(k), StatMeta.label(str(k))]])
+			w["stat"] = dropdown(pairs, str(cond.get("stat", "HP")), chg)
+			pbox.add_child(w["stat"])
+			w["op"] = dropdown([[">=", "≥"], ["<=", "≤"]], str(cond.get("op", ">=")), chg)
+			pbox.add_child(w["op"])
+			var vs := SpinBox.new()
+			vs.min_value = -9999
+			vs.max_value = 9999
+			vs.step = 0.5
+			vs.value = float(cond.get("value", 0))
+			vs.custom_minimum_size = Vector2(90, 0)
+			vs.value_changed.connect(func(_v): chg.call())
+			w["value"] = vs
+			pbox.add_child(vs)
+			var pkeys := [["", "（绝对值）"]]
+			for k in opts.get("stat_keys", []):
+				pkeys.append([str(k), "% / " + str(k)])
+			w["pct_of"] = dropdown(pkeys, str(cond.get("pct_of", "")), chg)   # 非空＝stat/pct_of×100 与阈值比
+			pbox.add_child(w["pct_of"])
+		"equip_state":   # {slot, empty?:true | has_tag?:"tag"}；两键皆无＝有装备即可
+			w["slot"] = dropdown(opts.get("slot_pairs", [["main_hand", "主手"], ["off_hand", "副手"]]),
+				str(cond.get("slot", "main_hand")), chg)
+			pbox.add_child(w["slot"])
+			var mode := "occupied"
+			if bool(cond.get("empty", false)):
+				mode = "empty"
+			elif str(cond.get("has_tag", "")) != "":
+				mode = "has_tag"
+			var mob := dropdown([["occupied", "有装备即可"], ["empty", "空置"], ["has_tag", "装备带 tag"]], mode)
+			w["mode"] = mob
+			pbox.add_child(mob)
+			var tl := LineEdit.new()
+			tl.text = str(cond.get("has_tag", ""))
+			tl.placeholder_text = "装备 tag（如 weapon_sword）"
+			tl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			tl.editable = mode == "has_tag"
+			tl.text_changed.connect(func(_t2): chg.call())
+			w["tag"] = tl
+			pbox.add_child(tl)
+			mob.item_selected.connect(func(_i):
+				tl.editable = str(mob.get_selected_metadata()) == "has_tag"
+				chg.call())
+		"self_tag":   # {tag, has?(缺省 true)}
+			var sl := LineEdit.new()
+			sl.text = str(cond.get("tag", ""))
+			sl.placeholder_text = "自身 tag（如 flying）"
+			sl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			sl.text_changed.connect(func(_t2): chg.call())
+			w["tag"] = sl
+			pbox.add_child(sl)
+			var hc := CheckBox.new()
+			hc.text = "须有（关＝须无）"
+			hc.button_pressed = bool(cond.get("has", true))
+			hc.toggled.connect(func(_v): chg.call())
+			w["has"] = hc
+			pbox.add_child(hc)
+		"target_tag":   # {tag:"x"} 或 {any:[...]}——逗号分隔；收集沿原键形（保字节）
+			var tt := []
+			if cond.has("any"):
+				for x in cond.get("any", []):
+					tt.append(str(x))
+			elif str(cond.get("tag", "")) != "":
+				tt.append(str(cond.get("tag", "")))
+			var al := LineEdit.new()
+			al.text = ", ".join(PackedStringArray(tt))
+			al.placeholder_text = "受击目标 tag 逗号分隔（多个＝任一命中，如 dragon, beast）"
+			al.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			al.text_changed.connect(func(_t2): chg.call())
+			w["tags"] = al
+			pbox.add_child(al)
+		"skill_tag":   # {tag}——本次结算技能的 tag
+			var kl := LineEdit.new()
+			kl.text = str(cond.get("tag", ""))
+			kl.placeholder_text = "本次技能 tag（如 skill_sword）"
+			kl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			kl.text_changed.connect(func(_t2): chg.call())
+			w["tag"] = kl
+			pbox.add_child(kl)
+		"target_effect":   # {effect}——目标身上效果 id（EffectDB 引用）
+			var cur := str(cond.get("effect", ""))
+			var pairs2 := [["", "（选效果…）"]]
+			pairs2.append_array(opts.get("effect_options", []))
+			var found := false
+			for p2 in pairs2:
+				if str(p2[0]) == cur:
+					found = true
+					break
+			if cur != "" and not found:
+				pairs2.append([cur, "⚠ 悬空引用：" + cur])   # 悬空引用保值（同 _ensure_meta_option 口径）
+			w["effect"] = dropdown(pairs2, cur, chg)
+			pbox.add_child(w["effect"])
+
+# when 行收集（护栏：字节级保留）：类型未变＝duplicate 原条件、只更新表单拥有的键（未知键透传）；
+# 换过类型＝从 {type} 重建（旧类型键作废）；锁定行＝原样返回。缺省值不落盘（canonical 最小键：
+# op 缺省 >= / has 缺省 true——原文显式写过则保留）。必填缺失（空 tag/效果）→ errs 追加信息（调用方拒存）。
+static func collect_when_row(entry: Dictionary, errs: Array) -> Dictionary:
+	var data: Dictionary = entry.get("data", {})
+	if entry.get("locked", false):
+		return data.duplicate(true)
+	var t := str((entry["type"] as OptionButton).get_selected_metadata())
+	var out: Dictionary = data.duplicate(true) if str(data.get("type", "")) == t else {"type": t}
+	out["type"] = t
+	var w: Dictionary = entry["params"]
+	match t:
+		"stat_threshold":
+			out["stat"] = str(w["stat"].get_selected_metadata())
+			var op := str(w["op"].get_selected_metadata())
+			if op == "<=" or out.has("op"):
+				out["op"] = op
+			out["value"] = _numv(float(w["value"].value))
+			var pof := str(w["pct_of"].get_selected_metadata())
+			if pof != "":
+				out["pct_of"] = pof
+			else:
+				out.erase("pct_of")
+		"equip_state":
+			out["slot"] = str(w["slot"].get_selected_metadata())
+			match str(w["mode"].get_selected_metadata()):
+				"empty":
+					out["empty"] = true
+					out.erase("has_tag")
+				"has_tag":
+					var tg := str(w["tag"].text).strip_edges()
+					if tg == "":
+						errs.append("equip_state「装备带 tag」模式须填 tag")
+					out["has_tag"] = tg
+					if bool(out.get("empty", false)):
+						out.erase("empty")   # 显式 empty:false 保留（字节）；true 与本模式矛盾才摘
+				_:
+					out.erase("has_tag")
+					if bool(out.get("empty", false)):
+						out.erase("empty")
+		"self_tag":
+			var tg2 := str(w["tag"].text).strip_edges()
+			if tg2 == "":
+				errs.append("self_tag 条件 tag 不能为空")
+			out["tag"] = tg2
+			var hv: bool = w["has"].button_pressed
+			if not hv or out.has("has"):
+				out["has"] = hv
+		"target_tag":
+			var list := []
+			for p in str(w["tags"].text).split(","):
+				var s := str(p).strip_edges()
+				if s != "" and not list.has(s):
+					list.append(s)
+			if list.is_empty():
+				errs.append("target_tag 条件至少填一个 tag")
+			if out.has("any") or list.size() > 1:
+				out["any"] = list
+				out.erase("tag")
+			elif list.size() == 1:
+				out["tag"] = str(list[0])
+		"skill_tag":
+			var tg3 := str(w["tag"].text).strip_edges()
+			if tg3 == "":
+				errs.append("skill_tag 条件 tag 不能为空")
+			out["tag"] = tg3
+		"target_effect":
+			var eid := str(w["effect"].get_selected_metadata())
+			if eid == "":
+				errs.append("target_effect 条件未选效果")
+			out["effect"] = eid
+	return out
+
+# 数值归一：整数值落 int（JSON 往返 5 与 5.0 字节不同——与 SkillEditor._num / JsonRegistry.intify 同口径）
+static func _numv(v: float):
+	return int(v) if v == floorf(v) else v
 
 
 # —— 通用分段场景切换（workshop_switch 的参数化版）——
