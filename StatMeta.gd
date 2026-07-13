@@ -18,6 +18,8 @@ const LABELS := {
 	"finesse": "技巧", "agility": "灵活", "luck": "运气", "resolve": "决心",
 	"armor_res_phys": "物理甲抗", "armor_res_nature": "自然甲抗",
 	"dr_flat_armor": "甲固减", "dr_flat_human": "人固减",
+	# 能力键 stat（🔒 决策31：0/1 语义、perk 经被动桥 passive_stat_mods 走修正管线授予，≥1＝解锁）
+	"offhand_ws": "副手武技", "dual_strike": "双武连携", "weapon_block": "武器格挡",
 }
 
 # ============ stat 分组元数据（单一源；序列化/编辑器 两个白名单同处维护）============
@@ -32,7 +34,8 @@ const SERIALIZABLE_BASE_STATS := ["HP_max", "atk", "acc", "eva",
 	"res_phys", "res_nature", "will_fort", "body_fort",
 	"finesse", "agility", "luck", "resolve",
 	"armor_res_phys", "armor_res_nature",
-	"dr_flat_human", "dr_flat_armor"]
+	"dr_flat_human", "dr_flat_armor",
+	"offhand_ws", "dual_strike", "weapon_block"]
 
 # 单位编辑器（DeployPanel）可编辑的基础 stat 子集（甲抗/固减属物品侧数据，暂不开单位级编辑）。
 const EDITOR_STATS := ["HP_max", "atk", "acc", "eva",
@@ -40,7 +43,8 @@ const EDITOR_STATS := ["HP_max", "atk", "acc", "eva",
 	"move", "speed", "sight", "AP_max", "armor_max",
 	"atk_eff", "def_eff", "offhand_eff",
 	"res_phys", "res_nature", "will_fort", "body_fort",
-	"finesse", "agility", "luck", "resolve"]
+	"finesse", "agility", "luck", "resolve",
+	"offhand_ws", "dual_strike", "weapon_block"]
 
 # 非数值「状态旗」mod 键白名单（不在 LABELS、但属合法修正对象 stat）
 const FLAG_MOD_STATS := ["vision_state"]

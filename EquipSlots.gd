@@ -33,7 +33,7 @@ static func accepts(slot: String, item: Dictionary) -> bool:
 	if not has_elig:
 		return _slot_field_fits(item, slot)
 	match slot:
-		"main_hand": return tags.has("one_handed") or tags.has("two_handed")
+		"main_hand": return tags.has("one_handed") or tags.has("two_handed") or tags.has("shield")   # 盾可主手＝纯盾战士（🔒 决策31：盾＝正常武器，主手持盾＝盾击作普攻）
 		"off_hand": return tags.has("one_handed") or tags.has("shield")
 		"head": return tags.has("head")
 		"body": return tags.has("body")

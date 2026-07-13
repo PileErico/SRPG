@@ -50,13 +50,15 @@ func _initialize() -> void:
 	ck(u.transfer_hand("off_hand", "main_hand"), "长剑副→主（顶拳脚）")
 	ck(int(u.equipment.get("main_hand", 0)) == sword and not u.equipment.has("off_hand"), "回主手、副手空、拳脚收回销毁")
 
-	# 4) 双件互换 + 盾资格拒
+	# 4) 双件互换 + 盾可主手（⚠ 原「盾资格拒」已被 🔒 决策31 翻案：盾＝正常武器、纯盾战士成立）
 	ck(u.equip_from_bag(dagger, "off_hand"), "匕首从包装副手")
 	ck(u.transfer_hand("main_hand", "off_hand"), "剑↔匕首互换")
 	ck(int(u.equipment.get("main_hand", 0)) == dagger and int(u.equipment.get("off_hand", 0)) == sword, "互换成立")
 	var u2 = mk()
 	ck(u2.equip("wood_kite_shield"), "装盾（副手）")
-	ck(not u2.transfer_hand("off_hand", "main_hand"), "盾进主手 → 槽位资格拒（EquipSlots）")
+	var shield_uid := int(u2.equipment.get("off_hand", 0))
+	ck(u2.transfer_hand("off_hand", "main_hand"), "盾进主手 → 收（🔒 决策31 EquipSlots 资格放开）")
+	ck(int(u2.equipment.get("main_hand", 0)) == shield_uid, "盾坐上主手（纯盾战士）")
 
 	# 5) 包满拒（模型层护栏；UI 侧菜单灰显/拖放拒同口）
 	var u3 = mk()

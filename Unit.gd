@@ -150,6 +150,22 @@ static func round1(v: float) -> float:
 
 const BLOCK_MAX_KEYS := ["block_rate", "block_power"]   # 装备来源取高聚合的键（🔒 §10.3：只用一件器械格挡）
 
+# 格挡休眠来源过滤（🔒 决策31）：仅 BLOCK_MAX_KEYS 两键调用（effective_stat_f 先判 stat 名——热路径其他键零开销）。
+# equip 源查该物品：tags 含 shield＝恒计（盾的格挡属性天然生效）；否则 slot 为 main_hand/off_hand（手持武器）
+# ＝须 weapon_block ≥1（「格挡」技能/perk 激活）才计；防具/饰品等其他 equip 源、以及特性/buff/perk 非 equip 源恒计。
+# 无递归环：weapon_block 自身非格挡键 → 其 effective_stat 读链不会再进本过滤。
+func _block_source_active(src: String) -> bool:
+	if not src.begins_with("equip:"):
+		return true
+	var item = ItemInstances.view(int(src.get_slice(":", 1)))
+	if item == null:
+		return true   # 实例不存在（测试合成源等）＝不拦
+	if (item.get("tags", []) as Array).has("shield"):
+		return true
+	if str(item.get("slot", "")) in ["main_hand", "off_hand"]:
+		return effective_stat("weapon_block") >= 1
+	return true
+
 # 修正对象是否生效（🔒 §10.3 条件 mod 基建）：`requires_prof` 字段＝须装载指定技艺域才计入
 # （首例＝武器格挡须装载「格挡」域；triple_vs 等条件修正将来同走此口）。无字段＝无条件生效。
 func _mod_active(m: Dictionary) -> bool:
@@ -231,6 +247,8 @@ func effective_stat_f(key: String) -> float:
 			continue
 		var v := float(m.get("value", 0))
 		var src := str(m.get("source", ""))
+		if block_max and not _block_source_active(src):
+			continue   # 格挡休眠（🔒 决策31）：手持武器的格挡属性须 weapon_block 激活；盾/防具/非装备源恒计
 		match str(m.get("op", "flat")):
 			"flat":
 				if block_max and src.begins_with("equip:"):
@@ -659,12 +677,12 @@ func current_main_weapon_name() -> String:
 	var item = ItemInstances.view(int(equipment.get("main_hand", 0)))
 	return str(item.get("name", "")) if item != null else ""
 
-# 主手武器的攻击定义单一取处（🔒 §6.2 + 决策26 阶段3a）：
+# 某槽武器的攻击定义单一取处（🔒 §6.2 + 决策26 阶段3a；决策31 副手段复用同链）：
 #   ① 武器 "bws"（旧键 "bas" 双键桥）→ SkillDB 条目 → flatten_bws 扁平 legacy attack dict；
 #   ② 双读窗口：无 bws 键 → 回退旧内联 attack（迁移后正式数据不应走到；lint 收口后删此分支）；
 #   ③ 无武器攻击 = {}（调用方兜 UNARMED）。悬空 bws 引用 / flatten 空（引用了无 attack 块技能，lint 另拦）＝警告后走回退链。
-func _main_weapon_attack() -> Dictionary:
-	var item = ItemInstances.view(int(equipment.get("main_hand", 0)))
+func _weapon_attack_of(slot: String) -> Dictionary:
+	var item = ItemInstances.view(int(equipment.get(slot, 0)))
 	if item == null:
 		return {}
 	var bws := SkillDB.weapon_bws_id(item)   # 双读单口（§1-6）
@@ -679,11 +697,41 @@ func _main_weapon_attack() -> Dictionary:
 		return atk
 	return {}
 
+func _main_weapon_attack() -> Dictionary:
+	return _weapon_attack_of("main_hand")
+
 # 基础攻击 ＝ 恒读主手武器 🔒（§6.2）：主手无武器攻击 → 徒手 UNARMED（不退副手）。
 # 比路兹起降已把活跃爪换进主手，故此处天然正确、无需 airborne 分支。
 func basic_attack() -> Dictionary:
 	var atk := _main_weapon_attack()
 	return atk if not atk.is_empty() else UNARMED_ATTACK
+
+# 副手武器的攻击定义（🔒 决策31 双武器连携的副手段）：空手/双手武器占双槽/持盾（副手须持武器非盾）→ {}；
+# 否则取副手 bws 扁平并烙 weapon_source=off_hand——结算天然走 offhand_eff 链（🔒 决策5 阶段3b），不硬编码系数。
+func offhand_weapon_attack() -> Dictionary:
+	var oh := int(equipment.get("off_hand", 0))
+	if oh == 0 or oh == int(equipment.get("main_hand", 0)):
+		return {}   # 空副手 / 双手武器同 iuid 占双槽＝没有独立副手武器
+	var item = ItemInstances.view(oh)
+	if item == null or (item.get("tags", []) as Array).has("shield"):
+		return {}
+	var atk := _weapon_attack_of("off_hand")
+	if atk.is_empty():
+		return {}
+	atk = atk.duplicate()
+	atk["weapon_source"] = "off_hand"
+	return atk
+
+# 副手武器技能解锁（🔒 决策31 能力键 offhand_ws ≥1；perk 经被动桥授予、走修正管线）
+func can_use_offhand_ws() -> bool:
+	return effective_stat("offhand_ws") >= 1
+
+# 双武器连携激活（🔒 决策31 能力键 dual_strike ≥1 ＋ 副手持非盾武器且其攻击定义非空）——
+# 激活＝普攻两段连携（主手全额 + 副手 offhand_eff 链），攻击执行点（Sandbox/BattleState）消费。
+func dual_strike_active() -> bool:
+	if effective_stat("dual_strike") < 1:
+		return false
+	return not offhand_weapon_attack().is_empty()
 
 # 挂装备修正：每条 mod 唯一 source（"equip:<实例iuid>:<序号>"）——同件装备的模板 mod 与词条 mod
 # 即使同 stat 同 op 也各自生效（effective_stat 的「同 source 去重取高」只该压重复 buff，不该吃词条）。
@@ -834,30 +882,46 @@ func reset_skill_charges() -> void:
 
 var ews_state := {}   # skill_id -> {cd, uses}（战斗运行态；懒初始化——无表项=就绪满次数）
 
-# 主手武器的 EWS 条目（🔒 决策28 恒读主手——与决策2「普攻恒读主手」同族绝对规则）：[{id, requires, slot, unlocked}]。
-# 副手武器/盾不供给能力表；双持型攻击能力＝「双武器」域熟练度解锁的 perk 授予（非武器 EWS，阶段4/5）。
-# 键形（🔒 决策26）：对象 {skill, requires:[{prof,value},…]}；决策22 兼容裸字符串＝无条件 EWS。同表同 id 首见去重。
+# 武器 EWS 条目表：[{id, requires, slot, unlocked}]。主手武器的 ews 恒供给（🔒 决策28 恒读主手）；
+# ⚠ 决策28「副手不供给能力表」前半句已被 🔒 决策31 翻案：offhand_ws ≥1 时**副手位武器技能一律按 EWS 论**——
+# 副手武器的 ews 全量 + 其 bws 也作一条 EWS（位置语义：bws/ews 键照旧，变的是读取语义）；
+# 条目自身 requires（武器域熟练度）照常判 unlocked。盾同样走 offhand_ws 门控（决策31 只写「副手武器技能解锁」，
+# 未对盾开豁免——盾是否豁免待用户定，暂保守一律要 offhand_ws）。
+# 键形（🔒 决策26）：对象 {skill, requires:[{prof,value},…]}；决策22 兼容裸字符串＝无条件 EWS。跨槽同 id 首见去重（主手优先）。
 func ews_entries() -> Array:
 	var out := []
 	var seen := {}
 	var item = ItemInstances.view(int(equipment.get("main_hand", 0)))
-	if item == null:
-		return out
-	for e in item.get("ews", []):
-		var sid := ""
-		var req := []
-		if typeof(e) == TYPE_DICTIONARY:
-			sid = str(e.get("skill", ""))
-			var r = e.get("requires", [])
-			if typeof(r) == TYPE_ARRAY:
-				req = r
-		else:
-			sid = str(e)
-		if sid == "" or seen.has(sid):
-			continue
-		seen[sid] = true
-		out.append({"id": sid, "requires": req, "slot": "main_hand", "unlocked": ews_requires_met(req)})
+	if item != null:
+		for e in item.get("ews", []):
+			_append_ews_entry(out, seen, e, "main_hand")
+	if can_use_offhand_ws():
+		var oh := int(equipment.get("off_hand", 0))
+		if oh != 0 and oh != int(equipment.get("main_hand", 0)):   # 双手武器占双槽＝无独立副手
+			var oitem = ItemInstances.view(oh)
+			if oitem != null:
+				var obws := SkillDB.weapon_bws_id(oitem)
+				if obws != "":
+					_append_ews_entry(out, seen, {"skill": obws}, "off_hand")   # 副手 bws＝EWS（排序最高故置本槽首）
+				for e in oitem.get("ews", []):
+					_append_ews_entry(out, seen, e, "off_hand")
 	return out
+
+# ews 条目解析共用（ews_entries 内部）：解键形（对象/裸字符串）→ 去重 → 附 slot 与解锁判定
+func _append_ews_entry(out: Array, seen: Dictionary, e, slot: String) -> void:
+	var sid := ""
+	var req := []
+	if typeof(e) == TYPE_DICTIONARY:
+		sid = str(e.get("skill", ""))
+		var r = e.get("requires", [])
+		if typeof(r) == TYPE_ARRAY:
+			req = r
+	else:
+		sid = str(e)
+	if sid == "" or seen.has(sid):
+		return
+	seen[sid] = true
+	out.append({"id": sid, "requires": req, "slot": slot, "unlocked": ews_requires_met(req)})
 
 # EWS 解锁判定（🔒 决策26）：requires 复数 AND——每条〔技艺域 prof + 裸数值阈值 value〕都须 prof_xp 达标。
 # 空/缺省 requires＝装备即用（决策22 旧语义子集）。资格看 prof_xp、与技艺是否装载无关（同资格闸门先例）。

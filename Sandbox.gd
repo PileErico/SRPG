@@ -1576,7 +1576,7 @@ func _learned_active_skills(u) -> Array:
 		return an < bn if an != bn else str(a) < str(b))
 	return out
 
-# 装备武器授予的主动 EWS 条目（🔒 决策26；排除已学同名——已学走 skills 路径）：[{id, requires, unlocked}]
+# 装备武器授予的主动 EWS 条目（🔒 决策26；排除已学同名——已学走 skills 路径）：[{id, requires, slot, unlocked}]
 func _ews_active_entries(u) -> Array:
 	var out := []
 	if u == null:
@@ -1584,6 +1584,10 @@ func _ews_active_entries(u) -> Array:
 	for e in u.ews_entries():
 		var def = SkillDB.get_skill(str(e["id"]))
 		if def == null or not def.get("active", false) or u.has_skill(str(e["id"])):
+			continue
+		# 无可跑块（纯 attack 形——副手 bws 按 EWS 论后天然会出现，🔒 决策31）不进能力菜单：
+		# attack 经能力路径施放＝阶段6（与 _learned_active_skills 同口守卫，apply_skill 亦同）
+		if not SkillDB.has_runnable_block(def):
 			continue
 		out.append(e)
 	return out
@@ -1769,7 +1773,7 @@ func _can_move(u) -> bool:
 	return u != null and (u.move_points > 0 or u.ap > 0)
 
 func _can_attack(u) -> bool:
-	return u != null and u.ap >= SkillDB.skill_ap_cost(u.basic_attack())
+	return u != null and u.ap >= _state.attack_ap_cost(u)   # 连携=DUAL_STRIKE_AP 常量（🔒 决策31）；单段=技能费
 
 func _is_friendly(u) -> bool:
 	return _state._is_friendly(u)
@@ -1866,11 +1870,20 @@ func _zoc_on_leave(mover) -> bool:
 		return true   # 移动者被借机打死，自然停下
 	return stopped
 
-# 借机（AoO）：owner 用基础攻击打 mover 一次（不耗 owner AP）。命中且未被格挡 = 钉住（返回 true）。
+# 借机（AoO）：owner 以普攻构成打 mover（不耗 owner AP）——每段伤害 ×REACTION_RATE
+# （🔒 决策31 反应系数：借机/反击＝普攻构成×系数；连携者两段各 ×0.75 自动成立，勿特判）。
+# 任一段命中且未被格挡 = 钉住（返回 true）。
 func _resolve_aoo(owner, mover) -> bool:
 	_log_line("%s [b]借机[/b] → %s" % [_cname(owner), _cname(mover)])
-	var res = _resolve_one(owner, mover, owner.basic_attack(), false)
-	return bool(res.get("hit", false)) and not bool(res.get("blocked", false))
+	var pinned := false
+	for seg in _state.attack_segments(owner):
+		var atk: Dictionary = (seg as Dictionary).duplicate()
+		atk["atk_rate"] = BattleState.REACTION_RATE   # 借机路径专属注入（普攻路径无此键＝golden 零涉）
+		var res := _resolve_one(owner, mover, atk, false)
+		pinned = pinned or (bool(res.get("hit", false)) and not bool(res.get("blocked", false)))
+		if int(mover.stats.get("HP", 0)) <= 0 and not mover.tags.has("deaths_door"):
+			break   # 段间已倒——第二段不打尸体
+	return pinned
 
 # 移动范围内、属于敌方 ZOC 的格（移动模式自动标红，提示「踏进会被控制」）
 func _enemy_zoc_in_range(mover, reach: Dictionary) -> Dictionary:
@@ -1996,21 +2009,35 @@ func _enter_attack_mode() -> void:
 func _is_hostile(a, b) -> bool:
 	return _state._is_hostile(a, b)
 
-# 执行攻击：取攻方基础攻击 skill → 算命中目标（直线 AoE 按方向、可友伤）→ 扣 skill AP、逐目标判定 + 记录。
+# 执行攻击：取攻方普攻构成（🔒 决策31：连携＝主手段+副手段）→ 算命中目标（直线 AoE 按方向、可友伤）
+# → 扣 AP（连携=DUAL_STRIKE_AP 常量、单段=技能费）、逐段逐目标判定 + 记录。
 func _do_attack(attacker, cell: Vector2i) -> void:
-	var skill = attacker.basic_attack()
+	var segs: Array = _state.attack_segments(attacker)
+	var skill: Dictionary = segs[0]
 	var targets := _attack_targets(attacker, cell, skill)
 	var aoe = skill.get("aoe", null)
 	var is_aoe: bool = typeof(aoe) == TYPE_DICTIONARY \
 		or not (SkillDB.shape_of(skill).get("effect", []) as Array).is_empty()   # 形状作用形＝AOE（可空放，🔒 决策30）
-	# 单体且点到空格/非敌 → 取消、不耗 AP；AOE 空放照常消耗（挥了就是挥了）
+	# 单体且点到空格/非敌 → 取消、不耗 AP；AOE 空放照常消耗（挥了就是挥了）——主手段口径（取消即整次取消）
 	if targets.is_empty() and not is_aoe:
 		_clear_selection()
 		return
-	attacker.ap -= SkillDB.skill_ap_cost(skill)
+	attacker.ap -= _state.attack_ap_cost(attacker)
 	_resolve_attack(attacker, skill, targets)
+	var flash: Array = targets.duplicate()
+	# 副手段（🔒 决策31 双武器连携）：按副手武器自己的 bws 形状/单体取自己的目标（不强行同形）；
+	# 两段各自独立结算（命中/暴击/格挡独立掷骰、weapon_source=off_hand 天然吃 offhand_eff 链）；
+	# 第一段已倒者（HP≤0 且非死门）不吃第二段——收尸仍统一在段后 _handle_deaths
+	if segs.size() > 1:
+		var off: Dictionary = segs[1]
+		var t2: Array = _attack_targets(attacker, cell, off).filter(
+			func(t): return int(t.stats.get("HP", 0)) > 0 or t.tags.has("deaths_door"))
+		_resolve_attack(attacker, off, t2)
+		for t in t2:
+			if not (t in flash):
+				flash.append(t)
 	_handle_deaths()
-	_play_attack_anim(attacker, cell, targets)   # 撞击 + 受击闪红 + 音效（cosmetic）
+	_play_attack_anim(attacker, cell, flash)   # 撞击 + 受击闪红 + 音效（cosmetic；连携合一次冲撞、闪红取两段并集）
 	_clear_selection()
 	_refresh_info()
 	if canvas != null:
@@ -2062,6 +2089,8 @@ func _resolve_one(attacker, target, skill, show_target := false) -> Dictionary:
 		formula += "×效能%s%%" % _numf(float(r["aeff"]) * 100.0)
 	if float(r["bonus"]) > 0.0:
 		formula += "＋补正%s" % _numf(r["bonus"])
+	if float(r.get("atk_rate", 1.0)) != 1.0:   # 反应系数（🔒 决策31 借机/反击）：整段等比、有才写
+		formula = "（%s）×反应%s" % [formula, _numf(r["atk_rate"])]
 	lines.append("伤害：%s=%s" % [formula, _numf(r["out"])])
 	lines.append("格挡率%s%%" % _numf(r["br"]))
 	lines.append("→ %s" % _oc(r["blocked"], "格挡", "未格挡"))

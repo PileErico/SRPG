@@ -6,7 +6,9 @@ extends SceneTree
 ##  · apply_skill EWS 分支：非已学消耗走 ews_state（skills 不受污染、AP 扣减一致）
 ##  · 战斗快照：ews_state 往返（护栏#3 白名单同 PR 扩展）
 ##  · 审查修复回归：flatten_bws 无 attack 块→{}（防幻影攻击）/ apply_skill 无可跑块拒发零消耗
-##  · EWS 恒读主手（🔒 决策28）：副手不供给能力表（ItemDB._paths_override 注入临时武器库）
+##  · EWS 恒读主手（🔒 决策28）：无 offhand_ws 时副手不供给能力表（ItemDB._paths_override 注入临时武器库）
+##  · 位置语义（🔒 决策31 翻案决策28 前半）：offhand_ws ≥1 → 副手武器技能（ews 全量+bws）一律按 EWS 论，
+##    条目自身 requires 照常判；能力键门控正反向 + 连携便捷读口（dual_strike_active/offhand_weapon_attack）
 ## SkillDB 经 _path_override 注入 user:// 临时库，不碰真数据。
 ## 运行：..._console.exe --headless --path "D:/1战棋" -s res://tools/test_weapon_skills.gd（退出码 0=PASS）
 
@@ -17,6 +19,7 @@ const UnitFactory := preload("res://UnitFactory.gd")
 const BattleState := preload("res://BattleState.gd")
 const ItemDB := preload("res://ItemDB.gd")
 const ItemInstances := preload("res://ItemInstances.gd")
+const EquipSlots := preload("res://EquipSlots.gd")
 
 var _fail := 0
 func ck(c: bool, m: String) -> void:
@@ -39,6 +42,12 @@ func _initialize() -> void:
 			"max_level": 1, "target": {"enemy": false, "ally": true, "self": true},
 			"range": 1, "requires_hands": [],
 			"effects": [{"kind": "heal", "heal_pct_max_hp": 20, "cleanse_tags": []}]},
+		{"id": "t_ews_guard", "name": "戒备", "icon": "", "category": "skill", "desc": "",
+			"active": true, "tags": [],
+			"costs": {"ap": 1}, "cooldown": {"base": 1}, "uses_per_battle": {"base": 0},
+			"max_level": 1, "target": {"enemy": false, "ally": false, "self": true},
+			"range": 0, "requires_hands": [],
+			"effects": [{"kind": "heal", "heal_pct_max_hp": 5, "cleanse_tags": []}]},
 	]
 	var f = FileAccess.open("user://test_ws_skills.json", FileAccess.WRITE)
 	f.store_string(JSON.stringify(skills, "  "))
@@ -161,12 +170,15 @@ func _initialize() -> void:
 	st.apply_skill(brute2, "t_bws", target)
 	ck(brute2.ap == 3 and brute2.ews_state.is_empty(), "EWS 分支同守卫：零消耗、ews_state 干净")
 
-	# 7) ews_entries 恒读主手（🔒 决策28）：副手武器不供给能力表（双持型攻击＝perk 授予，非武器 EWS）
+	# 7) ews_entries 恒读主手（🔒 决策28；⚠ 前半句已被决策31 翻案为 offhand_ws 门控——无能力键时行为不变）
 	var weapons := [
 		{"id": "t_axe", "name": "试斧", "slot": "main_hand",
 			"ews": [{"skill": "t_ews_heal", "requires": [{"prof": "wp_axe", "value": 600}]}]},
 		{"id": "t_kit", "name": "试包", "slot": "off_hand",
 			"ews": [{"skill": "t_ews_heal"}]},
+		{"id": "t_saber", "name": "试刀", "slot": "main_hand", "tags": ["one_handed"], "bws": "t_bws",
+			"ews": [{"skill": "t_ews_guard", "requires": [{"prof": "wp_sword", "value": 200}]}]},
+		{"id": "t_shield", "name": "试盾", "slot": "off_hand", "tags": ["shield"], "bws": "t_bws"},
 	]
 	var wf = FileAccess.open("user://test_ws_weapons.json", FileAccess.WRITE)
 	wf.store_string(JSON.stringify(weapons, "  "))
@@ -179,12 +191,68 @@ func _initialize() -> void:
 	holder.equipment["off_hand"] = ItemInstances.create("t_kit")
 	var ents: Array = holder.ews_entries()
 	ck(ents.size() == 1 and str(ents[0]["slot"]) == "main_hand" and not bool(ents[0]["unlocked"]),
-		"副手无条件授予被忽略——主手条目（锁：斧600未达）是唯一条目")
+		"无 offhand_ws：副手授予被忽略——主手条目（锁：斧600未达）是唯一条目")
 	holder.equipment["main_hand"] = int(holder.equipment["off_hand"])   # t_kit 换上主手
 	ents = holder.ews_entries()
 	ck(ents.size() == 1 and bool(ents[0]["unlocked"]), "换到主手 → 无条件条目供给且解锁")
 	holder.equipment["main_hand"] = 0
-	ck(holder.ews_entries().is_empty(), "主手空 → 能力表无 EWS（副手仍持械也不读）")
+	ck(holder.ews_entries().is_empty(), "主手空 → 能力表无 EWS（无 offhand_ws 副手仍持械也不读）")
+
+	# 7b) 位置语义（🔒 决策31 翻案决策28 前半）：offhand_ws ≥1 → 副手位武器技能一律按 EWS 论
+	var dual = Unit.new("双持", "player", 5, 0)
+	dual.equipment["main_hand"] = ItemInstances.create("t_axe")
+	dual.equipment["off_hand"] = ItemInstances.create("t_saber")
+	ck(not dual.can_use_offhand_ws(), "便捷读口：offhand_ws=0 → false")
+	ck(dual.ews_entries().size() == 1, "无 offhand_ws：副手（bws+ews）不供给——决策28 行为保持")
+	dual.modifiers.append({"stat": "offhand_ws", "op": "flat", "value": 1, "source": "skill:t_dual_perk"})
+	ck(dual.can_use_offhand_ws(), "perk 经修正管线授予 offhand_ws=1 → true（能力键正向）")
+	var ents2: Array = dual.ews_entries()
+	ck(ents2.size() == 3, "offhand_ws=1 → 主手1 + 副手 bws + 副手 ews ＝3 条（实得 %d）" % ents2.size())
+	var off_bws = null
+	var off_ews = null
+	for e2 in ents2:
+		if str(e2["slot"]) == "off_hand":
+			if str(e2["id"]) == "t_bws":
+				off_bws = e2
+			elif str(e2["id"]) == "t_ews_guard":
+				off_ews = e2
+	ck(off_bws != null and bool(off_bws["unlocked"]), "副手 bws 以 EWS 形态出现（位置语义）·无 requires 即解锁")
+	ck(off_ews != null and not bool(off_ews["unlocked"]), "副手 ews 条目自身 requires（武器域熟练度）照常判——未达=锁")
+	dual.prof_xp["wp_sword"] = 200
+	var unlocked_now := false
+	for e2 in dual.ews_entries():
+		if str(e2["id"]) == "t_ews_guard" and bool(e2["unlocked"]):
+			unlocked_now = true
+	ck(unlocked_now, "副手 ews requires 达标 → 解锁（剑200）")
+	dual.modifiers.clear()
+	ck(dual.ews_entries().size() == 1, "摘除 offhand_ws 修正 → 副手条目消失（能力键反向）")
+
+	# 7c) 副手盾（⚠ 盾是否豁免 offhand_ws 待用户定——决策31 只写「副手武器技能解锁」，暂保守一律要 offhand_ws；此段锁现状）
+	var sworn = Unit.new("持盾", "player", 6, 0)
+	sworn.equipment["main_hand"] = ItemInstances.create("t_axe")
+	sworn.equipment["off_hand"] = ItemInstances.create("t_shield")
+	ck(sworn.ews_entries().size() == 1, "无 offhand_ws：副手盾的 bws 不供给（保守现状）")
+	sworn.modifiers.append({"stat": "offhand_ws", "op": "flat", "value": 1, "source": "buff:测试"})
+	ck(sworn.ews_entries().size() == 2, "offhand_ws=1：盾的 bws（盾击类）按 EWS 供给")
+
+	# 8) 连携便捷读口（🔒 决策31）：dual_strike_active＝能力≥1 ∧ 副手非盾武器 ∧ 攻击定义非空
+	var dw = Unit.new("连携", "player", 7, 0)
+	dw.equipment["main_hand"] = ItemInstances.create("t_axe")
+	dw.equipment["off_hand"] = ItemInstances.create("t_saber")
+	var offatk: Dictionary = dw.offhand_weapon_attack()
+	ck(str(offatk.get("weapon_source", "")) == "off_hand" and str(offatk.get("name", "")) == "试斩",
+		"副手攻击定义＝bws 扁平＋weapon_source=off_hand（吃 offhand_eff 链）")
+	ck(not dw.dual_strike_active(), "无 dual_strike 能力 → 不激活（门控反向）")
+	dw.modifiers.append({"stat": "dual_strike", "op": "flat", "value": 1, "source": "skill:t_dual_perk"})
+	ck(dw.dual_strike_active(), "能力+副手非盾武器 → 激活（门控正向）")
+	dw.equipment["off_hand"] = ItemInstances.create("t_shield")
+	ck(dw.offhand_weapon_attack().is_empty() and not dw.dual_strike_active(), "副手盾 → 不激活（决策31 非盾条件）")
+	dw.equipment["off_hand"] = 0
+	ck(not dw.dual_strike_active(), "副手空 → 不激活")
+	dw.equipment["off_hand"] = int(dw.equipment["main_hand"])
+	ck(not dw.dual_strike_active(), "双手武器占双槽（同 iuid）→ 无独立副手不激活")
+	ck(EquipSlots.accepts("main_hand", {"tags": ["shield"]}), "盾可进主手（🔒 决策31 纯盾战士，EquipSlots 资格放开）")
+
 	ItemDB._paths_override = {}
 	ItemDB.reload_data()
 	ItemInstances.clear()

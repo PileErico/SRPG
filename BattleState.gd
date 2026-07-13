@@ -542,6 +542,23 @@ func _skill_bonus(attacker, skill) -> float:
 		sum += attacker.effective_stat_f(str(s))
 	return Unit.round1(sum * float(b.get("mult", 0.0)))
 
+const DUAL_STRIKE_AP := 1     # 双武器连携普攻 AP（🔒 决策31；占位——数值轮调）
+const REACTION_RATE := 0.75   # 反应系数（🔒 决策31：借机/反击＝普攻构成 ×此值；占位——数值轮调）
+
+# 普攻 AP 成本单口（🔒 决策31）：连携激活＝DUAL_STRIKE_AP 常量（两段合一次动作）；否则＝主手技能费。
+# 消费点：Sandbox._can_attack/_do_attack ＋ _ai_plan 攻击门槛（三处同口，禁再手抄 skill_ap_cost(basic_attack)）。
+func attack_ap_cost(u) -> int:
+	return DUAL_STRIKE_AP if u.dual_strike_active() else SkillDB.skill_ap_cost(u.basic_attack())
+
+# 普攻构成段（🔒 决策31 双武器连携）：恒 [主手段]；dual_strike 激活 → 追加副手段
+# （副手 bws 扁平＋weapon_source=off_hand，结算天然吃 offhand_eff 链——不硬编码 0.5）。
+# 普攻执行（Sandbox._do_attack）与借机（_resolve_aoo）同吃此口——借机 ×REACTION_RATE 对两段自动成立（勿特判）。
+func attack_segments(u) -> Array:
+	var segs: Array = [u.basic_attack()]
+	if u.dual_strike_active():
+		segs.append(u.offhand_weapon_attack())
+	return segs
+
 # 单次攻击完整结算——命中/暴击/格挡掷骰、伤害分量落血、死门条 −1+结算、异常施加。
 # 只改单位状态，不写日志/飘字；返回展示所需全部数值（未命中时只有 hit/roll/hc/acc/eva）。
 # 副手是否持盾（🔒 §7.1：盾上的 off_hand 攻击不吃副手惩罚——盾击类语义另算）
@@ -599,6 +616,10 @@ func _resolve_compute_body(attacker, target, skill) -> Dictionary:
 	var bonus := _skill_bonus(attacker, skill)
 	if bonus > 0.0:
 		out += bonus
+	# 反应系数（🔒 决策31）：借机/反击段的 hit 带 atk_rate（借机注入 REACTION_RATE；缺省 1＝普攻零影响）——
+	# 段输出整体等比缩放（含补正），命中/暴击/格挡掷骰不受影响
+	var rrate := maxf(0.0, float(skill.get("atk_rate", 1.0)))
+	out *= rrate
 	# 格挡 + 全域减伤 G = max(0, 1−格挡性能/100) × 防御效能因子（下限 clamp🔒）
 	var br := float(target.effective_stat_f("block_rate"))
 	var blocked := rng.randf() * 100.0 < br
@@ -634,6 +655,7 @@ func _resolve_compute_body(attacker, target, skill) -> Dictionary:
 	r["cmult"] = cmult
 	r["aeff"] = aeff
 	r["offhand"] = ohf
+	r["atk_rate"] = rrate
 	r["bonus"] = bonus
 	r["out"] = out
 	r["blocked"] = blocked
@@ -1257,7 +1279,7 @@ func _ai_plan(unit) -> Dictionary:
 	var here := Vector2i(unit.col, unit.row)
 	var tcell := Vector2i(target.col, target.row)
 	var atk_range := SkillDB.skill_reach(unit.basic_attack())   # 形状掩码优先（决策30）
-	if _hex_dist(here, tcell) <= atk_range and unit.ap >= SkillDB.skill_ap_cost(unit.basic_attack()):
+	if _hex_dist(here, tcell) <= atk_range and unit.ap >= attack_ap_cost(unit):   # 连携=常量费（🔒 决策31）
 		# 形状精确校验：选取形（环形射程等）外的目标不打（_attack_targets 同口设防；空=旧圆盘语义）
 		var pickc := _shape_pick_cells(unit, unit.basic_attack())
 		if pickc.is_empty() or pickc.has(tcell):
