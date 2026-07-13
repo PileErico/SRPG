@@ -10,6 +10,7 @@ signal changed
 
 var radius := 3          # 盘半径（圈数）；3 圈=37 格，够武器/技能常用范围
 var cell_px := 15.0      # 单格外接圆半径（像素）
+var editable := true     # false＝只读参考盘（显示派生预览：range 圆盘/方向盘；蓝灰色区分）
 var _sel := {}           # Vector2i(dq,dr) -> true
 
 func _init() -> void:
@@ -63,6 +64,8 @@ func _corners(c: Vector2) -> PackedVector2Array:
 	return pts
 
 func _gui_input(event: InputEvent) -> void:
+	if not editable:
+		return
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		var a := _px_to_axial(event.position)
 		if a == Vector2i.ZERO or _axial_dist(a) > radius:
@@ -89,7 +92,8 @@ func _draw() -> void:
 				var tw := font.get_string_size("✦", HORIZONTAL_ALIGNMENT_CENTER, -1, 13).x
 				draw_string(font, c + Vector2(-tw * 0.5, 4.5), "✦", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.95, 0.9, 0.7))
 			elif _sel.has(a):
-				draw_colored_polygon(pts, Color(0.92, 0.74, 0.2, 0.55))
+				# 可编＝金色；只读参考（派生自 range/作用形方向盘）＝蓝灰
+				draw_colored_polygon(pts, Color(0.92, 0.74, 0.2, 0.55) if editable else Color(0.35, 0.55, 0.85, 0.38))
 			else:
 				draw_colored_polygon(pts, Color(1, 1, 1, 0.035))
 			var line := pts.duplicate()

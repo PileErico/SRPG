@@ -19,6 +19,7 @@ const EffectEditorScript := preload("res://EffectEditor.gd")   # §26 apply_effe
 const ItemDB := preload("res://ItemDB.gd")                     # §18 反向引用感知（武器 bws/ews 引用技能）
 const UnitFactory := preload("res://UnitFactory.gd")           # §18 反向引用感知（原型 skills 引用技能）
 const HexShapePicker := preload("res://HexShapePicker.gd")     # 🔒 决策30 图形化范围（选取形/作用形点格）
+const HexGrid := preload("res://HexGrid.gd")                   # 参考盘派生预览（旋转/圆盘）
 
 const ICON_DIR := "res://icons/Skills"
 # 适用武器种类的 tag 类别（🔒 决策29：词表＝TagDB wcat_*，与武器 tag/动态技能 tag 三位一体）
@@ -65,6 +66,7 @@ var _w_passive_hint: Label   # §25 被动灰化联动的说明条（active=fals
 var _w_wskill: CheckBox            # 武器技能勾选（勾＝可被武器选取）
 var _kind_box: Control             # 适用武器种类区（勾选时显示）
 var _kind_checks := {}             # wcat tag id -> CheckBox
+var _w_custom_pick: CheckBox       # 自定义攻击范围（勾＝选取形可点格编辑；否＝盘只作 range 可视化参考）
 var _w_pick: Control               # 选取形 HexShapePicker
 var _w_effect: Control             # 作用形 HexShapePicker
 var _w_anchor: OptionButton        # 作用形锚点 caster/target
@@ -270,21 +272,40 @@ func _build_form() -> void:
 	_kind_box.visible = bool(_current.get("weapon_skill", false))
 	_form.add_child(_kind_box)
 
-	# —— 范围与形状（🔒 决策30 图形化）：掩码空＝按射程 range 圆盘/单体（旧数据零迁移）——
-	_form.add_child(EditorUI.section_title("范围与形状（点格设形；两盘全空＝按下方 range 圆盘/单体）"))
+	# —— 范围与形状（🔒 决策30 图形化；2026-07-13 UX 拍板：range 领衔、选取形默认＝range 可视化参考，
+	# 勾「自定义攻击范围」才可点格编辑——以当前预览为底稿，长柄空内圈＝勾上后点掉内圈即可）——
+	_form.add_child(EditorUI.section_title("范围与形状（range 定攻击范围；自定义后点格微调）"))
 	var shp0: Dictionary = _current.get("shape", {}) if typeof(_current.get("shape")) == TYPE_DICTIONARY else {}
+	var pick0: Array = shp0.get("pick", [])
+	_w_range = EditorUI.add_spin(_form, "射程 range（格；0=自身/同格）——未自定义时选取形盘按此显示攻击范围", float(_current.get("range", 1)), 0, 20, 1,
+		func():
+			_mark_dirty()
+			_sync_pick_preview())
+	_w_custom_pick = EditorUI.add_check(_form, "自定义攻击范围（勾＝手动点格编辑选取形、取代 range；如长柄空出内圈）",
+		not pick0.is_empty(), func(_v = false):
+			_mark_dirty()
+			if _w_pick == null:
+				return
+			if _w_custom_pick.button_pressed:
+				_w_pick.editable = true   # 以当前预览为底稿开编
+				_w_pick.queue_redraw()
+			else:
+				_sync_pick_preview()      # 弃自定义 → 回 range 派生参考盘
+			_update_shape_gray())
 	var shp_row := HBoxContainer.new()
 	shp_row.add_theme_constant_override("separation", 14)
-	_w_pick = _shape_picker_col(shp_row, "选取形（可瞄准的格；如长柄空出内圈）", shp0.get("pick", []))
+	_w_pick = _shape_picker_col(shp_row, "选取形（可瞄准的格；未自定义＝蓝灰参考盘，盘显示至 3 圈）", pick0)
 	_w_effect = _shape_picker_col(shp_row, "作用形（AOE 打到的格；空＝单体打所点格）", shp0.get("effect", []))
 	_form.add_child(shp_row)
 	_w_anchor = EditorUI.add_dropdown(_form, "作用形锚点 anchor",
 		[["caster", "锚定自身（按目标方向 60° 旋转——横扫弧）"], ["target", "锚定落点（平移到所点格——火球）"]],
 		str(shp0.get("anchor", "caster")), func(_i = 0):
 			_mark_dirty()
+			_sync_pick_preview()
 			_update_shape_gray())
 	_w_ff = EditorUI.add_check(_form, "友伤 friendly_fire（AOE 可空放，故不设对敌/对友、只设是否伤及友军）",
 		bool(shp0.get("friendly_fire", false)), _mark_dirty)
+	_sync_pick_preview()   # 初始态：无自定义 → 盘显示 range 圆盘/方向盘参考
 
 	# 2. 标签
 	_form.add_child(EditorUI.section_title("技能标签（verbal=需发声、失语时禁用）"))
@@ -304,9 +325,7 @@ func _build_form() -> void:
 		float((_current.get("uses_per_battle", {}) as Dictionary).get("base", 0)), 0, 9, 1, _mark_dirty)
 	_w_maxlv = EditorUI.add_spin(_form, "技能等级数 max_level（各级参数=per_level 数组长度；武器技能钉 1——无升级）",
 		float(_current.get("max_level", 1)), 1, 5, 1, _mark_dirty)
-	_w_range = EditorUI.add_spin(_form, "射程 range（格；0=自身/同格）——画了选取形/锚自身作用形＝被顶掉（灰化+存盘清键）",
-		float(_current.get("range", 1)), 0, 20, 1, _mark_dirty)
-	_update_shape_gray()   # 初始灰化态（range 被形状顶掉/武器技能等级钉 1）
+	_update_shape_gray()   # 初始灰化态（range 被自定义/方向盘顶掉、武器技能等级钉 1——range 本体在形状区领衔）
 	# 目标三旗（🔒 §2.7 正交自由组合；全 false=永不可施放，存盘拦）
 	var trow := HBoxContainer.new()
 	trow.add_theme_constant_override("separation", 12)
@@ -393,14 +412,16 @@ func _dropdown_pairs(label: String, pairs: Array, sel: String) -> OptionButton:
 	_form.add_child(EditorUI.field_row(label, ob))
 	return ob
 
-# range/等级的联动灰化（决策30 收口）：选取形非空或作用形锚自身 → range 被顶掉（灰化+存盘清键；
-# 火球型〔锚落点、无选取形〕仍靠 range 定投掷距离）；勾武器技能 → max_level 钉 1（武器技能无升级）
+# range/等级的联动灰化（决策30 收口）：自定义选取形 或 作用形锚自身 → range 被顶掉（灰化+存盘清键；
+# 火球型〔锚落点、无自定义选取形〕仍靠 range 定投掷距离）；勾武器技能 → max_level 钉 1（武器技能无升级）
 func _update_shape_gray() -> void:
 	if _w_range == null:
 		return
 	var superseded := _range_superseded()
 	_w_range.editable = not superseded
 	_w_range.modulate = Color(0.55, 0.55, 0.6) if superseded else Color.WHITE
+	if _w_maxlv == null:
+		return
 	var ws: bool = _w_wskill != null and _w_wskill.button_pressed
 	if ws:
 		_w_maxlv.value = 1
@@ -408,11 +429,43 @@ func _update_shape_gray() -> void:
 	_w_maxlv.modulate = Color(0.55, 0.55, 0.6) if ws else Color.WHITE
 
 func _range_superseded() -> bool:
-	if _w_pick == null or _w_effect == null:
+	if _w_pick == null or _w_effect == null or _w_custom_pick == null:
 		return false
-	if not (_w_pick.mask() as Array).is_empty():
+	if _w_custom_pick.button_pressed and not (_w_pick.mask() as Array).is_empty():
 		return true
 	return not (_w_effect.mask() as Array).is_empty() and str(_w_anchor.get_selected_metadata()) == "caster"
+
+# 选取形参考盘同步（2026-07-13 UX 拍板）：未勾自定义 → 盘只读、显示派生预览
+# （作用形锚自身＝六旋转方向盘；否则＝range 圆盘）——所见即战斗侧实际可点格（_shape_pick_cells 同口径）
+func _sync_pick_preview() -> void:
+	if _w_pick == null or _w_custom_pick == null:
+		return
+	if _w_custom_pick.button_pressed:
+		_w_pick.editable = true
+		return
+	_w_pick.editable = false
+	_w_pick.set_mask(_derived_pick_mask())
+
+func _derived_pick_mask() -> Array:
+	var effm: Array = _w_effect.mask() if _w_effect != null else []
+	if not effm.is_empty() and _w_anchor != null and str(_w_anchor.get_selected_metadata()) == "caster":
+		var seen := {}
+		var out := []
+		for k in 6:
+			for m in effm:
+				var d := HexGrid.axial_rotate(Vector2i(int(m[0]), int(m[1])), k)
+				if not seen.has(d):
+					seen[d] = true
+					out.append([d.x, d.y])
+		return out
+	var rng := int(_w_range.value) if _w_range != null else 1
+	var out2 := []
+	for q in range(-rng, rng + 1):
+		for r in range(-rng, rng + 1):
+			var dist := int((abs(q) + abs(-q - r) + abs(r)) / 2)
+			if dist >= 1 and dist <= rng:
+				out2.append([q, r])
+	return out2
 
 # 形状盘列（标题 + 六边形点格盘 + 清空钮）——选取形/作用形两处共用（🔒 决策30）
 func _shape_picker_col(parent: Control, title: String, mask) -> Control:
@@ -967,8 +1020,9 @@ func _shell_collect() -> Dictionary:
 	else:
 		out.erase("weapon_skill")
 		out.erase("weapon_kinds")
-	# 形状（🔒 决策30）：两盘全空＝删键（回退 range 圆盘/单体）；anchor/friendly_fire 只随作用形落键
-	var pickm: Array = _w_pick.mask()
+	# 形状（🔒 决策30）：选取形只在勾了「自定义攻击范围」时收集（未勾＝盘是 range 参考、不落键）；
+	# 两盘全空＝删键（回退 range 圆盘/单体）；anchor/friendly_fire 只随作用形落键
+	var pickm: Array = _w_pick.mask() if _w_custom_pick.button_pressed else []
 	var effm: Array = _w_effect.mask()
 	if pickm.is_empty() and effm.is_empty():
 		out.erase("shape")
