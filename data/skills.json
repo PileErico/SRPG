@@ -3,47 +3,6 @@
     "active": true,
     "category": "skill",
     "cooldown": {
-      "base": 2
-    },
-    "costs": {
-      "ap": 1
-    },
-    "desc": "包扎伤口：恢复目标生命并止住流血。",
-    "effects": [
-      {
-        "cleanse_tags": [
-          "bleeding"
-        ],
-        "heal_pct_max_hp": {
-          "per_level": [
-            15,
-            25,
-            35
-          ]
-        },
-        "kind": "heal"
-      }
-    ],
-    "icon": "",
-    "id": "first_aid",
-    "max_level": 3,
-    "name": "救护",
-    "range": 1,
-    "requires_hands": [],
-    "tags": [],
-    "target": {
-      "ally": true,
-      "enemy": false,
-      "self": true
-    },
-    "uses_per_battle": {
-      "base": 0
-    }
-  },
-  {
-    "active": true,
-    "category": "skill",
-    "cooldown": {
       "base": 0
     },
     "costs": {
@@ -415,7 +374,7 @@
       {
         "hits": [
           {
-            "coeff": 1,
+            "coeff": 0.7,
             "damage_kind": "physical"
           }
         ],

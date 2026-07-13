@@ -71,6 +71,13 @@ func _initialize() -> void:
 				{"type": "target_effect", "effect": "bleeding"},
 				{"type": "time_of_day", "at": "night"}],
 			"mods": [{"stat": "acc", "op": "flat", "value": 10}]}]})
+	# heal 试料（形＝原救护条目——数据条目已删 2026-07-13 用户令；heal 块/per_level/往返回归靠它）
+	arr0.append({"id": "t_heal", "name": "试料救护", "icon": "", "category": "skill", "desc": "",
+		"active": true, "tags": [],
+		"costs": {"ap": 1}, "cooldown": {"base": 2}, "uses_per_battle": {"base": 0},
+		"max_level": 3, "target": {"enemy": false, "ally": true, "self": true},
+		"range": 1, "requires_hands": [],
+		"effects": [{"kind": "heal", "heal_pct_max_hp": {"per_level": [15, 25, 35]}, "cleanse_tags": ["bleeding"]}]})
 	SkillDB._write_array("user://test_skills.json", arr0)
 	SkillDB._write_array("user://test_skills.json", SkillDB._read_array("user://test_skills.json"))
 	SkillDB.reload_data()
@@ -87,12 +94,12 @@ func _initialize() -> void:
 	ck(ed.has_method("_shell_collect"), "SkillEditor 脚本挂载且解析通过")
 	var before := _bytes("user://test_skills.json")
 	ck(before.size() > 0, "临时 skills 副本非空")
-	ed._shell_load("first_aid")
-	ck(ed._w_id != null and str(ed._w_id.text) == "first_aid", "载入 first_aid 表单")
+	ed._shell_load("t_heal")
+	ck(ed._w_id != null and str(ed._w_id.text) == "t_heal", "载入 t_heal 表单")
 	ck(ed._blocks.size() == 1 and str(ed._blocks[0]["kind"]) == "heal", "heal 块已建")
 	var col = ed._shell_collect()
 	ck(not col.is_empty(), "无改动 collect 成功")
-	ck(_same(col, SkillDB.get_skill("first_aid")), "collect 结果与 DB 条目全等（含公式对象/键序语义）")
+	ck(_same(col, SkillDB.get_skill("t_heal")), "collect 结果与 DB 条目全等（含公式对象/键序语义）")
 	ck(SkillDB.save_skill(col), "无改动回存成功")
 	ck(_bytes("user://test_skills.json") == before, "★ canonical 字节级往返：无改动回存文件逐字节不变")
 
@@ -134,13 +141,13 @@ func _initialize() -> void:
 	ck(not col3.is_empty() and _same(col3["effects"][1].get("params"), {"radius": 2}), "params 合法 JSON → 解析入库")
 
 	# 编辑存盘：改名落盘 + 双键剥离
-	ed._shell_load("first_aid")
+	ed._shell_load("t_heal")
 	ed._w_name.text = "救护改"
 	var col4 = ed._shell_collect()
 	col4["ap_cost"] = 1   # 人为塞旧键——collect 后不该出现；此处验证 save 前的数据侧净化由 collect 承担
 	ck(not ed._shell_collect().has("ap_cost"), "collect 剥离顶层 ap_cost（双键禁写）")
 	ck(SkillDB.save_skill(ed._shell_collect()), "改名存盘成功")
-	ck(str(SkillDB.get_skill("first_aid").get("name")) == "救护改", "存盘后 DB 读回新名")
+	ck(str(SkillDB.get_skill("t_heal").get("name")) == "救护改", "存盘后 DB 读回新名")
 
 	# —— §6 conditional_mod：字节级往返（when 六型 + 未实现类型行锁定）——
 	var cond_before := _bytes("user://test_skills.json")
@@ -195,7 +202,7 @@ func _initialize() -> void:
 	ck(not ed._shell_collect().is_empty(), "补上 tag → collect 通过")
 
 	# —— §24 效果块调序：↑/↓ 与收集序同步 ——
-	ed._shell_load("first_aid")
+	ed._shell_load("t_heal")
 	ed._add_block(ed._block_skeleton("scripted"))
 	ed._blocks[1]["script_id"].text = "test_order"
 	ed._move_block(ed._blocks[1], -1)
@@ -298,12 +305,12 @@ func _initialize() -> void:
 	ck((fe._shell_referenced_by("__no_such_effect__") as Array).is_empty(), "无引用效果 → referenced_by 空")
 
 	# —— §26 跨编辑器定位静态口：_open_with_id 写→_ready 消费载入→即清 ——
-	SkillEd._open_with_id = "first_aid"
+	SkillEd._open_with_id = "t_heal"
 	var ed2 = SkillScene.instantiate()
 	root.add_child(ed2)
 	if ed2._form == null:
 		ed2._ready()
-	ck(ed2._w_id != null and str(ed2._w_id.text) == "first_aid", "SkillEditor 静态定位口：_ready 消费 _open_with_id 载入条目")
+	ck(ed2._w_id != null and str(ed2._w_id.text) == "t_heal", "SkillEditor 静态定位口：_ready 消费 _open_with_id 载入条目")
 	ck(SkillEd._open_with_id == "", "SkillEditor 静态口消费即清")
 	SkillEd._open_with_id = "no_such_skill_zzz"
 	var ed3 = SkillScene.instantiate()
