@@ -98,12 +98,13 @@ static func has_attack_block(def: Dictionary) -> bool:
 			return true
 	return false
 
-# BAS 形判定（🔒 决策27 关系制）：BWS/EWS 不是技能种类而是武器引用方式，技能「可被引为 BWS」看形状——
+# WS 形（武器技能形）判定（🔒 决策27 关系制；⚠ 2026-07-13 用户改词：普攻形/BAS 形→**武器技能/WS 形**，
+# bws/ews 家族统一 ws 词缀）：BWS/EWS 不是技能种类而是武器引用方式，技能「可被引为 BWS」看形状——
 # 含 attack 块（≥1 hit 对象）∧ 冷却0 ∧ 无级 ∧ 无手门槛 ∧ 次数无限（攻击路径不结算冷却/次数/等级，
 # 形状不符＝语义静默丢失；次数条件＝决策18「BAS＝无次数限制」+ 决策27 rationale 同款，审查补齐）。
 # 单一判定口：ItemEditor BWS 下拉过滤 / lint 规则8（在武器引用处执法）/ SkillEditor 左栏分组 共用。
 # attack 块扫描口径＝「首个 hits 合法的 attack 块」——与 flatten_bws 同口（gate 放行 ⇔ 运行时可扁平）。
-static func is_bas_shaped(def: Dictionary) -> bool:
+static func is_ws_shaped(def: Dictionary) -> bool:
 	var cd = def.get("cooldown", {})
 	if typeof(cd) == TYPE_DICTIONARY and int(cd.get("base", 0)) != 0:
 		return false
@@ -127,7 +128,7 @@ static func is_bas_shaped(def: Dictionary) -> bool:
 # 顶层字段从技能级取（name/icon/range/ap_cost〔经 skill_ap_cost 双键桥〕/tags）；
 # attack 块 hits[0] 其余键全部透传（coeff/damage_kind/aoe/inflict/armor_pen/sure_hit…）。
 # 无（合法）attack 块 → 返回 {}（勿凭顶层字段造「幻影全额物理攻击」；basic_attack 自然兜 UNARMED）。
-# 取「首个 hits 合法的 attack 块」，异形块跳过继续扫——与 is_bas_shaped 同口径（gate 放行 ⇔ 此处必有产出）。
+# 取「首个 hits 合法的 attack 块」，异形块跳过继续扫——与 is_ws_shaped 同口径（gate 放行 ⇔ 此处必有产出）。
 static func flatten_bws(def: Dictionary) -> Dictionary:
 	for b in def.get("effects", []):
 		if typeof(b) == TYPE_DICTIONARY and str(b.get("kind", "")) == "attack":

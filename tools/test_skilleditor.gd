@@ -2,7 +2,7 @@ extends SceneTree
 ## SkillEditor / EffectEditor 回归（🔒 设计 §10 阶段2 验收 + 提案 §6/§24/§25 2026-07-13）：
 ##  · canonical 字节级往返：载入→_collect（无改动）→save_skill → 文件字节不变；collect 结果与 DB 条目全等
 ##  · lint 规则7 同步校验拦截：三旗全 false / seq 撞格 / per_level 长度≠max_level → collect 拒（{}）
-##    （BAS 形约束已随决策27 关系制移到引用处＝lint 规则8/ItemEditor 过滤，编辑器不再有 usable_as_bas）
+##    （WS 形〔武器技能形〕约束已随决策27 关系制移到引用处＝lint 规则8/ItemEditor 过滤，编辑器不再有 usable_as_bas）
 ##  · 坏 JSON 响亮拒存：scripted params 非法 JSON → collect 拒
 ##  · §6 conditional_mod 表单：when 六型+未实现类型行锁定 字节级往返 / 新建块 canonical 定点 / 必填缺失拒存
 ##  · §24 效果块调序：↑/↓ 与收集序同步、顶端 no-op
