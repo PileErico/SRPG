@@ -4,6 +4,8 @@ extends SceneTree
 ## v5（2026-07-12）：40×28 大世界——北境雪原/帝国腹地/南野密林/黄沙残境四区；双城三村双巢双遗迹；
 ## FantasyHex 风味瓦片转正（fh_* 城市/农场/营地/遗迹/野兽/矿点/灵泉——overworld_cost 已在 terrains.json 补齐）；
 ## regions 描边（区域解锁可视化预热）。v4 起线特征转正：道路＝overlay 格对、河＝边线、桥＝豁免点。
+## 瓦片=地点 🔒（2026-07-13）：地点存在性由瓦片 location_type 派生；locations 数组＝注记（id/label/图/对话，无 type）。
+## ⚠ 村落瓦片约定：fh_grassland_farm / fh_snow_farm＝村落（有地点语义）；纯散景农场用 fh_plains_farm 等其他农场变体。
 ## ⚠ 测试地标同步：tools/test_overworld.gd 顶部 v5 常量、tools/test_worldsim.gd 全动态推导——改布局先对表。
 
 const MapIO := preload("res://MapIO.gd")
@@ -63,9 +65,9 @@ func _initialize() -> void:
 		_put(p[0], p[1], "farmland")
 	for p in [[28, 9], [30, 9], [28, 11], [30, 11], [27, 10], [31, 10]]:   # 维林城郊
 		_put(p[0], p[1], "farmland")
-	_put(12, 9, "fh_grassland_farm")
-	_put(6, 12, "fh_grassland_farm")
-	_put(26, 9, "fh_grassland_farm")
+	_put(12, 9, "fh_plains_farm")                   # 散景农场（无地点语义——fh_grassland_farm 已是村落瓦片）
+	_put(6, 12, "fh_plains_farm")
+	_put(26, 9, "fh_plains_farm")
 	_put(22, 7, "fh_fountain_of_youth")             # 灵泉（全局事件「灵泉驻足」认这块地）
 	_put(12, 7, "fh_fountain_of_youth")
 	_put(16, 6, "fh_deer")                          # 野兽风味（兽群游荡区）
@@ -121,17 +123,17 @@ func _initialize() -> void:
 			"do": [{"action": "show_message", "text": "劫道者从桥头的苇丛里窜了出来！"}, {"action": "start_battle", "map": "res://maps/bandit_ambush.json"}]},
 	]
 
-	# 地点实例（M7；类型定义在 data/locations.json，运行时状态在 WorldState.location_cleared_at）
+	# 地点注记（瓦片=地点 🔒：存在性/类型由上面画的瓦片派生；这里只挂身份与内容，格坐标须与瓦片对位）
 	var locations := [
-		{"id": "city_astra", "type": "city", "label": "阿斯特拉", "col": 9, "row": 10, "dialogue_id": "dlg_elder_astra"},
-		{"id": "city_veylin", "type": "city", "label": "维林", "col": 29, "row": 10},
-		{"id": "village_luowei", "type": "village", "label": "洛苇村", "col": 33, "row": 8},
-		{"id": "village_qingxi", "type": "village", "label": "清溪村", "col": 16, "row": 17},
-		{"id": "village_hanfeng", "type": "village", "label": "寒风村", "col": 20, "row": 3},
-		{"id": "lair_bandit", "type": "lair", "label": "劫道者营地", "col": 12, "row": 20, "battle_map": "res://maps/bandit_ambush.json"},
-		{"id": "lair_snow", "type": "lair", "label": "雪原匪帮营地", "col": 28, "row": 2, "battle_map": "res://maps/bandit_ambush.json"},
-		{"id": "ruin_sand", "type": "ruin", "label": "沙没之殿", "col": 33, "row": 24, "battle_map": "res://maps/sandbox.json"},
-		{"id": "ruin_snow", "type": "ruin", "label": "冰封遗迹", "col": 7, "row": 2, "battle_map": "res://maps/sandbox.json"},
+		{"id": "city_astra", "label": "阿斯特拉", "col": 9, "row": 10, "dialogue_id": "dlg_elder_astra"},
+		{"id": "city_veylin", "label": "维林", "col": 29, "row": 10},
+		{"id": "village_luowei", "label": "洛苇村", "col": 33, "row": 8},
+		{"id": "village_qingxi", "label": "清溪村", "col": 16, "row": 17},
+		{"id": "village_hanfeng", "label": "寒风村", "col": 20, "row": 3},
+		{"id": "lair_bandit", "label": "劫道者营地", "col": 12, "row": 20, "battle_map": "res://maps/bandit_ambush.json"},
+		{"id": "lair_snow", "label": "雪原匪帮营地", "col": 28, "row": 2, "battle_map": "res://maps/bandit_ambush.json"},
+		{"id": "ruin_sand", "label": "沙没之殿", "col": 33, "row": 24, "battle_map": "res://maps/sandbox.json"},
+		{"id": "ruin_snow", "label": "冰封遗迹", "col": 7, "row": 2, "battle_map": "res://maps/sandbox.json"},
 	]
 
 	# regions 描边（纯视觉；区域解锁可视化预热——kind 留空＝非战斗语义）

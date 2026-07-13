@@ -43,68 +43,59 @@
       "dialogue_id": "dlg_elder_astra",
       "id": "city_astra",
       "label": "阿斯特拉",
-      "row": 10,
-      "type": "city"
+      "row": 10
     },
     {
       "col": 29,
       "id": "city_veylin",
       "label": "维林",
-      "row": 10,
-      "type": "city"
+      "row": 10
     },
     {
       "col": 33,
       "id": "village_luowei",
       "label": "洛苇村",
-      "row": 8,
-      "type": "village"
+      "row": 8
     },
     {
       "col": 16,
       "id": "village_qingxi",
       "label": "清溪村",
-      "row": 17,
-      "type": "village"
+      "row": 17
     },
     {
       "col": 20,
       "id": "village_hanfeng",
       "label": "寒风村",
-      "row": 3,
-      "type": "village"
+      "row": 3
     },
     {
       "battle_map": "res://maps/bandit_ambush.json",
       "col": 12,
       "id": "lair_bandit",
       "label": "劫道者营地",
-      "row": 20,
-      "type": "lair"
+      "row": 20
     },
     {
       "battle_map": "res://maps/bandit_ambush.json",
       "col": 28,
       "id": "lair_snow",
       "label": "雪原匪帮营地",
-      "row": 2,
-      "type": "lair"
+      "row": 2
     },
     {
       "battle_map": "res://maps/sandbox.json",
       "col": 33,
       "id": "ruin_sand",
       "label": "沙没之殿",
-      "row": 24,
-      "type": "ruin"
+      "row": 24
     },
     {
       "battle_map": "res://maps/sandbox.json",
       "col": 7,
       "id": "ruin_snow",
       "label": "冰封遗迹",
-      "row": 2,
-      "type": "ruin"
+      "row": 2
     }
   ],
   "map_type": "overworld",
@@ -5962,7 +5953,7 @@
       },
       {
         "terrain": "fh",
-        "variant": "grassland_farm"
+        "variant": "plains_farm"
       },
       {
         "terrain": "plain",
@@ -6018,7 +6009,7 @@
       },
       {
         "terrain": "fh",
-        "variant": "grassland_farm"
+        "variant": "plains_farm"
       },
       {
         "terrain": "plain",
@@ -6424,7 +6415,7 @@
       },
       {
         "terrain": "fh",
-        "variant": "grassland_farm"
+        "variant": "plains_farm"
       },
       {
         "terrain": "plain",
