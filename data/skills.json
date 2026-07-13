@@ -403,6 +403,7 @@
   },
   {
     "active": true,
+    "category": "skill",
     "cooldown": {
       "base": 0
     },
@@ -425,7 +426,6 @@
     "id": "ws_swing",
     "max_level": 1,
     "name": "横扫",
-    "range": 1,
     "requires_hands": [],
     "shape": {
       "anchor": "caster",
@@ -443,7 +443,33 @@
           0
         ]
       ],
-      "friendly_fire": true
+      "friendly_fire": true,
+      "pick": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ],
+        [
+          -1,
+          0
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          -1,
+          1
+        ],
+        [
+          0,
+          1
+        ]
+      ]
     },
     "tags": [
       "aoe",
