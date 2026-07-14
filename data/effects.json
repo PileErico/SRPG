@@ -11,7 +11,7 @@
     "duration_model": "fixed",
     "expire_timing": "turn_end",
     "hot_flat": 0,
-    "icon": "",
+    "icon": "res://icons/Effect/异常_流血_基础_32x32.png",
     "id": "bleeding_basic",
     "kind": "debuff",
     "max_stacks": 0,
