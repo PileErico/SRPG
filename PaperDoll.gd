@@ -183,12 +183,16 @@ static func clear_cache() -> void:
 	_bake_cache.clear()
 	_img_cache.clear()
 
+# 配方签名（烘焙缓存键）。⚠ 必须含槽位层序（z）——合成顺序由 z 决定，只含部件+调色板的话
+# 调层后签名不变会命中旧合成图（2026-07-13 用户踩点：武器 z=2/头盔 z=4 调层后预览仍「头盔被挡」）。
 static func _sig(recipe: Dictionary) -> String:
 	var parts: Dictionary = recipe.get("parts", {})
 	var palettes: Dictionary = recipe.get("palettes", {})
 	var keys := parts.keys()
 	keys.sort()
 	var s := ""
+	for slot in AppearanceDB.slots():
+		s += "%s@%d;" % [str(slot.get("id", "")), int(slot.get("z", 0))]
 	for k in keys:
 		s += "%s=%s:%s|" % [k, parts[k], palettes.get(k, "")]
 	return s

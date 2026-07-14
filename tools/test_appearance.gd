@@ -141,6 +141,13 @@ func _initialize() -> void:
 	# 叠加武器
 	var comp2 := PaperDoll.compose({"parts": {"body": "b", "wpn": "w"}, "palettes": {"body": "", "wpn": ""}})
 	ck(comp2.get_pixel(7, 3).r > 0.5 and comp2.get_pixel(7, 3).g < 0.5, "武器叠加到右列")
+	# 层序参与烘焙签名（2026-07-13 踩点：调 z 后签名不变命中旧合成图——「头盔仍被武器挡」）
+	var bk1 := PaperDoll.bake({"parts": {"body": "b", "wpn": "w"}, "palettes": {"body": "", "wpn": ""}})
+	ck(AppearanceDB.save_slot({"id": "wpn", "cn": "武器", "z": -5}), "调 z：武器沉到 body 之下")
+	var comp3 := PaperDoll.compose({"parts": {"body": "b", "wpn": "w"}, "palettes": {"body": "", "wpn": ""}})
+	ck(comp3.get_pixel(7, 3).is_equal_approx(Color(1, 1, 1, 1)), "z 生效：body 盖回右列（合成按新层序）")
+	var bk2 := PaperDoll.bake({"parts": {"body": "b", "wpn": "w"}, "palettes": {"body": "", "wpn": ""}})
+	ck(bk1 != bk2, "★ 烘焙签名含层序：调 z 后不再命中旧合成图")
 
 	# 导出 PNG（2x）
 	var exp_path := "user://_test_appearance_export.png"
