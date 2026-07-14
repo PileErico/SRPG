@@ -481,8 +481,11 @@ func _import_variant() -> void:
 		_set_msg("先选一个地形", false); return
 	# §35：全文件系统访问（与外观侧 _open_import 对齐）——导入本就复制进 icons/Tiles/，不引用外部源路径
 	var dlg := EditorUI.make_file_dialog(FileDialog.FILE_MODE_OPEN_FILE, FileDialog.ACCESS_FILESYSTEM, [["*.png", "PNG 图片"]])
+	dlg.current_dir = EditorUI.recall_dir("terrain_import", dlg.current_dir)   # 上次导入目录
 	add_child(dlg)
-	dlg.file_selected.connect(func(p): _do_import(e, str(p)); dlg.queue_free())
+	dlg.file_selected.connect(func(p):
+		EditorUI.remember_dir("terrain_import", str(p))
+		_do_import(e, str(p)); dlg.queue_free())
 	dlg.canceled.connect(func(): dlg.queue_free())
 	dlg.popup_centered_ratio(0.7)
 

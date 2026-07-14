@@ -390,12 +390,13 @@ func _build_icon_row() -> void:
 			_file_dialog = EditorUI.make_file_dialog(FileDialog.FILE_MODE_OPEN_FILE, FileDialog.ACCESS_RESOURCES,
 				[["*.png", "PNG"], ["*.jpg,*.jpeg", "JPG"], ["*.webp", "WebP"]], false)
 			_file_dialog.file_selected.connect(func(path):
+				EditorUI.remember_dir("effect_icon", path)   # 记住上次目录（跨编辑器共享缓存）
 				if _w_icon != null and is_instance_valid(_w_icon):
 					_w_icon.text = path
 					_icon_thumb.texture = TextureCache.get_tex(path)
 					_mark_dirty())
 			add_child(_file_dialog)
-		_file_dialog.current_dir = ICON_DIR
+		_file_dialog.current_dir = EditorUI.recall_dir("effect_icon", ICON_DIR)
 		_file_dialog.popup_centered(Vector2i(760, 520)))
 	row.add_child(browse)
 	_form.add_child(row)

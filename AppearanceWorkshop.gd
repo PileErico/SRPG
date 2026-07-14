@@ -236,8 +236,10 @@ func _import_tile(slot_id: String) -> Button:
 
 func _open_import(slot_id: String) -> void:
 	var dlg := EditorUI.make_file_dialog(FileDialog.FILE_MODE_OPEN_FILE, FileDialog.ACCESS_FILESYSTEM, [["*.png", "PNG 图片"]], false)
+	dlg.current_dir = EditorUI.recall_dir("appearance_import", dlg.current_dir)   # 上次导入目录
 	add_child(dlg)
 	dlg.file_selected.connect(func(path: String):
+		EditorUI.remember_dir("appearance_import", path)
 		_import_into_slot(slot_id, path)
 		dlg.queue_free())
 	dlg.canceled.connect(func(): dlg.queue_free())
@@ -531,10 +533,11 @@ func _randomize() -> void:
 # —— 导出 / 导入 ——
 func _on_export() -> void:
 	var dlg := EditorUI.make_file_dialog(FileDialog.FILE_MODE_SAVE_FILE, FileDialog.ACCESS_RESOURCES, [["*.png", "PNG 图片"]], false)
-	dlg.current_dir = "res://icons/Characters"
+	dlg.current_dir = EditorUI.recall_dir("appearance_export", "res://icons/Characters")   # 上次导出目录
 	dlg.current_file = str(_fname.text) + ".png"
 	add_child(dlg)
 	dlg.file_selected.connect(func(path: String):
+		EditorUI.remember_dir("appearance_export", path)
 		var scale := int(_scale_opt.get_item_metadata(_scale_opt.selected))
 		if PaperDoll.export_png(_recipe, path, scale):
 			_set_msg("已导出：%s（%d×）" % [path, scale], true)
@@ -547,8 +550,10 @@ func _on_export() -> void:
 # 顶部下拉式导入（选目标总类后导入）——与每总类的 ⭳ 格共用 _import_into_slot（复制进对应文件夹）。
 func _on_import() -> void:
 	var dlg := EditorUI.make_file_dialog(FileDialog.FILE_MODE_OPEN_FILE, FileDialog.ACCESS_FILESYSTEM, [["*.png", "PNG 图片"]], false)
+	dlg.current_dir = EditorUI.recall_dir("appearance_import", dlg.current_dir)   # 与格内 ⭳ 共用上次导入目录
 	add_child(dlg)
 	dlg.file_selected.connect(func(path: String):
+		EditorUI.remember_dir("appearance_import", path)
 		_import_into_slot(str(_import_slot.get_item_metadata(_import_slot.selected)), path)
 		dlg.queue_free())
 	dlg.canceled.connect(func(): dlg.queue_free())

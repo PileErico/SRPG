@@ -1079,10 +1079,12 @@ func _open_file_dialog(target: String, dir: String) -> void:
 			[["*.png", "PNG"], ["*.jpg,*.jpeg", "JPG"], ["*.webp", "WebP"]], false)
 		_file_dialog.file_selected.connect(_on_file_picked)
 		add_child(_file_dialog)
-	_file_dialog.current_dir = dir
+	# 上次目录记忆（跨编辑器共享缓存）：立绘/棋子图标各记各的（scope=target；两者默认目录本就不同）
+	_file_dialog.current_dir = EditorUI.recall_dir("char_" + target, dir)
 	_file_dialog.popup_centered(Vector2i(760, 520))
 
 func _on_file_picked(path: String) -> void:
+	EditorUI.remember_dir("char_" + _file_target, path)
 	if _unit == null: return
 	if _file_target == "icon":
 		_unit.icon = path

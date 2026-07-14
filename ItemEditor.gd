@@ -1083,11 +1083,13 @@ func _open_icon_dialog() -> void:
 			[["*.png", "PNG"], ["*.jpg,*.jpeg", "JPG"], ["*.webp", "WebP"]], false)
 		_file_dialog.file_selected.connect(_on_icon_picked)
 		add_child(_file_dialog)
-	_file_dialog.current_dir = ICON_DIR.get(_current_kind, "res://icons/Items")
+	# 上次目录记忆（跨编辑器共享缓存）：按大类分 scope——武器/防具/饰品各记各的
+	_file_dialog.current_dir = EditorUI.recall_dir("item_icon:" + _current_kind, ICON_DIR.get(_current_kind, "res://icons/Items"))
 	_file_dialog.popup_centered(Vector2i(760, 520))
 
 
 func _on_icon_picked(path: String) -> void:
+	EditorUI.remember_dir("item_icon:" + _current_kind, path)
 	if _w_icon != null and is_instance_valid(_w_icon):
 		_w_icon.text = path
 		_refresh_preview()

@@ -193,6 +193,48 @@ static func make_file_dialog(mode: int, access: int, filters: Array, native := t
 			dlg.add_filter(str(f[0]), str(f[1]))
 	return dlg
 
+# —— 文件对话框「上次目录」记忆（跨编辑器共享·持久化到 user://）——
+# 各浏览入口按**用途 scope** 记住上次选文件所在目录，下次弹窗默认回到那里（省得每次重选文件夹）。
+# scope 分开（effect_icon / skill_icon / item_icon:<kind> / char_portrait / char_icon / …）故互不串味；
+# 无记录/目录已失效 → 回退各自的默认目录。res:// 与 OS 绝对路径都支持（get_base_dir 各自成对往返）。
+const _DIR_MEMORY_PATH := "user://editor_dir_memory.json"
+static var _dir_memory: Dictionary = {}
+static var _dir_memory_loaded := false
+
+static func _ensure_dir_memory() -> void:
+	if _dir_memory_loaded:
+		return
+	_dir_memory_loaded = true
+	if FileAccess.file_exists(_DIR_MEMORY_PATH):
+		var f := FileAccess.open(_DIR_MEMORY_PATH, FileAccess.READ)
+		if f != null:
+			var d = JSON.parse_string(f.get_as_text())
+			if typeof(d) == TYPE_DICTIONARY:
+				_dir_memory = d
+			f.close()
+
+# 选中文件后调（file_selected 里）：记住该用途上次所在目录并落盘。
+static func remember_dir(scope: String, selected_path: String) -> void:
+	if scope == "" or selected_path == "":
+		return
+	_ensure_dir_memory()
+	var d := selected_path.get_base_dir()
+	if d == "" or str(_dir_memory.get(scope, "")) == d:
+		return
+	_dir_memory[scope] = d
+	var f := FileAccess.open(_DIR_MEMORY_PATH, FileAccess.WRITE)
+	if f != null:
+		f.store_string(JSON.stringify(_dir_memory, "  "))
+		f.close()
+
+# 弹窗前调：取该用途上次目录（已记且仍存在则用之，否则回退 fallback 默认目录）。
+static func recall_dir(scope: String, fallback: String) -> String:
+	_ensure_dir_memory()
+	var d := str(_dir_memory.get(scope, ""))
+	if d != "" and DirAccess.dir_exists_absolute(d):
+		return d
+	return fallback
+
 # —— 确认框 ——
 
 # 通用确认：弹出 → 确定执行 on_ok / 取消执行 on_cancel，两路都 queue_free（一次性、不残留节点）。

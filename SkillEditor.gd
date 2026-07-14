@@ -519,12 +519,13 @@ func _open_icon_dialog() -> void:
 		_file_dialog = EditorUI.make_file_dialog(FileDialog.FILE_MODE_OPEN_FILE, FileDialog.ACCESS_RESOURCES,
 			[["*.png", "PNG"], ["*.jpg,*.jpeg", "JPG"], ["*.webp", "WebP"]], false)
 		_file_dialog.file_selected.connect(func(path):
+			EditorUI.remember_dir("skill_icon", path)   # 记住上次目录（跨编辑器共享缓存）
 			if _w_icon != null and is_instance_valid(_w_icon):
 				_w_icon.text = path
 				_icon_thumb.texture = TextureCache.get_tex(path)
 				_mark_dirty())
 		add_child(_file_dialog)
-	_file_dialog.current_dir = ICON_DIR
+	_file_dialog.current_dir = EditorUI.recall_dir("skill_icon", ICON_DIR)
 	_file_dialog.popup_centered(Vector2i(760, 520))
 
 # 技能 tag 下拉预设：技能行为类别 + 手动（weapon_* 种类词走 weapon_kinds〔决策29〕，不进 tags）
