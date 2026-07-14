@@ -119,7 +119,7 @@ var _intr1_box: VBoxContainer    # 兼用单手形态区（握持=versatile 时�
 var _onhit_rows: Array = []      # On-Hit Effects 行：[{row, effect:OptionButton, chance:SpinBox}]
 var _onhit_box: VBoxContainer
 var _w_armdmg: SpinBox           # 甲伤行 spin（可选行 2026-07-15：null=无此行；✕删行置空）
-var _w_armdmg_btn: Button        # 「＋ 甲伤」按钮（行存在时禁用——甲伤只一条）
+var _w_armdmg_btn: MenuButton    # 「＋ 添加」菜单钮（效果/甲伤统一入口；甲伤存在时其菜单项灰）
 var _w_bws: OptionButton         # 普攻 BWS 下拉（weapon_skill 勾选过滤，🔒 决策29；（无）＝不提供普攻，如盾）
 var _w_prefer: OptionButton      # 地/空偏好（比路兹式起降换手；一般武器（无））
 var _ews_box: VBoxContainer      # EWS 行容器
@@ -490,23 +490,21 @@ func _build_form() -> void:
 		for e in _current.get("on_hit_effects", []):
 			if typeof(e) == TYPE_DICTIONARY:
 				_add_onhit_row(str(e.get("effect", "")), float(e.get("chance", 100)))
-		var addrow := HBoxContainer.new()
-		addrow.add_theme_constant_override("separation", 6)
-		var addoh := Button.new()
-		addoh.text = "＋ 添加 On-Hit 效果"
-		addoh.pressed.connect(func():
-			_add_onhit_row("", 100.0)
+		# 单一添加入口（＋ 添加 → 弹菜单选「效果」或「甲伤」；甲伤只一条，已存在则灰）
+		_w_armdmg_btn = MenuButton.new()   # 复用引用作添加菜单钮（甲伤存在态经 _sync_armdmg_menu 灰化其菜单项）
+		_w_armdmg_btn.text = "＋ 添加"
+		_w_armdmg_btn.flat = false
+		var pm := _w_armdmg_btn.get_popup()
+		pm.add_item("On-Hit 效果", 0)
+		pm.add_item("甲伤（对护甲额外伤害）", 1)
+		pm.id_pressed.connect(func(id: int):
+			if id == 0:
+				_add_onhit_row("", 100.0)
+			else:
+				_add_armdmg_row(50.0)
 			_refresh_preview())
-		addrow.add_child(addoh)
-		_w_armdmg_btn = Button.new()
-		_w_armdmg_btn.text = "＋ 甲伤"
-		_w_armdmg_btn.tooltip_text = "对护甲额外伤害%（钝器特色；任意招式都触发）"
-		_w_armdmg_btn.disabled = adm0 != 0.0
-		_w_armdmg_btn.pressed.connect(func():
-			_add_armdmg_row(50.0)
-			_refresh_preview())
-		addrow.add_child(_w_armdmg_btn)
-		_form.add_child(addrow)
+		_form.add_child(_w_armdmg_btn)
+		_sync_armdmg_menu()   # 甲伤已存在→菜单项灰
 
 	# 4. 武器技能（仅武器，放底部）：BWS/EWS 引用位（🔒 决策25/26）
 	if _current_kind == "weapon":
@@ -731,15 +729,21 @@ func _add_armdmg_row(value: float) -> void:
 	rm.pressed.connect(func():
 		_w_armdmg = null
 		row.queue_free()
-		if _w_armdmg_btn != null and is_instance_valid(_w_armdmg_btn):
-			_w_armdmg_btn.disabled = false
+		_sync_armdmg_menu()   # 甲伤删掉→菜单项恢复可选
 		_refresh_preview())
 	row.add_child(rm)
 	_onhit_box.add_child(row)
 	_onhit_box.move_child(row, 0)   # 甲伤领衔（视觉惯例，不影响数据）
 	_w_armdmg = sp
-	if _w_armdmg_btn != null and is_instance_valid(_w_armdmg_btn):
-		_w_armdmg_btn.disabled = true
+	_sync_armdmg_menu()   # 甲伤已存在→菜单「甲伤」项灰（只允许一条）
+
+# 「＋ 添加」菜单里「甲伤」项的可选态：行已存在则灰（甲伤唯一）
+func _sync_armdmg_menu() -> void:
+	if _w_armdmg_btn == null or not is_instance_valid(_w_armdmg_btn):
+		return
+	var pm := _w_armdmg_btn.get_popup()
+	if pm.item_count >= 2:
+		pm.set_item_disabled(1, _w_armdmg != null and is_instance_valid(_w_armdmg))
 
 # 一条 On-Hit：效果下拉（EffectDB 引用，只列 on_hit_ok=true 白名单——效果库勾选）+ 概率% + ✕（🔒 决策33）
 func _add_onhit_row(effect_id: String, chance: float) -> void:
