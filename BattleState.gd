@@ -818,6 +818,11 @@ func apply_skill(caster, skill_id: String, target) -> Array:
 	if not SkillDB.has_runnable_block(def):
 		push_warning("apply_skill：技能「%s」无可跑效果块（%s）——拒发零消耗（可编≠可跑）" % [skill_id, "/".join(SkillDB.RUNNABLE_KINDS)])
 		return events
+	# 握持守卫 🔒（决策35 运行时可用性条件，双闸之引擎侧）：grip 不满足 → 拒发零消耗
+	# （菜单侧已灰显；判据恒主手——阶段6 副手 EWS 接线时随 weapon_source 改判）。
+	if not caster.grip_met(def):
+		push_warning("apply_skill：技能「%s」握持条件不满足（需%s持）——拒发零消耗（决策35）" % [skill_id, "双手" if str(def.get("grip", "")) == "two_handed" else "单手"])
+		return events
 	var lvl := int(caster.skill_level(skill_id))
 	caster.ap -= SkillDB.skill_ap_cost(def)
 	if caster.has_skill(skill_id):

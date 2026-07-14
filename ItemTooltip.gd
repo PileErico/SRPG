@@ -73,10 +73,19 @@ static func render(item: Dictionary) -> Control:
 		v.add_child(rl)
 
 	# 武器固有属性（🔒 决策33 三轮校准：攻/格挡率%/格挡性能%——命中在武器技能侧；0=无不显）
+	# 兼用件（🔒 决策35）：顶层三键标「双手·单持」、one_handed 子面板另起「单手持（配副手）」段
+	var versat: bool = (item.get("tags", []) as Array).has("versatile")
 	for p in [["atk", "攻击"], ["block_rate", "格挡率"], ["block_power", "格挡性能"]]:
 		var iv := float(item.get(str(p[0]), 0))
 		if iv != 0.0:
-			v.add_child(_kv(str(p[1]), ("%s%%" % _num(iv)) if str(p[0]) != "atk" else str(_num(iv))))
+			var lbl := str(p[1]) + ("（双手·单持）" if versat else "")
+			v.add_child(_kv(lbl, ("%s%%" % _num(iv)) if str(p[0]) != "atk" else str(_num(iv))))
+	var oh1 = item.get("one_handed", null)
+	if versat and typeof(oh1) == TYPE_DICTIONARY:
+		for p in [["atk", "攻击"], ["block_rate", "格挡率"], ["block_power", "格挡性能"]]:
+			var iv1 := float(oh1.get(str(p[0]), 0))
+			if iv1 != 0.0:
+				v.add_child(_kv("%s（单手·配副手）" % str(p[1]), ("%s%%" % _num(iv1)) if str(p[0]) != "atk" else str(_num(iv1))))
 
 	# mods（词条/附加修正）
 	for m in item.get("mods", []):
@@ -208,6 +217,10 @@ static func render(item: Dictionary) -> Control:
 						parts.append("%s %d" % [ProfDB.prof_name(str(r.get("prof", ""))), int(r.get("value", 0))])
 				if not parts.is_empty():
 					req_txt = "（需 %s）" % " ∧ ".join(parts)
+			# 握持要求（🔒 决策35 运行时条件：与解锁条件并列陈列）
+			var gv := str(sdef.get("grip", "")) if sdef != null else ""
+			if gv != "":
+				req_txt += "（需双手持）" if gv == "two_handed" else "（需单手持）"
 			v.add_child(_kv("额外技能", ews_nm + req_txt))
 	# 风味文本 desc（§33 可选键，旧数据无此键＝不渲染）：置底斜体灰——RPG tooltip 惯例位
 	var desc := str(item.get("desc", ""))

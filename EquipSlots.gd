@@ -3,7 +3,7 @@ extends RefCounted
 ## 关键区分（用户校准）：
 ##  · 槽位/部位 = 放置位置（main_hand/off_hand/head/body/accessory_1/2），**不是物品 tag**。
 ##    部位用「身体部位」命名(head/body)，与 stat「armor/armor_max」(护甲值)区分开。
-##  · 物品内在 tag = 它“是什么”：武器→持握(one/two_handed，天生无)+类型/种类；防具→head/body(部位)；饰品→accessory。
+##  · 物品内在 tag = 它“是什么”：武器→持握(one/two_handed/versatile，天生无)+类型/种类；防具→head/body(部位)；饰品→accessory。
 ##  · main_hand/off_hand 等 **不作物品 tag**；位置类效果(强化副手)按【槽位占用】判，不靠物品 tag。
 ## 用法：const EquipSlots := preload("res://EquipSlots.gd")。纯静态、无状态。
 
@@ -14,13 +14,13 @@ const SLOT_CN := {
 # （曾有 SLOTS/SLOTS_BY_KIND/MANAGED_TAGS/intrinsic_tag——全仓零调用的死码，2026-07-02 清除：
 #  编辑器的管理集/内在 tag 派生实际长在 ItemEditor〔MANAGED_CATS 走 TagDB 类别、更全〕，两份只留活的那份。）
 
-# 装备资格相关的内在 tag。
-const ELIGIBILITY_TAGS := ["one_handed", "two_handed", "shield", "head", "body", "accessory"]
+# 装备资格相关的内在 tag。versatile 兼用＝🔒 决策35：占槽全套单手行为、单双手为动态状态（Unit.effective_grip）。
+const ELIGIBILITY_TAGS := ["one_handed", "two_handed", "versatile", "shield", "head", "body", "accessory"]
 
 # 物品（按内在 tag）能否进某槽——tag 驱动装备资格。
 #  · innate 天生：豁免 tag 资格（按其 slot 字段放置、永不卸下）。
 #  · 无任何资格 tag 的旧物品：回退比 slot 字段。
-#  · 否则严格判：main_hand=单/双手；off_hand=单手/盾；head/body/accessory=对应部位 tag。
+#  · 否则严格判：main_hand=单/双手/兼用；off_hand=单手/兼用/盾；head/body/accessory=对应部位 tag。
 static func accepts(slot: String, item: Dictionary) -> bool:
 	if item.get("innate", false):
 		return true
@@ -33,8 +33,8 @@ static func accepts(slot: String, item: Dictionary) -> bool:
 	if not has_elig:
 		return _slot_field_fits(item, slot)
 	match slot:
-		"main_hand": return tags.has("one_handed") or tags.has("two_handed") or tags.has("shield")   # 盾可主手＝纯盾战士（🔒 决策31：盾＝正常武器，主手持盾＝盾击作普攻）
-		"off_hand": return tags.has("one_handed") or tags.has("shield")
+		"main_hand": return tags.has("one_handed") or tags.has("two_handed") or tags.has("versatile") or tags.has("shield")   # 盾可主手＝纯盾战士（🔒 决策31：盾＝正常武器，主手持盾＝盾击作普攻）
+		"off_hand": return tags.has("one_handed") or tags.has("versatile") or tags.has("shield")
 		"head": return tags.has("head")
 		"body": return tags.has("body")
 		"accessory_1", "accessory_2": return tags.has("accessory")

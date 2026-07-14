@@ -25,6 +25,7 @@
 
   {"id": "one_handed", "cn": "单手", "cat": "handedness", "status": "in_use"},
   {"id": "two_handed", "cn": "双手", "cat": "handedness", "status": "in_use", "desc": "同时占用主手+副手；副手显示同图标+灰滤镜"},
+  {"id": "versatile", "cn": "兼用", "cat": "handedness", "status": "in_use", "desc": "🔒 决策35：占槽全套单手行为；单/双手＝动态状态（另一手空置〔拳脚视同空手〕即视为双手，读口 Unit.effective_grip）；双固有面板 one_handed 子键"},
 
   {"id": "melee", "cn": "近战", "cat": "wtype", "status": "in_use", "desc": "武器类型：近战"},
   {"id": "ranged", "cn": "远程", "cat": "wtype", "status": "planned", "desc": "武器类型：远程"},

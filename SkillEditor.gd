@@ -28,6 +28,8 @@ const CATEGORIES := [["skill", "技巧 skill"], ["spell", "魔法 spell（魔法
 # 伤害属性（大类：物理/元素；真伤=将来位）＋伤害类型（创伤，词表同 tags.json cat damage）——两正交下拉（2026-07-13 用户拍板）
 const DAMAGE_CATEGORIES := [["physical", "物理"], ["fire", "火"], ["ice", "冰"], ["thunder", "雷"], ["holy", "神圣"]]
 const DAMAGE_TYPES := [["", "（未设）"], ["slashing", "斩击"], ["piercing", "穿刺"], ["bludgeoning", "打击"]]
+# 握持要求（🔒 决策35 运行时可用性条件：菜单灰显+apply_skill 守卫；BWS 禁带——普攻恒可用，lint 执法）
+const GRIP_PAIRS := [["", "（不限）"], ["one_handed", "需单手持"], ["two_handed", "需双手持"]]
 const HAND_SLOTS := [["main_hand", "主手"], ["off_hand", "副手"]]   # when equip_state 槽位词表（requires_hands 已删 2026-07-13）
 const BLOCK_KINDS := [["attack", "攻击 attack"], ["heal", "治疗 heal"],
 	["passive_stat_mods", "被动修正 passive_stat_mods"],
@@ -68,6 +70,7 @@ var _w_passive_hint: Label   # §25 被动灰化联动的说明条（active=fals
 var _w_wskill: CheckBox            # 武器技能勾选（勾＝可被武器选取）
 var _kind_box: Control             # 适用武器种类区（勾选时显示）
 var _kind_checks := {}             # wcat tag id -> CheckBox
+var _w_grip: OptionButton          # 握持要求（🔒 决策35；随 _kind_box 显隐）
 var _w_custom_pick: CheckBox       # 自定义攻击范围（勾＝选取形可点格编辑；否＝盘只作 range 可视化参考）
 var _w_pick: Control               # 选取形 HexShapePicker
 var _w_effect: Control             # 作用形 HexShapePicker
@@ -269,6 +272,10 @@ func _build_form() -> void:
 			flow.add_child(cb)
 			_kind_checks[tid] = cb
 		_kind_box.add_child(flow)
+	# 握持要求（🔒 决策35 运行时可用性条件——菜单灰显「需单/双手持」；解锁归熟练度 requires，握持归状态判断；
+	# BWS 禁带 grip〔普攻恒可用〕——武器编辑器 BWS 下拉已过滤带 grip 技能，lint 兜底）
+	_w_grip = EditorUI.add_dropdown(_kind_box, "握持要求 grip（兼用武器单/双手形态专属招式；BWS 禁带）", GRIP_PAIRS,
+		str(_current.get("grip", "")), _mark_dirty)
 	_kind_box.visible = bool(_current.get("weapon_skill", false))
 	_form.add_child(_kind_box)
 
@@ -980,9 +987,16 @@ func _shell_collect() -> Dictionary:
 			if (_kind_checks[tid] as CheckBox).button_pressed:
 				kinds.append(tid)
 		out["weapon_kinds"] = kinds
+		# 握持要求（🔒 决策35）：（不限）＝不落键
+		var gv := str(_w_grip.get_selected_metadata()) if _w_grip != null and is_instance_valid(_w_grip) else ""
+		if gv != "":
+			out["grip"] = gv
+		else:
+			out.erase("grip")
 	else:
 		out.erase("weapon_skill")
 		out.erase("weapon_kinds")
+		out.erase("grip")   # 握持条件只属武器技能（决策35）
 	# 形状（🔒 决策30）：选取形只在勾了「自定义攻击范围」时收集（未勾＝盘是 range 参考、不落键）；
 	# 两盘全空＝删键（回退 range 圆盘/单体）；anchor/friendly_fire 只随作用形落键
 	var pickm: Array = _w_pick.mask() if _w_custom_pick.button_pressed else []

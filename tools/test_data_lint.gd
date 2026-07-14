@@ -14,8 +14,10 @@ extends SceneTree
 ##  7) skills.json 阶段2 形状闸门（🔒 设计 §10 护栏#1 机械执法）：target 三旗不得全 false / seq·nature·requires_hands 禁回流（2026-07-13 废除/改词/删除）/
 ##     per_level 长度==max_level / costs.ap 与顶层 ap_cost 禁双写 / 阶段6 前 hits.size()>1 或 riders 出现即 FAIL
 ##     （防「可编不可跑」内容入库）。WS 形约束已随决策27 关系制移到规则8 引用处执法。
-##  8) weapons.json 武器技能引用（🔒 决策25/26/29 勾选制）：bws/bas → 技能存在+勾 weapon_skill+含 attack 块；
-##     ews → 技能存在+勾选（一视同仁 2026-07-13——主动/可跑块闸已撤，攻击形施放=阶段6），requires 的 prof/value 合法。
+##     grip 握持条件（🔒 决策35）：值∈{one_handed,two_handed} 且只属武器技能（weapon_skill=true）。
+##  8) weapons.json 武器技能引用（🔒 决策25/26/29 勾选制）：bws/bas → 技能存在+勾 weapon_skill+含 attack 块+**禁带 grip**（决策35 普攻恒可用）；
+##     ews → 技能存在+勾选（一视同仁 2026-07-13——主动/可跑块闸已撤，攻击形施放=阶段6），requires 的 prof/value 合法，
+##     grip 与武器静态握持须相容（单手武器挂「需双手持」＝永不可用即 FAIL；兼用武器双态皆可）。
 ##     BWS/EWS＝武器引用位而非技能种类（武器侧决定）：同一技能可既是 A 的 BWS 又是 B 的 EWS。
 ##     内联 attack 残留＝FAIL（2026-07-12 技改 §4-11 收口：weapons.json 已全量迁引用制）。
 ##  9) 原型引用完整性（技改 §4-1）：unit_prototypes 的 equip/bag→ItemDB、trait→TraitDB、race→RaceDB、
@@ -28,6 +30,8 @@ extends SceneTree
 ##     maps/*.json 同时纳入规则 1/5/6 扫描集（禁键/damage_category/tags）。
 ## 11) 战中快照白名单（技改 §1-3 lint 化）：Unit 脚本字段 vs unit_to_battle_snapshot 键集 diff——
 ##     新运行态字段忘扩白名单＝suspend 静默丢数据；瞬态豁免表（faction 视图/last_hit_by 另存/combat_ctx 瞬态）。
+## 13) 兼用武器形状（🔒 决策35）：handedness 三选一互斥（one/two_handed/versatile）；versatile →
+##     two_handed 字段恒 false + one_handed 子面板三键必填数值；非 versatile → 禁有 one_handed 子面板。
 ## 运行：..._console.exe --headless --path "D:/1战棋" -s res://tools/test_data_lint.gd（退出码 0=PASS）
 
 const EffectDB := preload("res://EffectDB.gd")
@@ -285,6 +289,10 @@ func _initialize() -> void:
 			ck(not s.has("seq"), "%s：seq 已废（2026-07-13 通用序列退役）——禁回流" % sid)
 			ck(not s.has("nature"), "%s：nature 已改词 category（2026-07-13）——禁回流" % sid)
 			ck(not s.has("requires_hands"), "%s：requires_hands 已删（2026-07-13 位置语义后零用例）——禁回流" % sid)
+			# grip 握持条件（🔒 决策35 运行时可用性条件）：值白名单 + 只属武器技能
+			var sgv := str(s.get("grip", ""))
+			ck(sgv in ["", "one_handed", "two_handed"], "%s：grip ∈ {one_handed,two_handed}（决策35；实为「%s」）" % [sid, sgv])
+			ck(sgv == "" or bool(s.get("weapon_skill", false)), "%s：grip 只属武器技能（weapon_skill=true；决策35）" % sid)
 			var pls := []
 			_collect_key_arrays(s, "per_level", pls)
 			for pl in pls:
@@ -314,6 +322,8 @@ func _initialize() -> void:
 				"%s：被引为 BWS 须勾选「武器技能」（🔒 决策29 勾选制——勾了才可被武器选取）" % b)
 			ck(bdef == null or not SkillDB.flatten_bws(bdef).is_empty(),
 				"%s：被引为 BWS 须含合法 attack 块（无块＝flatten 空→普攻退化徒手）" % b)
+			ck(bdef == null or str(bdef.get("grip", "")) == "",
+				"%s：被引为 BWS 禁带 grip 握持条件（🔒 决策35：普攻恒可用——握持专属招式走 EWS 位）" % b)
 		var inline_left := 0
 		if typeof(wd) == TYPE_ARRAY:
 			for w in wd:
@@ -322,11 +332,17 @@ func _initialize() -> void:
 				var wid := str(w.get("id", "?"))
 				if w.has("attack") and str(w.get("bws", w.get("bas", ""))) == "":
 					inline_left += 1
+				var wtags0: Array = w.get("tags", [])
 				for e in w.get("ews", []):
 					var sid := str(e.get("skill", "")) if typeof(e) == TYPE_DICTIONARY else str(e)
 					var sdef = SkillDB.get_skill(sid)
 					ck(sdef != null, "%s：ews 引用的技能存在：%s" % [wid, sid])
 					ck(sdef == null or SkillDB.is_weapon_skill(sdef), "%s：ews「%s」须勾选「武器技能」（🔒 决策29）" % [wid, sid])
+					# grip 与武器静态握持相容（🔒 决策35）：单手武器挂「需双手持」/双手武器挂「需单手持」＝永不可用；兼用双态皆可
+					var sg := str(sdef.get("grip", "")) if sdef != null else ""
+					if sg != "" and not wtags0.has("versatile"):
+						ck(not ((sg == "two_handed" and wtags0.has("one_handed")) or (sg == "one_handed" and wtags0.has("two_handed"))),
+							"%s：ews「%s」握持条件（%s）与武器静态握持不相容——永不可用（决策35）" % [wid, sid, sg])
 					# 主动/可跑块闸已撤（2026-07-13 用户校准：BWS/EWS 只是引用方式、选取一视同仁）——
 					# 纯 attack 形 EWS 合法入库；施放接线＝阶段6（战斗菜单灰显、apply_skill 守卫兜底零消耗）
 					if typeof(e) == TYPE_DICTIONARY:
@@ -496,6 +512,30 @@ func _initialize() -> void:
 				ck(not (fam_map[t] as Dictionary).has(pr),
 					"异常族「%s」同级冲突：%s 与 %s 均 priority=%d（决策34 同族禁同级）" % [t, eid2, str((fam_map[t] as Dictionary).get(pr, "")), pr])
 				fam_map[t][pr] = eid2
+
+	# 13) 兼用武器形状（🔒 决策35）：handedness 三选一互斥；versatile → two_handed 恒 false +
+	#     one_handed 子面板三键必填数值；非 versatile → 禁有 one_handed 子面板（键只属兼用件）
+	if typeof(wd) == TYPE_ARRAY:
+		for w in wd:
+			if typeof(w) != TYPE_DICTIONARY:
+				continue
+			var wid2 := str(w.get("id", "?"))
+			var wt2: Array = w.get("tags", [])
+			var grips := []
+			for g in ["one_handed", "two_handed", "versatile"]:
+				if wt2.has(g):
+					grips.append(g)
+			ck(grips.size() <= 1, "%s：handedness 三选一互斥（现有：%s）" % [wid2, ", ".join(grips)])
+			if wt2.has("versatile"):
+				ck(not w.get("two_handed", false), "%s：兼用件 two_handed 字段恒 false（占槽全套单手行为，决策35）" % wid2)
+				var oh13 = w.get("one_handed", null)
+				ck(typeof(oh13) == TYPE_DICTIONARY, "%s：兼用件必带 one_handed 单手形态子面板（决策35）" % wid2)
+				if typeof(oh13) == TYPE_DICTIONARY:
+					for k in ["atk", "block_rate", "block_power"]:
+						ck(typeof(oh13.get(k)) in [TYPE_INT, TYPE_FLOAT],
+							"%s：one_handed 子面板 %s 必填数值（0=无此项，决策35）" % [wid2, k])
+			else:
+				ck(not w.has("one_handed"), "%s：one_handed 子面板只属兼用件（决策35）" % wid2)
 
 	if _fail == 0:
 		print("=== 数据 lint 全 PASS ===")

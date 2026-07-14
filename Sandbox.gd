@@ -1612,13 +1612,16 @@ func _build_skill_submenu(u) -> void:
 		var silenced: bool = u.has_state("silenced") and (def.get("tags", []) as Array).has("verbal")
 		var unlocked := bool(e["unlocked"])
 		var castable := SkillDB.has_runnable_block(def)   # 纯 attack 形＝阶段6 待接线（显示不隐身，2026-07-13 用户校准）
-		var ready: bool = castable and unlocked and u.ews_ready(id) and u.ap >= SkillDB.skill_ap_cost(def) and not silenced
+		var grip_ok: bool = u.grip_met(def)   # 🔒 决策35 握持条件：灰显不隐身（用户校准 2026-07-14），判据同 apply_skill 守卫（恒主手）
+		var ready: bool = castable and unlocked and grip_ok and u.ews_ready(id) and u.ap >= SkillDB.skill_ap_cost(def) and not silenced
 		var label := "🗡 " + str(def.get("name", id))
 		var st = u.ews_state.get(id, {})
 		if not castable:
 			label += "（攻击形施放待接线·阶段6）"
 		elif not unlocked:
 			label += "（需 %s）" % _ews_req_text(e["requires"])
+		elif not grip_ok:
+			label += "（需双手持）" if str(def.get("grip", "")) == "two_handed" else "（需单手持）"
 		elif int(st.get("cd", 0)) > 0:
 			label += "（冷却 %d）" % int(st.get("cd", 0))
 		elif int(st.get("uses", -1)) == 0:
@@ -1632,11 +1635,14 @@ func _build_skill_submenu(u) -> void:
 	for id in _learned_active_skills(u):
 		var def = SkillDB.get_skill(id)
 		var silenced: bool = u.has_state("silenced") and (def.get("tags", []) as Array).has("verbal")
-		var ready: bool = u.skill_ready(id) and u.ap >= SkillDB.skill_ap_cost(def) and not silenced
+		var grip_ok: bool = u.grip_met(def)   # 🔒 决策35：已学技能同吃握持条件（一般只武器技能带 grip 键）
+		var ready: bool = grip_ok and u.skill_ready(id) and u.ap >= SkillDB.skill_ap_cost(def) and not silenced
 		var label := str(def.get("name", id))
 		var cd := int(u.skills[id].get("cd", 0))
 		var uses := int(u.skills[id].get("uses", 0))
-		if cd > 0:
+		if not grip_ok:
+			label += "（需双手持）" if str(def.get("grip", "")) == "two_handed" else "（需单手持）"
+		elif cd > 0:
 			label += "（冷却 %d）" % cd          # 冷却中：括号里用阿拉伯数字标剩余回合
 		elif uses == 0:
 			label += "（本战已用尽）"            # -1=无限不标

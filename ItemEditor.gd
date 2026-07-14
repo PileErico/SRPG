@@ -114,6 +114,8 @@ var _w_weight: OptionButton
 var _mods_box: VBoxContainer
 var _mod_rows: Array = []
 var _w_intr: Dictionary = {}     # 武器固有属性 spins（🔒 决策33）：stat 键 → SpinBox
+var _w_intr1: Dictionary = {}    # 兼用单手形态面板 spins（🔒 决策35 双固有面板）：stat 键 → SpinBox
+var _intr1_box: VBoxContainer    # 兼用单手形态区（握持=versatile 时显示）
 var _onhit_rows: Array = []      # On-Hit Effects 行：[{row, effect:OptionButton, chance:SpinBox}]
 var _onhit_box: VBoxContainer
 var _w_bws: OptionButton         # 普攻 BWS 下拉（weapon_skill 勾选过滤，🔒 决策29；（无）＝不提供普攻，如盾）
@@ -377,6 +379,8 @@ func _clear_form() -> void:
 	_mod_rows.clear()
 	_ews_rows = []
 	_w_intr = {}
+	_w_intr1 = {}
+	_intr1_box = null
 	_onhit_rows = []
 	_free_tags = []
 	_requires = []
@@ -441,6 +445,17 @@ func _build_form() -> void:
 		for p in WEAPON_INTRINSIC:
 			_w_intr[str(p[0])] = EditorUI.add_spin(_form, "%s %s" % [str(p[1]), str(p[0])],
 				float(_current.get(str(p[0]), 0)), -999, 9999, 0.5, _refresh_preview)
+		# 兼用单手形态面板（🔒 决策35 双固有面板）：顶层三键＝双手（单持）形态、此处＝配副手/入副手形态；
+		# 显隐随握持下拉（_sync_versatile_box）；甲伤/On-Hit/词条不分握持（武器物性共享）
+		_intr1_box = VBoxContainer.new()
+		_intr1_box.add_theme_constant_override("separation", 4)
+		_intr1_box.add_child(EditorUI.section_title("单手形态（兼用：配副手/入副手时生效——上方三键＝双手·单持形态）"))
+		var oh0: Dictionary = _current.get("one_handed", {}) if typeof(_current.get("one_handed")) == TYPE_DICTIONARY else {}
+		for p in WEAPON_INTRINSIC:
+			_w_intr1[str(p[0])] = EditorUI.add_spin(_intr1_box, "%s %s" % [str(p[1]), str(p[0])],
+				float(oh0.get(str(p[0]), 0)), -999, 9999, 0.5, _refresh_preview)
+		_intr1_box.visible = false   # _on_wtype_changed／握持下拉经 _sync_versatile_box 同步
+		_form.add_child(_intr1_box)
 
 	# 3. 修正 mods
 	_form.add_child(EditorUI.section_title("修正 mods（每条加在装备者属性上——词条/附魔等额外修正）"))
@@ -632,6 +647,7 @@ func _build_weapon_tags() -> void:
 
 	_w_handed = _cat_dropdown_inline("握持方式", "handedness", false)
 	_select_meta(_w_handed, _tag_in_cat(_current.get("tags", []), "handedness"))
+	_w_handed.item_selected.connect(func(_i): _sync_versatile_box())   # 兼用→单手形态面板显隐（🔒 决策35）
 	_handed_row = _w_handed.get_parent()   # 其 field_row
 
 	_w_innate = _add_check(_form, "天生武器（永不卸下；无握持/不吃额外加成）", bool(_current.get("innate", false)))
@@ -666,7 +682,16 @@ func _on_wtype_changed() -> void:
 	# 盾不提供普攻：用户切到盾时自动清 BWS 选择（仍可手动选回；载入初始化 _building 时不强改）
 	if not _building and wtype == "shield" and _w_bws != null and is_instance_valid(_w_bws):
 		_select_meta(_w_bws, "")
+	_sync_versatile_box()
 	_refresh_preview()
+
+# 兼用单手形态面板显隐（🔒 决策35）：握持=versatile 且握持行本身可见（非盾/非天生）才显示
+# （预览刷新由握持下拉自带的 item_selected→_refresh_preview 负责，此处只管显隐）
+func _sync_versatile_box() -> void:
+	if _intr1_box == null or not is_instance_valid(_intr1_box):
+		return
+	var hv: bool = _handed_row != null and is_instance_valid(_handed_row) and _handed_row.visible
+	_intr1_box.visible = hv and str(_w_handed.get_selected_metadata()) == "versatile"
 
 
 # 一条 On-Hit：效果下拉（EffectDB 引用）+ 概率% + ✕（🔒 决策33）
@@ -711,7 +736,7 @@ func _add_onhit_row(effect_id: String, chance: float) -> void:
 # BWS/EWS 只是引用方式（BWS=应用层当普攻、EWS=有解锁条件，除此无异）——两下拉同源；
 # EWS 位另排掉当前 BWS 所选（一技不占两位）。kinds 空＝通用（徒手等）；
 # 匹配面＝表单当前种类所选 + 条目现有 tags（活状态：没存盘也按所选算）。
-func _ws_option_ids(exclude := "") -> Array:
+func _ws_option_ids(exclude := "", for_bws := false) -> Array:
 	var wtags := {}
 	if _w_wcat != null and is_instance_valid(_w_wcat):
 		wtags[str(_w_wcat.get_selected_metadata())] = true
@@ -724,6 +749,8 @@ func _ws_option_ids(exclude := "") -> Array:
 		var def = SkillDB.get_skill(id)
 		if not SkillDB.is_weapon_skill(def):
 			continue
+		if for_bws and str(def.get("grip", "")) != "":
+			continue   # BWS 禁带握持条件（🔒 决策35：普攻恒可用——握持专属招式走 EWS 位）
 		var kinds: Array = def.get("weapon_kinds", [])
 		var ok := kinds.is_empty()
 		for k in kinds:
@@ -740,7 +767,7 @@ func _build_weapon_skills_section() -> void:
 	_w_bws = OptionButton.new()
 	_w_bws.add_item("（无——不提供普攻，如盾）")
 	_w_bws.set_item_metadata(0, "")
-	for id in _ws_option_ids():   # 一视同仁清单：勾选+种类匹配（🔒 决策29+用户校准）
+	for id in _ws_option_ids("", true):   # 一视同仁清单：勾选+种类匹配（🔒 决策29+用户校准）；BWS 位排掉带 grip 的（决策35）
 		var def = SkillDB.get_skill(id)
 		_w_bws.add_item("%s（%s）" % [str(def.get("name", id)), str(id)])
 		_w_bws.set_item_metadata(_w_bws.item_count - 1, str(id))
@@ -1200,6 +1227,17 @@ func _collect() -> Dictionary:
 				if _w_intr.has(k):
 					out[k] = _num(float(_w_intr[k].value))
 			out.erase("acc")   # 命中已移出固有面板（随存即迁——基准命中在武器技能 hit、物品侧命中走 mods）
+			# 兼用双固有面板（🔒 决策35）：握持=versatile → one_handed 子面板三键恒写；否则清键
+			var versat: bool = wtype != "shield" and not innate and _w_handed != null \
+					and is_instance_valid(_w_handed) and str(_w_handed.get_selected_metadata()) == "versatile"
+			if versat:
+				var oh1 := {}
+				for k in ["atk", "block_rate", "block_power"]:
+					if _w_intr1.has(k):
+						oh1[k] = _num(float(_w_intr1[k].value))
+				out["one_handed"] = oh1
+			else:
+				out.erase("one_handed")
 			if _w_intr.has("armor_dmg"):
 				var adm := float(_w_intr["armor_dmg"].value)
 				if adm != 0.0:
@@ -1251,8 +1289,8 @@ func _collect() -> Dictionary:
 			tags.append("accessory")
 			slot = "accessory_1"
 	if _current_kind != "weapon":
-		for k in ["atk", "acc", "block_rate", "block_power", "armor_dmg", "on_hit_effects"]:
-			out.erase(k)   # 武器固有键/On-Hit 只属武器（🔒 决策33）——大类切换残留清除
+		for k in ["atk", "acc", "block_rate", "block_power", "armor_dmg", "on_hit_effects", "one_handed"]:
+			out.erase(k)   # 武器固有键/On-Hit/兼用单手面板 只属武器（🔒 决策33/35）——大类切换残留清除
 
 	for t in _free_tags:
 		if not tags.has(t):
@@ -1275,8 +1313,8 @@ func _collect() -> Dictionary:
 func _collect_item(out: Dictionary) -> Dictionary:
 	out["kind"] = "item"
 	for k in ["slot", "mods", "requires", "two_handed", "innate", "attack", "bws", "bas", "ews", "prefer", "use_scope",
-			"atk", "acc", "block_rate", "block_power", "armor_dmg", "on_hit_effects"]:
-		out.erase(k)   # 装备专属 + 废弃字段 + 武器固有键（决策33）：物品一律不带
+			"atk", "acc", "block_rate", "block_power", "armor_dmg", "on_hit_effects", "one_handed"]:
+		out.erase(k)   # 装备专属 + 废弃字段 + 武器固有键（决策33/35）：物品一律不带
 	var tags: Array = [_w_rarity.get_selected_metadata()]
 	if _w_usable.button_pressed:
 		tags.append("usable")

@@ -177,7 +177,30 @@ func _mod_active(m: Dictionary) -> bool:
 		for c in when:
 			if typeof(c) != TYPE_DICTIONARY or not _when_met(c):
 				return false
-	return true
+	return _grip_source_active(str(m.get("source", "")))
+
+# 兼用件双固有面板门控 🔒（决策35）：equip 源里 source 段 i_<key>=双手形态、i1_<key>=单手形态——
+# 按该件当前有效握持只放行一套；非固有段（词条 :<n>）与非 equip 源恒计。非兼用件 i_ 恒计（无 i1_）。
+# effective_grip 只读 equipment/ItemInstances，无递归环（同 _block_source_active 的安全性论证）。
+func _grip_source_active(src: String) -> bool:
+	if not src.begins_with("equip:"):
+		return true
+	var seg := src.get_slice(":", 2)
+	var is_1h := seg.begins_with("i1_")
+	if not is_1h and not seg.begins_with("i_"):
+		return true   # 词条/附魔等普通 mod（序号段）恒计
+	var iuid := int(src.get_slice(":", 1))
+	var item = ItemInstances.view(iuid)
+	if item == null or not (item.get("tags", []) as Array).has("versatile"):
+		return not is_1h   # 非兼用件：i_ 恒计；防御性拦截不该存在的 i1_
+	var slot := ""
+	for s in ["main_hand", "off_hand"]:
+		if int(equipment.get(s, 0)) == iuid:
+			slot = s
+			break
+	if slot == "":
+		return not is_1h   # 不在手上（异常态）＝按双手面板兜底
+	return (effective_grip(slot) == "one_handed") == is_1h
 
 # 条件词表 v1（🔒 §4 阶段4；when 数组内 AND）。递归防护锁定（§4.3）：一律读**裸 stats**，
 # 不进 effective_stat 读链（stat_threshold 在 effective_stat_f 内求值，读 effective 会成环）。
@@ -733,6 +756,35 @@ func dual_strike_active() -> bool:
 		return false
 	return not offhand_weapon_attack().is_empty()
 
+# 有效握持 🔒（决策35 单一读口）：该槽物品当前算单手还是双手。
+#  · 单手/双手件＝静态 tag（旧数据无 tag 回退 two_handed 字段）；盾/天生/徒手＝""（无握持）。
+#  · 兼用 versatile＝动态：**另一只手空置（或只有拳脚 natural——拳脚不是装备）→ 双手**，有物→单手；
+#    与装在哪个槽无关（副手单持一把兼用武器同样算双手——「事实层面只装备了这一把」，用户拍板 2026-07-14）。
+#  只读 equipment/ItemInstances，不进 effective_stat 读链（供 _mod_active 门控调用，无递归环）。
+func effective_grip(slot: String) -> String:
+	var item = ItemInstances.view(int(equipment.get(slot, 0)))
+	if item == null or item.get("innate", false):
+		return ""
+	var itags: Array = item.get("tags", [])
+	if itags.has("two_handed") or (not itags.has("one_handed") and not itags.has("versatile") and item.get("two_handed", false)):
+		return "two_handed"
+	if itags.has("one_handed"):
+		return "one_handed"
+	if itags.has("versatile"):
+		var other := "off_hand" if slot == "main_hand" else "main_hand"
+		var oitem = ItemInstances.view(int(equipment.get(other, 0)))
+		if oitem == null or oitem.get("natural", false):
+			return "two_handed"
+		return "one_handed"
+	return ""
+
+# 技能握持条件是否满足 🔒（决策35：运行时可用性条件，非解锁）：def.grip 缺省＝不限；
+# 判据＝施放槽位的有效握持（当前恒主手；阶段6 副手 EWS 接线时随 weapon_source 改判 slot）。
+# 战斗菜单灰显（需单/双手持）与 apply_skill 守卫同吃此口。
+func grip_met(def: Dictionary, slot := "main_hand") -> bool:
+	var g := str(def.get("grip", ""))
+	return g == "" or effective_grip(slot) == g
+
 # 武器固有属性键（🔒 决策33；⚠ 三轮校准 2026-07-13：**命中 acc 移出**——命中的固有归属＝武器技能 hit
 # 〔决策32 命中系数〕，物品侧命中只能是普通 mod）：攻/格挡率%/格挡性能%＝物品顶层必填字段（0=无），
 # 非 mods——mods 留给词条/附魔等**额外**修正。装备时折成 equip 源修正进同一管线（格挡休眠/
@@ -741,6 +793,8 @@ const INTRINSIC_EQUIP_STATS := ["atk", "block_rate", "block_power"]
 
 # 挂装备修正：每条 mod 唯一 source（"equip:<实例iuid>:<序号>"）——同件装备的模板 mod 与词条 mod
 # 即使同 stat 同 op 也各自生效（effective_stat 的「同 source 去重取高」只该压重复 buff，不该吃词条）。
+# 兼用件 🔒（决策35 双固有面板）：顶层三键=双手形态（source i_）+ one_handed 子面板=单手形态（source i1_）
+# 两套都烘、_grip_source_active 按有效握持只放行一套——零重挂零状态残留（格挡休眠同族的 source 门控先例）。
 func _apply_item_mods(item: Dictionary, iuid: int) -> void:
 	var label := str(item.get("name", ""))
 	for k in INTRINSIC_EQUIP_STATS:
@@ -748,6 +802,13 @@ func _apply_item_mods(item: Dictionary, iuid: int) -> void:
 		if iv != 0.0:
 			modifiers.append({"stat": k, "op": "flat", "value": iv,
 				"source": "equip:%d:i_%s" % [iuid, k], "source_label": label})
+	var oh1 = item.get("one_handed", null)
+	if (item.get("tags", []) as Array).has("versatile") and typeof(oh1) == TYPE_DICTIONARY:
+		for k in INTRINSIC_EQUIP_STATS:
+			var iv1 := float(oh1.get(k, 0))
+			if iv1 != 0.0:
+				modifiers.append({"stat": k, "op": "flat", "value": iv1,
+					"source": "equip:%d:i1_%s" % [iuid, k], "source_label": label + "（单手持）"})
 	var idx := 0
 	for m in item.get("mods", []):
 		var mod: Dictionary = m.duplicate()
@@ -1085,6 +1146,11 @@ func current_attack_tags() -> Array:
 	if item != null:
 		for t in item.get("tags", []):
 			out.append(str(t))
+		# 兼用件 🔒（决策35 喂养动态跟随）：注入有效握持 tag——单持喂「双手」style、配副手喂「单手」style
+		if (item.get("tags", []) as Array).has("versatile"):
+			var g := effective_grip("main_hand")
+			if g != "" and not out.has(g):
+				out.append(g)
 	for t in atk.get("tags", []):
 		if not out.has(str(t)):
 			out.append(str(t))
