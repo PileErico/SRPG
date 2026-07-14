@@ -78,7 +78,7 @@ func _initialize() -> void:
 	var patient = UnitFactory.make_unit(BARE, "player", 1, 0)
 	ck(healer.learn_skill("t_heal") == 1, "学会试料救护")
 	healer.ap = 5
-	bs._add_effect(patient, {"id": "bleeding"})
+	bs._add_effect(patient, {"id": "bleeding_basic"})   # 效果 id 随用户重建改（2026-07-15）；cleanse 按 bleeding tag 清不受影响
 	ck(patient.effects.size() == 1, "预置流血")
 	var maxhp := int(patient.effective_stat("HP_max"))
 	patient.stats["HP"] = maxhp / 2

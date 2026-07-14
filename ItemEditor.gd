@@ -118,6 +118,8 @@ var _w_intr1: Dictionary = {}    # 兼用单手形态面板 spins（🔒 决策3
 var _intr1_box: VBoxContainer    # 兼用单手形态区（握持=versatile 时显示）
 var _onhit_rows: Array = []      # On-Hit Effects 行：[{row, effect:OptionButton, chance:SpinBox}]
 var _onhit_box: VBoxContainer
+var _w_armdmg: SpinBox           # 甲伤行 spin（可选行 2026-07-15：null=无此行；✕删行置空）
+var _w_armdmg_btn: Button        # 「＋ 甲伤」按钮（行存在时禁用——甲伤只一条）
 var _w_bws: OptionButton         # 普攻 BWS 下拉（weapon_skill 勾选过滤，🔒 决策29；（无）＝不提供普攻，如盾）
 var _w_prefer: OptionButton      # 地/空偏好（比路兹式起降换手；一般武器（无））
 var _ews_box: VBoxContainer      # EWS 行容器
@@ -382,6 +384,8 @@ func _clear_form() -> void:
 	_w_intr1 = {}
 	_intr1_box = null
 	_onhit_rows = []
+	_w_armdmg = null
+	_w_armdmg_btn = null
 	_free_tags = []
 	_requires = []
 	_baseline = ""   # §14：重建期间预览刷新不比脏（基线由 _load_item/_do_new_item/_shell_after_save 设）
@@ -473,24 +477,36 @@ func _build_form() -> void:
 		_refresh_preview())
 	_form.add_child(addmod)
 
-	# 3b. On-Hit Effects（🔒 决策33：武器打中的附带行为——普攻与武器技能都触发，与技能自带 inflict 独立叠加。
-	#     甲伤同属此族：不论用什么技能挥舞都破坏护甲——用户校准 2026-07-13）
+	# 3b. On-Hit Effects（🔒 决策33：武器打中的附带行为——普攻与武器技能都触发，与技能侧 On-Hit 独立叠加。
+	#     甲伤同属此族且为**可选项**（2026-07-15 用户校准：与流血同等地位——点＋添加、✕可删，非常驻行））
 	if _current_kind == "weapon":
-		_form.add_child(EditorUI.section_title("On-Hit Effects（打中附带；普攻/武器技能/借机都触发，与技能 inflict 叠加）"))
-		_w_intr["armor_dmg"] = EditorUI.add_spin(_form, "甲伤 armor_dmg（对护甲额外伤害%；0=无）",
-			float(_current.get("armor_dmg", 0)), -999, 9999, 0.5, _refresh_preview)
+		_form.add_child(EditorUI.section_title("On-Hit Effects（打中附带；普攻/武器技能/借机都触发，与技能侧 On-Hit 叠加）"))
 		_onhit_box = VBoxContainer.new()
 		_onhit_box.add_theme_constant_override("separation", 4)
 		_form.add_child(_onhit_box)
+		var adm0 := float(_current.get("armor_dmg", 0))
+		if adm0 != 0.0:
+			_add_armdmg_row(adm0)
 		for e in _current.get("on_hit_effects", []):
 			if typeof(e) == TYPE_DICTIONARY:
 				_add_onhit_row(str(e.get("effect", "")), float(e.get("chance", 100)))
+		var addrow := HBoxContainer.new()
+		addrow.add_theme_constant_override("separation", 6)
 		var addoh := Button.new()
 		addoh.text = "＋ 添加 On-Hit 效果"
 		addoh.pressed.connect(func():
 			_add_onhit_row("", 100.0)
 			_refresh_preview())
-		_form.add_child(addoh)
+		addrow.add_child(addoh)
+		_w_armdmg_btn = Button.new()
+		_w_armdmg_btn.text = "＋ 甲伤"
+		_w_armdmg_btn.tooltip_text = "对护甲额外伤害%（钝器特色；任意招式都触发）"
+		_w_armdmg_btn.disabled = adm0 != 0.0
+		_w_armdmg_btn.pressed.connect(func():
+			_add_armdmg_row(50.0)
+			_refresh_preview())
+		addrow.add_child(_w_armdmg_btn)
+		_form.add_child(addrow)
 
 	# 4. 武器技能（仅武器，放底部）：BWS/EWS 引用位（🔒 决策25/26）
 	if _current_kind == "weapon":
@@ -695,7 +711,37 @@ func _sync_versatile_box() -> void:
 	_intr1_box.visible = hv and str(_w_handed.get_selected_metadata()) == "versatile"
 
 
-# 一条 On-Hit：效果下拉（EffectDB 引用）+ 概率% + ✕（🔒 决策33）
+# 甲伤行（🔒 2026-07-15 用户校准：可选项非常驻——与效果行同等地位）：spin + ✕
+func _add_armdmg_row(value: float) -> void:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	var lb := Label.new()
+	lb.text = "甲伤 armor_dmg（对护甲额外伤害%）"
+	lb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(lb)
+	var sp := SpinBox.new()
+	sp.min_value = -999
+	sp.max_value = 9999
+	sp.step = 0.5
+	sp.value = value
+	sp.value_changed.connect(func(_v): _refresh_preview())
+	row.add_child(sp)
+	var rm := Button.new()
+	rm.text = "✕"
+	rm.pressed.connect(func():
+		_w_armdmg = null
+		row.queue_free()
+		if _w_armdmg_btn != null and is_instance_valid(_w_armdmg_btn):
+			_w_armdmg_btn.disabled = false
+		_refresh_preview())
+	row.add_child(rm)
+	_onhit_box.add_child(row)
+	_onhit_box.move_child(row, 0)   # 甲伤领衔（视觉惯例，不影响数据）
+	_w_armdmg = sp
+	if _w_armdmg_btn != null and is_instance_valid(_w_armdmg_btn):
+		_w_armdmg_btn.disabled = true
+
+# 一条 On-Hit：效果下拉（EffectDB 引用，只列 on_hit_ok=true 白名单——效果库勾选）+ 概率% + ✕（🔒 决策33）
 func _add_onhit_row(effect_id: String, chance: float) -> void:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 6)
@@ -705,6 +751,8 @@ func _add_onhit_row(effect_id: String, chance: float) -> void:
 	ob.set_item_metadata(0, "")
 	for id in EffectDB.all():
 		var e = EffectDB.all()[id]
+		if not bool(e.get("on_hit_ok", false)):
+			continue   # 白名单（2026-07-15 用户令）：效果库勾了「可作 On-Hit 引用」才列；旧值悬空经 _ensure_meta_option 保值
 		ob.add_item("%s（%s）" % [str(e.get("name", id)), str(id)])
 		ob.set_item_metadata(ob.item_count - 1, str(id))
 	_ensure_meta_option(ob, effect_id)
@@ -1239,12 +1287,11 @@ func _collect() -> Dictionary:
 				out["one_handed"] = oh1
 			else:
 				out.erase("one_handed")
-			if _w_intr.has("armor_dmg"):
-				var adm := float(_w_intr["armor_dmg"].value)
-				if adm != 0.0:
-					out["armor_dmg"] = _num(adm)
-				else:
-					out.erase("armor_dmg")
+			# 甲伤（可选行 2026-07-15）：行存在且非 0 才落键；删行/0＝清键
+			if _w_armdmg != null and is_instance_valid(_w_armdmg) and float(_w_armdmg.value) != 0.0:
+				out["armor_dmg"] = _num(float(_w_armdmg.value))
+			else:
+				out.erase("armor_dmg")
 			# On-Hit Effects（空行跳过；全空＝不落键）
 			var ohs := []
 			for e in _onhit_rows:

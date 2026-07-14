@@ -25,7 +25,7 @@ func mk():
 
 func _bleed(u):
 	for e in u.effects:
-		if str(e.get("id", "")) == "bleeding":
+		if str(e.get("id", "")) == "bleeding_basic":   # 效果 id 随用户重建改（2026-07-15：bleeding→bleeding_basic）
 			return e
 	return null
 
@@ -33,21 +33,23 @@ func _initialize() -> void:
 	print("=== bleed 迁引用 端到端 回归 ===")
 	var s = BattleState.new()
 
-	# 数据侧：claw_wing 的 inflict 已是引用形态。
+	# 数据侧：claw_wing 的击中施加已是引用形态（🔒 2026-07-15 键级统一：on_hit_effects 数组）。
 	# ⚠ 阶段3a（决策26）：attack 已迁 BWS 条目（武器 bws 引用）——经 SkillDB.flatten_bws 取扁平 attack（与运行时同路径）。
 	var claw = ItemDB.get_item("claw_wing")
 	ck(claw != null, "claw_wing 存在")
 	var bws_def = SkillDB.get_skill(str(claw.get("bws", ""))) if claw != null else null
 	ck(bws_def != null, "claw_wing 的 bws 引用可解析")
 	var atk: Dictionary = SkillDB.flatten_bws(bws_def) if bws_def != null else {}
-	var inf = atk.get("inflict", {})
-	ck(str(inf.get("effect", "")) == "bleeding", "inflict 引用 effect=bleeding")
-	ck(int(inf.get("chance", 0)) == 30, "inflict 保留 chance=30（rider 侧）")
-	ck(not inf.has("name") and not inf.has("dot_pct_max_hp"), "内联定义字段已迁走（inflict 只剩引用+chance）")
+	var ohs: Array = atk.get("on_hit_effects", [])
+	ck(ohs.size() == 1, "on_hit_effects 数组一条（键级统一 2026-07-15）")
+	var inf: Dictionary = ohs[0] if ohs.size() > 0 else {}
+	ck(str(inf.get("effect", "")) == "bleeding_basic", "引用 effect=bleeding_basic")
+	ck(int(inf.get("chance", 0)) == 30, "保留 chance=30（rider 侧）")
+	ck(not inf.has("name") and not inf.has("dot_pct_max_hp"), "内联定义字段已迁走（条目只剩引用+chance）")
 
-	# 施加：解析引用 → 从 EffectDB 取定义挂上（chance→100 副本确定化）
+	# 施加：解析引用 → 从 EffectDB 取定义挂上（chance→100 副本确定化；_try_inflict_state 内部信封键=inflict）
 	var atk100 = atk.duplicate(true)
-	atk100["inflict"] = {"effect": "bleeding", "chance": 100}
+	atk100["inflict"] = {"effect": "bleeding_basic", "chance": 100}
 	var t = mk()
 	var r = s._try_inflict_state(t, atk100)
 	ck(bool(r.get("applied", false)), "chance=100 + 强韧0 → 必施加")
@@ -76,7 +78,7 @@ func _initialize() -> void:
 	ck(_bleed(t2) == null, "豁免=完全不受影响")
 	# ignore_fort：无视强韧（施加豁免+每回合豁免一并跳过）
 	var atk_ig = atk.duplicate(true)
-	atk_ig["inflict"] = {"effect": "bleeding", "chance": 100, "ignore_fort": true}
+	atk_ig["inflict"] = {"effect": "bleeding_basic", "chance": 100, "ignore_fort": true}
 	var r3 = s._try_inflict_state(t2, atk_ig)
 	ck(bool(r3.get("applied", false)) and _bleed(t2) != null, "ignore_fort 穿透强韧施加")
 	var shrug := false
@@ -86,7 +88,7 @@ func _initialize() -> void:
 	ck(not shrug and _bleed(t2) != null, "ignore_fort 效果不可挣脱（每回合豁免跳过）")
 	# 常规施加后的每回合豁免：肉体强韧 100 → 回合开始必挣脱（连带摘修正、事件上报）
 	var t3 = mk()
-	s._add_effect(t3, {"id": "bleeding"})
+	s._add_effect(t3, {"id": "bleeding_basic"})
 	t3.stats["body_fort"] = 100
 	var shrug3 := false
 	for ev in s._apply_turn_start_effects(t3):

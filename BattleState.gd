@@ -701,13 +701,18 @@ func _resolve_compute_body(attacker, target, skill) -> Dictionary:
 		target.stats["HP"] = 0
 		r["door_gauge"] = target.door_gauge
 		r["door_result"] = _door_settle_state(target)
-	# 施加异常 + 武器 On-Hit Effects——单击合并规则（🔒 决策33/34，用户口径）：
+	# On-Hit Effects 双挂点合并——技能侧＋武器侧同性质只是来源不同（🔒 2026-07-15 键级统一：
+	# 技能攻击块旧单条 inflict → 与武器同形的 on_hit_effects 数组；旧键双读窗口，lint 禁回流）。
+	# 单击合并规则（🔒 决策33/34，用户口径）：
 	# ①同 effect id：**概率取高只掷一次**（施加概率在武器/技能侧、不在异常本身；ignore_fort 取或）；
 	# ②异 id 同族（共享 cat=effect 异常 tag——各种出血变体都带 bleeding）：**只按优先级更高的那条施加**
 	#   （概率与效果都取高者，低者本次不掷）；③无关异常各自独立掷。
 	# 目标身上已挂同族旧效果的覆盖/压制＝_add_effect_by_id 优先级闸（跨击语义）。空手/无实例＝无武器侧。
 	var cands := []   # [{inf, from_skill}]
-	var sinf = skill.get("inflict", null)
+	for se in skill.get("on_hit_effects", []):
+		if typeof(se) == TYPE_DICTIONARY and str(se.get("effect", "")) != "":
+			cands.append({"inf": se.duplicate(true), "from_skill": true})
+	var sinf = skill.get("inflict", null)   # 旧键双读窗口（含无 effect 键的匿名内联形，原样入候选）
 	if typeof(sinf) == TYPE_DICTIONARY:
 		cands.append({"inf": sinf.duplicate(true), "from_skill": true})
 	var w_item = ItemInstances.view(int(attacker.equipment.get(_seg_slot(skill), 0)))
@@ -738,13 +743,11 @@ func _resolve_compute_body(attacker, target, skill) -> Dictionary:
 				break
 		if not absorbed:
 			final.append(c)
-	r["inflict"] = {}
+	# 结果归一（键级统一 2026-07-15）：技能侧/武器侧同入 r["on_hit"] 数组（原 r["inflict"] 单列已并轨）
 	var onhit := []
 	for f in final:
 		var ires := _try_inflict_state(target, {"inflict": f["inf"]})
-		if bool(f["from_skill"]):
-			r["inflict"] = ires
-		else:
+		if not ires.is_empty():
 			onhit.append(ires)
 	if not onhit.is_empty():
 		r["on_hit"] = onhit

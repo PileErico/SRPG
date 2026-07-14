@@ -43,6 +43,7 @@ var _w_timing: OptionButton
 var _w_stackable: CheckBox
 var _w_maxstacks: SpinBox
 var _w_priority: SpinBox    # 异常优先级（🔒 决策34）
+var _w_onhit_ok: CheckBox   # 可作 On-Hit 引用（🔒 2026-07-15 白名单：勾了才进武器/技能 On-Hit 下拉）
 var _w_dot: SpinBox
 var _w_hot: SpinBox
 var _w_expire_apply: OptionButton
@@ -231,6 +232,9 @@ func _build_form() -> void:
 	# 异常优先级（🔒 决策34）：同族（同 cat=effect 异常 tag）异 id → 恒高者起效（高顶低、低不生效）；
 	# 同族禁同级（lint 执法）保证覆盖顺序确定。无族 tag 的效果不参与。0=缺省不落键。
 	_w_priority = EditorUI.add_spin(_form, "异常优先级 priority（同族异 id 高者起效；同族禁同级）", float(_current.get("priority", 0)), -99, 99, 1, _mark_dirty)
+	# 可作 On-Hit 引用（🔒 2026-07-15 用户令·白名单式）：勾了才出现在武器/技能的 On-Hit 效果下拉；
+	# 缺省不勾＝不可引用（防士气/变身类效果混进击中施加）。lint 校验存量引用。
+	_w_onhit_ok = EditorUI.add_check(_form, "可作 On-Hit 引用 on_hit_ok（勾＝可被武器/技能的击中施加选取）", bool(_current.get("on_hit_ok", false)), _mark_dirty)
 	_w_dot = EditorUI.add_spin(_form, "持续伤害 dot_pct_max_hp（%最大生命/回合末；无视护甲）", float(_current.get("dot_pct_max_hp", 0)), 0, 100, 1, _mark_dirty)
 	_w_hot = EditorUI.add_spin(_form, "持续回复 hot_flat（固定值/回合末）", float(_current.get("hot_flat", 0)), 0, 999, 1, _mark_dirty)
 
@@ -425,6 +429,10 @@ func _shell_collect() -> Dictionary:
 		out["priority"] = int(_w_priority.value)   # 决策34：0=缺省不落键
 	else:
 		out.erase("priority")
+	if _w_onhit_ok.button_pressed:
+		out["on_hit_ok"] = true   # 白名单（2026-07-15）：false=缺省不落键
+	else:
+		out.erase("on_hit_ok")
 	out["dot_pct_max_hp"] = int(_w_dot.value)
 	out["hot_flat"] = int(_w_hot.value)
 	var mods := []

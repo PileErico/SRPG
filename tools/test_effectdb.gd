@@ -32,20 +32,20 @@ func _ids(path: String) -> Array:
 func _initialize() -> void:
 	print("=== EffectDB 测试开始 ===")
 
-	# 0) 真库：bleeding 定义可读、字段正确（迁自 claw_wing 内联 inflict）
-	var bleed = EffectDB.get_effect("bleeding")
-	ck(bleed != null, "真库 bleeding 可读")
+	# 0) 真库：流血定义可读、字段正确（效果 id 随用户重建改：bleeding→bleeding_basic 2026-07-15）
+	var bleed = EffectDB.get_effect("bleeding_basic")
+	ck(bleed != null, "真库 bleeding_basic 可读")
 	if bleed != null:
-		ck(str(bleed.get("kind", "")) == "debuff", "bleeding kind=debuff")
-		ck((bleed.get("tags", []) as Array).has("bleeding"), "bleeding tag 有 bleeding")
-		ck(int(bleed.get("dot_pct_max_hp", 0)) == 5, "bleeding dot=5%")
-		ck(str(bleed.get("duration_model", "")) == "fixed", "bleeding duration_model=fixed")
+		ck(str(bleed.get("kind", "")) == "debuff", "bleeding_basic kind=debuff")
+		ck((bleed.get("tags", []) as Array).has("bleeding"), "bleeding_basic tag 有 bleeding")
+		ck(int(bleed.get("dot_pct_max_hp", 0)) == 5, "bleeding_basic dot=5%")
+		ck(str(bleed.get("duration_model", "")) == "fixed", "bleeding_basic duration_model=fixed")
 
 	# 1) 接管路径 + 空库起步
 	EffectDB._path_override = P
 	DirAccess.remove_absolute(P)
 	EffectDB.reload_data()
-	ck(EffectDB.get_effect("bleeding") == null, "接管临时库后 bleeding 不在（隔离真数据）")
+	ck(EffectDB.get_effect("bleeding_basic") == null, "接管临时库后 bleeding_basic 不在（隔离真数据）")
 
 	# 2) 新增 → 文件自动创建 + 可读
 	ck(EffectDB.save_effect({"id": "poison_t", "name": "中毒", "kind": "debuff", "tags": ["poison"], "dot_pct_max_hp": 3}), "save 新增成功")
@@ -77,7 +77,7 @@ func _initialize() -> void:
 	EffectDB._path_override = ""
 	EffectDB.reload_data()
 	DirAccess.remove_absolute(P)
-	ck(EffectDB.get_effect("bleeding") != null and EffectDB.get_effect("venom_t") == null, "还原后真库回归、测试效果不残留")
+	ck(EffectDB.get_effect("bleeding_basic") != null and EffectDB.get_effect("venom_t") == null, "还原后真库回归、测试效果不残留")
 
 	if _fail == 0:
 		print("=== 全 PASS ===")

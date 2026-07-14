@@ -76,9 +76,10 @@ func _initialize() -> void:
 		{"id": "d31_parry", "name": "格挡剑", "slot": "main_hand", "tags": ["one_handed"], "bws": "d31_off",
 			"mods": [{"stat": "block_rate", "op": "flat", "value": 10}]},
 		# 决策33 试料：固有属性顶层键（三轮校准后无 acc）+ 甲伤 + On-Hit Effects
+		# （effect id 引用真库——随用户重建改 bleeding→bleeding_basic 2026-07-15）
 		{"id": "d33_hammer", "name": "破甲锤", "slot": "main_hand", "tags": ["one_handed"], "bws": "d31_main",
 			"atk": 6, "block_rate": 0, "block_power": 0, "armor_dmg": 50,
-			"on_hit_effects": [{"effect": "bleeding", "chance": 100}]},
+			"on_hit_effects": [{"effect": "bleeding_basic", "chance": 100}]},
 		{"id": "d33_off", "name": "副刀", "slot": "main_hand", "tags": ["one_handed"], "bws": "d31_off",
 			"atk": 2, "block_rate": 0, "block_power": 0},
 		# 决策34 试料：On-Hit 带高级出血变体
@@ -254,22 +255,26 @@ func _initialize() -> void:
 	s8.equipment["main_hand"] = ItemInstances.create("d34_saw")
 	var v8 = mk("靶8", "enemy", 1, 7)
 	sb.units = [s8, v8]
-	# ①同 id 概率取高：技能 inflict bleed_high 0% + 武器 bleed_high 100% → 合并单掷、概率 100
+	# ①同 id 概率取高：技能 On-Hit bleed_high 0% + 武器 bleed_high 100% → 合并单掷、概率 100
+	# （🔒 2026-07-15 键级统一：技能侧＝on_hit_effects 数组；结果归一 r["on_hit"] 单列）
 	var got8 := false
 	for seedv in range(1, 41):
 		v8.effects = []
 		v8.modifiers = []
 		s8.morale = 25
 		sb._state.rng.seed = seedv
-		var r8: Dictionary = sb._state._resolve_compute(s8, v8, {"coeff": 1.0, "inflict": {"effect": "bleed_high", "chance": 0}})
+		var r8: Dictionary = sb._state._resolve_compute(s8, v8,
+			{"coeff": 1.0, "on_hit_effects": [{"effect": "bleed_high", "chance": 0}]})
 		if bool(r8.get("hit", false)):
-			ck(is_equal_approx(float(r8["inflict"]["base_ch"]), 100.0) and not r8.has("on_hit"),
+			var oh8: Array = r8.get("on_hit", [])
+			ck(oh8.size() == 1 and is_equal_approx(float((oh8[0] as Dictionary).get("base_ch", 0)), 100.0),
 				"同 id 概率取高：技能 0% + 武器 100% → 合并单掷 100%（施加概率在武器/技能侧）")
-			ck(bool(r8["inflict"]["applied"]), "合并后 100% 必施加")
+			ck(oh8.size() == 1 and bool((oh8[0] as Dictionary).get("applied", false)), "合并后 100% 必施加")
 			got8 = true
 			break
 	ck(got8, "§8a 样本内出现命中")
 	# ②同族异 id（都带 bleeding tag）：技能带低级 100%、武器带高级 100% → 只按高优先级施加、低者不掷
+	# （技能侧故意用**旧键 inflict 单条**——钉双读窗口：旧数据/未保存编辑器实例不断链）
 	got8 = false
 	for seedv in range(1, 41):
 		v8.effects = []
@@ -278,11 +283,10 @@ func _initialize() -> void:
 		sb._state.rng.seed = seedv
 		var r8b: Dictionary = sb._state._resolve_compute(s8, v8, {"coeff": 1.0, "inflict": {"effect": "bleed_low", "chance": 100}})
 		if bool(r8b.get("hit", false)):
-			ck((r8b.get("inflict", {}) as Dictionary).is_empty(), "技能低级条目被高优先级独占——本次不掷")
 			var names8 := []
 			for oh in r8b.get("on_hit", []):
 				names8.append(str(oh.get("name", "")))
-			ck(names8 == ["高级出血"], "只施加武器侧高级出血（概率与效果都按高者）")
+			ck(names8 == ["高级出血"], "低级被高优先级独占不掷——只施加武器侧高级出血（概率与效果都按高者；旧键 inflict 双读成立）")
 			ck(v8.effects.size() == 1 and str(v8.effects[0]["id"]) == "bleed_high", "落地效果＝bleed_high")
 			got8 = true
 			break

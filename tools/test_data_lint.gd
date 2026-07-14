@@ -4,14 +4,16 @@ extends SceneTree
 ##  1) 禁键 element：data/*.json 任意层出现即 FAIL——守 damage_category 正字（§7.2；原 damage_kind 已改词 2026-07-13）不回流。
 ##  2) effects.json 形状：id 非空且唯一 / kind∈{buff,debuff} / tags 是数组 / duration_model∈{fixed,resist} /
 ##     stackable 为 bool / dot_pct_max_hp、hot_flat 数值。
-##  3) 效果引用完整性：weapons/skills 里 inflict/apply 的 {effect:<id>} 引用必须在 EffectDB 存在
+##  3) 效果引用完整性：weapons/skills 里 on_hit/apply 的 {effect:<id>} 引用必须在 EffectDB 存在
 ##     （当前无引用形态即空过；阶段1.2b bleed 迁引用后此项开始守护悬空 id）。
+##     3b) On-Hit 白名单（🔒 2026-07-15 用户令）：weapons/skills 的 on_hit_effects 引用的效果须 on_hit_ok=true
+##     （效果库勾选制——防士气/变身类效果被击中施加引用）。
 ##  4) 强韧不入物品（🔒 模块_属性成长_设计.md §5）：weapons/armor/accessories 的 mods 出现 will_fort/body_fort 即 FAIL。
 ##  5) damage_category 白名单 ∈ {physical,fire,ice,thunder,holy} + damage_type 白名单 ∈ {slashing,piercing,bludgeoning} + 禁键 damage_kind
 ##     （未知种别在 CombatResolver 会告警回退物理轨；数据侧在此挡住）。
 ##  6) tag 引用完整性（🔒 tag 统一词表）：data/*.json 与 terrains.json 里任意 "tags" 数组的字符串
 ##     必须 ∈ tags.json——防「用了没注册」的词表漂移（曾漏 cold/road/wall）。
-##  7) skills.json 阶段2 形状闸门（🔒 设计 §10 护栏#1 机械执法）：target 三旗不得全 false / seq·nature·requires_hands 禁回流（2026-07-13 废除/改词/删除）/
+##  7) skills.json 阶段2 形状闸门（🔒 设计 §10 护栏#1 机械执法）：target 三旗不得全 false / seq·nature·requires_hands·inflict 禁回流（2026-07-13 废除/改词/删除；inflict→on_hit_effects 键级统一 2026-07-15）/
 ##     per_level 长度==max_level / costs.ap 与顶层 ap_cost 禁双写 / 阶段6 前 hits.size()>1 或 riders 出现即 FAIL
 ##     （防「可编不可跑」内容入库）。WS 形约束已随决策27 关系制移到规则8 引用处执法。
 ##     grip 握持条件（🔒 决策35）：值∈{one_handed,two_handed} 且只属武器技能（weapon_skill=true）。
@@ -226,6 +228,17 @@ func _initialize() -> void:
 		_collect_effect_refs(data, refs)
 		for rid in refs:
 			ck(EffectDB.get_effect(rid) != null, "%s 引用的效果 id 存在：%s" % [path.get_file(), rid])
+		# 3b) On-Hit 白名单（🔒 2026-07-15）：on_hit_effects 引用的效果须 on_hit_ok=true（效果库勾选制）
+		var oh_arrs := []
+		_collect_key_arrays(data, "on_hit_effects", oh_arrs)
+		for arr in oh_arrs:
+			for e in arr:
+				if typeof(e) != TYPE_DICTIONARY:
+					continue
+				var oid := str(e.get("effect", ""))
+				var odef = EffectDB.get_effect(oid)
+				ck(odef == null or bool(odef.get("on_hit_ok", false)),
+					"%s：On-Hit 引用的效果「%s」须在效果库勾选 on_hit_ok（白名单 2026-07-15）" % [path.get_file(), oid])
 
 	# 4) 强韧不入物品（🔒 §5：防具/词条只有抗性、永不提供强韧；特性/种族不受此限）
 	#    禁键清单从 StatMeta.ITEM_FORBIDDEN_STATS 单一源取（运行时护栏 ItemInstances._affix_valid 同源）；
@@ -289,6 +302,10 @@ func _initialize() -> void:
 			ck(not s.has("seq"), "%s：seq 已废（2026-07-13 通用序列退役）——禁回流" % sid)
 			ck(not s.has("nature"), "%s：nature 已改词 category（2026-07-13）——禁回流" % sid)
 			ck(not s.has("requires_hands"), "%s：requires_hands 已删（2026-07-13 位置语义后零用例）——禁回流" % sid)
+			# 攻击块禁键 inflict（🔒 2026-07-15 键级统一：技能侧击中施加＝与武器同形的 on_hit_effects 数组）
+			var inf_hits := []
+			_find_key(s, "inflict", sid, inf_hits)
+			ck(inf_hits.is_empty(), "%s：inflict 已改词 on_hit_effects 数组（2026-07-15 键级统一）——禁回流（命中：%s）" % [sid, ", ".join(inf_hits)])
 			# grip 握持条件（🔒 决策35 运行时可用性条件）：值白名单 + 只属武器技能
 			var sgv := str(s.get("grip", ""))
 			ck(sgv in ["", "one_handed", "two_handed"], "%s：grip ∈ {one_handed,two_handed}（决策35；实为「%s」）" % [sid, sgv])

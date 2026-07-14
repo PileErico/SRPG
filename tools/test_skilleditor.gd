@@ -68,7 +68,7 @@ func _initialize() -> void:
 				{"type": "self_tag", "tag": "flying", "has": false},
 				{"type": "target_tag", "any": ["dragon", "beast"]},
 				{"type": "skill_tag", "tag": "skill_sword"},
-				{"type": "target_effect", "effect": "bleeding"},
+				{"type": "target_effect", "effect": "bleeding_basic"},
 				{"type": "time_of_day", "at": "night"}],
 			"mods": [{"stat": "acc", "op": "flat", "value": 10}]}]})
 	# heal 试料（形＝原救护条目——数据条目已删 2026-07-13 用户令；heal 块/per_level/往返回归靠它）
@@ -212,16 +212,16 @@ func _initialize() -> void:
 	ed._move_block(ed._blocks[0], -1)   # 顶端上移＝no-op
 	ck(str(ed._shell_collect()["effects"][0].get("kind")) == "scripted", "顶端上移 no-op（不越界）")
 
-	# —— EffectEditor：bleeding 往返 + 新建 ——
+	# —— EffectEditor：bleeding_basic 往返 + 新建（效果 id 随用户重建改 2026-07-15）——
 	var fe = EffectScene.instantiate()
 	root.add_child(fe)
 	if fe._form == null:
 		fe._ready()
 	var fx_before := _bytes("user://test_effects.json")
-	fe._shell_load("bleeding")
-	ck(fe._w_id != null and str(fe._w_id.text) == "bleeding", "载入 bleeding 表单")
+	fe._shell_load("bleeding_basic")
+	ck(fe._w_id != null and str(fe._w_id.text) == "bleeding_basic", "载入 bleeding_basic 表单")
 	var fcol = fe._shell_collect()
-	ck(_same(fcol, EffectDB.get_effect("bleeding")), "效果 collect 与 DB 条目全等")
+	ck(_same(fcol, EffectDB.get_effect("bleeding_basic")), "效果 collect 与 DB 条目全等")
 	ck(EffectDB.save_effect(fcol), "效果无改动回存成功")
 	ck(_bytes("user://test_effects.json") == fx_before, "★ 效果 canonical 字节级往返不变")
 	fe._shell_new_entry()
@@ -233,7 +233,7 @@ func _initialize() -> void:
 	ck(EffectDB.get_effect("test_chill") != null and int(EffectDB.get_effect("test_chill").get("dot_pct_max_hp", 0)) == 3, "新效果读回字段正确")
 
 	# —— §25 收集校验：未注册 tag 响亮拒存（lint 规则6 编辑器先拦）——
-	fe._shell_load("bleeding")
+	fe._shell_load("bleeding_basic")
 	fe._tags.append("no_such_tag")
 	ck(fe._shell_collect().is_empty(), "未注册 tag → collect 拒（lint 规则6 口径）")
 	fe._tags.erase("no_such_tag")
@@ -290,12 +290,12 @@ func _initialize() -> void:
 	else:
 		print("（跳过：weapons 无 bws 引用试料）")
 	ck((ed._shell_referenced_by("__no_such_skill__") as Array).is_empty(), "无引用技能 → referenced_by 空")
-	var erefs = fe._shell_referenced_by("bleeding")
+	var erefs = fe._shell_referenced_by("bleeding_basic")
 	var has_sk := false
 	for r in erefs:
 		if str(r).contains("技能"):
 			has_sk = true
-	ck(has_sk, "效果 referenced_by：技能效果块引用被察觉（bleeding）")
+	ck(has_sk, "效果 referenced_by：技能效果块引用被察觉（bleeding_basic）")
 	var arefs = fe._shell_referenced_by("t_chain_a")
 	var has_chain := false
 	for r in arefs:
@@ -319,12 +319,12 @@ func _initialize() -> void:
 		ed3._ready()
 	ck(ed3._w_id == null, "SkillEditor 悬空定位 id：不载入（空态+报错消息）")
 	ck(SkillEd._open_with_id == "", "SkillEditor 悬空定位仍消费即清")
-	EffectEd._open_with_id = "bleeding"
+	EffectEd._open_with_id = "bleeding_basic"
 	var fe2 = EffectScene.instantiate()
 	root.add_child(fe2)
 	if fe2._form == null:
 		fe2._ready()
-	ck(fe2._w_id != null and str(fe2._w_id.text) == "bleeding", "EffectEditor 静态定位口：载入条目")
+	ck(fe2._w_id != null and str(fe2._w_id.text) == "bleeding_basic", "EffectEditor 静态定位口：载入条目")
 	ck(EffectEd._open_with_id == "", "EffectEditor 静态口消费即清")
 
 	# —— 复原（同进程后续脚本防污染）——

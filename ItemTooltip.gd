@@ -173,19 +173,26 @@ static func render(item: Dictionary) -> Control:
 		var pen := float(atk.get("armor_pen", 0))
 		if pen > 0.0:
 			v.add_child(_kv("穿甲", "%s%%（按比例无视护甲）" % _num(pen * 100.0)))
+		# 技能侧 On-Hit（键级统一 2026-07-15：on_hit_effects 数组；旧单条 inflict 双读兜底）
+		var skl_ohs: Array = []
+		for se in atk.get("on_hit_effects", []):
+			if typeof(se) == TYPE_DICTIONARY:
+				skl_ohs.append(se)
 		var inf = atk.get("inflict", null)
 		if typeof(inf) == TYPE_DICTIONARY:
+			skl_ohs.append(inf)
+		for soh in skl_ohs:
 			# 效果名：引用形 {effect,chance} 经 EffectDB 解析（🔒 §2.2 引用制）；旧内联 name 兜底
-			var iname := str(inf.get("name", ""))
-			var eid := str(inf.get("effect", ""))
+			var iname := str(soh.get("name", ""))
+			var eid := str(soh.get("effect", ""))
 			if eid != "":
 				var edef = EffectDB.get_effect(eid)
 				if edef != null:
 					iname = str(edef.get("name", eid))
-			var txt := "%s%% 施加 %s" % [_num(float(inf.get("chance", 100))), iname]
-			if float(inf.get("dot_pct_max_hp", 0)) > 0.0:
-				txt += "（回合末 最大生命%s%%·%d回合）" % [_num(float(inf.get("dot_pct_max_hp", 0))), int(inf.get("duration", 0))]
-			v.add_child(_kv("异常", txt))
+			var txt := "%s%% 施加 %s" % [_num(float(soh.get("chance", 100))), iname]
+			if float(soh.get("dot_pct_max_hp", 0)) > 0.0:
+				txt += "（回合末 最大生命%s%%·%d回合）" % [_num(float(soh.get("dot_pct_max_hp", 0))), int(soh.get("duration", 0))]
+			v.add_child(_kv("击中施加", txt))
 		var shp: Dictionary = SkillDB.shape_of(atk)
 		if not (shp.get("effect", []) as Array).is_empty():
 			var ff0 := "·友伤" if bool(shp.get("friendly_fire", false)) else ""

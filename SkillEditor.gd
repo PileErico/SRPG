@@ -684,28 +684,72 @@ func _build_attack_block(box: VBoxContainer, entry: Dictionary) -> void:
 		str(hit.get("damage_type", "")), _mark_dirty)
 	entry["armor_pen"] = EditorUI.add_spin(box, "破甲 armor_pen（0~1：0.3=30% 直击人体，1=无视护甲）", clampf(float(hit.get("armor_pen", 0)), 0.0, 1.0), 0.0, 1.0, 0.01, _mark_dirty)
 	entry["sure_hit"] = EditorUI.add_check(box, "必中 sure_hit（无视命中对抗）", bool(hit.get("sure_hit", false)), _mark_dirty)
-	# 命中施加 inflict（🔒 §2.2 引用形 {effect,chance}；技能招式自带——武器 On-Hit Effects 另算叠加）
+	# On-Hit Effects（🔒 2026-07-15 键级统一，用户令：与武器侧同性质只是来源不同——原「命中施加 inflict」
+	# 单条对象改为同形 on_hit_effects 数组；旧键随存即迁、lint 禁回流；效果下拉只列 on_hit_ok 白名单）
 	var inf0 = hit.get("inflict", null)
 	if typeof(inf0) == TYPE_DICTIONARY and not inf0.is_empty() and not inf0.has("effect"):
 		entry["inflict_locked"] = true
-		box.add_child(_warn("inflict 为旧内联形（无 effect 引用键）——本行锁定，保存原样保留", LOCK_COLOR))
+		box.add_child(_warn("inflict 为旧内联形（无 effect 引用键）——本行锁定，保存原样保留（lint 会催迁）", LOCK_COLOR))
 	else:
-		var iob := OptionButton.new()
-		iob.add_item("（无）")
-		iob.set_item_metadata(0, "")
-		for eid in EffectDB.all():
-			var e = EffectDB.all()[eid]
-			iob.add_item("%s（%s）" % [str(e.get("name", eid)), str(eid)])
-			iob.set_item_metadata(iob.item_count - 1, str(eid))
-		var cur_ie := str(inf0.get("effect", "")) if typeof(inf0) == TYPE_DICTIONARY else ""
-		_ensure_meta_option(iob, cur_ie)
-		_select_meta(iob, cur_ie)
-		iob.item_selected.connect(func(_i): _mark_dirty())
-		box.add_child(EditorUI.field_row("命中施加 inflict（打中挂效果；（无）=不施加）", iob))
-		entry["inflict_eff"] = iob
-		entry["inflict_ch"] = EditorUI.add_spin(box, "　　施加概率 %（resist 效果另有强韧豁免）",
-			float(inf0.get("chance", 100)) if typeof(inf0) == TYPE_DICTIONARY else 100.0, 1, 100, 1, _mark_dirty)
+		box.add_child(EditorUI.label("On-Hit Effects（用这招打中时施加；与武器面板的 On-Hit 叠加合并——同 id 概率取高/同族按优先级）"))
+		var ob_box := VBoxContainer.new()
+		ob_box.add_theme_constant_override("separation", 4)
+		box.add_child(ob_box)
+		entry["onhit_box"] = ob_box
+		entry["onhit_rows"] = []
+		for se in hit.get("on_hit_effects", []):
+			if typeof(se) == TYPE_DICTIONARY:
+				_add_skill_onhit_row(entry, str(se.get("effect", "")), float(se.get("chance", 100)))
+		if typeof(inf0) == TYPE_DICTIONARY and str(inf0.get("effect", "")) != "":
+			_add_skill_onhit_row(entry, str(inf0.get("effect", "")), float(inf0.get("chance", 100)))   # 旧 inflict → 行（随存即迁）
+		var addoh := Button.new()
+		addoh.text = "＋ 添加 On-Hit 效果"
+		addoh.pressed.connect(func():
+			_add_skill_onhit_row(entry, "", 100.0)
+			_mark_dirty())
+		box.add_child(addoh)
 	box.add_child(_warn("aoe / bonus / ignore_* 等高级字段本版不编辑，保存原样保留", WARN_COLOR))
+
+# 一条技能侧 On-Hit：效果下拉（只列 on_hit_ok=true 的效果——效果库勾选白名单）+ 概率% + ✕
+# （与 ItemEditor._add_onhit_row 同形；🔒 2026-07-15 键级统一）
+func _add_skill_onhit_row(entry: Dictionary, effect_id: String, chance: float) -> void:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	var ob := OptionButton.new()
+	ob.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	ob.add_item("（选效果…）")
+	ob.set_item_metadata(0, "")
+	for id in EffectDB.all():
+		var e = EffectDB.all()[id]
+		if not bool(e.get("on_hit_ok", false)):
+			continue   # 白名单：效果库勾了「可作 On-Hit 引用」才列（悬空/未勾旧值经 _ensure_meta_option 保值）
+		ob.add_item("%s（%s）" % [str(e.get("name", id)), str(id)])
+		ob.set_item_metadata(ob.item_count - 1, str(id))
+	_ensure_meta_option(ob, effect_id)
+	_select_meta(ob, effect_id)
+	ob.item_selected.connect(func(_i): _mark_dirty())
+	row.add_child(ob)
+	var chl := Label.new()
+	chl.text = "概率%"
+	chl.add_theme_font_size_override("font_size", 12)
+	row.add_child(chl)
+	var ch := SpinBox.new()
+	ch.min_value = 1
+	ch.max_value = 100
+	ch.step = 1
+	ch.value = chance
+	ch.value_changed.connect(func(_v): _mark_dirty())
+	row.add_child(ch)
+	var rm := Button.new()
+	rm.text = "✕"
+	var rentry := {"row": row, "effect": ob, "chance": ch}
+	rm.pressed.connect(func():
+		(entry["onhit_rows"] as Array).erase(rentry)
+		row.queue_free()
+		_mark_dirty())
+	row.add_child(rm)
+	(entry["onhit_box"] as VBoxContainer).add_child(row)
+	(entry["onhit_rows"] as Array).append(rentry)
 
 func _build_heal_block(box: VBoxContainer, entry: Dictionary) -> void:
 	entry["heal_pct"] = _add_formula(box, "治疗量 heal_pct_max_hp（%最大生命）", entry["data"].get("heal_pct_max_hp", 0))
@@ -1064,16 +1108,18 @@ func _collect_block(entry: Dictionary) -> Dictionary:
 				hit["armor_pen"] = _num(pen)
 			else:
 				hit.erase("armor_pen")
-			if not entry.get("inflict_locked", false) and entry.has("inflict_eff"):
-				var ieid := str(entry["inflict_eff"].get_selected_metadata())
-				if ieid == "":
-					hit.erase("inflict")
+			if not entry.get("inflict_locked", false) and entry.has("onhit_rows"):
+				# On-Hit Effects（🔒 2026-07-15 键级统一）：空行跳过、全空不落键；旧键 inflict 随存即迁
+				var ohs := []
+				for oe in entry["onhit_rows"]:
+					var oeid := str((oe["effect"] as OptionButton).get_selected_metadata())
+					if oeid != "":
+						ohs.append({"effect": oeid, "chance": _num(float((oe["chance"] as SpinBox).value))})
+				if ohs.is_empty():
+					hit.erase("on_hit_effects")
 				else:
-					# duplicate 原对象只更新两键（ignore_fort 等原样保留——canonical 往返）
-					var inf: Dictionary = (hit.get("inflict") as Dictionary).duplicate(true) if typeof(hit.get("inflict")) == TYPE_DICTIONARY else {}
-					inf["effect"] = ieid
-					inf["chance"] = _num(float(entry["inflict_ch"].value))
-					hit["inflict"] = inf
+					hit["on_hit_effects"] = ohs
+				hit.erase("inflict")
 			if entry["sure_hit"].button_pressed:
 				hit["sure_hit"] = true
 			else:

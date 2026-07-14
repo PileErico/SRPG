@@ -2115,10 +2115,7 @@ func _resolve_one(attacker, target, skill, show_target := false) -> Dictionary:
 		lines.append("[color=#C86BD5]%s 死门 −1（条 %+d）[/color]" % [_cname(target), int(r["door_gauge"])])
 		_log_door_settle(target, str(r["door_result"]))
 	# 施加播报（用户口径 2026-07-13：**只报成功施加**——凭空施加或刷新时长都算；未掷中/豁免/免疫/
-	# 被高优先级压制一律沉默，信息精炼不解释失败原因）
-	var inf: Dictionary = r.get("inflict", {})
-	if bool(inf.get("applied", false)):
-		lines.append("　施加「%s」" % str(inf.get("name", "")))
+	# 被高优先级压制一律沉默，信息精炼不解释失败原因）。技能/武器双挂点已并轨 r["on_hit"]（键级统一 2026-07-15）
 	for oh in r.get("on_hit", []):
 		if bool((oh as Dictionary).get("applied", false)):
 			lines.append("　施加「%s」" % str((oh as Dictionary).get("name", "")))
