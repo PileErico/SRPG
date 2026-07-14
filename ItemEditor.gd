@@ -445,11 +445,12 @@ func _build_form() -> void:
 		for p in WEAPON_INTRINSIC:
 			_w_intr[str(p[0])] = EditorUI.add_spin(_form, "%s %s" % [str(p[1]), str(p[0])],
 				float(_current.get(str(p[0]), 0)), -999, 9999, 0.5, _refresh_preview)
-		# 兼用单手形态面板（🔒 决策35 双固有面板）：顶层三键＝双手（单持）形态、此处＝配副手/入副手形态；
-		# 显隐随握持下拉（_sync_versatile_box）；甲伤/On-Hit/词条不分握持（武器物性共享）
+		# 兼用单手形态面板（🔒 决策35 双固有面板）：判据＝另一只手是否有装备（与本武器在主/副手无关——
+		# 副手单持一把、另一手空置〔含拳脚〕仍是双手形态）；显隐随握持下拉（_sync_versatile_box）；
+		# 甲伤/On-Hit/词条不分握持（武器物性共享）
 		_intr1_box = VBoxContainer.new()
 		_intr1_box.add_theme_constant_override("separation", 4)
-		_intr1_box.add_child(EditorUI.section_title("单手形态（兼用：配副手/入副手时生效——上方三键＝双手·单持形态）"))
+		_intr1_box.add_child(EditorUI.section_title("单手形态（另一只手有装备时生效——放主/副手皆同；另一手空置＝上方双手面板）"))
 		var oh0: Dictionary = _current.get("one_handed", {}) if typeof(_current.get("one_handed")) == TYPE_DICTIONARY else {}
 		for p in WEAPON_INTRINSIC:
 			_w_intr1[str(p[0])] = EditorUI.add_spin(_intr1_box, "%s %s" % [str(p[1]), str(p[0])],
