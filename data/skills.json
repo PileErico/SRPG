@@ -67,10 +67,12 @@
             "damage_category": "physical",
             "damage_type": "slashing",
             "hit": 15,
-            "inflict": {
-              "chance": 30,
-              "effect": "bleeding"
-            }
+            "on_hit_effects": [
+              {
+                "chance": 30,
+                "effect": "bleeding_basic"
+              }
+            ]
           }
         ],
         "kind": "attack"
@@ -206,7 +208,13 @@
             "coeff": 1,
             "damage_category": "physical",
             "damage_type": "slashing",
-            "hit": 30
+            "hit": 80,
+            "on_hit_effects": [
+              {
+                "chance": 100,
+                "effect": "bleeding_basic"
+              }
+            ]
           }
         ],
         "kind": "attack"
