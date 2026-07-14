@@ -1053,11 +1053,15 @@ func _checker_texture() -> Texture2D:
 	img.set_pixel(1, 0, b); img.set_pixel(0, 1, b)
 	return ImageTexture.create_from_image(img)
 
+# 部件 id / 文件名清洗：保留 a-zA-Z0-9_ 与中文汉字（中文部件名/文件名——用户需求 2026-07-13；
+# UTF-8 res:// 路径引擎/Windows 皆安全，横扫_32x32.png 等已有先例），其余（空格/路径非法字符）转 _。
 func _sanitize_id(s: String) -> String:
 	var res := ""
 	for i in s.length():
 		var ch := s[i]
-		if (ch >= "a" and ch <= "z") or (ch >= "A" and ch <= "Z") or (ch >= "0" and ch <= "9") or ch == "_":
+		var c := s.unicode_at(i)
+		if (ch >= "a" and ch <= "z") or (ch >= "A" and ch <= "Z") or (ch >= "0" and ch <= "9") or ch == "_" \
+				or (c >= 0x4E00 and c <= 0x9FFF):   # CJK 统一表意
 			res += ch
 		else:
 			res += "_"
