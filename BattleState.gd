@@ -579,22 +579,30 @@ func _main_hand_tags(u) -> Array:
 func _seg_slot(skill) -> String:
 	return "off_hand" if str(skill.get("weapon_source", "")) == "off_hand" else "main_hand"
 
-# 甲伤因子（🔒 决策33 钝器对护甲额外伤害）：1 + (持械件固有 armor_dmg + 该件 mods 词条 + 非装备源修正)/100。
+# 甲伤·百分比因子（🔒 决策33 钝器对护甲额外伤害）：1 + (持械件固有 armor_dmg_pct + 该件 mods 词条 + 非装备源修正)/100。
 # 件侧直读（固有键+词条），不走 effective_stat——装备源修正扫描排除（防双计、防双武跨件串味）；
-# perk/buff/特性等非装备源经 _mod_active 照常计入（修正是对象 🔒）。
+# perk/buff/特性等非装备源经 _mod_active 照常计入（修正是对象 🔒）。旧键 armor_dmg 双读窗口（迁 armor_dmg_pct）。
 func _seg_armor_dmg_factor(attacker, skill) -> float:
-	var pct := 0.0
+	return maxf(0.0, 1.0 + _seg_armor_dmg_sum(attacker, skill, "armor_dmg_pct", "armor_dmg") / 100.0)
+
+# 甲伤·固定值（🔒 2026-07-15）：固定点数额外护甲破坏（持械件固有 armor_dmg_flat + 该件词条 + 非装备源修正）。
+func _seg_armor_dmg_flat(attacker, skill) -> float:
+	return maxf(0.0, _seg_armor_dmg_sum(attacker, skill, "armor_dmg_flat", ""))
+
+# 按段汇总某甲伤键（件固有 key〔legacy 兜底旧键〕+ 件 mods 词条 + 非 equip 源修正）——两模式共用采集。
+func _seg_armor_dmg_sum(attacker, skill, key: String, legacy_key: String) -> float:
+	var sum := 0.0
 	var item = ItemInstances.view(int(attacker.equipment.get(_seg_slot(skill), 0)))
 	if item != null:
-		pct += float(item.get("armor_dmg", 0))
+		sum += float(item.get(key, item.get(legacy_key, 0) if legacy_key != "" else 0))
 		for m in item.get("mods", []):
-			if typeof(m) == TYPE_DICTIONARY and str(m.get("stat", "")) == "armor_dmg":
-				pct += float(m.get("value", 0))
+			if typeof(m) == TYPE_DICTIONARY and str(m.get("stat", "")) == key:
+				sum += float(m.get("value", 0))
 	for m in attacker.modifiers:
-		if typeof(m) == TYPE_DICTIONARY and str(m.get("stat", "")) == "armor_dmg" \
+		if typeof(m) == TYPE_DICTIONARY and str(m.get("stat", "")) == key \
 				and not str(m.get("source", "")).begins_with("equip:") and attacker._mod_active(m):
-			pct += float(m.get("value", 0))
-	return maxf(0.0, 1.0 + pct / 100.0)
+			sum += float(m.get("value", 0))
+	return sum
 
 func _resolve_compute(attacker, target, skill) -> Dictionary:
 	# 交互语境（🔒 §4.2 阶段4）：结算期内两侧互挂 combat_ctx，when 条件（target_tag/skill_tag/target_effect）
@@ -664,8 +672,9 @@ func _resolve_compute_body(attacker, target, skill) -> Dictionary:
 		components.append({"lane": "armor_first", "damage_category": dkind, "ratio": 1.0 - pen})
 	else:
 		components.append({"lane": "armor_first", "damage_category": dkind, "ratio": 1.0})
-	# 结算落血（分量减伤链在 CombatResolver：逐分量 甲抗/人抗/固减 + 破甲溢出保留元素；甲伤因子按段取件）
-	var dres := CombatResolver.resolve(target, out, g, components, _seg_armor_dmg_factor(attacker, skill))
+	# 结算落血（分量减伤链在 CombatResolver：逐分量 甲抗/人抗/固减 + 破甲溢出保留元素；甲伤按段取件——百分比+固定值两模式）
+	var dres := CombatResolver.resolve(target, out, g, components,
+		_seg_armor_dmg_factor(attacker, skill), _seg_armor_dmg_flat(attacker, skill))
 	var hp_loss := int(round(float(dres["hp_loss"])))
 	var armor_loss := int(round(float(dres["armor_loss"])))
 	if armor_loss > 0:

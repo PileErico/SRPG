@@ -93,10 +93,13 @@ static func render(item: Dictionary) -> Control:
 		if typeof(m) == TYPE_DICTIONARY:
 			v.add_child(mod_line(m))
 
-	# On-Hit 族（🔒 决策33：打中附带——普攻/武器技能/借机都触发；甲伤同族〔任意招式都破坏护甲〕）
-	var adm := float(item.get("armor_dmg", 0))
-	if adm != 0.0:
-		v.add_child(_kv("甲伤", "%s%%（对护甲额外伤害·任意招式）" % _num(adm)))
+	# On-Hit 族（🔒 决策33：打中附带——普攻/武器技能/借机都触发；甲伤同族〔任意招式都破坏护甲〕；2026-07-15 两模式）
+	var adm_flat := float(item.get("armor_dmg_flat", 0))
+	var adm_pct := float(item.get("armor_dmg_pct", item.get("armor_dmg", 0)))   # 旧键 armor_dmg 兜底
+	if adm_flat != 0.0:
+		v.add_child(_kv("甲伤", "%s 点（对护甲额外伤害·过甲抗·任意招式）" % _num(adm_flat)))
+	elif adm_pct != 0.0:
+		v.add_child(_kv("甲伤", "%s%%（对护甲额外伤害·任意招式）" % _num(adm_pct)))
 	for e in item.get("on_hit_effects", []):
 		if typeof(e) == TYPE_DICTIONARY and str(e.get("effect", "")) != "":
 			var oedef = EffectDB.get_effect(str(e["effect"]))

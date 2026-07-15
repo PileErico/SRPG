@@ -9,7 +9,7 @@ extends SceneTree
 ##     3b) On-Hit 白名单（🔒 2026-07-15 用户令）：weapons/skills 的 on_hit_effects 引用的效果须 on_hit_ok=true
 ##     （效果库勾选制——防士气/变身类效果被击中施加引用）。
 ##  4) 强韧不入物品（🔒 模块_属性成长_设计.md §5）：weapons/armor/accessories 的 mods 出现 will_fort/body_fort 即 FAIL。
-##  5) damage_category 白名单 ∈ {physical,fire,ice,thunder,holy} + damage_type 白名单 ∈ {slashing,piercing,bludgeoning} + 禁键 damage_kind
+##  5) damage_category 白名单 ∈ {physical,fire,ice,thunder,holy} + damage_type 白名单 ∈ {slashing,piercing,bludgeoning} + 禁键 damage_kind + 禁键 armor_dmg（2026-07-15 拆 pct/flat）
 ##     （未知种别在 CombatResolver 会告警回退物理轨；数据侧在此挡住）。
 ##  6) tag 引用完整性（🔒 tag 统一词表）：data/*.json 与 terrains.json 里任意 "tags" 数组的字符串
 ##     必须 ∈ tags.json——防「用了没注册」的词表漂移（曾漏 cold/road/wall）。
@@ -268,6 +268,10 @@ func _initialize() -> void:
 		var dk_hits := []
 		_find_key(data, "damage_kind", path.get_file(), dk_hits)
 		ck(dk_hits.is_empty(), "禁键 damage_kind（已改词 damage_category 2026-07-13）未出现于 %s（命中：%s）" % [path.get_file(), ", ".join(dk_hits)])
+		# 禁键 armor_dmg（🔒 2026-07-15 拆两模式 armor_dmg_pct/armor_dmg_flat，同 element/damage_kind 先例禁回流）
+		var ad_hits := []
+		_find_key(data, "armor_dmg", path.get_file(), ad_hits)
+		ck(ad_hits.is_empty(), "禁键 armor_dmg（已拆 armor_dmg_pct/armor_dmg_flat 2026-07-15）未出现于 %s（命中：%s）" % [path.get_file(), ", ".join(ad_hits)])
 
 	# 6) tag 引用完整性：所有 tag 承载键成员必须在 tags.json 注册（tags.json 自身除外——它是词表本体；
 	#    键集扩五类见 _collect_tag_uses；maps/ 一并扫描）

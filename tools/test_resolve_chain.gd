@@ -235,6 +235,24 @@ func _initialize() -> void:
 	ck(is_equal_approx(float(r_of["armor_loss"]), 20.0) and is_equal_approx(float(r_of["hp_loss"]), 10.0),
 		"f=2 破甲：armor_loss 封顶池 20、人身溢出 10＝原口径")
 
+	# —— 5b) 甲伤·固定值 armor_flat（🔒 2026-07-15）：定额额外毁甲、过甲抗+甲固减、只扣甲池不溢人身 ——
+	var t_fl = mk("固定甲靶", "enemy", 6, 4)
+	t_fl.stats["armor"] = 20
+	# 主伤 10 啃甲 + 固定甲伤 5 → 甲失 15，无人身溢出（甲够）
+	var r_fl: Dictionary = CR.resolve(t_fl, 10.0, 1.0, comp, 1.0, 5.0)
+	ck(is_equal_approx(float(r_fl["armor_loss"]), 15.0) and is_equal_approx(float(r_fl["hp_loss"]), 0.0),
+		"固定甲伤 5：主伤 10 啃甲 + 定额 5 → 甲失 15、不溢人身（实得 %s/%s）" % [str(r_fl["armor_loss"]), str(r_fl["hp_loss"])])
+	# 甲池不够：主伤 18 先啃 → 剩 2 甲，固定甲伤 5 只能再扣 2（封顶剩余池），多出的 3 浪费·不溢人身
+	var r_fl2: Dictionary = CR.resolve(t_fl, 18.0, 1.0, comp, 1.0, 5.0)
+	ck(is_equal_approx(float(r_fl2["armor_loss"]), 20.0) and is_equal_approx(float(r_fl2["hp_loss"]), 0.0),
+		"固定甲伤封顶剩余池：主伤 18 + 定额 5 → 甲失封顶 20、余量浪费不溢人身（实得 %s/%s）" % [str(r_fl2["armor_loss"]), str(r_fl2["hp_loss"])])
+	# 甲抗 50%：固定甲伤 8 过甲抗 → 实际 4 点毁甲
+	t_fl.modifiers.append({"stat": "armor_res_phys", "op": "flat", "value": 50, "source": "buff:测试甲抗"})
+	var r_fl3: Dictionary = CR.resolve(t_fl, 0.0, 1.0, comp, 1.0, 8.0)
+	ck(is_equal_approx(float(r_fl3["armor_loss"]), 4.0),
+		"固定甲伤过甲抗：甲抗 50%% → 8 点定额毁甲实收 4（实得 %s）" % str(r_fl3["armor_loss"]))
+	t_fl.modifiers.clear()
+
 	if _fail == 0:
 		print("=== 战斗结算链 全 PASS ===")
 		quit(0)

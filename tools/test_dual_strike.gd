@@ -75,10 +75,10 @@ func _initialize() -> void:
 				{"stat": "block_power", "op": "flat", "value": 35}]},
 		{"id": "d31_parry", "name": "格挡剑", "slot": "main_hand", "tags": ["one_handed"], "bws": "d31_off",
 			"mods": [{"stat": "block_rate", "op": "flat", "value": 10}]},
-		# 决策33 试料：固有属性顶层键（三轮校准后无 acc）+ 甲伤 + On-Hit Effects
+		# 决策33 试料：固有属性顶层键（三轮校准后无 acc）+ 甲伤（2026-07-15 拆两模式）+ On-Hit Effects
 		# （effect id 引用真库——随用户重建改 bleeding→bleeding_basic 2026-07-15）
 		{"id": "d33_hammer", "name": "破甲锤", "slot": "main_hand", "tags": ["one_handed"], "bws": "d31_main",
-			"atk": 6, "block_rate": 0, "block_power": 0, "armor_dmg": 50,
+			"atk": 6, "block_rate": 0, "block_power": 0, "armor_dmg_pct": 50, "armor_dmg_flat": 4,
 			"on_hit_effects": [{"effect": "bleeding_basic", "chance": 100}]},
 		{"id": "d33_off", "name": "副刀", "slot": "main_hand", "tags": ["one_handed"], "bws": "d31_off",
 			"atk": 2, "block_rate": 0, "block_power": 0},
@@ -216,13 +216,20 @@ func _initialize() -> void:
 	h._apply_item_mods(ItemInstances.view(int(h.equipment["off_hand"])), int(h.equipment["off_hand"]))
 	ck(h.effective_stat_f("atk") == 28.0 and h.effective_stat_f("acc") == 200.0,
 		"固有键装备合成进修正管线：atk 20+6+2；acc 非武器固有不合成（决策33 三轮校准）")
-	ck(is_equal_approx(sb._state._seg_armor_dmg_factor(h, {}), 1.5), "主手段甲伤因子＝1+50%（件固有键）")
+	ck(is_equal_approx(sb._state._seg_armor_dmg_factor(h, {}), 1.5), "主手段甲伤·百分比因子＝1+50%（件固有键 armor_dmg_pct）")
 	ck(is_equal_approx(sb._state._seg_armor_dmg_factor(h, {"weapon_source": "off_hand"}), 1.0),
-		"副手段甲伤因子＝1（件归属：不吃主手件甲伤——同 offhand_eff/格挡休眠先例）")
-	h.modifiers.append({"stat": "armor_dmg", "op": "flat", "value": 25, "source": "skill:破甲者"})
+		"副手段甲伤·百分比因子＝1（件归属：不吃主手件甲伤——同 offhand_eff/格挡休眠先例）")
+	# 甲伤·固定值（2026-07-15）：主手件 armor_dmg_flat=4 按段读、副手段不吃
+	ck(is_equal_approx(sb._state._seg_armor_dmg_flat(h, {}), 4.0), "主手段甲伤·固定值＝4（件固有键 armor_dmg_flat）")
+	ck(is_equal_approx(sb._state._seg_armor_dmg_flat(h, {"weapon_source": "off_hand"}), 0.0), "副手段甲伤·固定值＝0（件归属）")
+	h.modifiers.append({"stat": "armor_dmg_pct", "op": "flat", "value": 25, "source": "skill:破甲者"})
+	h.modifiers.append({"stat": "armor_dmg_flat", "op": "flat", "value": 3, "source": "skill:破甲者"})
 	ck(is_equal_approx(sb._state._seg_armor_dmg_factor(h, {}), 1.75)
 		and is_equal_approx(sb._state._seg_armor_dmg_factor(h, {"weapon_source": "off_hand"}), 1.25),
-		"perk 非装备源甲伤两段都吃（+25%，修正是对象）")
+		"perk 非装备源甲伤·百分比两段都吃（+25%，修正是对象）")
+	ck(is_equal_approx(sb._state._seg_armor_dmg_flat(h, {}), 7.0)
+		and is_equal_approx(sb._state._seg_armor_dmg_flat(h, {"weapon_source": "off_hand"}), 3.0),
+		"perk 非装备源甲伤·固定值两段都吃（件 4+perk 3=7 主手；副手仅 perk 3）")
 	# On-Hit：主手件 100% 流血（靶 body_fort 0＝无豁免）——命中即挂；与技能 inflict 无关
 	var v = mk("受害者", "enemy", 2, 6)
 	sb.units = [h, v]

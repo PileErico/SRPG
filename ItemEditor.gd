@@ -119,6 +119,7 @@ var _intr1_box: VBoxContainer    # 兼用单手形态区（握持=versatile 时�
 var _onhit_rows: Array = []      # On-Hit Effects 行：[{row, effect:OptionButton, chance:SpinBox}]
 var _onhit_box: VBoxContainer
 var _w_armdmg: SpinBox           # 甲伤行 spin（可选行 2026-07-15：null=无此行；✕删行置空）
+var _w_armdmg_mode: OptionButton # 甲伤模式下拉（pct 百分比 / flat 固定值）
 var _w_armdmg_btn: MenuButton    # 「＋ 添加」菜单钮（效果/甲伤统一入口；甲伤存在时其菜单项灰）
 var _w_bws: OptionButton         # 普攻 BWS 下拉（weapon_skill 勾选过滤，🔒 决策29；（无）＝不提供普攻，如盾）
 var _w_prefer: OptionButton      # 地/空偏好（比路兹式起降换手；一般武器（无））
@@ -385,6 +386,7 @@ func _clear_form() -> void:
 	_intr1_box = null
 	_onhit_rows = []
 	_w_armdmg = null
+	_w_armdmg_mode = null
 	_w_armdmg_btn = null
 	_free_tags = []
 	_requires = []
@@ -484,9 +486,14 @@ func _build_form() -> void:
 		_onhit_box = VBoxContainer.new()
 		_onhit_box.add_theme_constant_override("separation", 4)
 		_form.add_child(_onhit_box)
-		var adm0 := float(_current.get("armor_dmg", 0))
-		if adm0 != 0.0:
-			_add_armdmg_row(adm0)
+		# 甲伤两模式（🔒 2026-07-15）：百分比（啃甲放大）/固定值（额外定额护甲破坏·过甲抗）——载入按存在的键选模式；
+		# 旧键 armor_dmg 双读迁 armor_dmg_pct
+		var adm_pct := float(_current.get("armor_dmg_pct", _current.get("armor_dmg", 0)))
+		var adm_flat := float(_current.get("armor_dmg_flat", 0))
+		if adm_flat != 0.0:
+			_add_armdmg_row("flat", adm_flat)
+		elif adm_pct != 0.0:
+			_add_armdmg_row("pct", adm_pct)
 		for e in _current.get("on_hit_effects", []):
 			if typeof(e) == TYPE_DICTIONARY:
 				_add_onhit_row(str(e.get("effect", "")), float(e.get("chance", 100)))
@@ -501,7 +508,7 @@ func _build_form() -> void:
 			if id == 0:
 				_add_onhit_row("", 100.0)
 			else:
-				_add_armdmg_row(50.0)
+				_add_armdmg_row("pct", 50.0)
 			_refresh_preview())
 		_form.add_child(_w_armdmg_btn)
 		_sync_armdmg_menu()   # 甲伤已存在→菜单项灰
@@ -709,14 +716,23 @@ func _sync_versatile_box() -> void:
 	_intr1_box.visible = hv and str(_w_handed.get_selected_metadata()) == "versatile"
 
 
-# 甲伤行（🔒 2026-07-15 用户校准：可选项非常驻——与效果行同等地位）：spin + ✕
-func _add_armdmg_row(value: float) -> void:
+# 甲伤行（🔒 2026-07-15 用户校准：可选项非常驻——与效果行同等地位；两模式）：模式下拉 + spin + ✕
+#   mode="pct" 百分比（啃甲放大 ×(1+n%)）；mode="flat" 固定值（额外 n 点护甲破坏·过甲抗，只毁甲不打人）
+func _add_armdmg_row(mode: String, value: float) -> void:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 6)
 	var lb := Label.new()
-	lb.text = "甲伤 armor_dmg（对护甲额外伤害%）"
-	lb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	lb.text = "甲伤"
 	row.add_child(lb)
+	var md := OptionButton.new()
+	md.add_item("百分比（啃甲放大%）")
+	md.set_item_metadata(0, "pct")
+	md.add_item("固定值（定额毁甲·过甲抗）")
+	md.set_item_metadata(1, "flat")
+	md.select(1 if mode == "flat" else 0)
+	md.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	md.item_selected.connect(func(_i): _refresh_preview())
+	row.add_child(md)
 	var sp := SpinBox.new()
 	sp.min_value = -999
 	sp.max_value = 9999
@@ -728,6 +744,7 @@ func _add_armdmg_row(value: float) -> void:
 	rm.text = "✕"
 	rm.pressed.connect(func():
 		_w_armdmg = null
+		_w_armdmg_mode = null
 		row.queue_free()
 		_sync_armdmg_menu()   # 甲伤删掉→菜单项恢复可选
 		_refresh_preview())
@@ -735,6 +752,7 @@ func _add_armdmg_row(value: float) -> void:
 	_onhit_box.add_child(row)
 	_onhit_box.move_child(row, 0)   # 甲伤领衔（视觉惯例，不影响数据）
 	_w_armdmg = sp
+	_w_armdmg_mode = md
 	_sync_armdmg_menu()   # 甲伤已存在→菜单「甲伤」项灰（只允许一条）
 
 # 「＋ 添加」菜单里「甲伤」项的可选态：行已存在则灰（甲伤唯一）
@@ -1293,11 +1311,13 @@ func _collect() -> Dictionary:
 				out["one_handed"] = oh1
 			else:
 				out.erase("one_handed")
-			# 甲伤（可选行 2026-07-15）：行存在且非 0 才落键；删行/0＝清键
+			# 甲伤（可选行 2026-07-15，两模式）：行存在且非 0 才落对应键；删行/0/换模式＝清另一键（旧键 armor_dmg 随存清）
+			out.erase("armor_dmg")   # 旧键随存即迁（→ armor_dmg_pct/flat）
+			out.erase("armor_dmg_pct")
+			out.erase("armor_dmg_flat")
 			if _w_armdmg != null and is_instance_valid(_w_armdmg) and float(_w_armdmg.value) != 0.0:
-				out["armor_dmg"] = _num(float(_w_armdmg.value))
-			else:
-				out.erase("armor_dmg")
+				var admode := str(_w_armdmg_mode.get_selected_metadata()) if _w_armdmg_mode != null and is_instance_valid(_w_armdmg_mode) else "pct"
+				out["armor_dmg_flat" if admode == "flat" else "armor_dmg_pct"] = _num(float(_w_armdmg.value))
 			# On-Hit Effects（空行跳过；全空＝不落键）
 			var ohs := []
 			for e in _onhit_rows:
@@ -1343,7 +1363,7 @@ func _collect() -> Dictionary:
 			tags.append("accessory")
 			slot = "accessory_1"
 	if _current_kind != "weapon":
-		for k in ["atk", "acc", "block_rate", "block_power", "armor_dmg", "on_hit_effects", "one_handed"]:
+		for k in ["atk", "acc", "block_rate", "block_power", "armor_dmg", "armor_dmg_pct", "armor_dmg_flat", "on_hit_effects", "one_handed"]:
 			out.erase(k)   # 武器固有键/On-Hit/兼用单手面板 只属武器（🔒 决策33/35）——大类切换残留清除
 
 	for t in _free_tags:
@@ -1367,7 +1387,7 @@ func _collect() -> Dictionary:
 func _collect_item(out: Dictionary) -> Dictionary:
 	out["kind"] = "item"
 	for k in ["slot", "mods", "requires", "two_handed", "innate", "attack", "bws", "bas", "ews", "prefer", "use_scope",
-			"atk", "acc", "block_rate", "block_power", "armor_dmg", "on_hit_effects", "one_handed"]:
+			"atk", "acc", "block_rate", "block_power", "armor_dmg", "armor_dmg_pct", "armor_dmg_flat", "on_hit_effects", "one_handed"]:
 		out.erase(k)   # 装备专属 + 废弃字段 + 武器固有键（决策33/35）：物品一律不带
 	var tags: Array = [_w_rarity.get_selected_metadata()]
 	if _w_usable.button_pressed:
