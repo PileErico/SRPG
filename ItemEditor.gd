@@ -116,9 +116,10 @@ var _mod_rows: Array = []
 var _w_intr: Dictionary = {}     # 武器固有属性 spins（🔒 决策33）：stat 键 → SpinBox
 var _w_intr1: Dictionary = {}    # 兼用单手形态面板 spins（🔒 决策35 双固有面板）：stat 键 → SpinBox
 var _intr1_box: VBoxContainer    # 兼用单手形态区（握持=versatile 时显示）
+var _intr_title: Control         # 固有面板节标题（兼用时动态标「双手形态」——防呆 2026-07-15：曾致用户单双手值倒填）
 var _onhit_rows: Array = []      # On-Hit 统一行（🔒 2026-07-15 mod 式·单项目下拉）：[{row, effect:OptionButton〔含「甲伤」特殊项 __armor__〕, mode, val:SpinBox}]
 var _onhit_box: VBoxContainer
-var _w_bws: OptionButton         # 普攻 BWS 下拉（weapon_skill 勾选过滤，🔒 决策29；（无）＝不提供普攻，如盾）
+var _w_bws: OptionButton         # 普攻 BWS 下拉（weapon_skill 勾选过滤，🔒 决策29；（无）＝不提供普攻——盾也配盾击 BWS，2026-07-15）
 var _w_prefer: OptionButton      # 地/空偏好（比路兹式起降换手；一般武器（无））
 var _ews_box: VBoxContainer      # EWS 行容器
 var _ews_rows: Array = []        # EWS 行：[{panel, skill:OptionButton, reqs:[{row,prof,value,hint}], reqs_box}]
@@ -381,6 +382,7 @@ func _clear_form() -> void:
 	_w_intr = {}
 	_w_intr1 = {}
 	_intr1_box = null
+	_intr_title = null
 	_onhit_rows = []
 	_free_tags = []
 	_requires = []
@@ -441,7 +443,8 @@ func _build_form() -> void:
 
 	# 2b. 武器固有属性（🔒 决策33：必填字段——0=无此项；额外修正/词条走下方 mods）
 	if _current_kind == "weapon":
-		_form.add_child(EditorUI.section_title("武器固有属性（必填——0=无此项；额外修正/词条走下方 mods）"))
+		_intr_title = EditorUI.section_title("武器固有属性（必填——0=无此项；额外修正/词条走下方 mods）")
+		_form.add_child(_intr_title)
 		for p in WEAPON_INTRINSIC:
 			_w_intr[str(p[0])] = EditorUI.add_spin(_form, "%s %s" % [str(p[1]), str(p[0])],
 				float(_current.get(str(p[0]), 0)), -999, 9999, 0.5, _refresh_preview)
@@ -685,19 +688,23 @@ func _on_wtype_changed() -> void:
 		_handed_row.visible = wtype != "shield" and not innate
 	if _innate_slot_row != null and is_instance_valid(_innate_slot_row):
 		_innate_slot_row.visible = innate
-	# 盾不提供普攻：用户切到盾时自动清 BWS 选择（仍可手动选回；载入初始化 _building 时不强改）
-	if not _building and wtype == "shield" and _w_bws != null and is_instance_valid(_w_bws):
-		_select_meta(_w_bws, "")
+	# （原「切到盾自动清 BWS」已拆 2026-07-15 用户令：盾照常配盾击 BWS——决策31「主手持盾＝盾击作普攻」终于兑现）
 	_sync_versatile_box()
 	_refresh_preview()
 
 # 兼用单手形态面板显隐（🔒 决策35）：握持=versatile 且握持行本身可见（非盾/非天生）才显示
 # （预览刷新由握持下拉自带的 item_selected→_refresh_preview 负责，此处只管显隐）
+# 防呆（2026-07-15）：兼用时顶层固有面板标题动态标「双手形态」——只在子面板标单手曾致用户把单/双手值倒填
 func _sync_versatile_box() -> void:
 	if _intr1_box == null or not is_instance_valid(_intr1_box):
 		return
 	var hv: bool = _handed_row != null and is_instance_valid(_handed_row) and _handed_row.visible
-	_intr1_box.visible = hv and str(_w_handed.get_selected_metadata()) == "versatile"
+	var versat: bool = hv and str(_w_handed.get_selected_metadata()) == "versatile"
+	_intr1_box.visible = versat
+	if _intr_title != null and is_instance_valid(_intr_title) and _intr_title.get_child_count() > 0:
+		(_intr_title.get_child(0) as Label).text = \
+			"武器固有属性 · 双手形态（单独持用时生效——必填；0=无此项）" if versat \
+			else "武器固有属性（必填——0=无此项；额外修正/词条走下方 mods）"
 
 
 # 一条 On-Hit（🔒 2026-07-15 mod 式统一行·**单项目下拉**——用户二轮校准：甲伤就是清单里的一项，不另设类型级）：
@@ -806,7 +813,7 @@ func _ws_option_ids(exclude := "", for_bws := false) -> Array:
 func _build_weapon_skills_section() -> void:
 	_form.add_child(EditorUI.section_title("武器技能（引用技能库条目；招式参数在技能编辑器改——决策25 引用制）"))
 	_w_bws = OptionButton.new()
-	_w_bws.add_item("（无——不提供普攻，如盾）")
+	_w_bws.add_item("（无——不提供普攻）")
 	_w_bws.set_item_metadata(0, "")
 	for id in _ws_option_ids("", true):   # 一视同仁清单：勾选+种类匹配（🔒 决策29+用户校准）；BWS 位排掉带 grip 的（决策35）
 		var def = SkillDB.get_skill(id)

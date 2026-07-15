@@ -52,8 +52,8 @@ func _initialize() -> void:
 	ck(is_equal_approx(u.effective_stat_f("acc"), 0.0), "acc 面板 0（基准命中在武器技能 hit——决策33 三轮校准）")
 	# 顶替：装长剑 → 拳脚收回；卸下 → 拳脚回位
 	ck(u.equip("long_sword"), "装长剑成功（顶掉拳脚）")
-	ck(is_equal_approx(u.effective_stat_f("atk"), 5.0) and is_equal_approx(u.effective_stat_f("acc"), 0.0),
-		"长剑数值生效且拳脚修正无残留（atk=5；acc 非武器固有——基准命中已迁武器技能 hit，决策33 三轮校准）")
+	ck(is_equal_approx(u.effective_stat_f("atk"), 12.0) and is_equal_approx(u.effective_stat_f("acc"), 0.0),
+		"长剑数值生效且拳脚修正无残留（atk=12——兼用单持=双手面板，用户配数 2026-07-15；acc 非武器固有）")
 	var sword_uid: int = int(u.equipment["main_hand"])
 	u.unequip("main_hand")
 	ck(u.equipment.has("main_hand") and int(u.equipment["main_hand"]) != sword_uid, "卸剑后拳脚自动回位")
@@ -179,8 +179,8 @@ func _initialize() -> void:
 	# 盾（无门槛）直接生效
 	var d = UnitFactory.make_unit(inf, "player", 0, 0)
 	ck(d.equip("wood_kite_shield"), "装斗盾")
-	ck(is_equal_approx(d.effective_stat_f("block_rate"), 15.0) and is_equal_approx(d.effective_stat_f("block_power"), 35.0),
-		"盾格挡天生激活（15/35）")
+	ck(is_equal_approx(d.effective_stat_f("block_rate"), 20.0) and is_equal_approx(d.effective_stat_f("block_power"), 30.0),
+		"盾格挡天生激活（20/30——中盾白板，用户配数 2026-07-15）")
 
 	# —— 6) attr_picks 序列化往返 ——
 	g.attr_picks = 7

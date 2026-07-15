@@ -32,8 +32,8 @@ func _initialize() -> void:
 	var v1 = ItemInstances.view(uid1)
 	ck(v1 != null and int(v1["uid"]) == uid1 and str(v1["tpl_id"]) == "long_sword", "view uid/tpl_id")
 	ck((v1["mods"] as Array).is_empty(), "view 继承模板 mods（🔒 决策33 固有属性上提顶层键——长剑 mods 空）")
-	ck(is_equal_approx(float(v1.get("atk", 0)), 5.0) and not v1.has("acc"),
-		"view 携带固有键 atk5（acc 非武器固有——基准命中在武器技能侧，决策33 三轮校准）")
+	ck(is_equal_approx(float(v1.get("atk", 0)), 12.0) and not v1.has("acc"),
+		"view 携带固有键 atk12（长剑兼用双面板·顶层=双手形态，用户配数 2026-07-15；acc 非武器固有）")
 
 	# 2) 雷①：view 是深拷，改视图不污染全局模板（固有键/mods 双查）
 	v1["name"] = "被篡改"
@@ -41,16 +41,16 @@ func _initialize() -> void:
 	(v1["mods"] as Array).append({"stat": "atk", "op": "flat", "value": 999})
 	var tpl = ItemDB.get_item("long_sword")
 	ck(str(tpl.get("name", "")) != "被篡改", "模板 name 未被污染")
-	ck(is_equal_approx(float(tpl.get("atk", 0)), 5.0) and (tpl.get("mods", []) as Array).is_empty(), "模板固有键/mods 未被污染")
+	ck(is_equal_approx(float(tpl.get("atk", 0)), 12.0) and (tpl.get("mods", []) as Array).is_empty(), "模板固有键/mods 未被污染")
 	var rv = ItemInstances.view(uid1)
-	ck((rv["mods"] as Array).is_empty() and is_equal_approx(float(rv.get("atk", 0)), 5.0), "重取 view 干净")
+	ck((rv["mods"] as Array).is_empty() and is_equal_approx(float(rv.get("atk", 0)), 12.0), "重取 view 干净")
 
 	# 3) equip 模板便捷入口（兼容路径）：equipment 存 int uid、模板 mods 生效
 	var u1 = _fresh_unit("甲")
 	var base_atk: float = u1.effective_stat_f("atk")
 	ck(u1.equip("long_sword"), "equip(模板id) 成功")
 	ck(typeof(u1.equipment.get("main_hand")) == TYPE_INT and int(u1.equipment["main_hand"]) > 0, "equipment 存 int uid")
-	ck(absf(u1.effective_stat_f("atk") - (base_atk + 5.0)) < 0.001, "模板 atk+5 生效")
+	ck(absf(u1.effective_stat_f("atk") - (base_atk + 12.0)) < 0.001, "模板 atk+12 生效（兼用单持=双手面板，决策35）")
 
 	# 4) 雷③：模板 mod 与词条 mod 同 stat 同 op —— 都要生效（不被「同 source 去重取高」吃掉）
 	var uid2 := ItemInstances.create("long_sword")
@@ -58,7 +58,7 @@ func _initialize() -> void:
 	var u2 = _fresh_unit("乙")
 	var b2: float = u2.effective_stat_f("atk")
 	ck(u2.equip_instance(uid2), "equip_instance 成功")
-	ck(absf(u2.effective_stat_f("atk") - (b2 + 8.0)) < 0.001, "模板+5 与词条+3 都生效（=+8，去重雷已排）；实得 +%.1f" % (u2.effective_stat_f("atk") - b2))
+	ck(absf(u2.effective_stat_f("atk") - (b2 + 15.0)) < 0.001, "模板+12 与词条+3 都生效（=+15，去重雷已排）；实得 +%.1f" % (u2.effective_stat_f("atk") - b2))
 
 	# 4b) 运行时词条护栏（🔒 §5 强韧不入物品；lint 只扫模板，add_affix 是旁路）：
 	#     强韧禁键 / 旧 stat 键（管线不消费＝静默无效）→ 整条拒收（下两行预期各打一条 WARNING）
@@ -92,7 +92,7 @@ func _initialize() -> void:
 	ck(new_uid != old_uid, "换装后是新实例")
 	ck(ItemInstances.exists(old_uid), "被顶掉的旧实例存活（将来进背包）")
 	var br: float = u4.effective_stat_f("block_rate")
-	ck(absf(br - (_fresh_unit("对照").effective_stat_f("block_rate") + 15.0)) < 0.001, "只有一份盾 mods 生效")
+	ck(absf(br - (_fresh_unit("对照").effective_stat_f("block_rate") + 20.0)) < 0.001, "只有一份盾 mods 生效（斗盾率 20——用户配数 2026-07-15）")
 
 	# 8) proto 层：uid → 模板 id 映射（定义层不带实例态）
 	var u5 = _fresh_unit("戊")
