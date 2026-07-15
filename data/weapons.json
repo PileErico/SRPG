@@ -96,7 +96,7 @@
   },
   {
     "atk": 12,
-    "block_power": 15.5,
+    "block_power": 15,
     "block_rate": 25,
     "bws": "bws_slash",
     "icon": "res://icons/Items/Weapons/sword_long.png",
@@ -120,9 +120,9 @@
     "two_handed": false
   },
   {
-    "atk": 2.5,
-    "block_power": 0,
-    "block_rate": 0,
+    "atk": 3,
+    "block_power": 10,
+    "block_rate": 10,
     "bws": "bws_unarmed",
     "icon": "res://icons/Items/Weapons/weapon_human_unarmed.png",
     "id": "unarmed_fists",
@@ -135,7 +135,7 @@
     "tags": [
       "common",
       "unarmed",
-      "melee"
+      "innate_weapon"
     ],
     "two_handed": false
   },
@@ -201,7 +201,7 @@
     "atk": 10,
     "block_power": 20,
     "block_rate": 15,
-    "bws": "ws_swing",
+    "bws": "ws_sword_swing",
     "icon": "res://icons/Items/Weapons/sword_zweihande.png",
     "id": "sword_zweihande",
     "innate": false,
@@ -218,18 +218,25 @@
     "two_handed": true
   },
   {
-    "atk": 0,
-    "block_power": 0,
-    "block_rate": 0,
+    "atk": 11,
+    "block_power": 10,
+    "block_rate": 15,
+    "bws": "ws_sper_stab",
     "icon": "res://icons/Items/Weapons/spear_winged .png",
     "id": "spear_winged",
     "innate": false,
-    "mods": [],
+    "mods": [
+      {
+        "op": "flat",
+        "stat": "acc",
+        "value": 3
+      }
+    ],
     "name": "翼矛",
     "one_handed": {
-      "atk": 0,
-      "block_power": 0,
-      "block_rate": 0
+      "atk": 6,
+      "block_power": 5,
+      "block_rate": 5
     },
     "requires": [],
     "slot": "main_hand",

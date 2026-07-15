@@ -379,6 +379,49 @@
       "base": 0
     },
     "costs": {
+      "ap": 1
+    },
+    "desc": "",
+    "effects": [
+      {
+        "hits": [
+          {
+            "armor_pen": 0.3,
+            "coeff": 0.9,
+            "damage_category": "physical",
+            "damage_type": "piercing",
+            "hit": 90
+          }
+        ],
+        "kind": "attack"
+      }
+    ],
+    "icon": "res://icons/Skills/WeaponSkills/矛_突刺_32x32.png",
+    "id": "ws_sper_stab",
+    "max_level": 1,
+    "name": "刺击（矛）",
+    "range": 2,
+    "tags": [],
+    "target": {
+      "ally": false,
+      "enemy": true,
+      "self": false
+    },
+    "uses_per_battle": {
+      "base": 0
+    },
+    "weapon_kinds": [
+      "weapon_spear"
+    ],
+    "weapon_skill": true
+  },
+  {
+    "active": true,
+    "category": "skill",
+    "cooldown": {
+      "base": 0
+    },
+    "costs": {
       "ap": 2
     },
     "desc": "",
@@ -395,10 +438,10 @@
         "kind": "attack"
       }
     ],
-    "icon": "res://icons/Skills/WeaponSkills/横扫_32x32.png",
-    "id": "ws_swing",
+    "icon": "res://icons/Skills/WeaponSkills/剑_横扫_32x32.png",
+    "id": "ws_sword_swing",
     "max_level": 1,
-    "name": "横扫",
+    "name": "横扫（剑）",
     "shape": {
       "anchor": "caster",
       "effect": [
@@ -456,8 +499,7 @@
       "base": 0
     },
     "weapon_kinds": [
-      "weapon_sword",
-      "weapon_halberd"
+      "weapon_sword"
     ],
     "weapon_skill": true
   }

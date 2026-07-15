@@ -25,5 +25,30 @@
       "bleeding",
       "fort_body"
     ]
+  },
+  {
+    "desc": "",
+    "dot_pct_max_hp": 0,
+    "duration": {
+      "base": 2,
+      "per_stat": {
+
+      }
+    },
+    "duration_model": "fixed",
+    "expire_timing": "turn_end",
+    "hot_flat": 0,
+    "icon": "",
+    "id": "dizzy",
+    "kind": "debuff",
+    "max_stacks": 0,
+    "mods": [],
+    "name": "眩晕",
+    "on_expire_apply": "",
+    "permanent": false,
+    "stackable": false,
+    "tags": [
+      "incapacitated"
+    ]
   }
 ]
