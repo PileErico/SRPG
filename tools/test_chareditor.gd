@@ -339,18 +339,19 @@ func _test_scene() -> void:
 	else:
 		print("  （技能库无 max_level≥2 条目，改级 case 跳过）")
 
-	# 技艺 known/slots 编辑 + proto 往返
+	# 技艺 known/slots 编辑 + proto 往返（2026-07-15 点格换装：装/卸走角色卡面板单口 editor_slot_prof）
 	ed._add_prof_known("style_two_handed")
-	ck(ed._unit.prof_known.has("style_two_handed"), "＋已识 → prof_known")
-	ed._toggle_prof_slot("style_two_handed", true)
-	ck(ed._unit.prof_slots.has("style_two_handed"), "装载 → prof_slots（force 烘焙）")
+	ck(ed._unit.prof_known.has("style_two_handed"), "＋已学习 → prof_known")
+	ck(ed._panel.editor_slot_prof("style_two_handed"), "面板点格装载 → 成功（force 烘焙）")
+	ck(ed._unit.prof_slots.has("style_two_handed"), "装载 → prof_slots")
+	ck(not ed._panel.editor_slot_prof("__not_known__"), "未学习不可装载（known 门槛）")
 	var pp2: Dictionary = ed._collect_proto()
 	ck(((pp2.get("profs", {}) as Dictionary).get("known", []) as Array).has("style_two_handed"), "known 写进 proto.profs")
 	ck(((pp2.get("profs", {}) as Dictionary).get("slots", []) as Array).has("style_two_handed"), "slots 写进 proto.profs")
-	ed._toggle_prof_slot("style_two_handed", false)
-	ck(not ed._unit.prof_slots.has("style_two_handed"), "卸载 → prof_slots 移除")
+	ed._panel.editor_unslot_prof("style_two_handed")
+	ck(not ed._unit.prof_slots.has("style_two_handed"), "面板点格卸载 → prof_slots 移除")
 	ed._remove_prof_known("style_two_handed")
-	ck(not ed._unit.prof_known.has("style_two_handed"), "删已识 → prof_known 移除")
+	ck(not ed._unit.prof_known.has("style_two_handed"), "删已学习 → prof_known 移除")
 	ck(not ed._collect_proto().has("profs"), "清空后 proto 不写 profs 键（旧档零噪音）")
 
 	# 悬空引用保值（§7）：SkillDB 查无的技能 / 不在已识的槽位 → 载入不丢、显式删除才消失

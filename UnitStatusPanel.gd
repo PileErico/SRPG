@@ -52,6 +52,7 @@ var _unit = null                       # 当前查看的单位
 var _current_tab := 0                  # 记住当前 Tab（翻页时保持）
 var _prof_subtab := 0                   # 技艺页 L2 横向 tab（技能类型：武器/战斗/其他；重建保持）
 var _prof_l3 := 0                       # 技艺页 L3 纵向 tab（当前类型下具体技能；重建保持）
+var _prof_slots_row: HBoxContainer      # 技能页装载格行（点格换装/等级改动即时刷新——2026-07-15 用户令）
 
 # —— 编辑器模式（角色编辑器嵌用；默认 false → 游戏内查看行为逐字节零改动）——
 # 打开＝设 editor_mode=true + 注入回调后 open(u)。可编辑：头像点选 / 姓名·等级 / 特性下拉 / 装备槽点选 / 背包。
@@ -442,6 +443,7 @@ func _on_edit_name(t: String) -> void:
 func _on_edit_level(v: float) -> void:
 	if _unit == null: return
 	_unit.level = int(v)
+	_refresh_prof_slots(_unit)   # 等级驱动技能槽容量（1/4/8/11/16）——即时解锁/上锁（2026-07-15 用户令）
 	_emit_edit()
 
 func _on_edit_trait(idx: int) -> void:
@@ -697,22 +699,15 @@ func _build_prof_page(u) -> Control:
 	var page := VBoxContainer.new()
 	page.add_theme_constant_override("separation", 4)   # 收紧上部区块间距 → 让位给中轴计量条
 
-	# ① 顶部：5 个装备技能格＝Unit.prof_slots；容量内空格=（空槽）、容量外=未解锁（Lv 节拍）
+	# ① 顶部：5 个装备技能格＝Unit.prof_slots；容量内空格=（空槽）、容量外=未解锁（Lv 节拍）。
+	# editor_mode 点格换装（2026-07-15 用户令）：空槽点击→已学习选单装载、已装点击→卸载；
+	# 等级编辑即时刷新容量（_on_edit_level → _refresh_prof_slots）。游戏内查看路径仍只读（战斗锁待接回）。
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 14)
 	row.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	page.add_child(row)
-	var cap: int = u.prof_slot_capacity()
-	for i in PROF_CELL_COUNT:
-		if i < u.prof_slots.size():
-			var pid := str(u.prof_slots[i])
-			row.add_child(_prof_slot_unit({
-				"name": ProfDB.prof_name(pid), "xp": int(u.prof_xp.get(pid, 0)),
-				"icon": str(ProfDB.get_prof(pid).get("icon", ""))}))
-		elif i < cap:
-			row.add_child(_prof_slot_unit({}))
-		else:
-			row.add_child(_prof_slot_unit({"locked": true, "lv": int(PROF_SLOT_LV[i])}))
+	_prof_slots_row = row
+	_refresh_prof_slots(u)
 
 	# ② 横线
 	page.add_child(HSeparator.new())
@@ -848,9 +843,75 @@ func _prof_l3_icon(pid: String, page_key: String) -> Texture2D:
 	var slug := pid.substr(us + 1) if us >= 0 else pid
 	return TextureCache.get_tex("res://icons/Skills/SkillsTree-%s/%s.png" % [page_key, slug])
 
+# 装载格行重填（editor_mode 点格换装/等级改动即时刷新共用；游戏内只读同走此口）
+func _refresh_prof_slots(u) -> void:
+	if _prof_slots_row == null or not is_instance_valid(_prof_slots_row):
+		return
+	for c in _prof_slots_row.get_children():
+		c.queue_free()
+	var cap: int = u.prof_slot_capacity()
+	for i in PROF_CELL_COUNT:
+		if i < u.prof_slots.size():
+			var pid := str(u.prof_slots[i])
+			var cb := Callable()
+			if editor_mode:
+				cb = func(): editor_unslot_prof(pid)
+			_prof_slots_row.add_child(_prof_slot_unit({
+				"name": ProfDB.prof_name(pid), "xp": int(u.prof_xp.get(pid, 0)),
+				"icon": str(ProfDB.get_prof(pid).get("icon", "")),
+				"tip": "点击卸载「%s」" % ProfDB.prof_name(pid) if editor_mode else ""}, cb))
+		elif i < cap:
+			var cb2 := Callable()
+			if editor_mode:
+				cb2 = func(): _popup_prof_pick()
+			_prof_slots_row.add_child(_prof_slot_unit({"tip": "点击从已学习中装载" if editor_mode else ""}, cb2))
+		else:
+			_prof_slots_row.add_child(_prof_slot_unit({"locked": true, "lv": int(PROF_SLOT_LV[i])}))
+
+# 空槽点击 → 已学习（known）且未装载的技艺选单；选中即装载（editor 烘焙路径 force 🔒 §6——
+# 容量由「只有容量内空槽可点」保证，不再二次校验）
+func _popup_prof_pick() -> void:
+	if _unit == null:
+		return
+	var pm := PopupMenu.new()
+	var ids := []
+	for pid in _unit.prof_known:
+		if not _unit.prof_slots.has(str(pid)):
+			ids.append(str(pid))
+	if ids.is_empty():
+		pm.add_item("（无已学习可装载——右栏先添加已学习）")
+		pm.set_item_disabled(0, true)
+	else:
+		for i in ids.size():
+			var pid := str(ids[i])
+			var stage: int = ProfDB.stage_of(int(_unit.prof_xp.get(pid, 0)))
+			pm.add_item("%s（%s）" % [ProfDB.prof_name(pid), ProfDB.stage_name(stage)], i)
+			pm.set_item_metadata(pm.item_count - 1, pid)
+		pm.index_pressed.connect(func(idx: int):
+			editor_slot_prof(str(pm.get_item_metadata(idx))))
+	add_child(pm)
+	pm.popup_hide.connect(func(): pm.queue_free())
+	pm.popup(Rect2i(Vector2i(get_global_mouse_position()), Vector2i(0, 0)))
+
+# editor_mode 装载/卸载单口（点格换装消费；测试可直调）：改 _unit 后刷新槽行 + 通知宿主标脏
+func editor_slot_prof(pid: String) -> bool:
+	if _unit == null or not _unit.slot_prof(pid, true):
+		return false
+	_refresh_prof_slots(_unit)
+	_emit_edit()
+	return true
+
+func editor_unslot_prof(pid: String) -> void:
+	if _unit == null:
+		return
+	_unit.unslot_prof(pid)
+	_refresh_prof_slots(_unit)
+	_emit_edit()
+
 # 一个装备技能格：VBox[ HBox(格 + 竖向计量槽), 下方「名-档位」]。
 # d 有 name=已装载；d 空=（空槽，容量内未用）；d.locked=容量外未解锁（画 ✕，同物品栏锁定格）。
-func _prof_slot_unit(d: Dictionary) -> Control:
+# on_click 有效＝可点（editor_mode 点格换装：手型光标 + d.tip 悬停提示）。
+func _prof_slot_unit(d: Dictionary, on_click := Callable()) -> Control:
 	var has := d.has("name")
 	var locked := bool(d.get("locked", false))
 	var xp := int(d.get("xp", 0))
@@ -880,6 +941,13 @@ func _prof_slot_unit(d: Dictionary) -> Control:
 		sb.set_border_width_all(1)
 		sb.border_color = Color(1, 1, 1, 0.22)
 		cell.add_theme_stylebox_override("panel", sb)
+		if on_click.is_valid():   # editor_mode 点格换装（空槽=装载选单 / 已装=卸载）
+			cell.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+			if str(d.get("tip", "")) != "":
+				cell.tooltip_text = str(d["tip"])
+			cell.gui_input.connect(func(ev):
+				if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT:
+					on_click.call())
 		# 技艺图标（若域填了 icon 路径）：铺满格子留 4px 边距；未填=空格（名字在下方，图标你画好丢路径即显）。
 		var icon_path := str(d.get("icon", ""))
 		if has and icon_path != "":

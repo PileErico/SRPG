@@ -921,7 +921,9 @@ func _remove_skill(sid: String) -> void:
 
 # 技艺区：已识（known）行内带「装载」勾选（slots ⊆ known 天然成立）+ ✕；悬空槽位引用 ⚠ 行
 func _build_prof_ui() -> void:
-	_strip.add_child(EditorUI.section_title("技艺（熟练度域：已识 + 装载）"))
+	# 2026-07-15 用户令：右栏只管**已学习（known）**——装载/卸载移到左侧角色卡「技能」页点格换装
+	# （UnitStatusPanel editor_mode：空槽点选已学习装载、已装点卸载；槽容量随等级即时刷新）
+	_strip.add_child(EditorUI.section_title("技能·已学习（known——去左侧角色卡「技能」页点空槽装载）"))
 	var adder := HBoxContainer.new()
 	adder.add_theme_constant_override("separation", 6)
 	var pick := OptionButton.new()
@@ -951,8 +953,8 @@ func _build_prof_ui() -> void:
 			pick.set_item_metadata(pick.item_count - 1, str(pid))
 	adder.add_child(pick)
 	var addb := Button.new()
-	addb.text = "＋ 已识"
-	addb.tooltip_text = "加入已识列表（known）；「装载」勾选＝占槽挂阶段补正（烘焙 force，不做玩家槽位容量校验 🔒 §6）。\nxp（熟练度值）不在此编辑——随存档/战斗喂养，原样往返。"
+	addb.text = "＋ 已学习"
+	addb.tooltip_text = "加入已学习列表（known）——只有已学习的技能才能装进左侧「技能」页的槽位。\nxp（熟练度值）不在此编辑——随存档/战斗喂养，原样往返。"
 	addb.pressed.connect(func():
 		var pid := str(pick.get_selected_metadata())
 		if pid != "":
@@ -990,13 +992,13 @@ func _rebuild_prof_box() -> void:
 		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		l.clip_text = true
 		row.add_child(l)
-		var slot_cb := CheckBox.new()
-		slot_cb.text = "装载"
-		slot_cb.button_pressed = _unit.prof_slots.has(pid)
-		slot_cb.tooltip_text = "占槽挂阶段补正（slots；烘焙 force 装载）"
+		if _unit.prof_slots.has(pid):   # 装载态只读标注（装/卸交互在左侧角色卡「技能」页点格）
+			var on := Label.new()
+			on.text = "已装载"
+			on.add_theme_color_override("font_color", Color(0.5, 0.8, 0.55))
+			on.add_theme_font_size_override("font_size", 12)
+			row.add_child(on)
 		var p2 := pid
-		slot_cb.toggled.connect(func(v: bool): _toggle_prof_slot(p2, v))
-		row.add_child(slot_cb)
 		var rm := Button.new()
 		rm.text = "✕"
 		rm.pressed.connect(func(): _remove_prof_known(p2))
@@ -1040,15 +1042,8 @@ func _remove_prof_known(pid: String) -> void:
 	_rebuild_panel()
 	_mark_dirty()
 
-func _toggle_prof_slot(pid: String, on: bool) -> void:
-	if _unit == null:
-		return
-	if on:
-		_unit.slot_prof(pid, true)   # force＝烘焙路径 🔒 §6（敌方/预设不走玩家槽位容量校验）
-	else:
-		_unit.unslot_prof(pid)
-	_rebuild_panel()
-	_mark_dirty()
+# （_toggle_prof_slot 已拆 2026-07-15 用户令：装载/卸载移到角色卡「技能」页点格换装——
+#   UnitStatusPanel.editor_slot_prof/editor_unslot_prof〔烘焙 force 同规 🔒 §6〕，宿主经 on_edit 标脏）
 
 func _remove_lost_slot(pid: String) -> void:
 	_lost_slots.erase(pid)
@@ -1065,7 +1060,8 @@ func _dim_lbl(t: String) -> Label:
 # —— 角色卡编辑回调（UnitStatusPanel editor_mode）——
 
 func _on_panel_edit() -> void:
-	_mark_dirty()   # 卡内改姓名/等级/特性（四维直接填已删 🔒 属性重做）
+	_mark_dirty()   # 卡内改姓名/等级/特性/技能装卸（四维直接填已删 🔒 属性重做）
+	_rebuild_prof_box()   # 点格装/卸后右栏「已装载」标注同步（2026-07-15 点格换装）
 
 # 立绘选择（角色卡头像「＋」回调）→ 走通用文件对话框
 func _on_portrait_pick() -> void:
