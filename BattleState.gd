@@ -763,7 +763,9 @@ func _resolve_compute_body(attacker, target, skill) -> Dictionary:
 	# 击退判定（🔒 2026-07-15 用户拍板：概率制击中附带——挂 hit 内 on_hit_displace，与 on_hit_effects 并列）：
 	# 门槛＝命中且未被格挡（未命中已早退）；概率＝主动块 chance ＋ 攻方被动伪 stat knockback_chance
 	# （perk 挂载口，任意攻击段都参与）**合并单掷**，直减目标肉体强韧（数值直减，非效果族的豁免二掷；可减到 0）。
-	# 借机/反击段（atk_rate 注入键）禁击退——移动编排中途改被推者位置会撕裂路径推进（v1 安全阀）。
+	# 借机/反击段（atk_rate 注入键）禁击退。
+	# ⚠ 位移延迟结算（🔒 同日用户+Codex 三层定调）：判定层只登记请求（r["displace_req"]＋队列），
+	#   坐标变更集中在攻击动作末 flush_displaces——防双持副手段被自己第一段的位移拆断目标。
 	# ⚠ 掷骰只在 kb_dist>0 时发生：旧数据（无击退无被动）零额外 rng 抽取＝golden 零涉。
 	if not blocked and not skill.has("atk_rate"):
 		var kb = skill.get("on_hit_displace", null)
@@ -781,11 +783,32 @@ func _resolve_compute_body(attacker, target, skill) -> Dictionary:
 			if rng.randf() * 100.0 < kb_final:
 				var kd := _dir_away(Vector2i(attacker.col, attacker.row), Vector2i(target.col, target.row))
 				if kd >= 0:
-					r["displace"] = displace_push(target, kd, kb_dist)
+					_pending_displace.append({"unit": target, "dir": kd, "distance": kb_dist})
+					r["displace_req"] = {"dir": kd, "distance": kb_dist}
 	return r
 
 # ============ 位移解算器（displace 族首铺 🔒 红队报告 §2-1：swap/push/pull/charge 四模式规划共用一个解算器，
 # 本次落 push；被动位移一律不触发借机、不受 ZOC 停步 🔒）============
+
+# 位移延迟结算队列（🔒 2026-07-15 用户定调「攻击流程先结算完，再走位移效果」——攻击动作三层：
+# 动作(1AP)→攻击判定(逐段/逐目标独立掷)→伤害判定；击退判定挂攻击判定层、坐标变更集中在动作末）。
+# 动作内暂存不入快照（动作中途无 suspend 点）；宿主在每个攻击动作收尾点（_do_attack/_do_skill 攻击分流）flush。
+# 同目标多请求（双持两段各中）＝**依次执行**：方向定于各自判定时、逐请求从当前位置续推——
+# ⚠ 暂行默认，合并策略（依次/并距/取高）待用户正式规范位移系统时拍板。
+var _pending_displace := []   # [{unit, dir, distance}]
+
+# 攻击动作末统一执行位移：逐请求 displace_push，返回事件列表供宿主播报；清队列。
+func flush_displaces() -> Array:
+	var events := []
+	for req in _pending_displace:
+		var u = req["unit"]
+		if u == null or not (u in units):
+			continue   # 目标已在动作内离场 → 请求作废
+		var res := displace_push(u, int(req["dir"]), int(req["distance"]))
+		events.append({"unit": u, "steps": int(res["steps"]), "blocked": bool(res["blocked"]),
+			"from": res["from"], "to": res["to"]})
+	_pending_displace.clear()
+	return events
 
 # 沿方向 d（0–5）逐格推 distance 格：出图 / 不可通行（tag 驱动 _move_cost_at——旱鸭不会被推进深水）/
 # 有人占 → 提前停步（blocked）。位置在模型层落账并重算迷雾；返回 {from,to,steps,blocked} 供宿主渲染/播报。

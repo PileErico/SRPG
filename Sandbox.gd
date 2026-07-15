@@ -1722,6 +1722,7 @@ func _do_skill(caster, skill_id: String, cell: Vector2i) -> void:
 			return
 		_state.consume_cast(caster, skill_id, def)
 		_resolve_attack(caster, flat, atk_targets)
+		_log_displaces(_state.flush_displaces())   # 位移延迟结算（攻击动作末统一执行）
 		_handle_deaths()
 		_play_attack_anim(caster, cell, atk_targets)
 		_clear_selection()
@@ -2061,6 +2062,7 @@ func _do_attack(attacker, cell: Vector2i) -> void:
 		for t in t2:
 			if not (t in flash):
 				flash.append(t)
+	_log_displaces(_state.flush_displaces())   # 位移延迟结算（🔒 2026-07-15：两段全结完才推——攻击动作末统一执行）
 	_handle_deaths()
 	_play_attack_anim(attacker, cell, flash)   # 撞击 + 受击闪红 + 音效（cosmetic；连携合一次冲撞、闪红取两段并集）
 	_clear_selection()
@@ -2140,20 +2142,22 @@ func _resolve_one(attacker, target, skill, show_target := false) -> Dictionary:
 	for oh in r.get("on_hit", []):
 		if bool((oh as Dictionary).get("applied", false)):
 			lines.append("　施加「%s」" % str((oh as Dictionary).get("name", "")))
-	# 击退播报（同施加口径：只报成功、判定失败沉默）；掷中但寸步难行（出图/地形/占位顶住）报「无处可退」
-	var disp = r.get("displace", null)
-	if typeof(disp) == TYPE_DICTIONARY:
-		if int(disp.get("steps", 0)) > 0:
-			lines.append("　%s 被击退 %d 格%s" % [_cname(target), int(disp["steps"]),
-				"（撞停）" if bool(disp.get("blocked", false)) else ""])
-		else:
-			lines.append("　%s 无处可退" % _cname(target))
 	var att_shift := _morale_band_shift(attacker, int(r.get("morale_att", 0)))
 	if att_shift != "":
 		lines.append(att_shift)
 	_push_log(lines)
 	_log_prof_ups(_state.grant_combat_prof(attacker, target, r))
 	return {"hit": true, "blocked": r["blocked"]}
+
+# 击退播报（位移延迟结算：攻击动作末 flush 后统一报；只报成功、判定失败沉默——同施加口径）；
+# 掷中但寸步难行（出图/地形/占位顶住）报「无处可退」
+func _log_displaces(evs: Array) -> void:
+	for ev in evs:
+		if int(ev.get("steps", 0)) > 0:
+			_log_line("　%s 被击退 %d 格%s" % [_cname(ev["unit"]), int(ev["steps"]),
+				"（撞停）" if bool(ev.get("blocked", false)) else ""])
+		else:
+			_log_line("　%s 无处可退" % _cname(ev["unit"]))
 
 # 士气跨档播报（🔒 §10.7 骨架 v1：只报跨档，常规小幅波动静默防刷屏）；未跨档返回 ""。
 func _morale_band_shift(u, delta: int) -> String:
