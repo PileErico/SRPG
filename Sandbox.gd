@@ -1237,6 +1237,7 @@ func _ai_exec_move(unit, plan: Dictionary) -> bool:
 	unit.move_points -= int(plan.get("cost", 0))
 	unit.col = pick.x
 	unit.row = pick.y
+	_trigger_spear_stance_for_path(unit, path)
 	_refresh_info()
 	await _animate_path(unit, path)
 	if phase != "battle" or battle_over:
@@ -1570,6 +1571,10 @@ func _learned_active_skills(u) -> Array:
 		if not SkillDB.has_runnable_block(def) and SkillDB.flatten_bws(def).is_empty():
 			continue
 		out.append(id)
+	for id in u.active_prof_perk_ids():
+		var def = SkillDB.get_skill(str(id))
+		if def != null and (SkillDB.has_runnable_block(def) or not SkillDB.flatten_bws(def).is_empty()) and not out.has(str(id)):
+			out.append(str(id))
 	out.sort_custom(func(a, b):
 		var an := str(SkillDB.get_skill(a).get("name", a))
 		var bn := str(SkillDB.get_skill(b).get("name", b))
@@ -1637,10 +1642,15 @@ func _build_skill_submenu(u) -> void:
 	for id in _learned_active_skills(u):
 		var def = SkillDB.get_skill(id)
 		var silenced: bool = u.has_state("silenced") and (def.get("tags", []) as Array).has("verbal")
-		var ready: bool = u.skill_ready(id) and u.ap >= SkillDB.skill_ap_cost(def) and not silenced
+		var is_perk: bool = u.has_active_prof_perk(id)
+		var ready: bool = (u.prof_perk_ready(id) if is_perk else u.skill_ready(id)) \
+			and u.ap >= SkillDB.skill_ap_cost(def) and not silenced
 		var label := str(def.get("name", id))
-		var cd := int(u.skills[id].get("cd", 0))
-		var uses := int(u.skills[id].get("uses", 0))
+		var runtime = u.prof_perk_state.get(id, {}) if is_perk else u.skills[id]
+		var cd := int(runtime.get("cd", 0))
+		var uses := int(runtime.get("uses", -1))
+		if is_perk and not u.prof_perk_weapon_ok(id):
+			label += "（需装备矛）"
 		if cd > 0:
 			label += "（冷却 %d）" % cd          # 冷却中：括号里用阿拉伯数字标剩余回合
 		elif uses == 0:
@@ -1665,8 +1675,9 @@ func _enter_skill_mode(skill_id: String) -> void:
 	var def = SkillDB.get_skill(skill_id)
 	if u == null or def == null:
 		return
-	var ready: bool = u.skill_ready(skill_id) if u.has_skill(skill_id) \
-		else (u.ews_unlocked(skill_id) and u.ews_ready(skill_id))
+	var ready: bool = u.skill_ready(skill_id) if u.has_skill(skill_id) else \
+		(u.prof_perk_ready(skill_id) if u.has_active_prof_perk(skill_id) else \
+		(u.ews_unlocked(skill_id) and u.ews_ready(skill_id)))
 	if not ready or u.ap < SkillDB.skill_ap_cost(def):
 		return
 	if u.has_state("silenced") and (def.get("tags", []) as Array).has("verbal"):
@@ -2118,6 +2129,8 @@ func _resolve_one(attacker, target, skill, show_target := false) -> Dictionary:
 		formula += "＋补正%s" % _numf(r["bonus"])
 	if float(r.get("atk_rate", 1.0)) != 1.0:   # 反应系数（🔒 决策31 借机/反击）：整段等比、有才写
 		formula = "（%s）×反应%s" % [formula, _numf(r["atk_rate"])]
+	if float(r.get("final_damage_factor", 1.0)) != 1.0:
+		formula = "（%s）×最终调整%s" % [formula, _numf(r["final_damage_factor"])]
 	lines.append("伤害：%s=%s" % [formula, _numf(r["out"])])
 	lines.append("格挡率%s%%" % _numf(r["br"]))
 	lines.append("→ %s" % _oc(r["blocked"], "格挡", "未格挡"))
@@ -2152,12 +2165,40 @@ func _resolve_one(attacker, target, skill, show_target := false) -> Dictionary:
 # 击退播报（位移延迟结算：攻击动作末 flush 后统一报；只报成功、判定失败沉默——同施加口径）；
 # 掷中但寸步难行（出图/地形/占位顶住）报「无处可退」
 func _log_displaces(evs: Array) -> void:
-	for ev in evs:
+	var pending: Array = evs.duplicate()
+	var guard := 0
+	while not pending.is_empty() and guard < 64:
+		guard += 1
+		var ev: Dictionary = pending.pop_front()
 		if int(ev.get("steps", 0)) > 0:
 			_log_line("　%s 被击退 %d 格%s" % [_cname(ev["unit"]), int(ev["steps"]),
 				"（撞停）" if bool(ev.get("blocked", false)) else ""])
-		else:
+		elif not bool(ev.get("capped", false)):   # 已在极限距离＝寸步不动不刷屏（🔒 极限=击退距离+攻击距离）
 			_log_line("　%s 无处可退" % _cname(ev["unit"]))
+		_trigger_spear_stance_for_path(ev["unit"], ev.get("path", []))
+		if not _state._pending_displace.is_empty():
+			pending.append_array(_state.flush_displaces())
+
+# 立矛：真实移动（主动或强制）从圈外踏入圈内时触发；生成不调用。每名架势拥有者每 round 一次。
+func _trigger_spear_stance_for_path(mover, path: Array) -> void:
+	if mover == null or path.size() < 2 or not (mover in units):
+		return
+	for owner in _state.spear_stance_entry_owners(mover, path):
+		if not (mover in units):
+			break
+		_state.mark_spear_stance_triggered(owner)
+		_log_line("%s 的[b]立矛[/b]迎击 → %s" % [_cname(owner), _cname(mover)])
+		var atk: Dictionary = owner.basic_attack().duplicate(true)   # 自动引用 BWS；不是借机，不注入 0.75
+		# 反应段标记（验收修正 2026-07-15）：值 1.0＝伤害零衰减，但吃「反应段禁击退」安全阀——
+		# 迎击发生在移动编排中途，若产击退请求会泄漏进下一个攻击动作的 flush（幻影位移）。
+		atk["atk_rate"] = 1.0
+		if owner.effective_grip("main_hand") == "two_handed":
+			atk["final_damage_factor"] = 1.2
+		_resolve_one(owner, mover, atk, false)
+		_handle_deaths()
+	# 防泄漏兜底：迎击按反应段不产位移请求；若未来松绑，就地结清防漏入他人动作（空队列＝零开销）
+	if not _state._pending_displace.is_empty():
+		_log_displaces(_state.flush_displaces())
 
 # 士气跨档播报（🔒 §10.7 骨架 v1：只报跨档，常规小幅波动静默防刷屏）；未跨档返回 ""。
 func _morale_band_shift(u, delta: int) -> String:
@@ -2275,6 +2316,7 @@ func _commit_move(col: int, row: int) -> void:
 	u.move_points -= cost
 	u.col = col
 	u.row = row
+	_trigger_spear_stance_for_path(u, path)
 	_clear_selection()
 	_refresh_info()
 	_recompute_vision()   # 单位落位 → 重算玩家视野（友方移动揭开/关闭迷雾）

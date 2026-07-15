@@ -130,6 +130,7 @@ func _initialize() -> void:
 	ck(result["units"].size() == 1, "结果含参战 campaign 单位")
 	var entry: Dictionary = result["units"][0]
 	ck(bool(entry["injured"]) and int(entry["exp"]) == 2 * BattleIO.EXP_PER_KILL + BattleIO.EXP_PARTICIPATION, "经验＝2 杀 + 参战奖励（实得 %d）" % int(entry["exp"]))
+	ck(typeof(entry.get("prof_perks", null)) == TYPE_DICTIONARY, "BattleResult 携带技艺 perk 选择（不携带战斗运行态）")
 	var hp_before: int = int(src.stats["HP"])
 	var exp_before: int = src.exp
 	var lvl_before: int = src.level
@@ -151,13 +152,20 @@ func _initialize() -> void:
 	src.slot_prof("wp_sword", true)
 	src.prof_xp["wp_sword"] = 90
 	BattleIO.apply_result(ws, {"win": true, "units": [{"uid": src.uid, "hp": 5,
-		"prof_xp": {"wp_sword": 350}, "prof_known": ["wp_sword"], "prof_slots": ["wp_sword"]}], "kills": []})
+		"prof_xp": {"wp_sword": 350, "wp_spear": 100}, "prof_known": ["wp_sword", "wp_spear"],
+		"prof_slots": ["wp_sword", "wp_spear"], "prof_perks": {"wp_spear": {"2": "perk_spear_force_back"}}}], "kills": []})
 	ck(int(src.prof_xp.get("wp_sword", 0)) == 350, "战后熟练度回写 roster 原件（90→350）")
 	var prof_mod_ok := false
 	for m in src.modifiers:
 		if str(m.get("source", "")) == "prof:wp_sword" and str(m.get("stat", "")) == "acc" and float(m.get("value", 0)) == 3.0:
 			prof_mod_ok = true
 	ck(prof_mod_ok, "副本进阶（老练）回流后原件按新阶段重挂补正 acc+3")
+	ck(src.selected_prof_perk("wp_spear", 2) == "perk_spear_force_back", "战后 perk 选择回写 roster 原件")
+	var perk_mod_ok := false
+	for m in src.modifiers:
+		if str(m.get("source", "")) == "perk:wp_spear:2" and str(m.get("stat", "")) == "knockback_chance" and float(m.get("value", 0)) == 15.0:
+			perk_mod_ok = true
+	ck(perk_mod_ok, "回写后按当前装载技艺重挂逼退 knockback_chance+15")
 	# 真死：移出 roster
 	var before_n: int = ws.roster.size()
 	BattleIO.apply_result(ws, {"win": false, "units": [{"uid": src.uid, "dead": true}], "kills": []})

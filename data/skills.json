@@ -560,5 +560,50 @@
       "weapon_spear"
     ],
     "weapon_skill": true
+  },
+  {
+    "active": false,
+    "category": "perk",
+    "cooldown": {"base": 0},
+    "costs": {"ap": 0},
+    "desc": "使用矛类武器发动攻击并命中、且未被格挡时，额外获得15%击退概率。若攻击本身带有击退，则与其概率相加后合并判定。",
+    "effects": [
+      {
+        "kind": "conditional_mod",
+        "when": [{"type": "skill_tag", "tag": "skill_spear"}],
+        "mods": [{"stat": "knockback_chance", "op": "flat", "value": 15}]
+      }
+    ],
+    "icon": "",
+    "id": "perk_spear_force_back",
+    "max_level": 1,
+    "name": "逼退",
+    "range": 0,
+    "tags": [],
+    "target": {"ally": false, "enemy": false, "self": true},
+    "uses_per_battle": {"base": 0},
+    "weapon_kinds": [],
+    "weapon_skill": false
+  },
+  {
+    "active": true,
+    "category": "perk",
+    "cooldown": {"base": 0},
+    "costs": {"ap": 2},
+    "desc": "进入立矛架势直到自己下一回合开始：控制区扩大至2格；每个大回合第一次有敌人进入控制区时，以当前矛的基础攻击迎击。双手持矛时，该次攻击最终伤害×1.2。",
+    "effects": [
+      {"kind": "apply_effect", "effect": "spear_set_stance", "chance": 100}
+    ],
+    "icon": "",
+    "id": "perk_spear_set",
+    "max_level": 1,
+    "name": "立矛",
+    "range": 0,
+    "requires_weapon_tag": "weapon_spear",
+    "tags": [],
+    "target": {"ally": false, "enemy": false, "self": true},
+    "uses_per_battle": {"base": 0},
+    "weapon_kinds": [],
+    "weapon_skill": false
   }
 ]

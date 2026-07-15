@@ -3,7 +3,8 @@ extends SceneTree
 ## 覆盖：displace_push 几何/占位/地形/出图停步 → _dir_away 推离方向 → _resolve_compute 击退判定
 ## （主动概率 + 被动伪 stat knockback_chance 合并单掷 / 肉体强韧数值直减 / 格挡免推 / 借机段禁入）→
 ## **位移延迟结算**（🔒 同日三层定调：判定层只登记请求、攻击动作末 flush_displaces 统一执行；
-## 双持两段各中＝两请求依次续推〔暂行默认〕）→ 数据接线（flatten_bws 透传）→ consume_cast 消耗口（EWS 轨）。
+## 双持两段各中＝两请求依次续推）→ **极限距离**（🔒 二次拍板：极限＝击退距离＋攻击距离——
+## 贴脸双翼矛 1→2→3、第2格起步 2→3 封顶）→ 数据接线（flatten_bws 透传）→ consume_cast 消耗口（EWS 轨）。
 ## 运行：..._console.exe --headless --path "D:/1战棋" -s res://tools/test_displace.gd（退出码 0=PASS）
 
 const BattleState := preload("res://BattleState.gd")
@@ -112,7 +113,8 @@ func _initialize() -> void:
 	r = first_hit(s, a, d, {"coeff": 0.0})
 	evs = s.flush_displaces()
 	ck(r.has("displace_req") and evs.size() == 1 and int(evs[0]["steps"]) == 1, "纯被动：普攻无击退键也触发（距离 1）")
-	# 双持模拟（🔒 三层定调：一次攻击动作两段攻击判定＝两次击退机会，动作末一起执行、依次续推〔暂行默认〕）
+	# 双持模拟（🔒 三层定调：一次攻击动作两段攻击判定＝两次击退机会，动作末一起执行、依次续推）——
+	# 攻击距离缺省 1、被动击退 1 → 极限 1+1=2：贴脸两中只推到第 2 格（第二请求 capped）
 	d.col = 4
 	d.row = 3
 	var r1 := first_hit(s, a, d, {"coeff": 0.0})   # 主手段（被动 200 必中请求）
@@ -121,8 +123,24 @@ func _initialize() -> void:
 		"双段各自登记（攻击判定层——每段独立机会）")
 	ck(Vector2i(d.col, d.row) == Vector2i(4, 3), "两段判定间目标原位（副手不被主手位移拆断）")
 	evs = s.flush_displaces()
+	ck(evs.size() == 2 and s._hex_dist(Vector2i(a.col, a.row), Vector2i(d.col, d.row)) == 2
+		and bool(evs[1].get("capped", false)),
+		"依次执行受极限钳制：1格武器极限 1+1=2，第二请求原地 capped")
+	# 极限距离·翼矛例（🔒 2026-07-15 二次拍板：极限＝击退距离＋攻击距离＝1+2=3）：
+	# 贴脸两中 1→2→3；已在第 3 格再中一次＝原地（capped）
+	d.col = 4
+	d.row = 3
+	var spear_kb := {"coeff": 0.0, "range": 2, "on_hit_displace": {"mode": "push", "distance": 1, "chance": 200}}
+	first_hit(s, a, d, spear_kb)
+	first_hit(s, a, d, spear_kb)
+	evs = s.flush_displaces()
 	ck(evs.size() == 2 and s._hex_dist(Vector2i(a.col, a.row), Vector2i(d.col, d.row)) == 3,
-		"动作末依次执行：两请求续推共 2 格")
+		"翼矛贴脸两次击退→第 3 格（2+1 极限内）")
+	first_hit(s, a, d, spear_kb)
+	evs = s.flush_displaces()
+	ck(evs.size() == 1 and int(evs[0]["steps"]) == 0 and bool(evs[0].get("capped", false))
+		and s._hex_dist(Vector2i(a.col, a.row), Vector2i(d.col, d.row)) == 3,
+		"已在极限（第2格起步同理）：再中一次原地 capped、最多退到第 3 格")
 	# 格挡免推：block_rate 100 必格挡 → 不进击退判定
 	var d2 = mk("盾手", "enemy", 5, 3)
 	d2.stats["block_rate"] = 100.0

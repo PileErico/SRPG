@@ -65,6 +65,9 @@ static func make_unit(proto: Dictionary, fac: String, col: int, row: int):
 		for pid in pf.get("known", []):
 			if not u.prof_known.has(str(pid)):
 				u.prof_known.append(str(pid))
+		var pperks = pf.get("perks", {})
+		if typeof(pperks) == TYPE_DICTIONARY:
+			u.prof_perks = pperks.duplicate(true)
 		for pid in pf.get("slots", []):
 			u.slot_prof(str(pid), true)
 	# 敌方 AI 字段（玩家/友方忽略）
@@ -116,6 +119,8 @@ static func unit_to_proto(u) -> Dictionary:
 		profs["slots"] = u.prof_slots.duplicate()
 	if not u.prof_xp.is_empty():
 		profs["xp"] = u.prof_xp.duplicate()
+	if not u.prof_perks.is_empty():
+		profs["perks"] = u.prof_perks.duplicate(true)
 	# 白名单单一源＝StatMeta.SERIALIZABLE_BASE_STATS；**只写与「引擎基线+种族底值+成长轨走到 u.level」的差异**
 	# （🔒 属性重做 §3：原型 stats 只写差异——调 races.json 平衡能传导既有原型，不被全量快照冻结；对抗 review 修复。
 	#  2026-07-12 审查修复：基线原来不含成长轨——level>1 原型打开即存＝成长值整块烘焙进 stats、传导失效；
@@ -241,6 +246,7 @@ static func unit_to_battle_snapshot(u) -> Dictionary:
 		"tags": u.tags.duplicate(),
 		"stats": u.stats.duplicate(),
 		"prof_xp": u.prof_xp.duplicate(), "prof_known": u.prof_known.duplicate(), "prof_slots": u.prof_slots.duplicate(),
+		"prof_perks": u.prof_perks.duplicate(true), "prof_perk_state": u.prof_perk_state.duplicate(true),
 		"ap": u.ap, "move_points": u.move_points,
 		"morale": u.morale, "attr_picks": u.attr_picks,
 		"door_gauge": u.door_gauge, "door_checks": u.door_checks,
@@ -295,6 +301,8 @@ static func unit_from_battle_snapshot(d: Dictionary):
 	for t in d.get("prof_slots", []):
 		psl.append(str(t))
 	u.prof_slots = psl   # 阶段补正随 modifiers 整份快照走（prof: source），不重挂——与 trait/equip 同律
+	u.prof_perks = d.get("prof_perks", {}).duplicate(true) if typeof(d.get("prof_perks", {})) == TYPE_DICTIONARY else {}
+	u.prof_perk_state = d.get("prof_perk_state", {}).duplicate(true) if typeof(d.get("prof_perk_state", {})) == TYPE_DICTIONARY else {}
 	u.ap = int(d.get("ap", 0))
 	u.move_points = int(d.get("move_points", 0))
 	u.morale = int(d.get("morale", 25))   # 旧快照缺省＝常态 25

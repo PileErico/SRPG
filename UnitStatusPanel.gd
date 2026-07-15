@@ -1094,12 +1094,12 @@ func _fill_prof_main(main: VBoxContainer, pid: String, u) -> void:
 	st.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	hdr.add_child(st)
 	main.add_child(hdr)
-	# 脊柱式技能树（🟡 占位；读真 xp/档位，perk/奖励数据待接）
+	# 脊柱式技能树：阶段奖励 + perk 行；编辑器模式可点选/取消，同层互斥由 Unit 校验。
 	var tree := ProfTreeView.new()
 	tree.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	tree.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	main.add_child(tree)
-	tree.setup(xp, known)
+	tree.setup(pid, u, editor_mode, on_edit)
 
 # ============ 脊柱式技能树视图（🟡 占位）============
 # 中轴＝熟练度计量条（自底向上填 + 每100小刻度 + 档位边界大刻度 + 底部当前档位）；
@@ -1123,15 +1123,21 @@ class ProfTreeView extends Control:
 	const BOX := 40                          # 奖励/perk 小图标格
 	const GAP := 8
 	const ARM := 16                          # 中轴到格子的连线臂长
-	const PERKS := 3                         # 占位：每阶右侧 perk 数
-
+	var prof_id := ""
+	var unit = null
+	var editable := false
+	var on_changed := Callable()
 	var xp := 0
 	var known := false
 	var reached := 1                         # 当前阶段序号 1..5（=TIERS 索引+1）
 
-	func setup(_xp: int, _known: bool) -> void:
-		xp = clampi(_xp, 0, MAXXP)
-		known = _known
+	func setup(_prof_id: String, _unit, _editable: bool, _on_changed := Callable()) -> void:
+		prof_id = _prof_id
+		unit = _unit
+		editable = _editable
+		on_changed = _on_changed
+		xp = clampi(int(unit.prof_xp.get(prof_id, 0)), 0, MAXXP)
+		known = unit.prof_known.has(prof_id)
 		reached = 1
 		for i in TIERS.size():
 			if xp >= int(TIERS[i]["lo"]):
@@ -1144,18 +1150,23 @@ class ProfTreeView extends Control:
 	func _rebuild() -> void:
 		for c in get_children():
 			c.queue_free()
-		# 各进阶行的 perk 格交错分布：显示自上而下＝左·右·左·右（大师在上）；
-		# 格子所在侧的对侧＝该阶段「加成」文本位（数据待接，暂空、不占格）。
+		# 各进阶行的 perk 格交错分布；候选数完全由数据决定，不补固定空格。
 		for row in 4:
 			var ti := row + 1                # TIERS 索引：娴熟=1 … 大师=4
 			var unlocked := xp > 0 and reached >= ti + 1
 			var col := Color(str(TIERS[ti]["color"]))
 			var side := "L" if row % 2 == 1 else "R"   # 大师(左)·专家(右)·老练(左)·娴熟(右)
-			for k in PERKS:
-				add_child(_box(side, row, k, "%s perk —— 待定" % str(TIERS[ti]["name"]), unlocked, col))
+			var candidates := ProfDB.perks_at_stage(prof_id, ti + 1)
+			for k in candidates.size():
+				var sid := str(candidates[k])
+				var def = SkillDB.get_skill(sid)
+				var tip := "%s\n%s" % [str(def.get("name", sid)), str(def.get("desc", ""))] if def != null else sid
+				var selected: bool = unit.selected_prof_perk(prof_id, ti + 1) == sid
+				add_child(_box(side, row, k, tip, unlocked, col, sid, ti + 1, selected))
 		_relayout.call_deferred()
 
-	func _box(side: String, row: int, slot: int, tip: String, unlocked: bool, col: Color) -> Panel:
+	func _box(side: String, row: int, slot: int, tip: String, unlocked: bool, col: Color,
+			perk_id: String, stage: int, selected: bool) -> Panel:
 		var p := Panel.new()
 		p.custom_minimum_size = Vector2(BOX, BOX)
 		p.size = Vector2(BOX, BOX)
@@ -1164,12 +1175,20 @@ class ProfTreeView extends Control:
 		p.set_meta("row", row)
 		p.set_meta("slot", slot)
 		var sb := StyleBoxFlat.new()
-		sb.bg_color = Color(0.03, 0.04, 0.07, 0.72)   # 深底 → 与窗口背景对比、可见度更高
+		sb.bg_color = Color(0.16, 0.12, 0.03, 0.92) if selected else Color(0.03, 0.04, 0.07, 0.72)
 		sb.set_corner_radius_all(4)
-		sb.set_border_width_all(2 if unlocked else 1)
+		sb.set_border_width_all(3 if selected else (2 if unlocked else 1))
 		sb.border_color = col if unlocked else Color(1, 1, 1, 0.16)
 		p.add_theme_stylebox_override("panel", sb)
 		p.modulate = Color(1, 1, 1, 1.0 if unlocked else 0.45)
+		if editable and unlocked:
+			p.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+			p.gui_input.connect(func(ev):
+				if ev is InputEventMouseButton and ev.button_index == MOUSE_BUTTON_LEFT and ev.pressed:
+					unit.select_prof_perk(prof_id, stage, "" if selected else perk_id)
+					if on_changed.is_valid():
+						on_changed.call()
+					_rebuild())
 		return p
 
 	func _row_cy(row: int) -> float:

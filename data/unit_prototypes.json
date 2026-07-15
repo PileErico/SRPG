@@ -66,6 +66,9 @@
     "skills": {
 
     },
+    "stats": {
+
+    },
     "tags": [
       "ground",
       "char_veiken",
@@ -101,22 +104,44 @@
   {
     "_preset": true,
     "ai_threat": true,
+    "bag": [
+      "long_sword"
+    ],
     "default_faction": "enemy",
     "equip": [
-      "long_sword"
+      "spear_winged"
     ],
     "exp": 0,
     "exp_max": 100,
-    "icon": "res://icons/Unit_Icons/Empire_Light_Infantry.png",
+    "icon": "res://icons/Characters/appearance_empire_light_infantry.png",
     "id": "empire_light_infantry",
-    "level": 1,
+    "level": 3,
     "name": "帝国轻步兵",
-    "portrait": "res://icons/Characters/Empire_Light_Infantry.png",
+    "portrait": "res://icons/Characters/appearance_empire_light_infantry.png",
+    "profs": {
+      "known": [
+        "wp_spear"
+      ],
+      "slots": [
+        "wp_spear"
+      ],
+      "xp": {
+        "wp_spear": 150
+      }
+    },
     "race": "human",
-    "skills": {},
+    "skills": {
+
+    },
+    "stats": {
+      "HP_max": 40,
+      "body_fort": 0,
+      "will_fort": 0
+    },
     "tags": [
       "ground",
-      "human"
+      "human",
+      "camp_empire"
     ],
     "trait": ""
   },
@@ -181,7 +206,9 @@
     "name": "流寇小卒",
     "portrait": "",
     "race": "human",
-    "skills": {},
+    "skills": {
+
+    },
     "tags": [
       "ground",
       "human",
@@ -204,7 +231,9 @@
     "name": "流寇割喉手",
     "portrait": "",
     "race": "human",
-    "skills": {},
+    "skills": {
+
+    },
     "tags": [
       "ground",
       "human",
@@ -229,7 +258,9 @@
     "name": "流寇头目",
     "portrait": "",
     "race": "human",
-    "skills": {},
+    "skills": {
+
+    },
     "tags": [
       "ground",
       "human",

@@ -225,8 +225,8 @@ func _dijkstra(unit, budget: int) -> Dictionary:
 			continue
 		occupied[Vector2i(u.col, u.row)] = true
 		if _is_hostile(unit, u):
-			for nb in _neighbors(u.col, u.row):
-				zoc[nb] = true
+			for c in _zoc_cells(u):
+				zoc[c] = true
 	var open = MinHeap.new()
 	open.push(0, start)
 	while not open.is_empty():
@@ -283,12 +283,19 @@ func _path_via(came: Dictionary, cell: Vector2i) -> Array:
 
 # ============ ZOC 机制（控制区 + 借机判定的模型部分）============
 
-# 单位的 ZOC（控制区）= 周围一圈在界内的格
+# 单位的 ZOC 半径；失能不产生控制区。立矛效果把伪属性 zoc_radius 提到 2。
+func _zoc_radius(unit) -> int:
+	if unit == null or unit.has_state("incapacitated"):
+		return 0
+	return maxi(1, int(unit.effective_stat("zoc_radius")))
+
+# 单位的 ZOC（控制区）= 半径内、除自身外的界内格。
 func _zoc_cells(unit) -> Dictionary:
 	var d := {}
-	for nb in _neighbors(unit.col, unit.row):
-		if _cell_in_bounds(nb.x, nb.y):
-			d[nb] = true
+	var center := Vector2i(unit.col, unit.row)
+	for c in _cells_within({center: true}, _zoc_radius(unit)):
+		if c != center and _cell_in_bounds(c.x, c.y):
+			d[c] = true
 	return d
 
 func _zoc_key(owner, mover) -> String:
@@ -297,14 +304,14 @@ func _zoc_key(owner, mover) -> String:
 # cell 是否落在「敌对于 mover 的某单位」的 ZOC 内（= 与某敌对单位相邻）
 func _in_hostile_zoc(cell: Vector2i, mover) -> bool:
 	for u in units:
-		if u != mover and _is_hostile(mover, u) and _hex_dist(cell, Vector2i(u.col, u.row)) == 1:
+		if u != mover and _is_hostile(mover, u) and _hex_dist(cell, Vector2i(u.col, u.row)) <= _zoc_radius(u):
 			return true
 	return false
 
 # 取 cell 处第一个「本 round 尚未对 mover 触发过」的敌对 ZOC 拥有者（找不到=null）
 func _first_zoc_owner(cell: Vector2i, mover):
 	for u in units:
-		if u != mover and _is_hostile(mover, u) and _hex_dist(cell, Vector2i(u.col, u.row)) == 1:
+		if u != mover and _is_hostile(mover, u) and _hex_dist(cell, Vector2i(u.col, u.row)) <= _zoc_radius(u):
 			if not zoc_triggered.has(_zoc_key(u, mover)):
 				return u
 	return null
@@ -315,8 +322,7 @@ func _enemy_zoc_in_range(mover, reach: Dictionary) -> Dictionary:
 	for u in units:
 		if u == mover or not _is_hostile(mover, u):
 			continue
-		for nb in _neighbors(u.col, u.row):
-			var c := Vector2i(nb.x, nb.y)
+		for c in _zoc_cells(u):
 			if reach.has(c):
 				out[c] = true
 	return out
@@ -653,6 +659,9 @@ func _resolve_compute_body(attacker, target, skill) -> Dictionary:
 	# 段输出整体等比缩放（含补正），命中/暴击/格挡掷骰不受影响
 	var rrate := maxf(0.0, float(skill.get("atk_rate", 1.0)))
 	out *= rrate
+	# 最终伤害调整值：不改 WS 原系数，也不冒充反应攻击。首例＝立矛双手持矛 1.2。
+	var final_factor := maxf(0.0, float(skill.get("final_damage_factor", 1.0)))
+	out *= final_factor
 	# 格挡 + 全域减伤 G = max(0, 1−格挡性能/100) × 防御效能因子（下限 clamp🔒）
 	var br := float(target.effective_stat_f("block_rate"))
 	var blocked := rng.randf() * 100.0 < br
@@ -690,6 +699,7 @@ func _resolve_compute_body(attacker, target, skill) -> Dictionary:
 	r["aeff"] = aeff
 	r["offhand"] = ohf
 	r["atk_rate"] = rrate
+	r["final_damage_factor"] = final_factor
 	r["bonus"] = bonus
 	r["out"] = out
 	r["blocked"] = blocked
@@ -783,8 +793,12 @@ func _resolve_compute_body(attacker, target, skill) -> Dictionary:
 			if rng.randf() * 100.0 < kb_final:
 				var kd := _dir_away(Vector2i(attacker.col, attacker.row), Vector2i(target.col, target.row))
 				if kd >= 0:
-					_pending_displace.append({"unit": target, "dir": kd, "distance": kb_dist})
-					r["displace_req"] = {"dir": kd, "distance": kb_dist}
+					# 极限距离 🔒（2026-07-15 用户二次拍板）：本次判定的击退距离＋攻击距离（skill.range）
+					# ＝目标离攻击者的最终距离上限——跨请求累计生效（贴脸双翼矛 1→2→3；第2格起步 2→3 封顶）
+					var kb_cap: int = maxi(0, int(skill.get("range", 1))) + kb_dist
+					_pending_displace.append({"unit": target, "dir": kd, "distance": kb_dist,
+						"origin": Vector2i(attacker.col, attacker.row), "max_dist": kb_cap})
+					r["displace_req"] = {"dir": kd, "distance": kb_dist, "max_dist": kb_cap}
 	return r
 
 # ============ 位移解算器（displace 族首铺 🔒 红队报告 §2-1：swap/push/pull/charge 四模式规划共用一个解算器，
@@ -793,9 +807,9 @@ func _resolve_compute_body(attacker, target, skill) -> Dictionary:
 # 位移延迟结算队列（🔒 2026-07-15 用户定调「攻击流程先结算完，再走位移效果」——攻击动作三层：
 # 动作(1AP)→攻击判定(逐段/逐目标独立掷)→伤害判定；击退判定挂攻击判定层、坐标变更集中在动作末）。
 # 动作内暂存不入快照（动作中途无 suspend 点）；宿主在每个攻击动作收尾点（_do_attack/_do_skill 攻击分流）flush。
-# 同目标多请求（双持两段各中）＝**依次执行**：方向定于各自判定时、逐请求从当前位置续推——
-# ⚠ 暂行默认，合并策略（依次/并距/取高）待用户正式规范位移系统时拍板。
-var _pending_displace := []   # [{unit, dir, distance}]
+# 同目标多请求（双持两段各中）＝**依次执行**：方向定于各自判定时、逐请求从当前位置续推，
+# 各请求受自己的极限距离钳制（🔒 2026-07-15 用户二次拍板：极限＝击退距离＋攻击距离，合并策略就此收口）。
+var _pending_displace := []   # [{unit, dir, distance, origin, max_dist}]
 
 # 攻击动作末统一执行位移：逐请求 displace_push，返回事件列表供宿主播报；清队列。
 func flush_displaces() -> Array:
@@ -804,32 +818,73 @@ func flush_displaces() -> Array:
 		var u = req["unit"]
 		if u == null or not (u in units):
 			continue   # 目标已在动作内离场 → 请求作废
-		var res := displace_push(u, int(req["dir"]), int(req["distance"]))
+		var res := displace_push(u, int(req["dir"]), int(req["distance"]),
+			req.get("origin", Vector2i.ZERO), int(req.get("max_dist", -1)))
 		events.append({"unit": u, "steps": int(res["steps"]), "blocked": bool(res["blocked"]),
-			"from": res["from"], "to": res["to"]})
+			"capped": bool(res.get("capped", false)),
+			"from": res["from"], "to": res["to"], "path": res.get("path", [res["from"], res["to"]])})
 	_pending_displace.clear()
 	return events
 
 # 沿方向 d（0–5）逐格推 distance 格：出图 / 不可通行（tag 驱动 _move_cost_at——旱鸭不会被推进深水）/
-# 有人占 → 提前停步（blocked）。位置在模型层落账并重算迷雾；返回 {from,to,steps,blocked} 供宿主渲染/播报。
-func displace_push(unit, d: int, distance: int) -> Dictionary:
+# 有人占 → 提前停步（blocked）；max_dist ≥0 时离 origin 超过极限的下一步不迈（capped，🔒 极限距离）。
+# 位置在模型层落账并重算迷雾；返回 {from,to,steps,blocked,capped,path} 供宿主渲染/播报。
+func displace_push(unit, d: int, distance: int, origin := Vector2i.ZERO, max_dist := -1) -> Dictionary:
 	var from := Vector2i(unit.col, unit.row)
 	var cur := from
 	var steps := 0
+	var path := [from]
 	var was_blocked := false
+	var capped := false
 	for _i in distance:
 		var nxt := _neighbor_in_dir(cur, d)
+		if max_dist >= 0 and _hex_dist(origin, nxt) > max_dist:
+			capped = true
+			break
 		if not _cell_in_bounds(nxt.x, nxt.y) or _move_cost_at(nxt.x, nxt.y, unit) < 0 \
 				or _occupied_by_other(nxt.x, nxt.y, unit):
 			was_blocked = true
 			break
 		cur = nxt
+		path.append(cur)
 		steps += 1
 	if steps > 0:
 		unit.col = cur.x
 		unit.row = cur.y
 		_recompute_vision_state()
-	return {"from": from, "to": cur, "steps": steps, "blocked": was_blocked}
+	return {"from": from, "to": cur, "steps": steps, "blocked": was_blocked, "capped": capped, "path": path}
+
+# 一次实际位移路径中，取全部被“从圈外进入”触发的立矛拥有者。生成/原地出现不调用此口。
+# 重叠控制区各自触发；同一拥有者在一条路径中只返回一次。
+func spear_stance_entry_owners(mover, path: Array) -> Array:
+	var out := []
+	if mover == null or path.size() < 2:
+		return out
+	for i in range(1, path.size()):
+		var prev: Vector2i = path[i - 1]
+		var cur: Vector2i = path[i]
+		for owner in units:
+			if owner == mover or not _is_hostile(mover, owner) or owner.has_state("incapacitated") \
+					or not owner.has_active_prof_perk("perk_spear_set") or not owner.prof_perk_weapon_ok("perk_spear_set"):
+				continue
+			var stance = null
+			for e in owner.effects:
+				if str(e.get("id", "")) == "spear_set_stance":
+					stance = e
+					break
+			if stance == null or int(stance.get("triggered_round", -1)) == round_num or out.has(owner):
+				continue
+			var center := Vector2i(owner.col, owner.row)
+			var radius := _zoc_radius(owner)
+			if radius > 0 and _hex_dist(prev, center) > radius and _hex_dist(cur, center) <= radius:
+				out.append(owner)
+	return out
+
+func mark_spear_stance_triggered(owner) -> void:
+	for e in owner.effects:
+		if str(e.get("id", "")) == "spear_set_stance":
+			e["triggered_round"] = round_num
+			return
 
 # 推离方向（0–5）：取攻→守连线末段 prev→target 的邻向——相邻＝正向推开；斜距＝远离攻方的近似轴向。异常=-1。
 func _dir_away(from: Vector2i, target: Vector2i) -> int:
@@ -903,6 +958,8 @@ func consume_cast(caster, skill_id: String, def) -> void:
 	caster.ap -= SkillDB.skill_ap_cost(def)
 	if caster.has_skill(skill_id):
 		caster.consume_skill(skill_id, caster.skill_cooldown_max(def))
+	elif caster.has_active_prof_perk(skill_id):
+		caster.consume_prof_perk(skill_id, caster.skill_cooldown_max(def))
 	else:
 		caster.consume_ews(skill_id, caster.skill_cooldown_max(def))
 
@@ -920,6 +977,8 @@ func apply_skill(caster, skill_id: String, target) -> Array:
 	# 已在宿主侧分流进攻击管线（Sandbox._do_skill，接线 2026-07-15）——误入本口仍拒发防白烧。
 	if not SkillDB.has_runnable_block(def):
 		push_warning("apply_skill：技能「%s」无可跑效果块（%s）——拒发零消耗（可编≠可跑）" % [skill_id, "/".join(SkillDB.RUNNABLE_KINDS)])
+		return events
+	if caster.has_active_prof_perk(skill_id) and not caster.prof_perk_weapon_ok(skill_id):
 		return events
 	# 握持守卫 🔒（决策35 修订 2026-07-15：握持组在武器侧 ews/ews_2h，双闸之引擎侧）：
 	# 该技能所有 EWS 条目的握持组都不匹配当前握持 → 拒发零消耗（菜单侧已灰显；已学技能无握持概念放行）。

@@ -83,6 +83,7 @@
   {"id": "bleeding", "cn": "流血类", "cat": "effect", "status": "in_use", "desc": "回合末按最大生命%掉血；可被清流血类技能整批移除"},
   {"id": "incapacitated", "cn": "失能", "cat": "effect", "status": "in_use", "desc": "眩晕/麻痹等：该单位回合直接跳过（不行动即不行使 ZOC/借机）；Unit.has_state 消费"},
   {"id": "silenced", "cn": "失语", "cat": "effect", "status": "in_use", "desc": "禁用带 verbal tag 的能力；Unit.has_state 消费"},
+  {"id": "spear_stance", "cn": "立矛架势", "cat": "effect", "status": "in_use", "desc": "立矛 perk 的持续状态标记；扩大 ZOC 并开放进入迎击"},
 
   {"id": "verbal", "cn": "言语", "cat": "skill_type", "status": "in_use", "desc": "该能力需发声（鼓舞/号令类）——失语 silenced 期间不可用（决策19 正字为 tag）"},
 

@@ -133,6 +133,8 @@ var skills := {}
 var prof_xp := {}       # 域id -> 累计熟练度（int；卸下冻结不清零）
 var prof_known := []    # 已学域 id（师承/自悟解锁「已学」；未学不可装载）
 var prof_slots := []    # 已装载域 id（≤ prof_slot_capacity()；非战斗可随时换）
+var prof_perks := {}    # 域id -> {阶段字符串: perk技能id}；卸载只停用，选择本身保留
+var prof_perk_state := {} # 主动 perk 的战斗运行态：skill_id -> {cd,uses}
 
 # —— 敌方 AI 警觉 / 仇恨（友方单位忽略这些字段；三种触发任一满足即激活，可组合）——
 # ai_threat：①视野感知——敌人进入它的「视野(sight) 且有视线(LOS)」就警觉（默认开）。见 docs/感知系统.md。
@@ -962,6 +964,7 @@ func reset_skill_charges() -> void:
 		skills[id]["cd"] = 0
 		skills[id]["uses"] = skill_uses_max(def)
 	ews_state = {}
+	prof_perk_state = {}
 
 # ============ EWS 武器额外技能（🔒 决策26：装备授予、熟练度解锁、以能力形式使用）============
 # EWS 非「已学」（不入 skills/不随 campaign 档）；cd/uses 运行态＝ews_state（战斗开始重置、
@@ -1115,6 +1118,7 @@ func slot_prof(id: String, force := false) -> bool:
 		return false
 	prof_slots.append(id)
 	_apply_prof_mods(id)
+	_apply_prof_perks(id)
 	return true
 
 # 卸载技艺：摘掉全部相关收益（阶段补正+将来 perk），熟练度冻结保留。
@@ -1123,6 +1127,7 @@ func unslot_prof(id: String) -> void:
 		return
 	prof_slots.erase(id)
 	remove_modifiers_by_source("prof:" + id)
+	remove_modifiers_by_source_prefix("perk:%s:" % id)
 
 # 熟练度获取（🔒 §2.4：仅装载中的技艺可涨；行为权重与威胁缩放由调用方算好传入）。
 # 返回新阶段（发生进阶时；未进阶=0）——进阶时重挂阶段补正。
@@ -1146,6 +1151,7 @@ func set_prof_xp(id: String, v: int) -> void:
 		prof_xp[id] = v
 	if prof_slots.has(id):
 		_apply_prof_mods(id)
+		_apply_prof_perks(id)
 
 # 挂/重挂某域当前阶段的数值补正：取 stage_mods 里 stage ≤ 当前阶段的**最高一档**（各档=该阶段的完整值，不叠加）。
 func _apply_prof_mods(id: String) -> void:
@@ -1168,6 +1174,114 @@ func _apply_prof_mods(id: String) -> void:
 		mod["source"] = source
 		mod["source_label"] = label
 		modifiers.append(mod)
+
+# 到阶 perk 行：同阶段候选互斥；空 id＝取消。选择可保留，但只有对应技艺装载时才挂被动/授予主动。
+func select_prof_perk(id: String, stage: int, perk_id: String) -> bool:
+	if not prof_known.has(id) or stage < 2 or stage > prof_stage(id):
+		return false
+	var candidates := ProfDB.perks_at_stage(id, stage)
+	if perk_id != "" and not candidates.has(perk_id):
+		return false
+	if not prof_perks.has(id) or typeof(prof_perks[id]) != TYPE_DICTIONARY:
+		prof_perks[id] = {}
+	if perk_id == "":
+		prof_perks[id].erase(str(stage))
+	else:
+		prof_perks[id][str(stage)] = perk_id
+	if (prof_perks[id] as Dictionary).is_empty():
+		prof_perks.erase(id)
+	if prof_slots.has(id):
+		_apply_prof_perks(id)
+	return true
+
+func selected_prof_perk(id: String, stage: int) -> String:
+	var rows = prof_perks.get(id, {})
+	return str(rows.get(str(stage), "")) if typeof(rows) == TYPE_DICTIONARY else ""
+
+func has_active_prof_perk(perk_id: String) -> bool:
+	for pid in prof_slots:
+		var rows = prof_perks.get(str(pid), {})
+		if typeof(rows) == TYPE_DICTIONARY:
+			for stage_key in rows:
+				if int(stage_key) <= prof_stage(str(pid)) and str(rows[stage_key]) == perk_id:
+					return true
+	return false
+
+func active_prof_perk_ids() -> Array:
+	var out := []
+	for pid in prof_slots:
+		var rows = prof_perks.get(str(pid), {})
+		if typeof(rows) != TYPE_DICTIONARY:
+			continue
+		for stage_key in rows:
+			if int(stage_key) > prof_stage(str(pid)):
+				continue
+			var id := str(rows[stage_key])
+			var def = SkillDB.get_skill(id)
+			if def != null and bool(def.get("active", false)) and not out.has(id):
+				out.append(id)
+	return out
+
+func prof_perk_weapon_ok(perk_id: String) -> bool:
+	var def = SkillDB.get_skill(perk_id)
+	if def == null:
+		return false
+	var req := str(def.get("requires_weapon_tag", ""))
+	if req == "":
+		return true
+	var item = ItemInstances.view(int(equipment.get("main_hand", 0)))
+	return item != null and (item.get("tags", []) as Array).has(req)
+
+func prof_perk_ready(perk_id: String) -> bool:
+	if not has_active_prof_perk(perk_id) or not prof_perk_weapon_ok(perk_id):
+		return false
+	var st = prof_perk_state.get(perk_id, {})
+	return int(st.get("cd", 0)) <= 0 and int(st.get("uses", -1)) != 0
+
+func consume_prof_perk(perk_id: String, cd: int) -> void:
+	if not has_active_prof_perk(perk_id):
+		return
+	var def = SkillDB.get_skill(perk_id)
+	var st: Dictionary = prof_perk_state.get(perk_id, {"cd": 0, "uses": skill_uses_max(def)})
+	st["cd"] = maxi(0, cd)
+	var uses := int(st.get("uses", -1))
+	if uses > 0:
+		st["uses"] = uses - 1
+	prof_perk_state[perk_id] = st
+
+func _apply_prof_perks(id: String) -> void:
+	var hp0 := effective_stat_f("HP_max")
+	var ar0 := effective_stat_f("armor_max")
+	remove_modifiers_by_source_prefix("perk:%s:" % id)
+	if not prof_slots.has(id):
+		_rescale_vitals(hp0, ar0)
+		return
+	var rows = prof_perks.get(id, {})
+	if typeof(rows) != TYPE_DICTIONARY:
+		_rescale_vitals(hp0, ar0)
+		return
+	for stage_key in rows:
+		if int(stage_key) > prof_stage(id):
+			continue
+		var sid := str(rows[stage_key])
+		var def = SkillDB.get_skill(sid)
+		if def == null:
+			continue
+		var source := "perk:%s:%s" % [id, str(stage_key)]
+		for block in def.get("effects", []):
+			if typeof(block) != TYPE_DICTIONARY or str(block.get("kind", "")) not in ["passive_stat_mods", "conditional_mod"]:
+				continue
+			for raw in block.get("mods", []):
+				if typeof(raw) != TYPE_DICTIONARY:
+					continue
+				var mod: Dictionary = raw.duplicate(true)
+				mod["value"] = SkillDB.resolve_num(raw.get("value", 0), self, 1, 0.0)
+				mod["source"] = source
+				mod["source_label"] = str(def.get("name", sid))
+				if str(block.get("kind", "")) == "conditional_mod" and typeof(block.get("when", null)) == TYPE_ARRAY:
+					mod["when"] = (block.get("when") as Array).duplicate(true)
+				modifiers.append(mod)
+	_rescale_vitals(hp0, ar0)
 
 # 当前主手武器的 tags + attack tags（徒手=UNARMED 的 tags）——技艺喂养的行为匹配输入。
 # 判据与 basic_attack 完全一致（同读 _main_weapon_attack）：主手无武器攻击＝实际打徒手 → 喂体术、
@@ -1212,3 +1326,7 @@ func refresh_for_turn() -> void:
 		var c2 := int(ews_state[id].get("cd", 0))
 		if c2 > 0:
 			ews_state[id]["cd"] = c2 - 1
+	for id in prof_perk_state:
+		var c3 := int(prof_perk_state[id].get("cd", 0))
+		if c3 > 0:
+			prof_perk_state[id]["cd"] = c3 - 1

@@ -58,6 +58,8 @@ static func collect_result(roster: Array, kills: Array, win: bool, context: Dict
 			"prof_xp": u.prof_xp.duplicate(),
 			"prof_known": u.prof_known.duplicate(),
 			"prof_slots": u.prof_slots.duplicate(),
+			# perk 选择属于养成数据；prof_perk_state 是战斗运行态，不带回 campaign。
+			"prof_perks": u.prof_perks.duplicate(true),
 		})
 	var kills_out := []
 	for k in kills:
@@ -97,8 +99,12 @@ static func apply_result(ws, result: Dictionary) -> Dictionary:
 			for pid in e.get("prof_slots", []):
 				if not u.prof_slots.has(str(pid)):
 					u.slot_prof(str(pid), true)
+			# 选择可能在战前/战斗副本侧发生变化，按结果整体替换；重挂时会先摘掉旧 perk: 来源。
+			if typeof(e.get("prof_perks", null)) == TYPE_DICTIONARY:
+				u.prof_perks = (e["prof_perks"] as Dictionary).duplicate(true)
 			for pid in u.prof_slots:
 				u._apply_prof_mods(str(pid))
+				u._apply_prof_perks(str(pid))
 	# 击杀统计累计（按敌方原型；情报系统「战后按击杀解锁」的输入源，见 docs/模块_营地后勤.md）
 	for k in result.get("kills", []):
 		var pid := str(k.get("proto_id", ""))

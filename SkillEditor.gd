@@ -25,7 +25,8 @@ const SkillTooltip := preload("res://SkillTooltip.gd")         # 右栏即时预
 const ICON_DIR := "res://icons/Skills"
 # 适用武器种类的 tag 类别（🔒 决策29：词表＝TagDB wcat_*，与武器 tag/动态技能 tag 三位一体）
 const WEAPON_KIND_CATS := [["wcat_melee", "近战"], ["wcat_ranged", "远程"], ["wcat_catalyst", "触媒"], ["wcat_shield", "盾"]]
-const CATEGORIES := [["skill", "技巧 skill"], ["spell", "魔法 spell（魔法系统后置）"]]   # ⚠ 2026-07-13 用户改词：键 nature→category（与修正对象的 nature〔buff/debuff〕分家）
+const CATEGORIES := [["skill", "技巧 skill"], ["spell", "魔法 spell（魔法系统后置）"],
+	["perk", "专长 perk（熟练度域 perk 行条目）"]]   # ⚠ 2026-07-13 用户改词：键 nature→category；perk 类 2026-07-15 随矛 perk 首铺入列（缺项会被编辑器默改回 skill）
 # 伤害属性（大类：物理/元素；真伤=将来位）＋伤害类型（创伤，词表同 tags.json cat damage）——两正交下拉（2026-07-13 用户拍板）
 const DAMAGE_CATEGORIES := [["physical", "物理"], ["fire", "火"], ["ice", "冰"], ["thunder", "雷"], ["holy", "神圣"]]
 const DAMAGE_TYPES := [["", "（未设）"], ["slashing", "斩击"], ["piercing", "穿刺"], ["bludgeoning", "打击"]]

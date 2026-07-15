@@ -68,6 +68,12 @@ static func stage_name(stage: int) -> String:
 static func prof_name(id: String) -> String:
 	return str(get_prof(id).get("name", id))
 
+static func perks_at_stage(id: String, stage: int) -> Array:
+	for row in get_prof(id).get("perk_rows", []):
+		if typeof(row) == TYPE_DICTIONARY and int(row.get("stage", 0)) == stage:
+			return (row.get("perks", []) as Array).duplicate()
+	return []
+
 # 行为匹配：武器/攻击 tags 与域 match_tags 有交集 ⇒ 本次行为喂养该域（🔒 §2.4 一次行为同喂所有匹配技艺）
 static func matches_tags(id: String, tags: Array) -> bool:
 	var mt = get_prof(id).get("match_tags", [])

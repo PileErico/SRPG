@@ -112,6 +112,9 @@
      {"stage": 5, "mods": [{"stat": "acc", "op": "flat", "value": 5}, {"stat": "atk", "op": "flat", "value": 3}]}],
    "desc": "连枷类武器。"},
   {"id": "wp_spear", "name": "矛", "page": "weapon", "match_tags": ["weapon_spear"],
+   "perk_rows": [
+     {"stage": 2, "perks": ["perk_spear_set", "perk_spear_force_back"]}
+   ],
    "stage_mods": [
      {"stage": 2, "mods": [{"stat": "acc", "op": "flat", "value": 2}]},
      {"stage": 3, "mods": [{"stat": "acc", "op": "flat", "value": 3}, {"stat": "atk", "op": "flat", "value": 1}]},

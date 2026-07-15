@@ -50,5 +50,23 @@
     "tags": [
       "incapacitated"
     ]
+  },
+  {
+    "desc": "控制区扩大至2格；每个大回合第一次有敌人进入控制区时，以当前矛的基础攻击迎击。",
+    "dot_pct_max_hp": 0,
+    "duration": {"base": 1, "per_stat": {}},
+    "duration_model": "fixed",
+    "expire_timing": "turn_start",
+    "hot_flat": 0,
+    "icon": "",
+    "id": "spear_set_stance",
+    "kind": "buff",
+    "max_stacks": 0,
+    "mods": [{"stat": "zoc_radius", "op": "flat", "value": 2}],
+    "name": "立矛",
+    "on_expire_apply": "",
+    "permanent": false,
+    "stackable": false,
+    "tags": ["spear_stance"]
   }
 ]
