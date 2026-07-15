@@ -14,11 +14,12 @@ extends SceneTree
 ##  6) tag 引用完整性（🔒 tag 统一词表）：data/*.json 与 terrains.json 里任意 "tags" 数组的字符串
 ##     必须 ∈ tags.json——防「用了没注册」的词表漂移（曾漏 cold/road/wall）。
 ##  7) skills.json 阶段2 形状闸门（🔒 设计 §10 护栏#1 机械执法）：target 三旗不得全 false / seq·nature·requires_hands·inflict 禁回流（2026-07-13 废除/改词/删除；inflict→on_hit_effects 键级统一 2026-07-15）/
-##     per_level 长度==max_level / costs.ap 与顶层 ap_cost 禁双写 / 阶段6 前 hits.size()>1 或 riders 出现即 FAIL
+##     per_level 长度==max_level / costs.ap 与顶层 ap_cost 禁双写 / 阶段6 前 hits.size()>1 或 riders 出现即 FAIL /
+##     击退 on_hit_displace 形状（🔒 2026-07-15）：mode∈{push}、distance≥1、chance>0
 ##     （防「可编不可跑」内容入库）。WS 形约束已随决策27 关系制移到规则8 引用处执法。
 ##     grip 握持条件（🔒 决策35）：值∈{one_handed,two_handed} 且只属武器技能（weapon_skill=true）。
 ##  8) weapons.json 武器技能引用（🔒 决策25/26/29 勾选制）：bws/bas → 技能存在+勾 weapon_skill+含 attack 块+**禁带 grip**（决策35 普攻恒可用）；
-##     ews → 技能存在+勾选（一视同仁 2026-07-13——主动/可跑块闸已撤，攻击形施放=阶段6），requires 的 prof/value 合法，
+##     ews → 技能存在+勾选（一视同仁 2026-07-13——主动/可跑块闸已撤；攻击形施放已接线 2026-07-15），requires 的 prof/value 合法，
 ##     grip 与武器静态握持须相容（单手武器挂「需双手持」＝永不可用即 FAIL；兼用武器双态皆可）。
 ##     BWS/EWS＝武器引用位而非技能种类（武器侧决定）：同一技能可既是 A 的 BWS 又是 B 的 EWS。
 ##     内联 attack 残留＝FAIL（2026-07-12 技改 §4-11 收口：weapons.json 已全量迁引用制）。
@@ -151,6 +152,18 @@ func _collect_key_arrays(v, key: String, out: Array) -> void:
 		TYPE_ARRAY:
 			for e in v:
 				_collect_key_arrays(e, key, out)
+
+# 递归收集某 key 的字典值（如 on_hit_displace 击退块）
+func _collect_key_dicts(v, key: String, out: Array) -> void:
+	match typeof(v):
+		TYPE_DICTIONARY:
+			for k in v:
+				if str(k) == key and typeof(v[k]) == TYPE_DICTIONARY:
+					out.append(v[k])
+				_collect_key_dicts(v[k], key, out)
+		TYPE_ARRAY:
+			for e in v:
+				_collect_key_dicts(e, key, out)
 
 # 递归收集某 key 的字符串值（如 bas 引用）
 func _collect_key_strings(v, key: String, out: Array) -> void:
@@ -334,6 +347,17 @@ func _initialize() -> void:
 			_collect_key_arrays(s, "hits", hits)
 			for h in hits:
 				ck((h as Array).size() <= 1, "%s：hits>1 属阶段6（护栏#1）——现禁入库" % sid)
+			# 击退 on_hit_displace 形状（🔒 2026-07-15 概率制击中附带）：mode ∈ {push}（pull/swap/charge=位移族后续）、
+			# distance ≥1 整数、chance >0（可破 100 抵肉体强韧减值——不设上限）
+			var kbs := []
+			_collect_key_dicts(s, "on_hit_displace", kbs)
+			for kb in kbs:
+				ck(str((kb as Dictionary).get("mode", "push")) == "push",
+					"%s：on_hit_displace.mode 现仅支持 push（pull/swap/charge＝位移族后续模式）" % sid)
+				ck(int((kb as Dictionary).get("distance", 1)) >= 1,
+					"%s：on_hit_displace.distance 须 ≥1（无击退＝整键不写）" % sid)
+				ck(float((kb as Dictionary).get("chance", 100)) > 0.0,
+					"%s：on_hit_displace.chance 须 >0（0=永不触发的死配置）" % sid)
 
 	# 8) weapons.json 的武器技能引用（🔒 决策25/26/29 勾选制）：
 	#    bws/bas（双键桥）→ 技能存在 + 勾了 weapon_skill + 含 attack 块（无块＝flatten 空→普攻退化徒手）；

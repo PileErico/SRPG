@@ -513,5 +513,52 @@
       "weapon_spear"
     ],
     "weapon_skill": true
+  },
+  {
+    "active": true,
+    "category": "skill",
+    "cooldown": {
+      "base": 0
+    },
+    "costs": {
+      "ap": 1
+    },
+    "desc": "",
+    "effects": [
+      {
+        "hits": [
+          {
+            "coeff": 1,
+            "damage_category": "physical",
+            "on_hit_displace": {
+              "chance": 80,
+              "distance": 1,
+              "mode": "push"
+            }
+          }
+        ],
+        "kind": "attack"
+      }
+    ],
+    "icon": "",
+    "id": "ws_spear_repel",
+    "max_level": 1,
+    "name": "击退（矛）",
+    "range": 1,
+    "tags": [
+      "single_target"
+    ],
+    "target": {
+      "ally": false,
+      "enemy": true,
+      "self": false
+    },
+    "uses_per_battle": {
+      "base": 0
+    },
+    "weapon_kinds": [
+      "weapon_spear"
+    ],
+    "weapon_skill": true
   }
 ]

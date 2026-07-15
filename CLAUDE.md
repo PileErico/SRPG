@@ -76,6 +76,6 @@
 ## 运行 / 测试
 - **快捷启动**：双击 `run_game.bat`（主菜单＝游戏正式入口）/ `run_sandbox.bat`（直接进单位 sandbox）/ `run_map_editor.bat`（地图编辑器）；或 VSCode `Ctrl+Shift+B`（默认任务「运行 游戏」），「运行任务…」里还有「运行 Sandbox」「运行 地图编辑器」「打开 Godot 编辑器」。
 - 命令行：开 Godot IDE 用 `..._win64.exe -e --path "D:/1战棋"`；直接跑某场景用 `..._console.exe --path "D:/1战棋" res://Sandbox.tscn`。
-- **测试基线**：40 套 headless（`tools/test_*.gd`），中央 runner `tools/run_tests.ps1` **须用 pwsh7 跑**（PowerShell 5 编码会崩）；通用截图 harness `tools/screenshot.gd`（窗口跑场景存 PNG，供 UI/美术目检）。
+- **测试基线**：44 套 headless（`tools/test_*.gd`），中央 runner `tools/run_tests.ps1` **须用 pwsh7 跑**（PowerShell 5 编码会崩）；通用截图 harness `tools/screenshot.gd`（窗口跑场景存 PNG，供 UI/美术目检）。
 - **headless 自测（推荐）**：`..._console.exe --headless --path "D:/1战棋" res://<场景>.tscn --quit-after 8`——跑真实场景、必然自动退出、stderr 能看到报错。
 - ⚠️ **不要写「不调 `quit()` 的 SceneTree 脚本」**：会空转不退出（CPU 飙、`Select-Object` 看不到输出），曾因此空转数小时。非要用 SceneTree 脚本就务必结尾 `quit()`；且 `add_child` 后 `_ready` 是**延迟**的、需显式初始化（如 `e._load_terrains()` / `e.new_map(...)`）。

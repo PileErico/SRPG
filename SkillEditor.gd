@@ -751,6 +751,14 @@ func _build_attack_block(box: VBoxContainer, entry: Dictionary) -> void:
 			_add_skill_onhit_row(entry, "", 100.0)
 			_mark_dirty())
 		box.add_child(addoh)
+	# 击退 on_hit_displace（🔒 2026-07-15 概率制击中附带）：命中且未被格挡才判定；概率与攻方被动击退
+	# （伪 stat knockback_chance，perk 挂载口）相加单掷、直减目标肉体强韧数值。距离 0＝无击退不落键。
+	var kb0 = hit.get("on_hit_displace", null)
+	var kb_has := typeof(kb0) == TYPE_DICTIONARY
+	entry["kb_dist"] = EditorUI.add_spin(box, "击退距离 on_hit_displace.distance（格；0=无击退）",
+		float((kb0 as Dictionary).get("distance", 1)) if kb_has else 0.0, 0.0, 9.0, 1.0, _mark_dirty)
+	entry["kb_chance"] = EditorUI.add_spin(box, "击退概率 on_hit_displace.chance（%；判定＝概率−目标肉体强韧，可破 100 抵减值）",
+		float((kb0 as Dictionary).get("chance", 100)) if kb_has else 100.0, 1.0, 999.0, 1.0, _mark_dirty)
 	box.add_child(_warn("aoe / bonus / ignore_* 等高级字段本版不编辑，保存原样保留", WARN_COLOR))
 
 # 一条技能侧 On-Hit：效果下拉（只列 on_hit_ok=true 的效果——效果库勾选白名单）+ 概率% + ✕
@@ -1178,6 +1186,11 @@ func _collect_block(entry: Dictionary) -> Dictionary:
 				hit["sure_hit"] = true
 			else:
 				hit.erase("sure_hit")
+			var kbd := int(entry["kb_dist"].value)   # 击退（2026-07-15）：距离 0＝无不落键；mode 显式写 push（lint 白名单）
+			if kbd > 0:
+				hit["on_hit_displace"] = {"chance": _num(float(entry["kb_chance"].value)), "distance": kbd, "mode": "push"}
+			else:
+				hit.erase("on_hit_displace")
 			out["hits"] = [hit]
 		"heal":
 			var v = _collect_formula(entry["heal_pct"])

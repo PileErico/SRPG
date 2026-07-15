@@ -112,6 +112,10 @@ static func render(def: Dictionary) -> Control:
 						var edef = EffectDB.get_effect(str(se["effect"]))
 						var enm := str(edef.get("name", se["effect"])) if edef != null else "%s（引用悬空）" % str(se["effect"])
 						v.add_child(ItemTooltip._kv("击中施加", "%s %s%%" % [enm, ItemTooltip._num(float(se.get("chance", 100)))]))
+				var kb = hit.get("on_hit_displace", null)   # 击退（🔒 2026-07-15 概率制：判定＝概率−目标肉体强韧，格挡免推）
+				if typeof(kb) == TYPE_DICTIONARY:
+					v.add_child(ItemTooltip._kv("击退", "%d 格 %s%%（减目标肉体强韧；格挡免推）" % [
+						maxi(1, int(kb.get("distance", 1))), ItemTooltip._num(float(kb.get("chance", 100)))]))
 				var shp: Dictionary = SkillDB.shape_of(def)
 				if not (shp.get("effect", []) as Array).is_empty():
 					var ff0 := "·友伤" if bool(shp.get("friendly_fire", false)) else ""

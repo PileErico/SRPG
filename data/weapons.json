@@ -222,6 +222,17 @@
     "block_power": 10,
     "block_rate": 15,
     "bws": "ws_spear_stab",
+    "bws_2h": "ws_spear_stab",
+    "ews": [
+      {
+        "skill": "ws_spear_repel"
+      }
+    ],
+    "ews_2h": [
+      {
+        "skill": "ws_spear_repel"
+      }
+    ],
     "icon": "res://icons/Items/Weapons/spear_winged .png",
     "id": "spear_winged",
     "innate": false,

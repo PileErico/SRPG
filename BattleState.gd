@@ -760,7 +760,66 @@ func _resolve_compute_body(attacker, target, skill) -> Dictionary:
 			onhit.append(ires)
 	if not onhit.is_empty():
 		r["on_hit"] = onhit
+	# 击退判定（🔒 2026-07-15 用户拍板：概率制击中附带——挂 hit 内 on_hit_displace，与 on_hit_effects 并列）：
+	# 门槛＝命中且未被格挡（未命中已早退）；概率＝主动块 chance ＋ 攻方被动伪 stat knockback_chance
+	# （perk 挂载口，任意攻击段都参与）**合并单掷**，直减目标肉体强韧（数值直减，非效果族的豁免二掷；可减到 0）。
+	# 借机/反击段（atk_rate 注入键）禁击退——移动编排中途改被推者位置会撕裂路径推进（v1 安全阀）。
+	# ⚠ 掷骰只在 kb_dist>0 时发生：旧数据（无击退无被动）零额外 rng 抽取＝golden 零涉。
+	if not blocked and not skill.has("atk_rate"):
+		var kb = skill.get("on_hit_displace", null)
+		var kb_ch := 0.0
+		var kb_dist := 0
+		if typeof(kb) == TYPE_DICTIONARY and str(kb.get("mode", "push")) == "push":
+			kb_ch = float(kb.get("chance", 100.0))
+			kb_dist = maxi(1, int(kb.get("distance", 1)))
+		var kb_passive := float(attacker.effective_stat_f("knockback_chance"))
+		if kb_passive > 0.0:
+			kb_ch += kb_passive
+			kb_dist = maxi(kb_dist, 1)
+		if kb_dist > 0:
+			var kb_final := clampf(kb_ch - maxf(0.0, float(target.effective_stat_f("body_fort"))), 0.0, 100.0)
+			if rng.randf() * 100.0 < kb_final:
+				var kd := _dir_away(Vector2i(attacker.col, attacker.row), Vector2i(target.col, target.row))
+				if kd >= 0:
+					r["displace"] = displace_push(target, kd, kb_dist)
 	return r
+
+# ============ 位移解算器（displace 族首铺 🔒 红队报告 §2-1：swap/push/pull/charge 四模式规划共用一个解算器，
+# 本次落 push；被动位移一律不触发借机、不受 ZOC 停步 🔒）============
+
+# 沿方向 d（0–5）逐格推 distance 格：出图 / 不可通行（tag 驱动 _move_cost_at——旱鸭不会被推进深水）/
+# 有人占 → 提前停步（blocked）。位置在模型层落账并重算迷雾；返回 {from,to,steps,blocked} 供宿主渲染/播报。
+func displace_push(unit, d: int, distance: int) -> Dictionary:
+	var from := Vector2i(unit.col, unit.row)
+	var cur := from
+	var steps := 0
+	var was_blocked := false
+	for _i in distance:
+		var nxt := _neighbor_in_dir(cur, d)
+		if not _cell_in_bounds(nxt.x, nxt.y) or _move_cost_at(nxt.x, nxt.y, unit) < 0 \
+				or _occupied_by_other(nxt.x, nxt.y, unit):
+			was_blocked = true
+			break
+		cur = nxt
+		steps += 1
+	if steps > 0:
+		unit.col = cur.x
+		unit.row = cur.y
+		_recompute_vision_state()
+	return {"from": from, "to": cur, "steps": steps, "blocked": was_blocked}
+
+# 推离方向（0–5）：取攻→守连线末段 prev→target 的邻向——相邻＝正向推开；斜距＝远离攻方的近似轴向。异常=-1。
+func _dir_away(from: Vector2i, target: Vector2i) -> int:
+	if from == target:
+		return -1
+	var ln := _hex_line(from, target)
+	if ln.size() < 2:
+		return -1
+	var prev: Vector2i = ln[ln.size() - 2]
+	for d in 6:
+		if _neighbor_in_dir(prev, d) == target:
+			return d
+	return -1
 
 # 决策34 小工具：两效果是否同族（共享 cat=effect 异常 tag）/ 效果优先级（缺省 0）
 func _same_effect_family(a: String, b: String) -> bool:
@@ -815,6 +874,15 @@ func _try_inflict_state(target, skill) -> Dictionary:
 		"fort": fort, "fort_roll": fort_roll, "shrugged": shrugged,
 		"suppressed": applied and not shrugged and not landed}
 
+# 施放消耗单一实现（AP ＋ 冷却/次数；已学走 skills、EWS 走 ews_state 🔒 决策26）：
+# apply_skill 与攻击形能力路径（阶段6 接线 2026-07-15）共用，防两路各写一套漂移。
+func consume_cast(caster, skill_id: String, def) -> void:
+	caster.ap -= SkillDB.skill_ap_cost(def)
+	if caster.has_skill(skill_id):
+		caster.consume_skill(skill_id, caster.skill_cooldown_max(def))
+	else:
+		caster.consume_ews(skill_id, caster.skill_cooldown_max(def))
+
 # ============ 技能施放（阶段2 下沉 🔒 模块_技能_设计 §3/§10）：模型算+结构化事件出，宿主只渲染 ============
 # 修「heal 逻辑违例在宿主」（§3 注*）：AP/冷却/次数消耗与效果块结算全在模型层，Sandbox._do_skill 退成薄渲染壳。
 # v1 可跑块：heal（heal_pct_max_hp 标量/公式/逐级 + cleanse_tags）/ apply_effect（{effect,chance} 对象形，
@@ -825,8 +893,8 @@ func apply_skill(caster, skill_id: String, target) -> Array:
 	var def = SkillDB.get_skill(skill_id)
 	if def == null or caster == null or target == null:
 		return events
-	# 前置守卫（护栏#1 可编≠可跑）：effects 无可跑块 → 拒发且零消耗——
-	# 否则纯 attack 块技能经能力路径＝白烧 AP/冷却/次数（attack 经能力施放＝阶段6 再放开）。
+	# 前置守卫（护栏#1 可编≠可跑）：effects 无可跑块 → 拒发且零消耗。攻击形（flatten_bws 非空）
+	# 已在宿主侧分流进攻击管线（Sandbox._do_skill，接线 2026-07-15）——误入本口仍拒发防白烧。
 	if not SkillDB.has_runnable_block(def):
 		push_warning("apply_skill：技能「%s」无可跑效果块（%s）——拒发零消耗（可编≠可跑）" % [skill_id, "/".join(SkillDB.RUNNABLE_KINDS)])
 		return events
@@ -836,11 +904,7 @@ func apply_skill(caster, skill_id: String, target) -> Array:
 		push_warning("apply_skill：技能「%s」握持组不匹配当前握持——拒发零消耗（决策35 武器侧握持组）" % skill_id)
 		return events
 	var lvl := int(caster.skill_level(skill_id))
-	caster.ap -= SkillDB.skill_ap_cost(def)
-	if caster.has_skill(skill_id):
-		caster.consume_skill(skill_id, caster.skill_cooldown_max(def))
-	else:
-		caster.consume_ews(skill_id, caster.skill_cooldown_max(def))   # EWS＝装备授予非已学，运行态走 ews_state（🔒 决策26）
+	consume_cast(caster, skill_id, def)
 	for block in def.get("effects", []):
 		if typeof(block) != TYPE_DICTIONARY:
 			continue

@@ -1566,8 +1566,8 @@ func _learned_active_skills(u) -> Array:
 		var def = SkillDB.get_skill(id)
 		if def == null or not def.get("active", false):
 			continue
-		# 无可跑块（纯 attack 形——BWS 们天然如此）不进能力菜单：attack 经能力路径施放＝阶段6（apply_skill 同口守卫）
-		if not SkillDB.has_runnable_block(def):
+		# 可跑块 或 攻击形（flatten_bws 非空——攻击形施放接线 2026-07-15）才进能力菜单；两者皆无＝空壳不列
+		if not SkillDB.has_runnable_block(def) and SkillDB.flatten_bws(def).is_empty():
 			continue
 		out.append(id)
 	out.sort_custom(func(a, b):
@@ -1611,7 +1611,7 @@ func _build_skill_submenu(u) -> void:
 		var def = SkillDB.get_skill(id)
 		var silenced: bool = u.has_state("silenced") and (def.get("tags", []) as Array).has("verbal")
 		var unlocked := bool(e["unlocked"])
-		var castable := SkillDB.has_runnable_block(def)   # 纯 attack 形＝阶段6 待接线（显示不隐身，2026-07-13 用户校准）
+		var castable: bool = SkillDB.has_runnable_block(def) or not SkillDB.flatten_bws(def).is_empty()   # 攻击形已接线（2026-07-15）：flatten 非空＝经攻击管线施放
 		# 🔒 决策35 修订：握持组在武器侧（ews=单手组/ews_2h=双手组）——按条目 grip_req 对当前握持灰显
 		var grip_req := str(e.get("grip_req", ""))
 		var grip_ok: bool = grip_req == "" or u.effective_grip(str(e.get("slot", "main_hand"))) == grip_req
@@ -1619,7 +1619,7 @@ func _build_skill_submenu(u) -> void:
 		var label := "🗡 " + str(def.get("name", id))
 		var st = u.ews_state.get(id, {})
 		if not castable:
-			label += "（攻击形施放待接线·阶段6）"
+			label += "（无可跑效果块）"
 		elif not unlocked:
 			label += "（需 %s）" % _ews_req_text(e["requires"])
 		elif not grip_ok:
@@ -1706,6 +1706,28 @@ func _valid_skill_target(caster, def, target) -> bool:
 func _do_skill(caster, skill_id: String, cell: Vector2i) -> void:
 	var def = SkillDB.get_skill(skill_id)
 	if def == null:
+		return
+	# 攻击形能力（接线 2026-07-15 用户令·翼矛击退 EWS）：含合法 attack 块 → 分流进攻击管线——
+	# flatten_bws 扁平 + _attack_targets 取目标（与普攻同路径：形状掩码/友伤/迷雾+LOS 门控），
+	# 消耗走模型层 consume_cast（与 apply_skill 同口：已学/EWS 分轨）；无目标＝零消耗退出。
+	# ⚠ 混合块技能（attack+heal 等）本路径只结算 attack 块——真混合内容出现前不铺双路结算。
+	var flat: Dictionary = SkillDB.flatten_bws(def)
+	if not flat.is_empty():
+		if not caster.ews_grip_ok(skill_id):   # 握持守卫（🔒 决策35：菜单已灰显，此处防绕道）
+			_clear_selection()
+			return
+		var atk_targets: Array = _attack_targets(caster, cell, flat)
+		if atk_targets.is_empty():
+			_clear_selection()
+			return
+		_state.consume_cast(caster, skill_id, def)
+		_resolve_attack(caster, flat, atk_targets)
+		_handle_deaths()
+		_play_attack_anim(caster, cell, atk_targets)
+		_clear_selection()
+		_refresh_info()
+		if canvas != null:
+			canvas.queue_redraw()
 		return
 	var target = unit_at(cell.x, cell.y)
 	if not _valid_skill_target(caster, def, target):
@@ -2118,6 +2140,14 @@ func _resolve_one(attacker, target, skill, show_target := false) -> Dictionary:
 	for oh in r.get("on_hit", []):
 		if bool((oh as Dictionary).get("applied", false)):
 			lines.append("　施加「%s」" % str((oh as Dictionary).get("name", "")))
+	# 击退播报（同施加口径：只报成功、判定失败沉默）；掷中但寸步难行（出图/地形/占位顶住）报「无处可退」
+	var disp = r.get("displace", null)
+	if typeof(disp) == TYPE_DICTIONARY:
+		if int(disp.get("steps", 0)) > 0:
+			lines.append("　%s 被击退 %d 格%s" % [_cname(target), int(disp["steps"]),
+				"（撞停）" if bool(disp.get("blocked", false)) else ""])
+		else:
+			lines.append("　%s 无处可退" % _cname(target))
 	var att_shift := _morale_band_shift(attacker, int(r.get("morale_att", 0)))
 	if att_shift != "":
 		lines.append(att_shift)
