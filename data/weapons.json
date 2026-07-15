@@ -221,7 +221,7 @@
     "atk": 11,
     "block_power": 10,
     "block_rate": 15,
-    "bws": "ws_sper_stab",
+    "bws": "ws_spear_stab",
     "icon": "res://icons/Items/Weapons/spear_winged .png",
     "id": "spear_winged",
     "innate": false,

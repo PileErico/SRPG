@@ -34,7 +34,8 @@
     "range": 2,
     "tags": [
       "skill_spear",
-      "aoe"
+      "aoe",
+      "piercing"
     ],
     "target": {
       "ally": false,
@@ -85,7 +86,8 @@
     "range": 1,
     "tags": [
       "skill_claw",
-      "single_target"
+      "single_target",
+      "slashing"
     ],
     "target": {
       "ally": false,
@@ -131,7 +133,8 @@
     "range": 1,
     "tags": [
       "skill_claw",
-      "single_target"
+      "single_target",
+      "piercing"
     ],
     "target": {
       "ally": false,
@@ -176,7 +179,8 @@
     "range": 1,
     "tags": [
       "skill_claw",
-      "single_target"
+      "single_target",
+      "slashing"
     ],
     "target": {
       "ally": false,
@@ -226,7 +230,8 @@
     "name": "斩击",
     "range": 1,
     "tags": [
-      "single_target"
+      "single_target",
+      "slashing"
     ],
     "target": {
       "ally": false,
@@ -271,7 +276,8 @@
     "range": 1,
     "tags": [
       "unarmed",
-      "single_target"
+      "single_target",
+      "bludgeoning"
     ],
     "target": {
       "ally": false,
@@ -313,7 +319,8 @@
     "name": "刺击",
     "range": 1,
     "tags": [
-      "single_target"
+      "single_target",
+      "piercing"
     ],
     "target": {
       "ally": false,
@@ -357,7 +364,8 @@
     "name": "重击",
     "range": 1,
     "tags": [
-      "single_target"
+      "single_target",
+      "bludgeoning"
     ],
     "target": {
       "ally": false,
@@ -369,49 +377,6 @@
     },
     "weapon_kinds": [
       "weapon_hammer"
-    ],
-    "weapon_skill": true
-  },
-  {
-    "active": true,
-    "category": "skill",
-    "cooldown": {
-      "base": 0
-    },
-    "costs": {
-      "ap": 1
-    },
-    "desc": "",
-    "effects": [
-      {
-        "hits": [
-          {
-            "armor_pen": 0.3,
-            "coeff": 0.9,
-            "damage_category": "physical",
-            "damage_type": "piercing",
-            "hit": 90
-          }
-        ],
-        "kind": "attack"
-      }
-    ],
-    "icon": "res://icons/Skills/WeaponSkills/矛_突刺_32x32.png",
-    "id": "ws_sper_stab",
-    "max_level": 1,
-    "name": "刺击（矛）",
-    "range": 2,
-    "tags": [],
-    "target": {
-      "ally": false,
-      "enemy": true,
-      "self": false
-    },
-    "uses_per_battle": {
-      "base": 0
-    },
-    "weapon_kinds": [
-      "weapon_spear"
     ],
     "weapon_skill": true
   },
@@ -500,6 +465,52 @@
     },
     "weapon_kinds": [
       "weapon_sword"
+    ],
+    "weapon_skill": true
+  },
+  {
+    "active": true,
+    "category": "skill",
+    "cooldown": {
+      "base": 0
+    },
+    "costs": {
+      "ap": 1
+    },
+    "desc": "",
+    "effects": [
+      {
+        "hits": [
+          {
+            "armor_pen": 0.3,
+            "coeff": 0.9,
+            "damage_category": "physical",
+            "damage_type": "piercing",
+            "hit": 90
+          }
+        ],
+        "kind": "attack"
+      }
+    ],
+    "icon": "res://icons/Skills/WeaponSkills/矛_突刺_32x32.png",
+    "id": "ws_spear_stab",
+    "max_level": 1,
+    "name": "刺击（矛）",
+    "range": 2,
+    "tags": [
+      "single_target",
+      "piercing"
+    ],
+    "target": {
+      "ally": false,
+      "enemy": true,
+      "self": false
+    },
+    "uses_per_battle": {
+      "base": 0
+    },
+    "weapon_kinds": [
+      "weapon_spear"
     ],
     "weapon_skill": true
   }
