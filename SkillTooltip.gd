@@ -10,7 +10,7 @@ const TextureCache := preload("res://TextureCache.gd")
 const ItemTooltip := preload("res://ItemTooltip.gd")
 
 const CAT_CN := {"skill": "技巧", "spell": "魔法"}
-const DMG_CAT_CN := {"physical": "物理", "fire": "火", "ice": "冰", "thunder": "雷", "holy": "神圣"}
+const DMG_CAT_CN := ItemTooltip.DMG_CAT_CN   # 伤害属性中文词表单源（ItemTooltip 共用）
 
 static func render(def: Dictionary) -> Control:
 	var panel := PanelContainer.new()

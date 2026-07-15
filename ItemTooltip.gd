@@ -17,6 +17,7 @@ const ProfDB := preload("res://ProfDB.gd")     # EWS 解锁条件显示（技艺
 const MOD_GREEN := Color("#6FCF6F")
 const MOD_RED := Color("#E07A5A")
 const VISION_STATE_CN := {"nightvision": "黑夜视觉", "blind": "无视力"}   # vision_state mod 值→中文（物品自身 tooltip 显示；角色面板不显示）
+const DMG_CAT_CN := {"physical": "物理", "fire": "火", "ice": "冰", "thunder": "雷", "holy": "神圣"}   # 伤害属性→中文（SkillTooltip 共用）
 
 # 物品富 tooltip 面板：纯黑底 + 稀有度边框；名称(稀有度色)/种类·部位/标签/需求/mods/攻击 skill。
 static func render(item: Dictionary) -> Control:
@@ -167,7 +168,7 @@ static func render(item: Dictionary) -> Control:
 		v.add_child(_kv("AP 消耗", "%d" % SkillDB.skill_ap_cost(atk)))
 		var dc := str(atk.get("damage_category", ""))
 		if dc != "":
-			v.add_child(_kv("伤害属性", dc))
+			v.add_child(_kv("伤害属性", str(DMG_CAT_CN.get(dc, dc))))
 		var dt := str(atk.get("damage_type", ""))
 		if dt != "":
 			v.add_child(_kv("伤害类型", TagDB.cn(dt)))
