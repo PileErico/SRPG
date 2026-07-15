@@ -116,7 +116,7 @@ var _mod_rows: Array = []
 var _w_intr: Dictionary = {}     # 武器固有属性 spins（🔒 决策33）：stat 键 → SpinBox
 var _w_intr1: Dictionary = {}    # 兼用单手形态面板 spins（🔒 决策35 双固有面板）：stat 键 → SpinBox
 var _intr1_box: VBoxContainer    # 兼用单手形态区（握持=versatile 时显示）
-var _onhit_rows: Array = []      # On-Hit 统一行（🔒 2026-07-15 mod 式）：[{row, kind, effect, mode, val:SpinBox}]
+var _onhit_rows: Array = []      # On-Hit 统一行（🔒 2026-07-15 mod 式·单项目下拉）：[{row, effect:OptionButton〔含「甲伤」特殊项 __armor__〕, mode, val:SpinBox}]
 var _onhit_box: VBoxContainer
 var _w_bws: OptionButton         # 普攻 BWS 下拉（weapon_skill 勾选过滤，🔒 决策29；（无）＝不提供普攻，如盾）
 var _w_prefer: OptionButton      # 地/空偏好（比路兹式起降换手；一般武器（无））
@@ -700,24 +700,16 @@ func _sync_versatile_box() -> void:
 	_intr1_box.visible = hv and str(_w_handed.get_selected_metadata()) == "versatile"
 
 
-# 一条 On-Hit（🔒 2026-07-15 mod 式统一行）：[类型下拉 效果/甲伤] [效果下拉 或 甲伤模式下拉] [数值/概率 spin] [✕]
-#   kind="effect"：效果下拉（on_hit_ok 白名单）+ 概率%(1~100)；kind="armor"：模式下拉(pct/flat) + 数值
-#   行内改类型即时切换第二控件与数值口径（收集端按类型分派 armor_dmg_pct/flat 或 on_hit_effects）
+# 一条 On-Hit（🔒 2026-07-15 mod 式统一行·**单项目下拉**——用户二轮校准：甲伤就是清单里的一项，不另设类型级）：
+#   [项目下拉：白名单效果们＋「甲伤」] [甲伤模式 pct/flat（仅选甲伤时显）] [数值/概率 spin（口径随项目切）] [✕]
+#   收集端按所选项目分派：甲伤→armor_dmg_pct/flat 键、效果→on_hit_effects 数组。甲伤特殊项 metadata="__armor__"。
 func _add_onhit_row(kind: String, effect_id: String, chance: float, arm_mode := "pct", arm_val := 0.0) -> void:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 6)
-	# 类型下拉
-	var kb := OptionButton.new()
-	kb.add_item("效果")
-	kb.set_item_metadata(0, "effect")
-	kb.add_item("甲伤")
-	kb.set_item_metadata(1, "armor")
-	kb.select(1 if kind == "armor" else 0)
-	row.add_child(kb)
-	# 效果下拉（on_hit_ok 白名单）
+	# 项目下拉：on_hit_ok 白名单效果 + 甲伤（同一清单——选什么就是什么）
 	var ob := OptionButton.new()
 	ob.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	ob.add_item("（选效果…）")
+	ob.add_item("（选项目…）")
 	ob.set_item_metadata(0, "")
 	for id in EffectDB.all():
 		var e = EffectDB.all()[id]
@@ -725,13 +717,16 @@ func _add_onhit_row(kind: String, effect_id: String, chance: float, arm_mode := 
 			continue   # 白名单（2026-07-15 用户令）：效果库勾了「可作 On-Hit 引用」才列；旧值悬空经 _ensure_meta_option 保值
 		ob.add_item("%s（%s）" % [str(e.get("name", id)), str(id)])
 		ob.set_item_metadata(ob.item_count - 1, str(id))
-	_ensure_meta_option(ob, effect_id)
-	_select_meta(ob, effect_id)
-	ob.item_selected.connect(func(_i): _refresh_preview())
+	ob.add_item("甲伤（对护甲额外伤害）")
+	ob.set_item_metadata(ob.item_count - 1, "__armor__")
+	if kind == "armor":
+		_select_meta(ob, "__armor__")
+	else:
+		_ensure_meta_option(ob, effect_id)
+		_select_meta(ob, effect_id)
 	row.add_child(ob)
-	# 甲伤模式下拉（百分比/固定值）
+	# 甲伤模式下拉（百分比/固定值——仅项目=甲伤时显示）
 	var md := OptionButton.new()
-	md.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	md.add_item("百分比（啃甲放大%）")
 	md.set_item_metadata(0, "pct")
 	md.add_item("固定值（定额毁甲·过甲抗）")
@@ -739,10 +734,10 @@ func _add_onhit_row(kind: String, effect_id: String, chance: float, arm_mode := 
 	md.select(1 if arm_mode == "flat" else 0)
 	md.item_selected.connect(func(_i): _refresh_preview())
 	row.add_child(md)
-	# 概率标签（仅效果型显示）
+	# 概率标签（仅效果项显示）
 	var chl := EditorUI.label("概率%")
 	row.add_child(chl)
-	# 数值/概率 spin（效果型＝概率 1~100；甲伤型＝数值 -999~9999）
+	# 数值/概率 spin（效果＝概率 1~100；甲伤＝数值 -999~9999）
 	var sp := SpinBox.new()
 	sp.step = 1
 	sp.value = arm_val if kind == "armor" else chance
@@ -750,16 +745,15 @@ func _add_onhit_row(kind: String, effect_id: String, chance: float, arm_mode := 
 	row.add_child(sp)
 	var rm := Button.new()
 	rm.text = "✕"
-	var entry := {"row": row, "kind": kb, "effect": ob, "mode": md, "val": sp}
+	var entry := {"row": row, "effect": ob, "mode": md, "val": sp}
 	rm.pressed.connect(func():
 		_onhit_rows.erase(entry)
 		row.queue_free()
 		_refresh_preview())
 	row.add_child(rm)
-	# 类型切换 → 显隐第二控件、切数值口径
+	# 项目切换 → 显隐模式下拉/概率标签、切数值口径
 	var sync := func():
-		var is_arm := str(kb.get_selected_metadata()) == "armor"
-		ob.visible = not is_arm
+		var is_arm := str(ob.get_selected_metadata()) == "__armor__"
 		md.visible = is_arm
 		chl.visible = not is_arm
 		if is_arm:
@@ -769,7 +763,7 @@ func _add_onhit_row(kind: String, effect_id: String, chance: float, arm_mode := 
 			sp.min_value = 1
 			sp.max_value = 100
 			sp.value = clampf(sp.value, 1, 100)
-	kb.item_selected.connect(func(_i):
+	ob.item_selected.connect(func(_i):
 		sync.call()
 		_refresh_preview())
 	sync.call()
@@ -1287,20 +1281,20 @@ func _collect() -> Dictionary:
 				out["one_handed"] = oh1
 			else:
 				out.erase("one_handed")
-			# On-Hit 统一行收集（🔒 2026-07-15 mod 式）：按行类型分派——甲伤→armor_dmg_pct/flat 键、效果→on_hit_effects 数组
+			# On-Hit 统一行收集（🔒 2026-07-15 mod 式·单项目下拉）：按所选项目分派——
+			# 甲伤（metadata="__armor__"）→armor_dmg_pct/flat 键、效果→on_hit_effects 数组
 			out.erase("armor_dmg")   # 旧键随存即迁（→ armor_dmg_pct/flat）
 			out.erase("armor_dmg_pct")
 			out.erase("armor_dmg_flat")
 			var ohs := []
 			for e in _onhit_rows:
-				if str(e["kind"].get_selected_metadata()) == "armor":
+				var sel := str(e["effect"].get_selected_metadata())
+				if sel == "__armor__":
 					var v := float(e["val"].value)
 					if v != 0.0:   # 0/空行跳过；多条甲伤同模式＝后者覆盖（键唯一）
 						out["armor_dmg_flat" if str(e["mode"].get_selected_metadata()) == "flat" else "armor_dmg_pct"] = _num(v)
-				else:
-					var oe := str(e["effect"].get_selected_metadata())
-					if oe != "":
-						ohs.append({"effect": oe, "chance": _num(float(e["val"].value))})
+				elif sel != "":
+					ohs.append({"effect": sel, "chance": _num(float(e["val"].value))})
 			if ohs.is_empty():
 				out.erase("on_hit_effects")
 			else:
