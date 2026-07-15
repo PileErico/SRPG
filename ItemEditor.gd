@@ -1355,7 +1355,7 @@ func _collect() -> Dictionary:
 	for e in _mod_rows:
 		if str(e["stat"].get_selected_metadata()) == "vision_state":
 			mods.append({"stat": "vision_state", "op": "state", "value": str(e["state"].get_selected_metadata())})
-		else:
+		elif float(e["value"].value) != 0.0:   # 0 值空行不落盘（表单默认残留——曾把 value=0 的幽灵 mod 反复写回数据）
 			mods.append({"stat": e["stat"].get_selected_metadata(), "op": e["op"].get_selected_metadata(), "value": _num(e["value"].value)})
 	out["mods"] = mods
 	return out

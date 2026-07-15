@@ -103,8 +103,9 @@ func _initialize() -> void:
 		var def = SkillDB.get_skill(id)
 		if not bool(def.get("active", true)):
 			continue
-		if SkillDB.has_attack_block(def) and not SkillDB.has_runnable_block(def):
-			continue   # 纯 attack 形（BWS 们）＝阶段6 能力路径时限，冒烟归 test_basic_attack/test_combat_golden；
+		if bool(def.get("weapon_skill", false)) and not SkillDB.has_runnable_block(def):
+			continue   # 武器技能无可跑块＝纯 attack 形（阶段6 能力路径时限，冒烟归 test_basic_attack/golden）
+			# 或**编辑中的空壳**（决策33 松绑允许存无块武器技能；被引为 BWS 时由 lint 规则8 在引用处执法）；
 			# 其余主动技能一律强制施放（护栏#2）——「主动但无可跑块」的死内容（kind 打错/scripted-only）会在此响亮 FAIL
 		n += 1
 		var c = UnitFactory.make_unit(BARE, "player", 0, 0)

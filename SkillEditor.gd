@@ -20,6 +20,7 @@ const ItemDB := preload("res://ItemDB.gd")                     # §18 反向引�
 const UnitFactory := preload("res://UnitFactory.gd")           # §18 反向引用感知（原型 skills 引用技能）
 const HexShapePicker := preload("res://HexShapePicker.gd")     # 🔒 决策30 图形化范围（选取形/作用形点格）
 const HexGrid := preload("res://HexGrid.gd")                   # 参考盘派生预览（旋转/圆盘）
+const SkillTooltip := preload("res://SkillTooltip.gd")         # 右栏即时预览（成品 tooltip 效果，2026-07-15 用户令）
 
 const ICON_DIR := "res://icons/Skills"
 # 适用武器种类的 tag 类别（🔒 决策29：词表＝TagDB wcat_*，与武器 tag/动态技能 tag 三位一体）
@@ -71,6 +72,8 @@ var _w_wskill: CheckBox            # 武器技能勾选（勾＝可被武器选�
 var _kind_box: Control             # 适用武器种类区（勾选时显示）
 var _kind_checks := {}             # wcat tag id -> CheckBox
 var _w_grip: OptionButton          # 握持要求（🔒 决策35；随 _kind_box 显隐）
+var _preview: VBoxContainer        # 右栏即时 tooltip 预览（SkillTooltip 共享渲染，2026-07-15）
+var _form_ready := false           # 表单建全旗（半构造期闸预览 collect）
 var _w_custom_pick: CheckBox       # 自定义攻击范围（勾＝选取形可点格编辑；否＝盘只作 range 可视化参考）
 var _w_pick: Control               # 选取形 HexShapePicker
 var _w_effect: Control             # 作用形 HexShapePicker
@@ -128,7 +131,14 @@ func _shell_titlebar_extras(titlebar: HBoxContainer) -> void:
 		[["skill", "⚔ 能力库", "res://SkillEditor.tscn"], ["effect", "✨ 效果库", "res://EffectEditor.tscn"]],
 		_confirm_discard))
 
+# 右侧＝再一道 HSplit：表单（中）+ 即时 tooltip 预览（右）——与 ItemEditor 同构（2026-07-15 用户令）
 func _shell_build_right(split: HSplitContainer) -> void:
+	var right_split := HSplitContainer.new()
+	right_split.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	right_split.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	right_split.split_offset = 420
+	split.add_child(right_split)
+
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -136,7 +146,42 @@ func _shell_build_right(split: HSplitContainer) -> void:
 	_form.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_form.add_theme_constant_override("separation", 8)
 	scroll.add_child(_form)
-	split.add_child(scroll)
+	right_split.add_child(scroll)
+
+	var prev_scroll := ScrollContainer.new()
+	prev_scroll.custom_minimum_size = Vector2(230, 0)
+	prev_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_preview = VBoxContainer.new()
+	_preview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_preview.add_theme_constant_override("separation", 6)
+	prev_scroll.add_child(_preview)
+	right_split.add_child(prev_scroll)
+	_refresh_preview()
+
+# 即时预览（SkillTooltip 共享渲染）：_mark_dirty 顺带刷新（表单未建全时 _form_ready 闸住防半构造 collect 崩）
+func _refresh_preview() -> void:
+	if _preview == null or not is_instance_valid(_preview):
+		return
+	for c in _preview.get_children():
+		c.free()
+	var title := Label.new()
+	title.text = "预览（成品效果）"
+	title.add_theme_color_override("font_color", Color("#EBBC04"))
+	title.add_theme_font_size_override("font_size", 14)
+	_preview.add_child(title)
+	if not _form_ready or _w_id == null or not is_instance_valid(_w_id):
+		var h := Label.new()
+		h.text = "（编辑能力时此处即时显示）"
+		h.add_theme_color_override("font_color", Color(0.55, 0.6, 0.66))
+		h.add_theme_font_size_override("font_size", 12)
+		_preview.add_child(h)
+		return
+	_preview.add_child(SkillTooltip.render(_shell_collect()))
+
+func _mark_dirty() -> void:
+	_dirty = true
+	if _form_ready:
+		_refresh_preview()
 
 func _shell_show_empty() -> void:
 	_clear_form()
@@ -215,6 +260,7 @@ func _shell_open_as_new(entry: Dictionary) -> void:
 # —— 表单 ——
 
 func _clear_form() -> void:
+	_form_ready = false   # 半构造期闸住预览的 _shell_collect（控件未建全会崩）
 	for c in _form.get_children():
 		c.queue_free()
 	_tags = []
@@ -375,6 +421,8 @@ func _build_form() -> void:
 	addrow.add_child(addb)
 	_form.add_child(addrow)
 
+	_form_ready = true
+	_refresh_preview()   # 载入完成 → 首刷预览
 	_dirty = false   # 建表单期间控件信号可能置脏——载入完成＝干净基线
 
 # §25 被动灰化联动：active 实时切换成本/限制段可编性——灰化只锁输入不动值（勿静默清数据）

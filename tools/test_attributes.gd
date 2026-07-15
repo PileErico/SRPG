@@ -48,7 +48,7 @@ func _initialize() -> void:
 	var fist = ItemInstances.view(int(u.equipment["main_hand"]))
 	ck(fist != null and bool(fist.get("natural", false)), "主手＝默认型天生武器")
 	ck(str(u.basic_attack().get("name", "")) == "徒手", "普攻＝拳脚攻击行为")
-	ck(is_equal_approx(u.effective_stat_f("atk"), 2.5), "徒手攻击力 2.5（数值在拳脚条目）")
+	ck(is_equal_approx(u.effective_stat_f("atk"), 3.0), "徒手攻击力 3（数值在拳脚条目——用户配数 2026-07-15）")
 	ck(is_equal_approx(u.effective_stat_f("acc"), 0.0), "acc 面板 0（基准命中在武器技能 hit——决策33 三轮校准）")
 	# 顶替：装长剑 → 拳脚收回；卸下 → 拳脚回位
 	ck(u.equip("long_sword"), "装长剑成功（顶掉拳脚）")
@@ -57,7 +57,7 @@ func _initialize() -> void:
 	var sword_uid: int = int(u.equipment["main_hand"])
 	u.unequip("main_hand")
 	ck(u.equipment.has("main_hand") and int(u.equipment["main_hand"]) != sword_uid, "卸剑后拳脚自动回位")
-	ck(is_equal_approx(u.effective_stat_f("atk"), 2.5), "回位后徒手数值恢复")
+	ck(is_equal_approx(u.effective_stat_f("atk"), 3.0), "回位后徒手数值恢复")
 	ck(not u.apply_attr_pick("HP_max"), "非四属性键不可加点")
 	# proto 序列化不带拳脚
 	var proto := UnitFactory.unit_to_proto(u)
