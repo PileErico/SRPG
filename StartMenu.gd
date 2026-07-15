@@ -61,13 +61,13 @@ func _ready() -> void:
 	right.add_theme_constant_override("separation", 14)
 	cols.add_child(right)
 	right.add_child(_col_header("开发工具"))
-	right.add_child(_menu_button("🗺️ 地图编辑", _on_map_editor, false))
 	right.add_child(_menu_button("🎮 编辑器（编辑 · 试玩）", _on_game, false))
+	right.add_child(_menu_button("🗺️ 地图编辑", _on_map_editor, false))
 	right.add_child(_menu_button("👤 角色编辑器", _on_char_editor, false))
 	right.add_child(_menu_button("⚔️ 物品编辑器", _on_item_editor, false))
 	right.add_child(_menu_button("🤺 技能编辑器（能力 · 效果）", _on_skill_editor, false))
 	right.add_child(_menu_button("🎨 外观工坊（换装换色）", _on_appearance_workshop, false))
-	right.add_child(_menu_button("🧱 地块绘制工坊", _on_terrain_workshop, false))
+	right.add_child(_menu_button("🗻 地块绘制工坊", _on_terrain_workshop, false))
 
 func _menu_button(text: String, cb: Callable, disabled: bool) -> Button:
 	var b := Button.new()
