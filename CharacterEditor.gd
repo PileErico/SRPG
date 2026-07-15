@@ -919,7 +919,7 @@ func _remove_skill(sid: String) -> void:
 	_rebuild_panel()
 	_mark_dirty()
 
-# 技艺区：已识（known）行内带「装载」勾选（slots ⊆ known 天然成立）+ ✕；悬空槽位引用 ⚠ 行
+# 技艺区：下拉选中即学习（known）；行内熟练度 SpinBox 直调＋档位标注＋✕；悬空槽位引用 ⚠ 行
 func _build_prof_ui() -> void:
 	# 2026-07-15 用户令：右栏只管**已学习（known）**——装载/卸载移到左侧角色卡「技能」页点格换装
 	# （UnitStatusPanel editor_mode：空槽点选已学习装载、已装点卸载；槽容量随等级即时刷新）
@@ -951,16 +951,13 @@ func _build_prof_ui() -> void:
 		for pid in rest:
 			pick.add_item("%s（%s）" % [ProfDB.prof_name(str(pid)), str(pid)])
 			pick.set_item_metadata(pick.item_count - 1, str(pid))
-	adder.add_child(pick)
-	var addb := Button.new()
-	addb.text = "＋ 已学习"
-	addb.tooltip_text = "加入已学习列表（known）——只有已学习的技能才能装进左侧「技能」页的槽位。\nxp（熟练度值）不在此编辑——随存档/战斗喂养，原样往返。"
-	addb.pressed.connect(func():
+	pick.tooltip_text = "选中即学习（加入 known）——只有已学习的技能才能装进左侧「技能」页的槽位。\n熟练度值在下方行内直接调整。"
+	pick.item_selected.connect(func(_i: int):   # 选中即学（2026-07-15 用户令：去二段「＋已学习」确认）
 		var pid := str(pick.get_selected_metadata())
 		if pid != "":
 			_add_prof_known(pid)
-		pick.select(0))
-	adder.add_child(addb)
+		pick.select(0))   # 归位占位项（select() 不re触发 item_selected）
+	adder.add_child(pick)
 	_strip.add_child(adder)
 	_prof_box = VBoxContainer.new()
 	_prof_box.add_theme_constant_override("separation", 3)
@@ -992,6 +989,25 @@ func _rebuild_prof_box() -> void:
 		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		l.clip_text = true
 		row.add_child(l)
+		if registered:   # 行内熟练度直调（2026-07-15 用户令）；⚠ 未登记行原样往返不给编辑口
+			var stage_l := Label.new()
+			stage_l.add_theme_font_size_override("font_size", 12)
+			stage_l.custom_minimum_size = Vector2(34, 0)
+			_apply_stage_label(stage_l, int(_unit.prof_xp.get(pid, 0)))
+			var sp := SpinBox.new()
+			sp.min_value = 0
+			sp.max_value = int(ProfDB.MASTER_XP_CAP)
+			sp.step = 1
+			sp.value = int(_unit.prof_xp.get(pid, 0))
+			sp.custom_minimum_size = Vector2(86, 0)
+			sp.tooltip_text = "熟练度值（0~%d）：101/301/601/1001 进阶" % int(ProfDB.MASTER_XP_CAP)
+			var p3 := pid
+			var sl := stage_l
+			sp.value_changed.connect(func(v: float):
+				_set_prof_xp(p3, int(v))
+				_apply_stage_label(sl, int(v)))
+			row.add_child(sp)
+			row.add_child(stage_l)
 		if _unit.prof_slots.has(pid):   # 装载态只读标注（装/卸交互在左侧角色卡「技能」页点格）
 			var on := Label.new()
 			on.text = "已装载"
@@ -1041,6 +1057,21 @@ func _remove_prof_known(pid: String) -> void:
 	_rebuild_prof_box()
 	_rebuild_panel()
 	_mark_dirty()
+
+# 行内熟练度直调落账：Unit.set_prof_xp（装载中自动按新阶段重挂补正；0=删键）。
+# 只刷左卡不重建本栏——SpinBox 正被输入，重建会打断焦点；档位标注由调用方原位更新。
+func _set_prof_xp(pid: String, v: int) -> void:
+	if _unit == null:
+		return
+	_unit.set_prof_xp(pid, v)
+	_rebuild_panel()
+	_mark_dirty()
+
+# 档位标注（名+色）——显示口径走 UnitStatusPanel._prof_disp 单源（xp=0→入门，非"生疏"）
+func _apply_stage_label(l: Label, xp: int) -> void:
+	var disp: Dictionary = UnitStatusPanel._prof_disp(xp)
+	l.text = str(disp["name"])
+	l.add_theme_color_override("font_color", Color(str(disp["color"])))
 
 # （_toggle_prof_slot 已拆 2026-07-15 用户令：装载/卸载移到角色卡「技能」页点格换装——
 #   UnitStatusPanel.editor_slot_prof/editor_unslot_prof〔烘焙 force 同规 🔒 §6〕，宿主经 on_edit 标脏）

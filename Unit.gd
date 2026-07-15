@@ -1137,6 +1137,16 @@ func gain_prof(id: String, amount: int) -> int:
 		return new_stage
 	return 0
 
+# 直设熟练度（编辑器烘焙口 2026-07-15；不走喂养限制/装载门槛）：装载中则按新阶段重挂补正。
+# 0＝删键（prof_xp 缺省即 0，序列化不留零值行）。
+func set_prof_xp(id: String, v: int) -> void:
+	if v <= 0:
+		prof_xp.erase(id)
+	else:
+		prof_xp[id] = v
+	if prof_slots.has(id):
+		_apply_prof_mods(id)
+
 # 挂/重挂某域当前阶段的数值补正：取 stage_mods 里 stage ≤ 当前阶段的**最高一档**（各档=该阶段的完整值，不叠加）。
 func _apply_prof_mods(id: String) -> void:
 	var source := "prof:" + id

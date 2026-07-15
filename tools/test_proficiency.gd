@@ -63,6 +63,13 @@ func _initialize() -> void:
 	ck(ns == 4, "跨阶报进阶（专家，实得 %d）" % ns)
 	ck(u.effective_stat_f("acc") == acc0 + 4.0, "进阶重挂：acc+4（实得 %.1f）" % u.effective_stat_f("acc"))
 
+	# 4b) 直设熟练度（set_prof_xp 编辑器烘焙口 2026-07-15）：装载中按新阶段重挂；0=删键回生疏
+	u.set_prof_xp("wp_sword", 300)   # 专家(700) → 老练
+	ck(u.effective_stat_f("acc") == acc0 + 3.0, "直设降档重挂补正：acc+3（实得 %.1f）" % u.effective_stat_f("acc"))
+	u.set_prof_xp("wp_sword", 0)
+	ck(not u.prof_xp.has("wp_sword") and u.prof_stage("wp_sword") == 1, "直设 0＝删键、阶段回生疏")
+	ck(u.effective_stat_f("acc") == acc0, "生疏无补正（stage1 无档 → 全摘）")
+
 	# 5) 前置资格：一次性闸门 + AND/OR + 浮现
 	var v = Unit.new("修行者", "player", -1, -1)
 	v.level = 17

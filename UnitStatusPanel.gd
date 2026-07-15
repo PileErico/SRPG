@@ -674,7 +674,8 @@ const PROF_FONT_CELL := 13                        # 装备格下方「名-档位
 const PROF_FONT_LIST := 15                        # 右侧「已习得」列表字号
 
 # xp → 档位定义 {name, lo, hi, color}（阈值/名字来自 ProfDB.stage_of 单一源；hi＝下一档下界或大师满值）
-func _prof_tier(xp: int) -> Dictionary:
+# static 公开复用：档位显示口径单源——角色编辑器已学习行同吃（与 ItemTooltip 小件跨类复用同约定）。
+static func _prof_tier(xp: int) -> Dictionary:
 	var stage: int = ProfDB.stage_of(xp)
 	var lo := int(ProfDB.STAGE_THRESHOLDS[stage - 1])
 	var hi := int(ProfDB.STAGE_THRESHOLDS[stage]) if stage < ProfDB.STAGE_THRESHOLDS.size() else int(ProfDB.MASTER_XP_CAP)
@@ -691,7 +692,7 @@ func _prof_tier_progress(xp: int) -> float:
 # 已学习但 xp=0（编辑器刚标 known）＝入门(白)，与「已学=可装载,生疏起步」三态对齐（Unit.gd L131）。
 const PROF_UNLEARNED := {"name": "未学习", "color": "#808080"}
 const PROF_TIER0_NAME := "入门"
-func _prof_disp(xp: int, known := true) -> Dictionary:
+static func _prof_disp(xp: int, known := true) -> Dictionary:
 	if not known:
 		return PROF_UNLEARNED
 	var t := _prof_tier(xp)
