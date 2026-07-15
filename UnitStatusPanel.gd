@@ -685,12 +685,14 @@ func _prof_tier_progress(xp: int) -> float:
 	var t := _prof_tier(xp)
 	return clampf(float(xp - int(t["lo"])) / float(maxi(1, int(t["hi"]) - int(t["lo"]))), 0.0, 1.0)
 
-# 档位「显示」名/色（🔒 用户 2026-07-07）：xp=0→深灰「未学习」；xp>0 首段→白「入门」（覆盖 ProfDB 的"生疏"）；
+# 档位「显示」名/色（🔒 用户 2026-07-07）：未学习→深灰；首段→白「入门」（覆盖 ProfDB 的"生疏"）；
 # 其后 娴熟/老练/专家/大师 照旧。仅覆盖 UI 显示、不动数据层；gauge 填充/进度仍走 _prof_tier。
+# ⚠️ 判据修订（2026-07-15 known 三态落地）：未学习＝不在 prof_known，不再拿 xp==0 顶替——
+# 已学习但 xp=0（编辑器刚标 known）＝入门(白)，与「已学=可装载,生疏起步」三态对齐（Unit.gd L131）。
 const PROF_UNLEARNED := {"name": "未学习", "color": "#808080"}
 const PROF_TIER0_NAME := "入门"
-func _prof_disp(xp: int) -> Dictionary:
-	if xp <= 0:
+func _prof_disp(xp: int, known := true) -> Dictionary:
+	if not known:
 		return PROF_UNLEARNED
 	var t := _prof_tier(xp)
 	return {"name": PROF_TIER0_NAME if int(t["lo"]) == 0 else str(t["name"]), "color": str(t["color"])}
@@ -884,8 +886,8 @@ func _popup_prof_pick() -> void:
 	else:
 		for i in ids.size():
 			var pid := str(ids[i])
-			var stage: int = ProfDB.stage_of(int(_unit.prof_xp.get(pid, 0)))
-			pm.add_item("%s（%s）" % [ProfDB.prof_name(pid), ProfDB.stage_name(stage)], i)
+			var disp := _prof_disp(int(_unit.prof_xp.get(pid, 0)))   # 显示名走面板口径（xp=0→入门，非"生疏"）
+			pm.add_item("%s（%s）" % [ProfDB.prof_name(pid), str(disp["name"])], i)
 			pm.set_item_metadata(pm.item_count - 1, pid)
 		pm.index_pressed.connect(func(idx: int):
 			editor_slot_prof(str(pm.get_item_metadata(idx))))
@@ -990,7 +992,7 @@ func _prof_cell_label(d: Dictionary) -> Control:
 		e.add_theme_font_size_override("font_size", PROF_FONT_CELL)
 		h.add_child(e)
 		return h
-	var disp := _prof_disp(int(d.get("xp", 0)))   # xp=0→未学习(灰)；xp>0→入门/娴熟/…
+	var disp := _prof_disp(int(d.get("xp", 0)))   # 装载格必已学习（slot_prof 有 known 门槛）→ 入门/娴熟/…
 	var nm := Label.new()
 	nm.text = str(d.get("name", "")) + "-"
 	nm.add_theme_font_size_override("font_size", PROF_FONT_CELL)
@@ -1083,9 +1085,9 @@ func _fill_prof_main(main: VBoxContainer, pid: String, u) -> void:
 	title.add_theme_font_size_override("font_size", 17)
 	title.add_theme_color_override("font_color", Color("#EBBC04"))
 	hdr.add_child(title)
-	var disp := _prof_disp(xp)   # xp>0→入门/娴熟/…（未学习不在标题重复：计量条底部已示）
+	var disp := _prof_disp(xp, known)   # 已学习→入门/娴熟/…（未学习不在标题重复：计量条底部已示）
 	var st := Label.new()
-	st.text = "" if xp <= 0 else "%s%s" % [str(disp["name"]), "　·　已装载" if u.prof_slots.has(pid) else ""]
+	st.text = "" if not known else "%s%s" % [str(disp["name"]), "　·　已装载" if u.prof_slots.has(pid) else ""]
 	st.add_theme_color_override("font_color", Color(str(disp["color"])))
 	st.add_theme_font_size_override("font_size", 13)
 	st.size_flags_vertical = Control.SIZE_SHRINK_CENTER
@@ -1104,7 +1106,7 @@ func _fill_prof_main(main: VBoxContainer, pid: String, u) -> void:
 # 行按 4 次进阶等距排布（不与大刻度对齐——各阶所需熟练度不等，刻度本就不均匀）；未达阶段压暗。
 # ⚠️ 奖励/perk 数据未接（proficiencies.json 后加池）；本类只搭视觉、读真 xp。
 class ProfTreeView extends Control:
-	# {name,lo,hi,color}；首段＝入门(白，xp>0)；xp=0 另显「未学习」深灰。
+	# {name,lo,hi,color}；首段＝入门(白)；未学习（不在 prof_known）另显深灰——判据=known，非 xp==0。
 	const TIERS := [
 		{"name": "入门", "lo": 0,    "hi": 100,  "color": "#E0E0E0"},
 		{"name": "娴熟", "lo": 101,  "hi": 300,  "color": "#4FAE5A"},
@@ -1123,10 +1125,12 @@ class ProfTreeView extends Control:
 	const PERKS := 3                         # 占位：每阶右侧 perk 数
 
 	var xp := 0
+	var known := false
 	var reached := 1                         # 当前阶段序号 1..5（=TIERS 索引+1）
 
 	func setup(_xp: int, _known: bool) -> void:
 		xp = clampi(_xp, 0, MAXXP)
+		known = _known
 		reached = 1
 		for i in TIERS.size():
 			if xp >= int(TIERS[i]["lo"]):
@@ -1222,10 +1226,10 @@ class ProfTreeView extends Control:
 		draw_line(Vector2(cx - BAR_W * 0.5, bar_top), Vector2(cx + BAR_W * 0.5, bar_top), Color(str(TIERS[4]["color"])), 2.0)   # 顶端 1500 大师满（满宽）
 		var font := get_theme_default_font()
 		if font != null:   # 底部当前档位（自底往上涨 → 精通阶段写最下）
-			var nm := "未学习" if xp <= 0 else str(TIERS[reached - 1]["name"])
-			var col := Color("#808080") if xp <= 0 else Color(str(TIERS[reached - 1]["color"]))
+			var nm := "未学习" if not known else str(TIERS[reached - 1]["name"])
+			var col := Color("#808080") if not known else Color(str(TIERS[reached - 1]["color"]))
 			draw_string(font, Vector2(cx - 60, size.y - BOT_PAD + 22), nm, HORIZONTAL_ALIGNMENT_CENTER, 120, 16, col)
-			if xp > 0:
+			if known:
 				draw_string(font, Vector2(cx - 60, size.y - BOT_PAD + 35), "%d / %d" % [xp, MAXXP], HORIZONTAL_ALIGNMENT_CENTER, 120, 11, Color(1, 1, 1, 0.45))
 
 # 右上属性区（重排中·先放核心两条）：血量 / 护甲值 —— 图标 + 横向计量条（叠当前/上限）。
