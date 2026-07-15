@@ -6,7 +6,8 @@ extends SceneTree
 ##  · 双固有面板：顶层三键=双手形态（source i_）+ one_handed 子面板=单手形态（i1_）——
 ##    _grip_source_active 按握持只放行一套（格挡休眠同族 source 门控，零重挂）
 ##  · 熟练度喂养动态跟随：current_attack_tags 注入有效握持 tag
-##  · 技能 grip 施放闸：grip_met（菜单灰显同口）+ apply_skill 守卫拒发零消耗
+##  · 武器侧握持组（🔒 决策35 修订 2026-07-15：握持是武器的属性）：BWS 双槽（bws/bws_2h 随握持切、
+##    单槽共用回退）+ EWS 两桶（ews=单手组/ews_2h=双手组，ews_grip_ok 菜单/守卫同口）
 ## 运行：..._console.exe --headless --path "D:/1战棋" -s res://tools/test_versatile.gd（退出码 0=PASS）
 
 const SandboxScript := preload("res://Sandbox.gd")
@@ -43,17 +44,22 @@ func mk(nm: String, fac: String, col: int, row: int):
 
 func _initialize() -> void:
 	print("=== 决策35 兼用武器/握持条件 测试开始 ===")
-	# —— 临时技能库：共用 BWS（无 grip）+ 单/双手专属 EWS（heal 形＝可跑块，供 apply_skill 守卫测试）——
+	# —— 临时技能库（🔒 决策35 修订：技能侧无 grip 键——握持组在武器侧）：
+	# 两条 BWS（双槽试料）+ 两条 EWS（heal 形＝可跑块，供 apply_skill 守卫测试）——
 	var skills := [
 		{"id": "vt_bws", "name": "矛刺", "active": true, "weapon_skill": true, "tags": [],
 			"costs": {"ap": 1}, "cooldown": {"base": 0}, "max_level": 1,
 			"target": {"enemy": true, "ally": false, "self": false}, "range": 1,
 			"effects": [{"kind": "attack", "hits": [{"coeff": 1.0}]}]},
-		{"id": "vt_2h", "name": "双手上劈", "active": true, "weapon_skill": true, "grip": "two_handed", "tags": [],
+		{"id": "vt_bws2", "name": "双手贯刺", "active": true, "weapon_skill": true, "tags": [],
+			"costs": {"ap": 1}, "cooldown": {"base": 0}, "max_level": 1,
+			"target": {"enemy": true, "ally": false, "self": false}, "range": 1,
+			"effects": [{"kind": "attack", "hits": [{"coeff": 1.2}]}]},
+		{"id": "vt_2h", "name": "双手上劈", "active": true, "weapon_skill": true, "tags": [],
 			"costs": {"ap": 1}, "cooldown": {"base": 0}, "max_level": 1,
 			"target": {"enemy": false, "ally": false, "self": true}, "range": 0,
 			"effects": [{"kind": "heal", "heal_pct_max_hp": 10}]},
-		{"id": "vt_1h", "name": "单手突刺", "active": true, "weapon_skill": true, "grip": "one_handed", "tags": [],
+		{"id": "vt_1h", "name": "单手突刺", "active": true, "weapon_skill": true, "tags": [],
 			"costs": {"ap": 1}, "cooldown": {"base": 0}, "max_level": 1,
 			"target": {"enemy": false, "ally": false, "self": true}, "range": 0,
 			"effects": [{"kind": "heal", "heal_pct_max_hp": 10}]},
@@ -63,12 +69,17 @@ func _initialize() -> void:
 	sf.close()
 	SkillDB._path_override = "user://test_vt_skills.json"
 	SkillDB.reload_data()
-	# —— 临时物品库：兼用矛（双面板）/ 普通单手剑 / 盾 / 拳脚（natural 试料）——
+	# —— 临时物品库：兼用矛（双面板+BWS 双槽+EWS 两桶）/ 只配单槽的兼用枪（共用回退试料）/ 普通单手剑 / 盾 / 拳脚 ——
 	var weapons := [
-		{"id": "vt_spear", "name": "翼矛", "slot": "main_hand", "tags": ["versatile"], "bws": "vt_bws",
+		{"id": "vt_spear", "name": "翼矛", "slot": "main_hand", "tags": ["versatile"],
+			"bws": "vt_bws", "bws_2h": "vt_bws2",
 			"atk": 8, "block_rate": 10, "block_power": 0,
 			"one_handed": {"atk": 5, "block_rate": 4, "block_power": 0},
-			"ews": [{"skill": "vt_2h"}, {"skill": "vt_1h"}]},
+			"ews": [{"skill": "vt_1h"}], "ews_2h": [{"skill": "vt_2h"}]},
+		{"id": "vt_lance", "name": "短枪", "slot": "main_hand", "tags": ["versatile"],
+			"bws": "vt_bws",
+			"atk": 6, "block_rate": 0, "block_power": 0,
+			"one_handed": {"atk": 4, "block_rate": 0, "block_power": 0}},
 		{"id": "vt_sword", "name": "素剑", "slot": "main_hand", "tags": ["one_handed"], "bws": "vt_bws",
 			"atk": 0, "block_rate": 0, "block_power": 0},
 		{"id": "vt_shield", "name": "木盾", "slot": "off_hand", "tags": ["shield"]},
@@ -133,28 +144,37 @@ func _initialize() -> void:
 	var t2: Array = e.current_attack_tags()
 	ck(t2.has("one_handed") and not t2.has("two_handed"), "配盾喂「单手」style（注入 one_handed）")
 
-	# —— 7) 技能握持条件：grip_met（菜单灰显同口）+ apply_skill 守卫拒发零消耗 ——
+	# —— 7) 武器侧握持组（🔒 决策35 修订）：BWS 双槽随握持切 + EWS 两桶 ews_grip_ok + apply_skill 守卫 ——
 	var sb = SandboxScript.new()
 	sb._new_grassland(7, 7)
 	var g = mk("施放者", "player", 3, 3)
 	ck(g.equip("vt_spear"), "装翼矛（单持=双手）")
 	sb.units = [g]
-	var def2h = SkillDB.get_skill("vt_2h")
-	var def1h = SkillDB.get_skill("vt_1h")
-	ck(g.grip_met(def2h) and not g.grip_met(def1h), "单持：双手技能可用、单手技能灰")
+	ck(str(g.basic_attack().get("name", "")) == "双手贯刺", "单持 → 普攻走双手槽 bws_2h（双手贯刺）")
+	ck(g.ews_grip_ok("vt_2h") and not g.ews_grip_ok("vt_1h"), "单持：双手组 EWS 可用、单手组灰（ews_grip_ok）")
 	g.ap = 4
 	var ev_fail: Array = sb._state.apply_skill(g, "vt_1h", g)
-	ck(ev_fail.is_empty() and g.ap == 4, "守卫：握持不符 → 拒发零消耗（AP 不动）")
+	ck(ev_fail.is_empty() and g.ap == 4, "守卫：握持组不匹配 → 拒发零消耗（AP 不动）")
 	var hp0 := int(g.stats["HP"])
 	var ev_ok: Array = sb._state.apply_skill(g, "vt_2h", g)
-	ck(not ev_ok.is_empty() and g.ap == 3 and int(g.stats["HP"]) > hp0, "握持相符 → 正常施放（扣 AP+生效）")
+	ck(not ev_ok.is_empty() and g.ap == 3 and int(g.stats["HP"]) > hp0, "握持组匹配 → 正常施放（扣 AP+生效）")
 	ck(g.equip("vt_shield"), "配盾切单手")
-	ck(not g.grip_met(def2h) and g.grip_met(def1h), "配盾：单手技能亮、双手技能灰（战斗中即时翻转）")
+	ck(str(g.basic_attack().get("name", "")) == "矛刺", "配盾 → 普攻走单手槽 bws（矛刺）")
+	ck(not g.ews_grip_ok("vt_2h") and g.ews_grip_ok("vt_1h"), "配盾：单手组亮、双手组灰（战斗中即时翻转）")
 	var ev_fail2: Array = sb._state.apply_skill(g, "vt_2h", g)
-	ck(ev_fail2.is_empty() and g.ap == 3, "守卫：配盾后双手技能拒发零消耗")
+	ck(ev_fail2.is_empty() and g.ap == 3, "守卫：配盾后双手组拒发零消耗")
+	# 菜单口径：EWS 条目带 grip_req（Sandbox 灰显同吃）
+	var reqs := {}
+	for en in g.ews_entries():
+		reqs[str(en["id"])] = str(en.get("grip_req", ""))
+	ck(str(reqs.get("vt_1h", "")) == "one_handed" and str(reqs.get("vt_2h", "")) == "two_handed",
+		"ews_entries 两桶各带 grip_req（单手组/双手组）")
 
-	# —— 8) 无 grip 键＝不限（BWS/旧技能零回归）——
-	ck(g.grip_met(SkillDB.get_skill("vt_bws")), "无 grip 键＝不限握持")
+	# —— 8) BWS 单槽共用回退（只配 bws 的兼用件：双手形态共用单手槽）+ 非 EWS 无握持概念 ——
+	var g2 = mk("短枪手", "player", 4, 3)
+	ck(g2.equip("vt_lance"), "装短枪（兼用·只配单手槽 bws）")
+	ck(str(g2.basic_attack().get("name", "")) == "矛刺", "单持无 bws_2h → 共用单手槽（矛刺）")
+	ck(g.ews_grip_ok("vt_bws"), "非 EWS 引用（bws/已学技能）＝无握持概念恒可用")
 
 	# —— 清场：撤 override、清实例 ——
 	SkillDB._path_override = ""

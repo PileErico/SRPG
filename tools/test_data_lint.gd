@@ -310,10 +310,18 @@ func _initialize() -> void:
 			var inf_hits := []
 			_find_key(s, "inflict", sid, inf_hits)
 			ck(inf_hits.is_empty(), "%s：inflict 已改词 on_hit_effects 数组（2026-07-15 键级统一）——禁回流（命中：%s）" % [sid, ", ".join(inf_hits)])
-			# grip 握持条件（🔒 决策35 运行时可用性条件）：值白名单 + 只属武器技能
-			var sgv := str(s.get("grip", ""))
-			ck(sgv in ["", "one_handed", "two_handed"], "%s：grip ∈ {one_handed,two_handed}（决策35；实为「%s」）" % [sid, sgv])
-			ck(sgv == "" or bool(s.get("weapon_skill", false)), "%s：grip 只属武器技能（weapon_skill=true；决策35）" % sid)
+			# 禁键 grip（🔒 决策35 修订 2026-07-15：握持是武器的属性——武器侧 bws_2h/ews_2h 承载，技能侧键废）
+			ck(not s.has("grip"), "%s：grip 已废（决策35 修订——握持组挪武器侧）——禁回流" % sid)
+			# damage_type → 创伤 tag 派生一致性（2026-07-15 用户校准：字段为源、tag 自动附带——编辑器随存同步，此处执法）
+			var want_dmg := {}
+			for _b in s.get("effects", []):
+				if typeof(_b) == TYPE_DICTIONARY and str(_b.get("kind", "")) == "attack":
+					for _h in _b.get("hits", []):
+						if typeof(_h) == TYPE_DICTIONARY and str(_h.get("damage_type", "")) != "":
+							want_dmg[str(_h["damage_type"])] = true
+			var stags: Array = s.get("tags", [])
+			for wd in want_dmg:
+				ck(stags.has(wd), "%s：攻击块 damage_type=%s 须派生同名创伤 tag（字段为源——编辑器重存即补）" % [sid, wd])
 			var pls := []
 			_collect_key_arrays(s, "per_level", pls)
 			for pl in pls:
@@ -336,6 +344,7 @@ func _initialize() -> void:
 		var bas_refs := []
 		_collect_key_strings(wd, "bas", bas_refs)
 		_collect_key_strings(wd, "bws", bas_refs)
+		_collect_key_strings(wd, "bws_2h", bas_refs)   # 兼用双手槽同校（决策35 修订）
 		for b in bas_refs:
 			var bdef = SkillDB.get_skill(b)
 			ck(bdef != null, "weapons 引用的 BWS 技能存在：%s" % b)
@@ -343,8 +352,6 @@ func _initialize() -> void:
 				"%s：被引为 BWS 须勾选「武器技能」（🔒 决策29 勾选制——勾了才可被武器选取）" % b)
 			ck(bdef == null or not SkillDB.flatten_bws(bdef).is_empty(),
 				"%s：被引为 BWS 须含合法 attack 块（无块＝flatten 空→普攻退化徒手）" % b)
-			ck(bdef == null or str(bdef.get("grip", "")) == "",
-				"%s：被引为 BWS 禁带 grip 握持条件（🔒 决策35：普攻恒可用——握持专属招式走 EWS 位）" % b)
 		var inline_left := 0
 		if typeof(wd) == TYPE_ARRAY:
 			for w in wd:
@@ -353,27 +360,22 @@ func _initialize() -> void:
 				var wid := str(w.get("id", "?"))
 				if w.has("attack") and str(w.get("bws", w.get("bas", ""))) == "":
 					inline_left += 1
-				var wtags0: Array = w.get("tags", [])
-				for e in w.get("ews", []):
-					var sid := str(e.get("skill", "")) if typeof(e) == TYPE_DICTIONARY else str(e)
-					var sdef = SkillDB.get_skill(sid)
-					ck(sdef != null, "%s：ews 引用的技能存在：%s" % [wid, sid])
-					ck(sdef == null or SkillDB.is_weapon_skill(sdef), "%s：ews「%s」须勾选「武器技能」（🔒 决策29）" % [wid, sid])
-					# grip 与武器静态握持相容（🔒 决策35）：单手武器挂「需双手持」/双手武器挂「需单手持」＝永不可用；兼用双态皆可
-					var sg := str(sdef.get("grip", "")) if sdef != null else ""
-					if sg != "" and not wtags0.has("versatile"):
-						ck(not ((sg == "two_handed" and wtags0.has("one_handed")) or (sg == "one_handed" and wtags0.has("two_handed"))),
-							"%s：ews「%s」握持条件（%s）与武器静态握持不相容——永不可用（决策35）" % [wid, sid, sg])
-					# 主动/可跑块闸已撤（2026-07-13 用户校准：BWS/EWS 只是引用方式、选取一视同仁）——
-					# 纯 attack 形 EWS 合法入库；施放接线＝阶段6（战斗菜单灰显、apply_skill 守卫兜底零消耗）
-					if typeof(e) == TYPE_DICTIONARY:
-						for r in e.get("requires", []):
-							if typeof(r) != TYPE_DICTIONARY:
-								ck(false, "%s：ews「%s」requires 条目须为对象 {prof,value}" % [wid, sid])
-								continue
-							var pid := str(r.get("prof", ""))
-							ck(not ProfDB.get_prof(pid).is_empty(), "%s：ews「%s」条件域存在于 ProfDB：%s" % [wid, sid, pid])
-							ck(int(r.get("value", -1)) >= 0, "%s：ews「%s」条件阈值须 ≥0（裸数值，决策26）" % [wid, sid])
+				# 两桶 EWS 同校（决策35 修订：ews=单手组/ews_2h=双手组——条目形状同规）
+				# 主动/可跑块闸已撤（2026-07-13 用户校准）——纯 attack 形 EWS 合法入库；施放接线＝阶段6
+				for lk in ["ews", "ews_2h"]:
+					for e in w.get(lk, []):
+						var sid := str(e.get("skill", "")) if typeof(e) == TYPE_DICTIONARY else str(e)
+						var sdef = SkillDB.get_skill(sid)
+						ck(sdef != null, "%s：%s 引用的技能存在：%s" % [wid, lk, sid])
+						ck(sdef == null or SkillDB.is_weapon_skill(sdef), "%s：%s「%s」须勾选「武器技能」（🔒 决策29）" % [wid, lk, sid])
+						if typeof(e) == TYPE_DICTIONARY:
+							for r in e.get("requires", []):
+								if typeof(r) != TYPE_DICTIONARY:
+									ck(false, "%s：%s「%s」requires 条目须为对象 {prof,value}" % [wid, lk, sid])
+									continue
+								var pid := str(r.get("prof", ""))
+								ck(not ProfDB.get_prof(pid).is_empty(), "%s：%s「%s」条件域存在于 ProfDB：%s" % [wid, lk, sid, pid])
+								ck(int(r.get("value", -1)) >= 0, "%s：%s「%s」条件阈值须 ≥0（裸数值，决策26）" % [wid, lk, sid])
 		ck(inline_left == 0, "内联 attack 已清零（技改 §4-11 收口：%d 件武器仍无 bws 引用——决策25 引用制不回流）" % inline_left)
 
 	# 9) 原型引用完整性（技改 §4-1：改物品/技能/种族 id 即静默断链——逐类存在性校验）
@@ -557,6 +559,8 @@ func _initialize() -> void:
 							"%s：one_handed 子面板 %s 必填数值（0=无此项，决策35）" % [wid2, k])
 			else:
 				ck(not w.has("one_handed"), "%s：one_handed 子面板只属兼用件（决策35）" % wid2)
+				ck(not w.has("bws_2h") and not w.has("ews_2h"),
+					"%s：bws_2h/ews_2h 双手槽·组只属兼用件（决策35 修订）" % wid2)
 
 	if _fail == 0:
 		print("=== 数据 lint 全 PASS ===")

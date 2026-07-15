@@ -219,33 +219,46 @@ static func render(item: Dictionary) -> Control:
 			note.add_theme_font_size_override("font_size", 12)
 			note.add_theme_color_override("font_color", Color(0.70, 0.85, 1.0))
 			v.add_child(note)
-	# EWS 额外技能陈列（🔒 决策26：解锁条件跟武器引用走；tooltip 只陈列定义+条件，解锁态在能力菜单表达）
+	# 兼用件双手形态普攻注记（🔒 决策35 修订：bws_2h 双手槽——上方攻击段展示的是单手/共用槽）
+	if versat:
+		var b2 := str(item.get("bws_2h", ""))
+		if b2 != "":
+			var b2def = SkillDB.get_skill(b2)
+			v.add_child(_kv("双手形态普攻", str(b2def.get("name", b2)) if b2def != null else "%s（引用悬空）" % b2))
+	# EWS 额外技能陈列（🔒 决策26：解锁条件跟武器引用走；tooltip 只陈列定义+条件，解锁态在能力菜单表达。
+	# 决策35 修订：兼用件两桶——ews=单手组/ews_2h=双手组，行尾标注握持前置）
 	var ews = item.get("ews", [])
-	if typeof(ews) == TYPE_ARRAY and not ews.is_empty():
+	var ews2 = item.get("ews_2h", [])
+	var has_ews: bool = typeof(ews) == TYPE_ARRAY and not (ews as Array).is_empty()
+	var has_ews2: bool = typeof(ews2) == TYPE_ARRAY and not (ews2 as Array).is_empty()
+	if has_ews or has_ews2:
 		v.add_child(HSeparator.new())
-		for e in ews:
-			var sid := str(e.get("skill", "")) if typeof(e) == TYPE_DICTIONARY else str(e)
-			var sdef = SkillDB.get_skill(sid)
-			var ews_nm := str(sdef.get("name", sid)) if sdef != null else "%s（引用悬空）" % sid
-			var req_txt := ""
-			if typeof(e) == TYPE_DICTIONARY:
-				var parts := []
-				for r in e.get("requires", []):
-					if typeof(r) == TYPE_DICTIONARY:
-						parts.append("%s %d" % [ProfDB.prof_name(str(r.get("prof", ""))), int(r.get("value", 0))])
-				if not parts.is_empty():
-					req_txt = "（需 %s）" % " ∧ ".join(parts)
-			# 握持要求（🔒 决策35 运行时条件：与解锁条件并列陈列）
-			var gv := str(sdef.get("grip", "")) if sdef != null else ""
-			if gv != "":
-				req_txt += "（需双手持）" if gv == "two_handed" else "（需单手持）"
-			v.add_child(_kv("额外技能", ews_nm + req_txt))
+		if has_ews:
+			for e in ews:
+				v.add_child(_kv("额外技能", _ews_line(e) + ("（单手持）" if versat else "")))
+		if has_ews2:
+			for e in ews2:
+				v.add_child(_kv("额外技能", _ews_line(e) + "（双手持）"))
 	# 风味文本 desc（§33 可选键，旧数据无此键＝不渲染）：置底斜体灰——RPG tooltip 惯例位
 	var desc := str(item.get("desc", ""))
 	if desc != "":
 		v.add_child(HSeparator.new())
 		v.add_child(_desc_label(desc))
 	return panel
+
+# EWS 条目一行文案：技能名 +（需 域 阈值 ∧ …）——单/双手组后缀由调用方拼（决策35 修订）
+static func _ews_line(e) -> String:
+	var sid := str(e.get("skill", "")) if typeof(e) == TYPE_DICTIONARY else str(e)
+	var sdef = SkillDB.get_skill(sid)
+	var txt := str(sdef.get("name", sid)) if sdef != null else "%s（引用悬空）" % sid
+	if typeof(e) == TYPE_DICTIONARY:
+		var parts := []
+		for r in e.get("requires", []):
+			if typeof(r) == TYPE_DICTIONARY:
+				parts.append("%s %d" % [ProfDB.prof_name(str(r.get("prof", ""))), int(r.get("value", 0))])
+		if not parts.is_empty():
+			txt += "（需 %s）" % " ∧ ".join(parts)
+	return txt
 
 # —— 共用小件（公开：物品/技能/特性 tooltip 与角色状态页复用同一份，字号按场合传）——
 static func tag_chip(text: String, font_px := 12) -> Control:

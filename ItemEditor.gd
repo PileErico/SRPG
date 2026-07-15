@@ -119,10 +119,17 @@ var _intr1_box: VBoxContainer    # 兼用单手形态区（握持=versatile 时�
 var _intr_title: Control         # 固有面板节标题（兼用时动态标「双手形态」——防呆 2026-07-15：曾致用户单双手值倒填）
 var _onhit_rows: Array = []      # On-Hit 统一行（🔒 2026-07-15 mod 式·单项目下拉）：[{row, effect:OptionButton〔含「甲伤」特殊项 __armor__〕, mode, val:SpinBox}]
 var _onhit_box: VBoxContainer
-var _w_bws: OptionButton         # 普攻 BWS 下拉（weapon_skill 勾选过滤，🔒 决策29；（无）＝不提供普攻——盾也配盾击 BWS，2026-07-15）
+var _w_bws: OptionButton         # 普攻 BWS 下拉（weapon_skill 勾选过滤，🔒 决策29；兼用件＝单手形态槽——决策35 修订）
+var _w_bws2: OptionButton        # 普攻 BWS·双手形态槽（仅兼用件显示；缺省＝与单手槽共用）
+var _bws2_row: Control           # 双手 BWS 行（显隐随握持）
+var _bws_label: Label            # 单手 BWS 行标（兼用时动态标「单手形态」）
+var _ews_title: Control          # EWS 节标题（兼用时动态标「单手组」）
 var _w_prefer: OptionButton      # 地/空偏好（比路兹式起降换手；一般武器（无））
-var _ews_box: VBoxContainer      # EWS 行容器
+var _ews_box: VBoxContainer      # EWS 行容器（兼用件＝单手组）
 var _ews_rows: Array = []        # EWS 行：[{panel, skill:OptionButton, reqs:[{row,prof,value,hint}], reqs_box}]
+var _ews2_wrap: VBoxContainer    # EWS·双手组整块（标题+容器+添加钮；仅兼用件显示）
+var _ews2_box: VBoxContainer
+var _ews2_rows: Array = []
 var _building: bool = false      # _build_form 进行中（抑制「选盾自动清 BWS」等用户动作专属逻辑）
 # §14 精确脏判定基线＝载入内容的 JSON 快照（根治「任何信号即脏」假阳性：本编辑器预览刷新兼职脏标记，
 # 重选同一下拉项也会置脏）。""＝无基线（表单构建中/副本未保存态）：保守按原布尔逻辑走。
@@ -379,6 +386,12 @@ func _clear_form() -> void:
 		c.queue_free()
 	_mod_rows.clear()
 	_ews_rows = []
+	_ews2_rows = []
+	_ews2_wrap = null
+	_w_bws2 = null
+	_bws2_row = null
+	_bws_label = null
+	_ews_title = null
 	_w_intr = {}
 	_w_intr1 = {}
 	_intr1_box = null
@@ -692,8 +705,8 @@ func _on_wtype_changed() -> void:
 	_sync_versatile_box()
 	_refresh_preview()
 
-# 兼用单手形态面板显隐（🔒 决策35）：握持=versatile 且握持行本身可见（非盾/非天生）才显示
-# （预览刷新由握持下拉自带的 item_selected→_refresh_preview 负责，此处只管显隐）
+# 兼用件专属控件显隐（🔒 决策35＋修订）：握持=versatile 且握持行本身可见（非盾/非天生）才显示
+# （预览刷新由握持下拉自带的 item_selected→_refresh_preview 负责，此处只管显隐/改标）
 # 防呆（2026-07-15）：兼用时顶层固有面板标题动态标「双手形态」——只在子面板标单手曾致用户把单/双手值倒填
 func _sync_versatile_box() -> void:
 	if _intr1_box == null or not is_instance_valid(_intr1_box):
@@ -705,6 +718,18 @@ func _sync_versatile_box() -> void:
 		(_intr_title.get_child(0) as Label).text = \
 			"武器固有属性 · 双手形态（单独持用时生效——必填；0=无此项）" if versat \
 			else "武器固有属性（必填——0=无此项；额外修正/词条走下方 mods）"
+	# 决策35 修订：BWS 双槽 / EWS 双手组 仅兼用件显示；单手侧标题跟着改标
+	if _bws2_row != null and is_instance_valid(_bws2_row):
+		_bws2_row.visible = versat
+	if _ews2_wrap != null and is_instance_valid(_ews2_wrap):
+		_ews2_wrap.visible = versat
+	if _bws_label != null and is_instance_valid(_bws_label):
+		_bws_label.text = "普攻 BWS·单手形态（装备即用；⚠ 普攻不结算冷却/次数）" if versat \
+			else "普攻 BWS（装备即用——⚠ 普攻路径不结算冷却/次数/等级）"
+	if _ews_title != null and is_instance_valid(_ews_title) and _ews_title.get_child_count() > 0:
+		(_ews_title.get_child(0) as Label).text = \
+			"额外技能 EWS · 单手组（单手持时才激活；解锁条件另算）" if versat \
+			else "额外技能 EWS（装备授予；每条可配复数 AND 解锁条件〔技艺+熟练度裸数值〕）"
 
 
 # 一条 On-Hit（🔒 2026-07-15 mod 式统一行·**单项目下拉**——用户二轮校准：甲伤就是清单里的一项，不另设类型级）：
@@ -784,7 +809,7 @@ func _add_onhit_row(kind: String, effect_id: String, chance: float, arm_mode := 
 # BWS/EWS 只是引用方式（BWS=应用层当普攻、EWS=有解锁条件，除此无异）——两下拉同源；
 # EWS 位另排掉当前 BWS 所选（一技不占两位）。kinds 空＝通用（徒手等）；
 # 匹配面＝表单当前种类所选 + 条目现有 tags（活状态：没存盘也按所选算）。
-func _ws_option_ids(exclude := "", for_bws := false) -> Array:
+func _ws_option_ids(exclude := "") -> Array:
 	var wtags := {}
 	if _w_wcat != null and is_instance_valid(_w_wcat):
 		wtags[str(_w_wcat.get_selected_metadata())] = true
@@ -797,8 +822,6 @@ func _ws_option_ids(exclude := "", for_bws := false) -> Array:
 		var def = SkillDB.get_skill(id)
 		if not SkillDB.is_weapon_skill(def):
 			continue
-		if for_bws and str(def.get("grip", "")) != "":
-			continue   # BWS 禁带握持条件（🔒 决策35：普攻恒可用——握持专属招式走 EWS 位）
 		var kinds: Array = def.get("weapon_kinds", [])
 		var ok := kinds.is_empty()
 		for k in kinds:
@@ -810,25 +833,18 @@ func _ws_option_ids(exclude := "", for_bws := false) -> Array:
 
 # BWS 普攻位（🔒 决策29 勾选制：列＝勾了「武器技能」的条目；BWS/EWS 之分由本编辑器的引用位决定）+ 地/空偏好
 # + EWS 行（每条：技能引用+复数 AND 解锁条件）。同一技能可既是 A 武器 BWS 又是 B 武器 EWS。
+# 兼用件（🔒 决策35 修订 2026-07-15：握持是武器的属性）：BWS 双槽（bws=单手/bws_2h=双手，只配一个=共用）
+# + EWS 两桶（ews=单手组/ews_2h=双手组，按当前握持激活）——双手侧控件仅握持=兼用时显示（_sync_versatile_box）。
 func _build_weapon_skills_section() -> void:
 	_form.add_child(EditorUI.section_title("武器技能（引用技能库条目；招式参数在技能编辑器改——决策25 引用制）"))
-	_w_bws = OptionButton.new()
-	_w_bws.add_item("（无——不提供普攻）")
-	_w_bws.set_item_metadata(0, "")
-	for id in _ws_option_ids("", true):   # 一视同仁清单：勾选+种类匹配（🔒 决策29+用户校准）；BWS 位排掉带 grip 的（决策35）
-		var def = SkillDB.get_skill(id)
-		_w_bws.add_item("%s（%s）" % [str(def.get("name", id)), str(id)])
-		_w_bws.set_item_metadata(_w_bws.item_count - 1, str(id))
-	var cur_bws := SkillDB.weapon_bws_id(_current)   # 双读单口（§1-6）
-	_ensure_meta_option(_w_bws, cur_bws)
-	_select_meta(_w_bws, cur_bws)
-	_w_bws.item_selected.connect(func(_i): _refresh_preview())
-	var bws_row := HBoxContainer.new()               # §26：下拉 + ↗ 跳转钮（引用位回程票）
-	bws_row.add_theme_constant_override("separation", 6)
-	_w_bws.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	bws_row.add_child(_w_bws)
-	bws_row.add_child(_skill_jump_btn(_w_bws))
-	_form.add_child(EditorUI.field_row("普攻 BWS（装备即用；列＝勾了「武器技能」的条目——⚠ 普攻路径不结算冷却/次数/等级）", bws_row))
+	_w_bws = _make_bws_pick(SkillDB.weapon_bws_id(_current))   # 双读单口（§1-6）
+	var bws_frow := EditorUI.field_row("普攻 BWS（装备即用——⚠ 普攻路径不结算冷却/次数/等级）", _bws_pick_row(_w_bws))
+	_bws_label = bws_frow.get_child(0) as Label
+	_form.add_child(bws_frow)
+	_w_bws2 = _make_bws_pick(str(_current.get("bws_2h", "")))
+	_bws2_row = EditorUI.field_row("普攻 BWS·双手形态（缺省＝与单手槽共用）", _bws_pick_row(_w_bws2))
+	_bws2_row.visible = false   # _sync_versatile_box 按握持显隐
+	_form.add_child(_bws2_row)
 	# prefer 初值双读 attack.prefer（同 Unit._weapon_prefer 口径）：未迁移武器打开不丢偏好
 	var atk0 = _current.get("attack", {})
 	var prefer0 := str(_current.get("prefer", atk0.get("prefer", "") if typeof(atk0) == TYPE_DICTIONARY else ""))
@@ -842,7 +858,8 @@ func _build_weapon_skills_section() -> void:
 		warn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		_form.add_child(warn)
 	# EWS 额外技能位：装备授予、达标解锁、以能力形式使用（🔒 决策26；运行时恒读主手——决策28）
-	_form.add_child(EditorUI.section_title("额外技能 EWS（装备授予；每条可配复数 AND 解锁条件〔技艺+熟练度裸数值〕；运行时恒读主手）"))
+	_ews_title = EditorUI.section_title("额外技能 EWS（装备授予；每条可配复数 AND 解锁条件〔技艺+熟练度裸数值〕）")
+	_form.add_child(_ews_title)
 	_ews_rows = []
 	_ews_box = VBoxContainer.new()
 	_ews_box.add_theme_constant_override("separation", 6)
@@ -858,6 +875,50 @@ func _build_weapon_skills_section() -> void:
 		_add_ews_row("", [])
 		_refresh_preview())
 	_form.add_child(addews)
+	# EWS·双手组（仅兼用件显示）：当前握持=双手时才激活（∧ 各条 requires 解锁）
+	_ews2_wrap = VBoxContainer.new()
+	_ews2_wrap.add_theme_constant_override("separation", 6)
+	_ews2_wrap.add_child(EditorUI.section_title("额外技能 EWS · 双手组（双手持时才激活；解锁条件另算）"))
+	_ews2_rows = []
+	_ews2_box = VBoxContainer.new()
+	_ews2_box.add_theme_constant_override("separation", 6)
+	_ews2_wrap.add_child(_ews2_box)
+	for e in _current.get("ews_2h", []):
+		if typeof(e) == TYPE_DICTIONARY:
+			_add_ews_row(str(e.get("skill", "")), e.get("requires", []), true)
+		else:
+			_add_ews_row(str(e), [], true)
+	var addews2 := Button.new()
+	addews2.text = "＋ 添加额外技能（双手组）"
+	addews2.pressed.connect(func():
+		_add_ews_row("", [], true)
+		_refresh_preview())
+	_ews2_wrap.add_child(addews2)
+	_ews2_wrap.visible = false   # _sync_versatile_box 按握持显隐
+	_form.add_child(_ews2_wrap)
+
+# BWS 下拉工厂（单手/双手两槽共用）：（无）项 + 一视同仁清单（勾选+种类匹配，🔒 决策29+用户校准）
+func _make_bws_pick(sel: String) -> OptionButton:
+	var ob := OptionButton.new()
+	ob.add_item("（无——不提供普攻）")
+	ob.set_item_metadata(0, "")
+	for id in _ws_option_ids():
+		var def = SkillDB.get_skill(id)
+		ob.add_item("%s（%s）" % [str(def.get("name", id)), str(id)])
+		ob.set_item_metadata(ob.item_count - 1, str(id))
+	_ensure_meta_option(ob, sel)
+	_select_meta(ob, sel)
+	ob.item_selected.connect(func(_i): _refresh_preview())
+	return ob
+
+# BWS 行装配：下拉 + ↗ 跳转钮（§26 引用位回程票）
+func _bws_pick_row(ob: OptionButton) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	ob.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(ob)
+	row.add_child(_skill_jump_btn(ob))
+	return row
 
 # （_ensure_meta_option 已上提 ListEditorShell——技改 §3-1：EffectEditor/SkillEditor 同享悬空引用守卫）
 
@@ -879,8 +940,8 @@ func _skill_jump_btn(ob: OptionButton) -> Button:
 			get_tree().change_scene_to_file("res://SkillEditor.tscn")))
 	return b
 
-# 一条 EWS：技能下拉（主动+可跑块过滤）+ ✕；下挂条件行列表 + ＋添加条件
-func _add_ews_row(skill_id: String, requires) -> void:
+# 一条 EWS：技能下拉（一视同仁清单）+ ✕；下挂条件行列表 + ＋添加条件。two_h=true → 双手组（决策35 修订）
+func _add_ews_row(skill_id: String, requires, two_h := false) -> void:
 	var panel := PanelContainer.new()
 	var sb := EditorTheme.sb(Color(0.14, 0.15, 0.19), Color(0.3, 0.34, 0.42))
 	sb.set_content_margin_all(8)
@@ -894,10 +955,15 @@ func _add_ews_row(skill_id: String, requires) -> void:
 	pick.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	pick.add_item("（选技能…）")
 	pick.set_item_metadata(0, "")
-	# 一视同仁清单（2026-07-13 用户校准）：勾选+种类匹配、排掉当前 BWS 所选——不再按可跑块过滤
+	# 一视同仁清单（2026-07-13 用户校准）：勾选+种类匹配、排掉两个 BWS 槽所选——不再按可跑块过滤
 	# （纯 attack 形 EWS 可入库；施放接线＝阶段6，战斗菜单先灰显提示）
-	var cur_bws_pick := str(_w_bws.get_selected_metadata()) if _w_bws != null and is_instance_valid(_w_bws) else ""
-	for id in _ws_option_ids(cur_bws_pick):
+	var skip := {}
+	for ob in [_w_bws, _w_bws2]:
+		if ob != null and is_instance_valid(ob):
+			skip[str((ob as OptionButton).get_selected_metadata())] = true
+	for id in _ws_option_ids():
+		if skip.has(str(id)):
+			continue
 		var def = SkillDB.get_skill(id)
 		pick.add_item("%s（%s）" % [str(def.get("name", id)), str(id)])
 		pick.set_item_metadata(pick.item_count - 1, str(id))
@@ -914,8 +980,9 @@ func _add_ews_row(skill_id: String, requires) -> void:
 	reqs_box.add_theme_constant_override("separation", 3)
 	box.add_child(reqs_box)
 	var entry := {"panel": panel, "skill": pick, "reqs": [], "reqs_box": reqs_box}
+	var rows: Array = _ews2_rows if two_h else _ews_rows
 	rm.pressed.connect(func():
-		_ews_rows.erase(entry)
+		rows.erase(entry)
 		panel.queue_free()
 		_refresh_preview())
 	if typeof(requires) == TYPE_ARRAY:
@@ -928,8 +995,8 @@ func _add_ews_row(skill_id: String, requires) -> void:
 		_add_ews_req_row(entry, "", 100)
 		_refresh_preview())
 	box.add_child(addr)
-	_ews_box.add_child(panel)
-	_ews_rows.append(entry)
+	(_ews2_box if two_h else _ews_box).add_child(panel)
+	rows.append(entry)
 
 # 一条解锁条件：技艺域下拉 + ≥ 裸数值 + 档位名提示（🔒 决策26 阈值口径＝裸数值，旁标档位辅助可读）
 func _add_ews_req_row(entry: Dictionary, prof: String, value: int) -> void:
@@ -1288,6 +1355,12 @@ func _collect() -> Dictionary:
 				out["one_handed"] = oh1
 			else:
 				out.erase("one_handed")
+			# 兼用 BWS 双槽（🔒 决策35 修订：bws=单手槽〔上方已收〕、bws_2h=双手槽——缺省与单手共用；非兼用清键）
+			var bws2_id := str(_w_bws2.get_selected_metadata()) if versat and _w_bws2 != null and is_instance_valid(_w_bws2) else ""
+			if bws2_id != "":
+				out["bws_2h"] = bws2_id
+			else:
+				out.erase("bws_2h")
 			# On-Hit 统一行收集（🔒 2026-07-15 mod 式·单项目下拉）：按所选项目分派——
 			# 甲伤（metadata="__armor__"）→armor_dmg_pct/flat 键、效果→on_hit_effects 数组
 			out.erase("armor_dmg")   # 旧键随存即迁（→ armor_dmg_pct/flat）
@@ -1307,11 +1380,11 @@ func _collect() -> Dictionary:
 			else:
 				out["on_hit_effects"] = ohs
 			# EWS：每条 {skill, requires:[{prof,value},…]}（requires 空省略＝装备即用；空技能行跳过；
-			# 与 BWS 同技＝跳过——一技不占两位，2026-07-13 用户校准）
+			# 与两个 BWS 槽同技＝跳过——一技不占两位，2026-07-13 用户校准）。兼用件两桶：ews=单手组/ews_2h=双手组
 			var ews := []
 			for e in _ews_rows:
 				var sid := str(e["skill"].get_selected_metadata())
-				if sid == "" or sid == bws_id:
+				if sid == "" or sid == bws_id or sid == bws2_id:
 					continue
 				var entry := {"skill": sid}
 				var reqs := []
@@ -1327,6 +1400,26 @@ func _collect() -> Dictionary:
 				out.erase("ews")
 			else:
 				out["ews"] = ews
+			var ews2 := []
+			if versat:
+				for e in _ews2_rows:
+					var sid2 := str(e["skill"].get_selected_metadata())
+					if sid2 == "" or sid2 == bws_id or sid2 == bws2_id:
+						continue
+					var entry2 := {"skill": sid2}
+					var reqs2 := []
+					for rr in e["reqs"]:
+						var pid2 := str(rr["prof"].get_selected_metadata())
+						if pid2 == "":
+							continue
+						reqs2.append({"prof": pid2, "value": int(rr["value"].value)})
+					if not reqs2.is_empty():
+						entry2["requires"] = reqs2
+					ews2.append(entry2)
+			if ews2.is_empty():
+				out.erase("ews_2h")
+			else:
+				out["ews_2h"] = ews2
 		"armor":
 			var g: String = str(_w_gear.get_selected_metadata())
 			if g != "":
@@ -1341,8 +1434,9 @@ func _collect() -> Dictionary:
 			tags.append("accessory")
 			slot = "accessory_1"
 	if _current_kind != "weapon":
-		for k in ["atk", "acc", "block_rate", "block_power", "armor_dmg", "armor_dmg_pct", "armor_dmg_flat", "on_hit_effects", "one_handed"]:
-			out.erase(k)   # 武器固有键/On-Hit/兼用单手面板 只属武器（🔒 决策33/35）——大类切换残留清除
+		for k in ["atk", "acc", "block_rate", "block_power", "armor_dmg", "armor_dmg_pct", "armor_dmg_flat",
+				"on_hit_effects", "one_handed", "bws_2h", "ews_2h"]:
+			out.erase(k)   # 武器固有键/On-Hit/兼用面板与双槽两组 只属武器（🔒 决策33/35）——大类切换残留清除
 
 	for t in _free_tags:
 		if not tags.has(t):
@@ -1364,7 +1458,7 @@ func _collect() -> Dictionary:
 # 物品（非装备类）表单 → 物品字典：kind=item、类型多选 tag、消耗品时含 on_use/设置。无 slot/mods/requires。
 func _collect_item(out: Dictionary) -> Dictionary:
 	out["kind"] = "item"
-	for k in ["slot", "mods", "requires", "two_handed", "innate", "attack", "bws", "bas", "ews", "prefer", "use_scope",
+	for k in ["slot", "mods", "requires", "two_handed", "innate", "attack", "bws", "bws_2h", "bas", "ews", "ews_2h", "prefer", "use_scope",
 			"atk", "acc", "block_rate", "block_power", "armor_dmg", "armor_dmg_pct", "armor_dmg_flat", "on_hit_effects", "one_handed"]:
 		out.erase(k)   # 装备专属 + 废弃字段 + 武器固有键（决策33/35）：物品一律不带
 	var tags: Array = [_w_rarity.get_selected_metadata()]

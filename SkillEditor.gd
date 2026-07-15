@@ -29,8 +29,6 @@ const CATEGORIES := [["skill", "技巧 skill"], ["spell", "魔法 spell（魔法
 # 伤害属性（大类：物理/元素；真伤=将来位）＋伤害类型（创伤，词表同 tags.json cat damage）——两正交下拉（2026-07-13 用户拍板）
 const DAMAGE_CATEGORIES := [["physical", "物理"], ["fire", "火"], ["ice", "冰"], ["thunder", "雷"], ["holy", "神圣"]]
 const DAMAGE_TYPES := [["", "（未设）"], ["slashing", "斩击"], ["piercing", "穿刺"], ["bludgeoning", "打击"]]
-# 握持要求（🔒 决策35 运行时可用性条件：菜单灰显+apply_skill 守卫；BWS 禁带——普攻恒可用，lint 执法）
-const GRIP_PAIRS := [["", "（不限）"], ["one_handed", "需单手持"], ["two_handed", "需双手持"]]
 const HAND_SLOTS := [["main_hand", "主手"], ["off_hand", "副手"]]   # when equip_state 槽位词表（requires_hands 已删 2026-07-13）
 const BLOCK_KINDS := [["attack", "攻击 attack"], ["heal", "治疗 heal"],
 	["passive_stat_mods", "被动修正 passive_stat_mods"],
@@ -71,7 +69,6 @@ var _w_passive_hint: Label   # §25 被动灰化联动的说明条（active=fals
 var _w_wskill: CheckBox            # 武器技能勾选（勾＝可被武器选取）
 var _kind_box: Control             # 适用武器种类区（勾选时显示）
 var _kind_checks := {}             # wcat tag id -> CheckBox
-var _w_grip: OptionButton          # 握持要求（🔒 决策35；随 _kind_box 显隐）
 var _preview: VBoxContainer        # 右栏即时 tooltip 预览（SkillTooltip 共享渲染，2026-07-15）
 var _form_ready := false           # 表单建全旗（半构造期闸预览 collect）
 var _w_custom_pick: CheckBox       # 自定义攻击范围（勾＝选取形可点格编辑；否＝盘只作 range 可视化参考）
@@ -318,10 +315,7 @@ func _build_form() -> void:
 			flow.add_child(cb)
 			_kind_checks[tid] = cb
 		_kind_box.add_child(flow)
-	# 握持要求（🔒 决策35 运行时可用性条件——菜单灰显「需单/双手持」；解锁归熟练度 requires，握持归状态判断；
-	# BWS 禁带 grip〔普攻恒可用〕——武器编辑器 BWS 下拉已过滤带 grip 技能，lint 兜底）
-	_w_grip = EditorUI.add_dropdown(_kind_box, "握持要求 grip（兼用武器单/双手形态专属招式；BWS 禁带）", GRIP_PAIRS,
-		str(_current.get("grip", "")), _mark_dirty)
+	# （握持要求下拉已拆 2026-07-15 用户裁定：握持是武器的属性——兼用武器侧 bws/bws_2h 双槽 + ews/ews_2h 两组承载）
 	_kind_box.visible = bool(_current.get("weapon_skill", false))
 	_form.add_child(_kind_box)
 
@@ -1080,16 +1074,11 @@ func _shell_collect() -> Dictionary:
 			if (_kind_checks[tid] as CheckBox).button_pressed:
 				kinds.append(tid)
 		out["weapon_kinds"] = kinds
-		# 握持要求（🔒 决策35）：（不限）＝不落键
-		var gv := str(_w_grip.get_selected_metadata()) if _w_grip != null and is_instance_valid(_w_grip) else ""
-		if gv != "":
-			out["grip"] = gv
-		else:
-			out.erase("grip")
+		out.erase("grip")   # 技能侧握持键已废（2026-07-15 用户裁定挪武器侧）——随存即清
 	else:
 		out.erase("weapon_skill")
 		out.erase("weapon_kinds")
-		out.erase("grip")   # 握持条件只属武器技能（决策35）
+		out.erase("grip")
 	# 形状（🔒 决策30）：选取形只在勾了「自定义攻击范围」时收集（未勾＝盘是 range 参考、不落键）；
 	# 两盘全空＝删键（回退 range 圆盘/单体）；anchor/friendly_fire 只随作用形落键
 	var pickm: Array = _w_pick.mask() if _w_custom_pick.button_pressed else []
@@ -1116,6 +1105,22 @@ func _shell_collect() -> Dictionary:
 			_err(_collect_err)
 			return {}
 	out["effects"] = effects
+	# damage_type → 创伤 tag 自动派生（2026-07-15 用户校准：字段为源、tag 自动附带——决策32 当年只摘了
+	# tag 手动入口，字段成正式选项后应回填 tag 供筛选/内容判断；先摘全部 damage 类再按现选补，改选即换）
+	var dmg_set := {}
+	for b in effects:
+		if typeof(b) == TYPE_DICTIONARY and str(b.get("kind", "")) == "attack":
+			for h in b.get("hits", []):
+				if typeof(h) == TYPE_DICTIONARY and str(h.get("damage_type", "")) != "":
+					dmg_set[str(h["damage_type"])] = true
+	var dmg_ids := TagDB.ids_in_cat("damage")
+	var t3 := []
+	for t in out.get("tags", []):
+		if not dmg_ids.has(str(t)):
+			t3.append(t)
+	for dt in dmg_set:
+		t3.append(dt)
+	out["tags"] = t3
 	# —— lint 规则7 同步校验（编辑器先拦；WS 形约束已随决策27 移到引用处＝lint 规则8/ItemEditor 过滤）——
 	if not (bool(out["target"]["enemy"]) or bool(out["target"]["ally"]) or bool(out["target"]["self"])):
 		_err("目标三旗不得全 false（永不可施放，lint 规则7）")

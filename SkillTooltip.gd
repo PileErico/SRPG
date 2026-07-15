@@ -11,7 +11,6 @@ const ItemTooltip := preload("res://ItemTooltip.gd")
 
 const CAT_CN := {"skill": "技巧", "spell": "魔法"}
 const DMG_CAT_CN := {"physical": "物理", "fire": "火", "ice": "冰", "thunder": "雷", "holy": "神圣"}
-const GRIP_CN := {"one_handed": "需单手持", "two_handed": "需双手持"}
 
 static func render(def: Dictionary) -> Control:
 	var panel := PanelContainer.new()
@@ -61,9 +60,7 @@ static func render(def: Dictionary) -> Control:
 		for k in kinds:
 			kn.append(TagDB.cn(str(k)))
 		v.add_child(ItemTooltip._kv("适用武器", "、".join(kn) if not kn.is_empty() else "通用（不限种类）"))
-		var gv := str(def.get("grip", ""))
-		if gv != "":
-			v.add_child(ItemTooltip._kv("握持要求", str(GRIP_CN.get(gv, gv))))
+		# （握持要求不在技能侧——2026-07-15 用户裁定：握持组挂武器 ews/ews_2h，武器 tooltip 标注）
 
 	# 施放成本（主动才有意义；被动无此段）
 	if bool(def.get("active", true)):

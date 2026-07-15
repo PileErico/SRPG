@@ -708,7 +708,15 @@ func _weapon_attack_of(slot: String) -> Dictionary:
 	var item = ItemInstances.view(int(equipment.get(slot, 0)))
 	if item == null:
 		return {}
-	var bws := SkillDB.weapon_bws_id(item)   # 双读单口（§1-6）
+	var bws := SkillDB.weapon_bws_id(item)   # 双读单口（§1-6）；兼用件＝单手槽/共用缺省
+	# 兼用件双 BWS 槽（🔒 决策35 修订 2026-07-15：握持是武器的属性——bws=单手槽、bws_2h=双手槽；
+	# 只配一个＝两形态共用（省内容成本），都空＝退徒手）
+	if (item.get("tags", []) as Array).has("versatile"):
+		var b2 := str(item.get("bws_2h", ""))
+		if effective_grip(slot) == "two_handed":
+			bws = b2 if b2 != "" else bws
+		elif bws == "":
+			bws = b2
 	if bws != "":
 		var def = SkillDB.get_skill(bws)
 		var flat: Dictionary = SkillDB.flatten_bws(def) if def != null else {}
@@ -778,12 +786,19 @@ func effective_grip(slot: String) -> String:
 		return "one_handed"
 	return ""
 
-# 技能握持条件是否满足 🔒（决策35：运行时可用性条件，非解锁）：def.grip 缺省＝不限；
-# 判据＝施放槽位的有效握持（当前恒主手；阶段6 副手 EWS 接线时随 weapon_source 改判 slot）。
-# 战斗菜单灰显（需单/双手持）与 apply_skill 守卫同吃此口。
-func grip_met(def: Dictionary, slot := "main_hand") -> bool:
-	var g := str(def.get("grip", ""))
-	return g == "" or effective_grip(slot) == g
+# EWS 握持组是否可用 🔒（决策35 修订 2026-07-15：握持是武器的属性——组挂武器侧 ews/ews_2h，
+# 技能侧 grip 键已废）：该技能的任一 EWS 条目握持组匹配当前有效握持 → 可施放；
+# 非 EWS（已学技能）无握持概念恒 true。战斗菜单灰显与 apply_skill 守卫同吃此口。
+func ews_grip_ok(id: String) -> bool:
+	var found := false
+	for e in ews_entries():
+		if str(e["id"]) != id:
+			continue
+		found = true
+		var req := str(e.get("grip_req", ""))
+		if req == "" or effective_grip(str(e.get("slot", "main_hand"))) == req:
+			return true
+	return not found
 
 # 武器固有属性键（🔒 决策33；⚠ 三轮校准 2026-07-13：**命中 acc 移出**——命中的固有归属＝武器技能 hit
 # 〔决策32 命中系数〕，物品侧命中只能是普通 mod）：攻/格挡率%/格挡性能%＝物品顶层必填字段（0=无），
@@ -961,28 +976,39 @@ var ews_state := {}   # skill_id -> {cd, uses}（战斗运行态；懒初始化�
 # 副手门控 🔒（2026-07-13 用户裁定）：副手**武器**＝本域熟练度（条目 requires）+ offhand_ws 能力（双武器 perk）；
 # 副手**盾**＝只看条目 requires（盾域熟练度，如盾击配 requires 盾域阈值）——剑盾非双持，不吃双武器门槛。
 # 键形（🔒 决策26）：对象 {skill, requires:[{prof,value},…]}；决策22 兼容裸字符串＝无条件 EWS。跨槽同 id 首见去重（主手优先）。
+# 兼用件 EWS 两桶（🔒 决策35 修订 2026-07-15：握持是武器的属性）：ews=单手组、ews_2h=双手组——
+# 组＝激活前置（当前握持匹配 ∧ 条目 requires 解锁）；非兼用件 ews 单桶无握持门（其握持本就静态）。
 func ews_entries() -> Array:
 	var out := []
 	var seen := {}
 	var item = ItemInstances.view(int(equipment.get("main_hand", 0)))
 	if item != null:
+		var versat: bool = (item.get("tags", []) as Array).has("versatile")
 		for e in item.get("ews", []):
-			_append_ews_entry(out, seen, e, "main_hand")
+			_append_ews_entry(out, seen, e, "main_hand", "one_handed" if versat else "")
+		if versat:
+			for e in item.get("ews_2h", []):
+				_append_ews_entry(out, seen, e, "main_hand", "two_handed")
 	var oh := int(equipment.get("off_hand", 0))
 	if oh != 0 and oh != int(equipment.get("main_hand", 0)):   # 双手武器占双槽＝无独立副手
 		var oitem = ItemInstances.view(oh)
 		if oitem != null:
 			var oh_shield: bool = (oitem.get("tags", []) as Array).has("shield")
 			if oh_shield or can_use_offhand_ws():   # 盾豁免双武器门槛（用户裁定）；武器须 offhand_ws
+				var oversat: bool = (oitem.get("tags", []) as Array).has("versatile")
 				var obws := SkillDB.weapon_bws_id(oitem)
 				if obws != "":
 					_append_ews_entry(out, seen, {"skill": obws}, "off_hand")   # 副手 bws＝EWS（排序最高故置本槽首）
 				for e in oitem.get("ews", []):
-					_append_ews_entry(out, seen, e, "off_hand")
+					_append_ews_entry(out, seen, e, "off_hand", "one_handed" if oversat else "")
+				if oversat:
+					for e in oitem.get("ews_2h", []):
+						_append_ews_entry(out, seen, e, "off_hand", "two_handed")
 	return out
 
-# ews 条目解析共用（ews_entries 内部）：解键形（对象/裸字符串）→ 去重 → 附 slot 与解锁判定
-func _append_ews_entry(out: Array, seen: Dictionary, e, slot: String) -> void:
+# ews 条目解析共用（ews_entries 内部）：解键形（对象/裸字符串）→ 去重 → 附 slot/握持组 与解锁判定。
+# 去重键含握持组：同技能可同时入单手组+双手组（两态都可用的写法）——各成一条、各自按握持亮灭。
+func _append_ews_entry(out: Array, seen: Dictionary, e, slot: String, grip_req := "") -> void:
 	var sid := ""
 	var req := []
 	if typeof(e) == TYPE_DICTIONARY:
@@ -992,10 +1018,11 @@ func _append_ews_entry(out: Array, seen: Dictionary, e, slot: String) -> void:
 			req = r
 	else:
 		sid = str(e)
-	if sid == "" or seen.has(sid):
+	var dkey := sid + "|" + grip_req
+	if sid == "" or seen.has(dkey):
 		return
-	seen[sid] = true
-	out.append({"id": sid, "requires": req, "slot": slot, "unlocked": ews_requires_met(req)})
+	seen[dkey] = true
+	out.append({"id": sid, "requires": req, "slot": slot, "grip_req": grip_req, "unlocked": ews_requires_met(req)})
 
 # EWS 解锁判定（🔒 决策26）：requires 复数 AND——每条〔技艺域 prof + 裸数值阈值 value〕都须 prof_xp 达标。
 # 空/缺省 requires＝装备即用（决策22 旧语义子集）。资格看 prof_xp、与技艺是否装载无关（同资格闸门先例）。
