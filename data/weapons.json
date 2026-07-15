@@ -95,22 +95,27 @@
     "two_handed": false
   },
   {
-    "atk": 5,
-    "block_power": 0,
-    "block_rate": 0,
+    "atk": 12,
+    "block_power": 15.5,
+    "block_rate": 25,
     "bws": "bws_slash",
-    "icon": "res://icons/Items/Weapons/longsword.png",
+    "icon": "res://icons/Items/Weapons/sword_long.png",
     "id": "long_sword",
     "innate": false,
     "mods": [],
     "name": "长剑",
+    "one_handed": {
+      "atk": 8,
+      "block_power": 10,
+      "block_rate": 15
+    },
     "requires": [],
     "slot": "main_hand",
     "tags": [
       "common",
       "melee",
       "weapon_sword",
-      "one_handed"
+      "versatile"
     ],
     "two_handed": false
   },
@@ -135,9 +140,9 @@
     "two_handed": false
   },
   {
-    "atk": 0,
-    "block_power": 35,
-    "block_rate": 15,
+    "atk": 5,
+    "block_power": 30,
+    "block_rate": 20,
     "icon": "res://icons/Items/Weapons/wood_kite_shield.png",
     "id": "wood_kite_shield",
     "innate": false,
@@ -197,7 +202,7 @@
     "block_power": 20,
     "block_rate": 15,
     "bws": "ws_swing",
-    "icon": "res://icons/Items/Weapons/双手巨剑.png",
+    "icon": "res://icons/Items/Weapons/sword_zweihande.png",
     "id": "sword_zweihande",
     "innate": false,
     "mods": [],
@@ -211,5 +216,29 @@
       "two_handed"
     ],
     "two_handed": true
+  },
+  {
+    "atk": 0,
+    "block_power": 0,
+    "block_rate": 0,
+    "icon": "res://icons/Items/Weapons/spear_winged .png",
+    "id": "spear_winged",
+    "innate": false,
+    "mods": [],
+    "name": "翼矛",
+    "one_handed": {
+      "atk": 0,
+      "block_power": 0,
+      "block_rate": 0
+    },
+    "requires": [],
+    "slot": "main_hand",
+    "tags": [
+      "common",
+      "melee",
+      "weapon_spear",
+      "versatile"
+    ],
+    "two_handed": false
   }
 ]
