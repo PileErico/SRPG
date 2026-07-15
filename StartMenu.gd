@@ -39,20 +39,35 @@ func _ready() -> void:
 	box.add_child(subtitle)
 
 	box.add_child(_spacer(18))
-	box.add_child(_menu_button("战役 · 新开局", _on_new_campaign, false))
-	box.add_child(_menu_button("战役 · 继续", _on_continue_campaign, not SaveIO.list_slots().has(SaveIO.AUTO_SLOT)))
-	box.add_child(_menu_button("战役 · 读档", _on_load_campaign, SaveIO.list_slots().is_empty()))
-	box.add_child(_menu_button("编辑器（编辑 · 试玩）", _on_game, false))
-	box.add_child(_menu_button("沙盒模式", _on_sandbox, false))
-	box.add_child(_menu_button("地图编辑", _on_map_editor, false))
-	box.add_child(_menu_button("物品编辑器", _on_item_editor, false))
-	box.add_child(_menu_button("角色编辑器", _on_char_editor, false))
-	box.add_child(_menu_button("技能编辑器（能力 · 效果）", _on_skill_editor, false))
-	box.add_child(_menu_button("外观工坊（换装换色）", _on_appearance_workshop, false))
-	box.add_child(_menu_button("地块绘制工坊", _on_terrain_workshop, false))
-	box.add_child(_menu_button("设置", _on_settings, false))
-	box.add_child(_spacer(8))
-	box.add_child(_menu_button("退出", _on_quit, false))
+	# 双列布局（2026-07-15 用户校准：玩家菜单 vs 开发工具左右分排——一眼定位，暂不做二级页）
+	var cols := HBoxContainer.new()
+	cols.add_theme_constant_override("separation", 56)
+	cols.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.add_child(cols)
+	# 左列：游戏（玩家入口）
+	var left := VBoxContainer.new()
+	left.add_theme_constant_override("separation", 14)
+	cols.add_child(left)
+	left.add_child(_col_header("游戏"))
+	left.add_child(_menu_button("战役 · 新开局", _on_new_campaign, false))
+	left.add_child(_menu_button("战役 · 继续", _on_continue_campaign, not SaveIO.list_slots().has(SaveIO.AUTO_SLOT)))
+	left.add_child(_menu_button("战役 · 读档", _on_load_campaign, SaveIO.list_slots().is_empty()))
+	left.add_child(_menu_button("沙盒模式", _on_sandbox, false))
+	left.add_child(_spacer(8))
+	left.add_child(_menu_button("设置", _on_settings, false))
+	left.add_child(_menu_button("退出", _on_quit, false))
+	# 右列：开发工具（编辑器 · 工坊）
+	var right := VBoxContainer.new()
+	right.add_theme_constant_override("separation", 14)
+	cols.add_child(right)
+	right.add_child(_col_header("开发工具"))
+	right.add_child(_menu_button("编辑器（编辑 · 试玩）", _on_game, false))
+	right.add_child(_menu_button("地图编辑", _on_map_editor, false))
+	right.add_child(_menu_button("物品编辑器", _on_item_editor, false))
+	right.add_child(_menu_button("角色编辑器", _on_char_editor, false))
+	right.add_child(_menu_button("技能编辑器（能力 · 效果）", _on_skill_editor, false))
+	right.add_child(_menu_button("外观工坊（换装换色）", _on_appearance_workshop, false))
+	right.add_child(_menu_button("地块绘制工坊", _on_terrain_workshop, false))
 
 func _menu_button(text: String, cb: Callable, disabled: bool) -> Button:
 	var b := Button.new()
@@ -62,6 +77,15 @@ func _menu_button(text: String, cb: Callable, disabled: bool) -> Button:
 	if not disabled and cb.is_valid():
 		b.pressed.connect(cb)
 	return b
+
+# 列头小标（双列布局）：居中灰字
+func _col_header(text: String) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.add_theme_font_size_override("font_size", 13)
+	l.add_theme_color_override("font_color", Color(0.55, 0.6, 0.68))
+	return l
 
 func _spacer(h: int) -> Control:
 	var c := Control.new()
