@@ -38,8 +38,6 @@ from adapters.base import (
     Turn,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[3]  # adapters→chathub→tools→仓库根
-
 # Codex 的 effort 配置键——`--effort` 不存在，只有 `-c <key>=<value>`。
 EFFORT_CONFIG_KEY = "model_reasoning_effort"
 
@@ -183,6 +181,9 @@ class GptAdapter(Adapter):
         # Codex CLI 有时会因 prompt 过长而参数溢出 → 走 stdin
         timeout = self.config.get("cli_timeout", 80)  # 比 broker 超时略短
 
+        # cwd=目标工作区（broker.Config 注入；未注入＝继承进程 cwd）——
+        # codex read-only 沙盒的可读范围由 cwd 决定，指错目录＝席位看不到项目。
+        ws = self.config.get("workspace")
         # prompt 从 stdin 传给 `codex exec -`，避免 Windows 8191 字符 argv 上限。
         try:
             proc = subprocess.run(
@@ -191,7 +192,7 @@ class GptAdapter(Adapter):
                 capture_output=True,
                 text=True,
                 timeout=timeout,
-                cwd=str(REPO_ROOT),
+                cwd=str(ws) if ws else None,
                 env=codex_subprocess_env(),
                 # Codex CLI 需要 UTF-8；Windows 默认 GBK 会乱码
                 encoding="utf-8",

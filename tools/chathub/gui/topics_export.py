@@ -7,24 +7,27 @@
 
 格式（restore-friendly，与 memory_export 同族）：
     # <标题>
-    <!--meta id=3 status=concluded-->
+    <!--meta id=3 status=concluded workspace=D:/某项目-->
     ### <speaker>｜<unix_ts>
     正文多行……直到下一个 ### 头
+（workspace 段可缺省——旧镜像没有它，恢复时记 None。）
 """
 from __future__ import annotations
 
 import re
 from pathlib import Path
 
-_META_RE = re.compile(r"<!--meta id=(\d+) status=(\w+)-->")
+_META_RE = re.compile(r"<!--meta id=(\d+) status=(\w+)(?: workspace=(.*?))?-->")
 # 消息头带 ⟦⟧ 括记——正文里常见的「### 标题｜数字」不会被误当消息边界
 _MSG_RE = re.compile(r"^### ⟦(\S+)｜([\d.]+)⟧$")
 
 
 def render(topic: dict, messages: list[dict]) -> str:
+    ws = (topic.get("workspace") or "").strip()
+    ws_part = f" workspace={ws}" if ws else ""
     lines = [
         f"# {topic.get('title', '未命名议题')}",
-        f"<!--meta id={topic.get('id', 0)} status={topic.get('status', 'open')}-->",
+        f"<!--meta id={topic.get('id', 0)} status={topic.get('status', 'open')}{ws_part}-->",
         "",
     ]
     for m in messages:
@@ -35,16 +38,18 @@ def render(topic: dict, messages: list[dict]) -> str:
 
 
 def parse(text: str) -> dict | None:
-    """解析单个议题镜像 → {title, status, messages:[{speaker, created, body}]}；坏文件返回 None。"""
+    """解析单个议题镜像 → {title, status, workspace, messages:[…]}；坏文件返回 None。"""
     lines = text.splitlines()
     if not lines or not lines[0].startswith("# "):
         return None
     title = lines[0][2:].strip()
     status = "open"
+    workspace: str | None = None
     for probe in lines[1:3]:
         m = _META_RE.search(probe)
         if m:
             status = m.group(2)
+            workspace = (m.group(3) or "").strip() or None
             break
     messages: list[dict] = []
     cur: dict | None = None
@@ -71,7 +76,7 @@ def parse(text: str) -> dict | None:
         if cur is not None:
             body.append(line)
     flush()
-    return {"title": title, "status": status, "messages": messages}
+    return {"title": title, "status": status, "workspace": workspace, "messages": messages}
 
 
 def mirror_path(mirror_dir: str | Path, tid: int) -> Path:

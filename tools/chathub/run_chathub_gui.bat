@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul
 title ChatHub server - close this window to stop
-cd /d "D:\1战棋\tools\chathub"
+cd /d "%~dp0"
 REM GUI 从资源管理器启动时 PATH 可能不含 Node/npm；显式补齐，供 GPT/Codex 执行器使用。
 set "PATH=%ProgramFiles%\nodejs;%APPDATA%\npm;%PATH%"
 set CHATHUB_NO_AUTO_OPEN=1

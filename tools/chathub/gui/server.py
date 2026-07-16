@@ -5,13 +5,15 @@
 
 API：
   GET  /                          → 前端页面
-  GET  /api/status                → 各席在线状态
+  GET  /api/status                → 各席在线状态（讨论席+执行席）
+  GET  /api/config                → 调度配置（席位/标记/执行名单/工作区+可用性）
+  POST /api/workspace {path}      → 切换目标工作区（校验 git 仓库；忙时 409）
   GET  /api/capabilities          → 各席自报的 model/effort 能力 + 当前值
   POST /api/seats/<seat>/options  → 改某席 model/effort（进程内生效；非法值 400）
   GET  /api/topics                → 议题列表
-  POST /api/topics {title,mode}   → 新建议题 → {id}
+  POST /api/topics {title,mode}   → 新建议题（盖当前工作区戳）→ {id}
   GET  /api/topics/<id>/messages  → 该议题消息（+busy 标记）
-  POST /api/topics/<id>/send {text} → 追加 Erico 消息并后台跑一轮 → {mode}
+  POST /api/topics/<id>/send {text, participants?, executors?} → 追加 Erico 消息并后台跑一轮 → {mode}
   POST /api/topics/<id>/stop       → 请求在当前席结束后停止
   GET  /api/memory                → 共享记忆（draft/approved/rejected）
   POST /api/memory/<id>/approve   → 确认记忆
@@ -42,11 +44,15 @@ import topics_export             # noqa: E402  议题的可读备份镜像（恢
 
 DB = Path(os.environ.get("CHATHUB_DB", str(HERE / "chathub.db")))
 STATIC = HERE / "static"
-PORT = 8765
+PORT = int(os.environ.get("CHATHUB_PORT", "8765"))   # 环境变量可改（自测起备用实例用）
 
-store = Store(DB)
-engine = Engine(store)
-app = Flask(__name__, static_folder=None)
+# 双实例护栏（审查发现·major）：改了端口却没改库＝备用实例直接读写真库，且
+# Engine 的执行互斥是进程内锁——两个进程可对同一 git 工作区并发执行，互相踩踏。
+if PORT != 8765 and "CHATHUB_DB" not in os.environ:
+    sys.stderr.write(
+        "✗ 设了 CHATHUB_PORT 却没设 CHATHUB_DB：备用实例会读写真库，并与主实例并发踩踏工作区。\n"
+        "  请同时设置 CHATHUB_DB=<临时库路径> 再启动。\n")
+    sys.exit(1)
 
 MEM_MD = HERE / "memory.md"       # 共享记忆的人类可读持久备份（非 gitignore，可提交）
 BACKUP_DIR = HERE / "backups"     # db 启动快照（gitignore；2026-07-16 数据事故后加）
@@ -84,6 +90,15 @@ def _backup_db(throttled: bool = False) -> None:
         print(f"⚠ db 快照失败：{exc}")
 
 
+# 快照必须在 Store(DB) 之前拍：Store.__init__ 会跑 schema 迁移（ALTER 等），
+# 迁移若有损，事故不能发生在「本轮快照」的覆盖范围之外（审查发现）。
+_backup_db()
+
+store = Store(DB)
+engine = Engine(store)
+app = Flask(__name__, static_folder=None)
+
+
 def _restore_topics_if_empty() -> None:
     """topics 表为空而镜像目录有货 → 整体恢复议题（含消息/发言人/时间戳/状态）。"""
     try:
@@ -94,7 +109,8 @@ def _restore_topics_if_empty() -> None:
         for p in mirrors:
             data = topics_export.parse(p.read_text(encoding="utf-8"))
             if data and data["messages"]:
-                store.import_topic(data["title"], data["status"], data["messages"])
+                store.import_topic(data["title"], data["status"], data["messages"],
+                                   workspace=data.get("workspace"))
                 restored += 1
         if restored:
             print(f"♻ 已从议题镜像恢复 {restored} 个议题（库此前为空）")
@@ -143,16 +159,38 @@ def api_status():
 
 @app.get("/api/config")
 def api_config():
-    """前端所需的调度配置：模式标记、执行名单候选、验收/参考席。"""
+    """前端所需的调度配置：模式标记、席位名单、执行名单候选、验收/参考席、工作区。"""
+    ws, ws_err = engine.workspace_status()
     return jsonify({
         "seats": engine.cfg.speaking_order,
+        "default_participants": engine.cfg.default_participants,
         "topic_marker": engine.cfg.auto_marker,
         "exec_marker": engine.exec_cfg.get("marker", "【执行】"),
         "executors": [{"seat": e.get("seat"), "branch": e.get("branch")}
                       for e in (engine.exec_cfg.get("executors") or [])],
         "acceptor": engine.exec_cfg.get("acceptor"),
         "reviewer": engine.exec_cfg.get("reviewer"),
+        "spec_reviewer": engine.exec_cfg.get("spec_reviewer"),
+        "synthesizer": engine.cfg.synthesizer,
+        "workspace": ws,
+        "workspace_error": ws_err,        # None＝可用
     })
+
+
+@app.post("/api/workspace")
+def api_workspace():
+    """切换目标工作区（校验 git 仓库；忙时 409）。选择持久化，重启后延续。"""
+    d = request.get_json(force=True, silent=True) or {}
+    path = (d.get("path") or "").strip()
+    if not path:
+        return jsonify({"error": "缺 path"}), 400
+    try:
+        p = engine.set_workspace(path)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 409
+    return jsonify({"ok": True, "workspace": str(p)})
 
 
 @app.get("/api/capabilities")
@@ -188,7 +226,8 @@ def api_topics():
 @app.post("/api/topics")
 def api_new_topic():
     d = request.get_json(force=True, silent=True) or {}
-    tid = store.create_topic((d.get("title") or "未命名议题").strip(), d.get("mode", "reactive"))
+    tid = store.create_topic((d.get("title") or "未命名议题").strip(), d.get("mode", "reactive"),
+                             workspace=str(engine.workspace))
     return jsonify({"id": tid})
 
 
@@ -207,11 +246,16 @@ def api_send(tid: int):
     text = (d.get("text") or "").strip()
     if not text:
         return jsonify({"error": "空消息"}), 400
-    # 执行名单（可选）：GUI 勾选的执行者，如 ["gpt"]——只让这些席执行
+    # 执行名单（可选）：GUI 勾选的执行者，如 ["opus"]——只让这些席执行
     exec_seats = d.get("executors")
     if exec_seats is not None and not (
             isinstance(exec_seats, list) and all(isinstance(s, str) for s in exec_seats)):
         return jsonify({"error": "executors 须为席位名字符串数组"}), 400
+    # 参与名单（可选）：GUI 勾选的讨论席，如 ["gpt","fable"]——None＝全员（脚本直连兼容）
+    participants = d.get("participants")
+    if participants is not None and not (
+            isinstance(participants, list) and all(isinstance(s, str) for s in participants)):
+        return jsonify({"error": "participants 须为席位名字符串数组"}), 400
     # 标记语义=「以标记开头」（与 engine.dispatch/前端一致）——先判模式，再入库
     exec_marker = engine.exec_cfg.get("marker", "【执行】")
     t = text.lstrip()
@@ -235,7 +279,8 @@ def api_send(tid: int):
     try:
         threading.Thread(
             target=engine.dispatch, args=(tid, text),
-            kwargs={"reserved": True, "exec_seats": exec_seats}, daemon=True,
+            kwargs={"reserved": True, "exec_seats": exec_seats,
+                    "participants": participants}, daemon=True,
         ).start()
     except Exception:
         engine.release(tid)
@@ -338,17 +383,19 @@ def main():
         except (AttributeError, ValueError):
             pass
     if _port_in_use():
-        print("✗ 端口 8765 已被占用——另一个 ChatHub 还开着！")
+        print(f"✗ 端口 {PORT} 已被占用——另一个 ChatHub 还开着！")
         print("  请找到那个黑色窗口关掉（或任务管理器结束 python），再重新双击启动。")
         print("  旧实例用的是旧配置：不关掉它，你看到的永远是旧席位/旧功能。")
         sys.exit(1)
-    _backup_db()                # 先拍库快照（轮换留 10 份；运行期每 10 分钟再拍）
+    _backup_db(throttled=True)  # 首拍已在模块导入时（Store 迁移之前）完成，这里只是节流补拍
     _restore_memory_if_empty()  # 库空而 memory.md 有货 → 自动恢复记忆
     _restore_topics_if_empty()  # 议题表空而镜像有货 → 自动恢复议题
     _sync_memory()              # 再导出一次，保证 memory.md 与库一致
     st = engine.seat_status()
+    ws, ws_err = engine.workspace_status()
     print(f"ChatHub GUI 启动：http://127.0.0.1:{PORT}")
-    print("三席状态：" + " | ".join(f"{k}={'在线' if v['online'] else '离线'}" for k, v in st.items()))
+    print(f"工作区：{ws}" + (f"（⚠ {ws_err}）" if ws_err else ""))
+    print("席位状态：" + " | ".join(f"{k}={'在线' if v['online'] else '离线'}" for k, v in st.items()))
     # 启动器（bat）会自己开浏览器；设了 CHATHUB_NO_AUTO_OPEN 就不重复弹
     if not os.environ.get("CHATHUB_NO_AUTO_OPEN"):
         threading.Timer(1.0, lambda: webbrowser.open(f"http://127.0.0.1:{PORT}")).start()

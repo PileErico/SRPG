@@ -13,11 +13,16 @@ from pathlib import Path
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS topics(
-  id      INTEGER PRIMARY KEY AUTOINCREMENT,
-  title   TEXT NOT NULL,
-  mode    TEXT NOT NULL DEFAULT 'reactive',   -- reactive|auto（创建时可留 auto 由消息标记决定）
-  status  TEXT NOT NULL DEFAULT 'open',        -- open|concluded
-  created REAL NOT NULL
+  id        INTEGER PRIMARY KEY AUTOINCREMENT,
+  title     TEXT NOT NULL,
+  mode      TEXT NOT NULL DEFAULT 'reactive',   -- reactive|auto（创建时可留 auto 由消息标记决定）
+  status    TEXT NOT NULL DEFAULT 'open',        -- open|concluded
+  created   REAL NOT NULL,
+  workspace TEXT                                 -- 创建时的目标工作区（多项目前瞻字段，可空）
+);
+CREATE TABLE IF NOT EXISTS settings(
+  key   TEXT PRIMARY KEY,                        -- 如 'workspace'＝GUI 上次选择，重启后延续
+  value TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS messages(
   id       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,6 +48,12 @@ CREATE INDEX IF NOT EXISTS idx_msg_topic ON messages(topic_id, id);
 """
 
 
+# 旧库升级（CREATE IF NOT EXISTS 管不到已存在的表）；列已存在时报 OperationalError＝跳过
+_MIGRATIONS = (
+    "ALTER TABLE topics ADD COLUMN workspace TEXT",
+)
+
+
 class Store:
     def __init__(self, path: str | Path):
         self.path = str(path)
@@ -51,6 +62,11 @@ class Store:
         self.mirror_dir = Path(path).parent / "topics"
         with self._conn() as c:
             c.executescript(SCHEMA)
+            for stmt in _MIGRATIONS:
+                try:
+                    c.execute(stmt)
+                except sqlite3.OperationalError:
+                    pass  # 列已存在（新库或已迁移过）
 
     def _mirror_topic(self, tid: int) -> None:
         """把议题整体镜像成 markdown；失败不影响主流程。"""
@@ -80,13 +96,15 @@ class Store:
             c.close()
 
     # ---- topics ----
-    def import_topic(self, title: str, status: str, messages: list[dict]) -> int:
-        """整体导入一个议题（保留原始发言人/时间戳）——供镜像恢复用。"""
+    def import_topic(self, title: str, status: str, messages: list[dict],
+                     workspace: str | None = None) -> int:
+        """整体导入一个议题（保留原始发言人/时间戳/工作区戳）——供镜像恢复用。"""
         with self._conn() as c:
             cur = c.execute(
-                "INSERT INTO topics(title,mode,status,created) VALUES(?,?,?,?)",
+                "INSERT INTO topics(title,mode,status,created,workspace) VALUES(?,?,?,?,?)",
                 (title, "reactive", status,
-                 min((m.get("created", 0) for m in messages), default=time.time()) or time.time()),
+                 min((m.get("created", 0) for m in messages), default=time.time()) or time.time(),
+                 workspace),
             )
             tid = int(cur.lastrowid)
             for m in messages:
@@ -97,11 +115,12 @@ class Store:
         self._mirror_topic(tid)
         return tid
 
-    def create_topic(self, title: str, mode: str = "reactive") -> int:
+    def create_topic(self, title: str, mode: str = "reactive",
+                     workspace: str | None = None) -> int:
         with self._conn() as c:
             cur = c.execute(
-                "INSERT INTO topics(title,mode,status,created) VALUES(?,?,?,?)",
-                (title, mode, "open", time.time()),
+                "INSERT INTO topics(title,mode,status,created,workspace) VALUES(?,?,?,?,?)",
+                (title, mode, "open", time.time(), workspace),
             )
             tid = int(cur.lastrowid)
         self._mirror_topic(tid)
@@ -150,6 +169,17 @@ class Store:
             rows = [dict(r) for r in c.execute(
                 "SELECT * FROM messages WHERE topic_id=? ORDER BY id", (tid,))]
         return rows[-limit:] if limit else rows
+
+    # ---- settings（工具级键值：如 GUI 上次选择的工作区）----
+    def get_setting(self, key: str) -> str | None:
+        with self._conn() as c:
+            r = c.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+            return str(r["value"]) if r else None
+
+    def set_setting(self, key: str, value: str) -> None:
+        with self._conn() as c:
+            c.execute("INSERT INTO settings(key,value) VALUES(?,?) "
+                      "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
 
     # ---- shared memory ----
     def add_memory(self, content: str, source: str = "", status: str = "draft") -> int:

@@ -38,10 +38,9 @@ from pathlib import Path
 try:
     import yaml
 except ImportError:  # pragma: no cover
-    sys.stderr.write("需要 pyyaml：pip install -r tools/chathub/requirements.txt\n")
+    sys.stderr.write("需要 pyyaml：pip install -r requirements.txt（chathub 目录下）\n")
     raise
 
-REPO_ROOT = Path(__file__).resolve().parents[2]          # tools/chathub → tools → 仓库根
 HERE = Path(__file__).resolve().parent
 DEFAULT_CONFIG = HERE / "config.yaml"
 
@@ -57,9 +56,11 @@ SPEAKER_RE = re.compile(r"^([A-Za-z一-鿿]+)[：:]")
 # ============================ 配置 ============================================
 @dataclass
 class Config:
+    workspace: Path                    # 目标工作区（被讨论/被执行的项目仓库根）🔒 独立化后必配
     chathub_path: Path
     trigger_names: list[str]
     speaking_order: list[str]
+    default_participants: list[str]    # GUI 讨论默认勾选的席位（空＝全员）
     max_rounds: int
     timeouts: dict[str, float]         # 席位名 → 秒
     default_timeout: float
@@ -78,8 +79,19 @@ class Config:
     def load(cls, path: Path) -> "Config":
         raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
+        # 工作区：chathub 独立于目标项目之外，所有「对项目动手」的行为都以此为根。
+        # 相对路径＝相对 config.yaml 所在目录；缺键＝回落到进程 cwd 并警告（别静默）。
+        ws_raw = raw.get("workspace")
+        if ws_raw:
+            workspace = Path(str(ws_raw)).expanduser()
+            if not workspace.is_absolute():
+                workspace = (path.resolve().parent / workspace).resolve()
+        else:
+            workspace = Path.cwd()
+            sys.stderr.write(f"[warn] config 缺 workspace 键，暂以当前目录为工作区：{workspace}\n")
+
         chathub = raw.get("chathub_path", "docs/chathub.md")
-        chathub_path = (REPO_ROOT / chathub) if not Path(chathub).is_absolute() else Path(chathub)
+        chathub_path = (workspace / chathub) if not Path(chathub).is_absolute() else Path(chathub)
 
         trig = raw.get("trigger_names", ["Erico"])
         if isinstance(trig, str):
@@ -88,14 +100,22 @@ class Config:
         order = list(raw.get("speaking_order", []))
         auto = raw.get("autonomous") or {}
 
+        # 工作区注入各席适配器（CLI 席子进程的 cwd）：config 里显式配了的席不覆盖
+        adapters = dict(raw.get("adapters") or {})
+        for spec in adapters.values():
+            if isinstance(spec, dict):
+                spec.setdefault("workspace", str(workspace))
+
         return cls(
+            workspace=workspace,
             chathub_path=chathub_path,
             trigger_names=list(trig),
             speaking_order=order,
+            default_participants=list(raw.get("default_participants") or []),
             max_rounds=int(raw.get("max_rounds", 1)),
             timeouts={k: float(v) for k, v in (raw.get("timeouts") or {}).items()},
             default_timeout=float(raw.get("default_timeout", 90)),
-            adapters=dict(raw.get("adapters") or {}),
+            adapters=adapters,
             poll_interval=float(raw.get("poll_interval", 3)),
             auto_marker=str(auto.get("marker", "【议题】")),
             auto_max_rounds=int(auto.get("max_rounds", 4)),
@@ -538,6 +558,7 @@ def main(argv: list[str] | None = None) -> int:
 
     cfg = Config.load(args.config)
     print(f"chathub: {cfg.chathub_path}")
+    print(f"工作区: {cfg.workspace}")
     print(f"顺序: {cfg.speaking_order} | max_rounds={cfg.max_rounds} | 触发={cfg.trigger_names}")
 
     adapters = {name: load_adapter(name, spec) for name, spec in cfg.adapters.items()}

@@ -32,8 +32,6 @@ from adapters.base import (  # noqa: E402
     Turn,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[3]        # adapters→chathub→tools→仓库根
-
 # `claude --effort` 的封闭枚举——**施工期实测 CLI 取证所得**（2026-07-16）。
 # ⚠ CLI 大版本升级后须重跑探测再改这里；model 轴相反：服务端不校验，自由输入。
 EFFORT_VALUES = ("low", "medium", "high", "xhigh", "max")
@@ -145,6 +143,9 @@ class ClaudeAdapter(Adapter):
     def _run(self, args: list[str], context: str) -> str:
         prompt = context + self.config.get("ask", DEFAULT_ASK_TMPL.format(name=self.name))
         timeout = float(self.config.get("timeout", 140))
+        # cwd=目标工作区（broker.Config 注入）：让 claude 能引用项目文件（只读）。
+        # 未注入（如 --test 直跑）＝None＝继承进程 cwd，别拿工具目录冒充项目。
+        ws = self.config.get("workspace")
         try:
             proc = subprocess.run(
                 args,
@@ -154,7 +155,7 @@ class ClaudeAdapter(Adapter):
                 encoding="utf-8",
                 errors="replace",
                 timeout=timeout,
-                cwd=str(REPO_ROOT),          # 让 claude 能引用项目文件（只读）
+                cwd=str(ws) if ws else None,
             )
         except FileNotFoundError as exc:
             raise AdapterError(f"找不到 claude 可执行文件：{args[0]}（先装 CLI）") from exc

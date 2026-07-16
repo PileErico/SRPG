@@ -47,12 +47,67 @@ class Engine:
         # 执行工作区互斥：busy 按议题隔离，但所有执行共享同一 git 工作区——
         # 两个议题同时进执行阶段会互相 checkout 踩踏（审查发现#1），全局串行化
         self._exec_lock = threading.Lock()
+        # 按席钉死的工作区（config 里显式写了 workspace 键的席）：GUI 全局切换不覆盖，
+        # 兑现 config.yaml「按席覆盖」的承诺——否则 GUI 启动第一刻就把显式配置静默抹平。
+        self._ws_pinned = {n for n, spec in (raw.get("adapters") or {}).items()
+                           if isinstance(spec, dict) and "workspace" in spec}
+        # 工作区：GUI 上次选择（db settings）优先，config.workspace 兜底；
+        # 上次选择已失效（目录没了/不是 git 仓库）→ 回落 config 并喊出来，不静默。
+        self.workspace = Path(self.cfg.workspace)
+        saved = None
+        try:
+            saved = store.get_setting("workspace")
+        except Exception:  # noqa: BLE001  旧 Store 无 settings 表等
+            saved = None
+        if saved and str(Path(saved)) != str(self.workspace):
+            err = executor_mod.workspace_error(saved)
+            if err is None:
+                self._apply_workspace(Path(saved), persist=False)
+            else:
+                print(f"⚠ 上次选择的工作区不可用（{err}），回落到 config：{self.workspace}")
+        else:
+            self._apply_workspace(self.workspace, persist=False)
+
+    # ---- 工作区 ----
+    def _apply_workspace(self, p: Path, *, persist: bool) -> None:
+        """统一落点：engine 自身 + 各席适配器的子进程 cwd 同步更新，防两处漂移。
+        config 里显式钉了 workspace 的席（_ws_pinned）不动——按席覆盖优先于全局切换。"""
+        self.workspace = p
+        for n, a in self.adapters.items():
+            if a is not None and n not in self._ws_pinned:
+                a.config["workspace"] = str(p)
+        if persist:
+            self.store.set_setting("workspace", str(p))
+
+    def workspace_status(self) -> tuple[str, str | None]:
+        """(当前工作区, 不可用原因或 None)。"""
+        return str(self.workspace), executor_mod.workspace_error(self.workspace)
+
+    def set_workspace(self, path: str) -> Path:
+        """切换目标工作区（校验 git 仓库；讨论/执行进行中拒绝）。持久化到 db settings。"""
+        err = executor_mod.workspace_error(path)
+        if err:
+            raise ValueError(err)
+        with self._busy_lock:
+            if self._busy:
+                raise RuntimeError("有议题正在讨论/执行中，结束后再切换工作区")
+            self._apply_workspace(Path(path).resolve(), persist=True)
+        return self.workspace
 
     # ---- 状态 ----
+    def _status_seats(self) -> list[str]:
+        """状态栏展示的席位：讨论席（speaking_order）+ 纯执行席（executors 里独有的）。"""
+        names = list(self.cfg.speaking_order)
+        for e in (self.exec_cfg.get("executors") or []):
+            s = e.get("seat")
+            if s and s not in names:
+                names.append(s)
+        return names
+
     def seat_status(self) -> dict:
         """按适配器类型（非席位名）做前置检查：HTTP 席查 key、CLI 席查可执行文件。"""
         out = {}
-        for n in self.cfg.speaking_order:
+        for n in self._status_seats():
             a = self.adapters.get(n)
             online, reason = a is not None, ""
             if a is None:
@@ -195,19 +250,33 @@ class Engine:
             parts.append(f"\n———［调度器指令］———\n{instruction}")
         return "\n".join(parts)
 
-    def _call(self, name: str, context: str, round_index: int = 0) -> RunResult:
-        """调一席，返回 RunResult（正文＋元数据）。元数据随返回值走，不进共享状态。"""
+    def _call(self, name: str, context: str, round_index: int = 0,
+              timeout: float | None = None) -> RunResult:
+        """调一席，返回 RunResult（正文＋元数据）。元数据随返回值走，不进共享状态。
+        timeout 显式传入＝覆盖该席的讨论档超时（审查/验收等大负载调用用）。"""
         turn = Turn(round_index=round_index, speaker=name, order_index=0, prior_this_round=[])
-        return broker.call_with_timeout(self.adapters[name], context, turn, self.cfg.timeout_for(name))
+        t = self.cfg.timeout_for(name) if timeout is None else float(timeout)
+        return broker.call_with_timeout(self.adapters[name], context, turn, t)
 
     def _signed(self, run: RunResult, body: str | None = None) -> str:
         """正文（默认取 run.content）+ 落款。body 显式传入＝已剥标记/已加前缀的清洁正文。"""
         return broker.with_signature(run.content if body is None else body, run.meta)
 
+    # ---- 参与席位：本轮实际发言的席（GUI 勾选；None＝全员）----
+    def _seats(self, participants: list[str] | None) -> list[str]:
+        """按 speaking_order 的次序过滤参与名单——勾选决定「谁来」，顺序永远归 config。"""
+        if participants is None:
+            return list(self.cfg.speaking_order)
+        return [n for n in self.cfg.speaking_order if n in participants]
+
     # ---- 参与模式：各席一次 ----
-    def run_participate(self, tid: int) -> None:
+    def run_participate(self, tid: int, participants: list[str] | None = None) -> None:
         topic = self.store.get_topic(tid)
-        for name in self.cfg.speaking_order:
+        seats = self._seats(participants)
+        if not seats:
+            self.store.add_message(tid, "system", "［本轮取消：没有勾选任何参与席位］")
+            return
+        for name in seats:
             if self._cancelled(tid):
                 self.store.add_message(tid, "system", "［本轮已由用户停止］")
                 break
@@ -221,8 +290,12 @@ class Engine:
                 self.store.add_message(tid, name, f"[跳过：{exc}]")
 
     # ---- 议题模式：自主多轮→收敛→结论→记忆草案 ----
-    def run_topic(self, tid: int) -> None:
+    def run_topic(self, tid: int, participants: list[str] | None = None) -> None:
         topic = self.store.get_topic(tid)
+        seats = self._seats(participants)
+        if not seats:
+            self.store.add_message(tid, "system", "［议题取消：没有勾选任何参与席位］")
+            return
         for r in range(self.cfg.auto_max_rounds):
             if self._cancelled(tid):
                 self.store.add_message(tid, "system", "［议题讨论已由用户停止］")
@@ -230,7 +303,7 @@ class Engine:
             votes: list[bool] = []
             ruled = False
             instr = broker._auto_round_instruction(self.cfg, r)
-            for i, name in enumerate(self.cfg.speaking_order):
+            for i, name in enumerate(seats):
                 if self._cancelled(tid):
                     self.store.add_message(tid, "system", "［议题讨论已由用户停止］")
                     return
@@ -252,7 +325,7 @@ class Engine:
                 except Exception as exc:  # noqa: BLE001
                     self.store.add_message(tid, name, f"[跳过：{exc}]")
                 if ruled:
-                    skipped = [n for n in self.cfg.speaking_order[i + 1:]
+                    skipped = [n for n in seats[i + 1:]
                                if self.adapters.get(n) is not None]
                     self.store.add_message(tid, "system", broker.verdict_notice(self.cfg, skipped))
                     break
@@ -279,9 +352,9 @@ class Engine:
                 self.store.add_message(tid, synth, f"[结论失败：{exc}]")
         self.store.set_topic_status(tid, "concluded")
 
-    # ---- 执行阶段：授权后由带写权限的执行者落地（opus/codex 各自分支）----
-    # 流水：执行者顺序落地（可点名名单）→ 交叉互查（执行者互审对方真实 diff）
-    #       → deepseek 参考意见（无文件访问，只评记录）→ fable 终验收（看全部 diff+互查）
+    # ---- 执行阶段：授权后由带写权限的执行者落地（各自分支，目标=当前工作区）----
+    # 流水：执行者顺序落地（可点名名单）→ 审查（≥2 人＝交叉互查；1 人＝spec_reviewer 规格审查）
+    #       → reviewer 参考意见（无文件访问，只评记录）→ acceptor 终验收（看全部 diff+审查）
     def run_execute(self, tid: int, auth_text: str,
                     only_seats: list[str] | None = None) -> None:
         topic = self.store.get_topic(tid)
@@ -299,8 +372,24 @@ class Engine:
                 f"［执行取消：名单 {only_seats} 与配置的执行者 "
                 f"{[e.get('seat') for e in all_execs]} 无交集］")
             return
+        # 工作区校验：在错误目录跑 checkout 是全链路腐坏，进门先拦
+        ws = Path(self.workspace)
+        ws_err = executor_mod.workspace_error(ws)
+        if ws_err:
+            self.store.add_message(tid, "system", f"［执行拒绝：工作区不可用——{ws_err}］")
+            return
+        # 议题工作区戳比对：议题在 A 讨论的方案不能落进当前切到的 B 仓库（审查发现·major）。
+        # 旧议题戳为空（列迁移前建的）放行——没证据不定罪。
+        t_ws = (topic or {}).get("workspace")
+        if t_ws and os.path.normcase(os.path.normpath(str(t_ws))) \
+                != os.path.normcase(os.path.normpath(str(ws))):
+            self.store.add_message(
+                tid, "system",
+                f"［执行拒绝：本议题创建于工作区 {t_ws}，当前工作区是 {ws}——方案上下文与目标仓库"
+                f"不匹配。请切回原工作区，或在当前工作区新建议题再讨论、再授权执行。］")
+            return
         # 基线校验（审查发现#5）：detached HEAD 或基线撞执行分支名 → 全链路静默腐坏，拒绝执行
-        base = executor_mod.current_branch()
+        base = executor_mod.current_branch(ws)
         exec_branches = {e.get("branch") for e in all_execs}
         if base == "HEAD" or base in exec_branches:
             self.store.add_message(
@@ -313,22 +402,25 @@ class Engine:
             self.store.add_message(tid, "system", "［执行排队失败：另一议题正在执行中，请等它结束后重试］")
             return
         try:
-            self._run_execute_locked(tid, topic, context, auth_text, execs, base)
+            self._run_execute_locked(tid, topic, context, auth_text, execs, base, ws)
         finally:
             self._exec_lock.release()
 
     def _run_execute_locked(self, tid: int, topic: dict, context: str, auth_text: str,
-                            execs: list[dict], base: str) -> None:
+                            execs: list[dict], base: str, ws: Path) -> None:
         timeout = float(self.exec_cfg.get("timeout", 1200))
         diff_budget = int(self.exec_cfg.get("diff_char_budget", 20_000))
         acceptor = self.exec_cfg.get("acceptor")
         reviewer = self.exec_cfg.get("reviewer")
-        dirt_baseline = executor_mod.worktree_status()
+        spec_reviewer = self.exec_cfg.get("spec_reviewer")
+        dirt_baseline = executor_mod.worktree_status(ws)
         roster = ", ".join(e.get("seat", "?") for e in execs)
+        # 预告只写「审查」——互查还是规格审查要看实际产出几份 diff，届时按真相留痕，
+        # 预告与实际条件脱节＝记录承诺一场没发生的审查（审查发现）
         self.store.add_message(
             tid, "system",
-            f"［执行已授权｜基线分支={base}｜执行名单：{roster}｜"
-            f"流程：落地→互查→{reviewer or '—'} 参考→{acceptor or '—'} 验收｜不 push/不碰 main］")
+            f"［执行已授权｜工作区={ws}｜基线分支={base}｜执行名单：{roster}｜"
+            f"流程：落地→审查→{reviewer or '—'} 参考→{acceptor or '—'} 验收｜不 push/不碰 main］")
 
         # ── 1) 逐执行者落地（每人跑完立即回基线，防止下一位在别人分支上开工）──
         done: list[tuple[str, str, bool, bool]] = []    # (seat, branch, ok, fresh=本轮真更新了分支)
@@ -342,36 +434,37 @@ class Engine:
             if self.adapters.get(seat) is None:
                 self.store.add_message(tid, "system", f"［{seat} 通道不可用，跳过执行］")
                 continue
-            tip_before = executor_mod.branch_tip(branch)
+            tip_before = executor_mod.branch_tip(ws, branch)
             self.store.add_message(tid, seat, f"［开始执行 → {branch} 分支］")
             # 审计：Popen 之前构造白名单 Invocation 入库——spawn 失败/超时也留得住证据
             self.store.add_message(
                 tid, "system",
                 executor_mod.format_audit(seat, branch, executor_mod.build_invocation(list(cmd))))
-            res = executor_mod.run_executor(seat, list(cmd), branch, base, context, auth_text, timeout)
+            res = executor_mod.run_executor(seat, list(cmd), branch, base, context, auth_text,
+                                            ws, timeout)
             self.store.add_message(tid, seat, res["report"])
-            executor_mod.restore_branch(base)
-            tip_after = executor_mod.branch_tip(branch)
+            executor_mod.restore_branch(ws, base)
+            tip_after = executor_mod.branch_tip(ws, branch)
             fresh = tip_after is not None and tip_after != tip_before
-            leftover = executor_mod.new_dirt(dirt_baseline)
+            leftover = executor_mod.new_dirt(ws, dirt_baseline)
             if leftover:
                 self.store.add_message(
                     tid, "system",
                     "⚠［" + seat + " 执行后工作区出现未提交遗留（未自动清理，请人工确认）］\n"
                     + "\n".join(leftover[:20]))
                 # 滚动基线：A 的遗留不再栽给 B（审查发现#4）
-                dirt_baseline = executor_mod.worktree_status()
+                dirt_baseline = executor_mod.worktree_status(ws)
             done.append((seat, branch, bool(res.get("ok")), fresh))
 
         # ── 2) 执行记录：恢复基线 + 各分支 diffstat + 抽取真实 diff（仅本轮更新过的分支）──
-        note = executor_mod.restore_branch(base)
+        note = executor_mod.restore_branch(ws, base)
         diffs: dict[str, tuple[str, str]] = {}          # seat -> (branch, diff文本)
         lines = ["【执行记录】", note]
         for seat, branch, ok, fresh in done:
             if fresh:
-                stat = executor_mod.branch_diffstat(branch, base) or "（分支已更新但相对基线无差异）"
+                stat = executor_mod.branch_diffstat(ws, branch, base) or "（分支已更新但相对基线无差异）"
                 lines.append(f"— {seat} @ {branch} 分支：{'✓完成' if ok else '✗失败'}\n{stat}")
-                d = executor_mod.branch_diff(branch, base, diff_budget)
+                d = executor_mod.branch_diff(ws, branch, base, diff_budget)
                 if d:
                     diffs[seat] = (branch, d)
             else:
@@ -380,30 +473,70 @@ class Engine:
                              f"（本轮未更新分支——不纳入互查/验收；若分支存在，其内容为上轮遗留）")
         self.store.add_message(tid, "system", "\n".join(lines))
 
-        # ── 3) 交叉互查：执行者互审对方分支的真实 diff（只读）──
-        if self.exec_cfg.get("cross_review", True) and len(diffs) >= 2 and not self._cancelled(tid):
-            self.store.add_message(tid, "system", "［交叉互查：执行者互审对方分支 diff］")
-            for seat, branch, ok, fresh in done:
-                if self._cancelled(tid):
-                    break
-                if self.adapters.get(seat) is None:
-                    continue
-                for other, (obranch, odiff) in diffs.items():
-                    if other == seat:
+        # ── 3) 审查：≥2 份 diff→交叉互查；1 份→规格审查；任何跳过路径都明说原因——
+        # 静默豁口＝记录看似审过、实际一道闸都没过（审查发现）。审查读的是
+        # 「上下文+整份 diff」，负载远超讨论回复，超时用 execution.review_timeout。
+        review_timeout = float(self.exec_cfg.get("review_timeout", 300))
+        cross_on = self.exec_cfg.get("cross_review", True)
+        if not self._cancelled(tid) and diffs:
+            if cross_on and len(diffs) >= 2:
+                self.store.add_message(tid, "system", "［交叉互查：执行者互审对方分支 diff］")
+                for seat, branch, ok, fresh in done:
+                    if self._cancelled(tid):
+                        break
+                    if self.adapters.get(seat) is None:
                         continue
+                    for other, (obranch, odiff) in diffs.items():
+                        if other == seat:
+                            continue
+                        instr = (
+                            f"【互查】你是执行者 {seat}（你的实现在 {diffs.get(seat, ('?', ''))[0]} 分支）。"
+                            f"请只读审查 {other} 在 {obranch} 分支的实现——下面是其相对基线的真实 diff。"
+                            f"指出：①正确性问题；②风险/遗漏；③它比你的版本好的地方。"
+                            f"不要改任何代码，直接给审查意见。\n\n"
+                            f"=== {other} @ {obranch} 分支 diff ===\n{odiff}"
+                        )
+                        try:
+                            run = self._call(seat, self._context(topic, instr), 0,
+                                             timeout=review_timeout)
+                            self.store.add_message(
+                                tid, seat, self._signed(run, f"【互查 {other}@{obranch}】\n{run.content}"))
+                        except Exception as exc:  # noqa: BLE001
+                            self.store.add_message(tid, seat, f"[互查失败：{exc}]")
+            elif len(diffs) >= 2:
+                self.store.add_message(
+                    tid, "system",
+                    "［本轮无审查：config.execution.cross_review 已关闭——落地质量只剩验收一道闸，请留意］")
+            else:  # 恰一份 diff → 规格审查（互查在单执行者常态下永不触发，这是它的兜底）
+                seat, (branch, d) = next(iter(diffs.items()))
+                skip = None
+                if not spec_reviewer:
+                    skip = "未配置 execution.spec_reviewer"
+                elif spec_reviewer == seat:
+                    skip = f"spec_reviewer（{spec_reviewer}）就是执行席本人，不能自审"
+                elif self.adapters.get(spec_reviewer) is None:
+                    skip = f"spec_reviewer（{spec_reviewer}）适配器不可用"
+                if skip:
+                    self.store.add_message(
+                        tid, "system", f"［本轮无审查：{skip}——落地质量只剩验收一道闸，请留意］")
+                else:
+                    self.store.add_message(
+                        tid, "system", f"［规格审查：{spec_reviewer} 审查 {seat} 的落实是否走样］")
                     instr = (
-                        f"【互查】你是执行者 {seat}（你的实现在 {diffs.get(seat, ('?', ''))[0]} 分支）。"
-                        f"请只读审查 {other} 在 {obranch} 分支的实现——下面是其相对基线的真实 diff。"
-                        f"指出：①正确性问题；②风险/遗漏；③它比你的版本好的地方。"
-                        f"不要改任何代码，直接给审查意见。\n\n"
-                        f"=== {other} @ {obranch} 分支 diff ===\n{odiff}"
+                        f"【规格审查】你是 {spec_reviewer}，参与制定了本议题的方案。执行者 {seat} 已在 "
+                        f"{branch} 分支落地，下面是其相对基线的真实 diff。请只读审查落实质量："
+                        f"①是否忠实实现了定稿方案（偏离/擅自扩大范围之处逐条指出）；"
+                        f"②正确性问题；③遗漏与风险。不要改任何代码，直接给审查意见。\n\n"
+                        f"=== {seat} @ {branch} 分支 diff ===\n{d}"
                     )
                     try:
-                        run = self._call(seat, self._context(topic, instr), 0)
+                        run = self._call(spec_reviewer, self._context(topic, instr), 0,
+                                         timeout=review_timeout)
                         self.store.add_message(
-                            tid, seat, self._signed(run, f"【互查 {other}@{obranch}】\n{run.content}"))
+                            tid, spec_reviewer,
+                            self._signed(run, f"【规格审查 {seat}@{branch}】\n{run.content}"))
                     except Exception as exc:  # noqa: BLE001
-                        self.store.add_message(tid, seat, f"[互查失败：{exc}]")
+                        self.store.add_message(tid, spec_reviewer, f"[规格审查失败：{exc}]")
 
         # ── 4) 参谋席参考意见（config.execution.reviewer；无文件访问，只评记录中真实存在的内容）──
         if reviewer and reviewer not in {s for s, _, _, _ in done} \
@@ -444,7 +577,8 @@ class Engine:
 
     # ---- 后台入口：按消息标记选模式 ----
     def dispatch(self, tid: int, user_text: str, *, reserved: bool = False,
-                 exec_seats: list[str] | None = None) -> str:
+                 exec_seats: list[str] | None = None,
+                 participants: list[str] | None = None) -> str:
         # 标记语义=「以标记开头」（与前端一致；正文中段引用【议题】/【执行】不触发——审查发现#11）
         exec_marker = self.exec_cfg.get("marker", "【执行】")
         t = user_text.lstrip()
@@ -457,9 +591,9 @@ class Engine:
                 self.run_execute(tid, user_text, only_seats=exec_seats)
                 return "execute"
             if auto:
-                self.run_topic(tid)
+                self.run_topic(tid, participants=participants)
                 return "auto"
-            self.run_participate(tid)
+            self.run_participate(tid, participants=participants)
         finally:
             self.release(tid)
         return "reactive"

@@ -9,6 +9,10 @@
 
 git 细节交给执行者自己做（“怎么执行是他们的事”）；本模块只：读当前分支、
 把任务喂给执行者子进程、结束后把工作区恢复到基线分支、给出分支 diffstat。
+
+**工作区显式传参 🔒（2026-07-16 独立化）**：chathub 已搬出目标仓库，本模块不再
+假设「工具上溯三层＝仓库根」——所有 git 操作与执行者子进程都要显式收 `ws`
+（目标工作区路径），由 engine 从「config.workspace / GUI 切换」解析后传入。
 """
 from __future__ import annotations
 
@@ -18,8 +22,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[3]   # gui→chathub→tools→仓库根
-CHATHUB = Path(__file__).resolve().parents[1]     # tools/chathub
+CHATHUB = Path(__file__).resolve().parents[1]     # chathub 工具根（仅供 import）
 if str(CHATHUB) not in sys.path:
     sys.path.insert(0, str(CHATHUB))
 
@@ -119,40 +122,60 @@ def _executor_env(seat: str) -> dict[str, str]:
     return env
 
 
-def _git(*args: str, timeout: float = 30) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", *args], cwd=REPO_ROOT, capture_output=True,
+def _git(ws: str | Path, *args: str, timeout: float = 30) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *args], cwd=str(ws), capture_output=True,
                           text=True, encoding="utf-8", errors="replace", timeout=timeout)
 
 
-def current_branch() -> str:
-    r = _git("rev-parse", "--abbrev-ref", "HEAD")
+def workspace_error(ws: str | Path | None) -> str | None:
+    """工作区可用性校验：返回原因串（不可用）或 None（可用）。
+
+    可用 ＝ 目录存在且是 git 工作树。校验失败要明确报错而非静默——
+    执行阶段在错误目录跑 checkout 是全链路腐坏，不是小事。
+    """
+    if not ws:
+        return "未配置工作区（config.yaml 的 workspace 键）"
+    p = Path(ws)
+    if not p.is_dir():
+        return f"目录不存在：{p}"
+    try:
+        r = _git(p, "rev-parse", "--is-inside-work-tree", timeout=10)
+    except Exception as exc:  # noqa: BLE001  git 不在 PATH 等
+        return f"无法运行 git：{exc}"
+    if r.returncode != 0 or (r.stdout or "").strip() != "true":
+        return f"不是 git 仓库：{p}"
+    return None
+
+
+def current_branch(ws: str | Path) -> str:
+    r = _git(ws, "rev-parse", "--abbrev-ref", "HEAD")
     return (r.stdout or "").strip() or "HEAD"
 
 
-def branch_tip(branch: str) -> str | None:
+def branch_tip(ws: str | Path, branch: str) -> str | None:
     """分支 tip 哈希；分支不存在返回 None。用于判定「本轮是否真的更新了分支」，
     防止上一轮遗留的同名分支 diff 被当成本轮产出送审（审查发现#2）。"""
-    r = _git("rev-parse", "--verify", "--quiet", branch)
+    r = _git(ws, "rev-parse", "--verify", "--quiet", branch)
     tip = (r.stdout or "").strip()
     return tip if r.returncode == 0 and tip else None
 
 
-def restore_branch(base: str) -> str:
+def restore_branch(ws: str | Path, base: str) -> str:
     """尽力把工作区切回基线分支；返回一句状态说明。"""
-    r = _git("checkout", base)
+    r = _git(ws, "checkout", base)
     if r.returncode == 0:
         return f"已恢复到基线分支 {base}"
     return f"⚠ 恢复到 {base} 失败（可能有未提交改动）：{(r.stderr or '').strip()[-300:]}"
 
 
-def branch_diffstat(branch: str, base: str) -> str:
-    r = _git("diff", "--stat", f"{base}...{branch}")
+def branch_diffstat(ws: str | Path, branch: str, base: str) -> str:
+    r = _git(ws, "diff", "--stat", f"{base}...{branch}")
     return (r.stdout or "").strip()
 
 
-def branch_diff(branch: str, base: str, max_chars: int = 20_000) -> str:
+def branch_diff(ws: str | Path, branch: str, base: str, max_chars: int = 20_000) -> str:
     """分支相对基线的完整 diff（截断至 max_chars）——供互查/验收席阅读真实改动。"""
-    r = _git("diff", f"{base}...{branch}", timeout=60)
+    r = _git(ws, "diff", f"{base}...{branch}", timeout=60)
     d = (r.stdout or "").strip()
     if len(d) > max_chars:
         total = len(d)
@@ -160,22 +183,22 @@ def branch_diff(branch: str, base: str, max_chars: int = 20_000) -> str:
     return d
 
 
-def worktree_status() -> set[str]:
+def worktree_status(ws: str | Path) -> set[str]:
     """工作区 porcelain 状态快照（含未跟踪），供执行前后对比查执行者遗留。"""
-    r = _git("status", "--porcelain")
+    r = _git(ws, "status", "--porcelain")
     return {line for line in (r.stdout or "").splitlines() if line.strip()}
 
 
-def new_dirt(baseline: set[str]) -> list[str]:
+def new_dirt(ws: str | Path, baseline: set[str]) -> list[str]:
     """相对基线快照新出现的未提交条目（执行者遗留的脏改动）。"""
-    return sorted(worktree_status() - baseline)
+    return sorted(worktree_status(ws) - baseline)
 
 
-EXEC_PROMPT = """你是本项目的执行者（{seat}）。用户 Erico 已授权执行下面这个方案。你拥有本仓库的写权限。
+EXEC_PROMPT = """你是本项目的执行者（{seat}）。用户 Erico 已授权执行下面这个方案。你拥有工作区仓库（{ws}）的写权限。
 
 务必遵守：
 1. `git checkout -B {branch} {base}`（显式从 {base} 分叉——不要省略起点参数），只在 **{branch}** 分支上工作。
-2. 按方案实现：改代码/数据，必要时跑 headless 测试（`tools/run_tests.ps1` 须 pwsh7）。
+2. **忠实按方案落实**：方案含糊或与代码现状冲突时，选保守解读并在报告中明确写出你的解读与取舍——不要自作主张扩大范围。必要时跑项目自带的测试（以仓库文档说明的测试方式为准）。
 3. **只提交你自己改动的文件——显式 `git add <具体路径>`，严禁 `git add -A` / `git add .`**；提交信息写清改了什么。仓库里已存在的未提交文件（美术 WIP 等）一律别碰、别提交。
 4. **不要 push、不要切到/提交到 main、不要装包、不要删目录、不要联网。**
 5. 完成后 `git checkout {base}`。然后简要报告：你在 {branch} 分支改了哪些文件、跑了什么测试、结果如何、有无遗留问题。
@@ -189,18 +212,20 @@ EXEC_PROMPT = """你是本项目的执行者（{seat}）。用户 Erico 已授�
 
 
 def run_executor(seat: str, cmd: list[str], branch: str, base: str,
-                 context: str, auth: str, timeout: float = 1200) -> dict:
+                 context: str, auth: str, ws: str | Path,
+                 timeout: float = 1200) -> dict:
     """启动一个执行者子进程，prompt 走 stdin。返回 {ok, report}。
 
     失败报告结构化（席位共识 2026-07-16）：标明失败阶段（spawn/运行/超时）、
     解析后的真实命令路径、退出码、stderr 末尾——「executor 坏了」和「席没干活」
     必须一眼可分。
     """
-    prompt = EXEC_PROMPT.format(seat=seat, branch=branch, base=base, context=context, auth=auth)
+    prompt = EXEC_PROMPT.format(seat=seat, branch=branch, base=base, ws=ws,
+                                context=context, auth=auth)
     command = _resolve_cmd(cmd)
     try:
         proc = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, cwd=REPO_ROOT, text=True,
+                                stderr=subprocess.PIPE, cwd=str(ws), text=True,
                                 encoding="utf-8", errors="replace", env=_executor_env(seat))
     except FileNotFoundError as exc:
         return {"ok": False, "report": f"[{seat} 失败｜阶段=spawn(找不到可执行文件)｜命令={command[0]}｜{exc}]"}
@@ -214,7 +239,7 @@ def run_executor(seat: str, cmd: list[str], branch: str, base: str,
             proc.communicate(timeout=15)
         except Exception:
             pass
-        restore_branch(base)
+        restore_branch(ws, base)
         return {"ok": False, "report": (f"[{seat} 失败｜阶段=超时(>{timeout}s，已 taskkill 进程树)｜"
                                         f"命令={command[0]}｜已尝试恢复到 {base}]")}
     out = (out or "").strip()

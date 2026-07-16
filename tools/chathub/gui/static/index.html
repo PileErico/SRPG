@@ -27,6 +27,11 @@
     justify-content:space-between;align-items:center}
   .status{padding:8px 14px;border-bottom:1px solid var(--border);font-size:12px;color:var(--muted)}
   .status .seat{display:inline-flex;align-items:center;gap:4px;margin-right:8px}
+  /* 工作区行：点击切换；不可用时标红 */
+  .ws{padding:7px 14px;border-bottom:1px solid var(--border);font-size:12px;color:var(--muted);
+    cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ws:hover{color:var(--accent)}
+  .ws.bad{color:#c04a4a;font-weight:700}
   .dot{width:8px;height:8px;border-radius:50%;display:inline-block}
   .on{background:var(--ok)} .off{background:#c04a4a}
   /* 席位配置（model/effort，按各席自报能力渲染） */
@@ -91,6 +96,7 @@
   .chip{padding:3px 10px;border:1px solid var(--border);border-radius:12px;background:var(--bg);
     color:var(--muted);cursor:pointer;font:inherit;font-size:12px}
   .chip.sel{background:rgba(184,134,11,.16);border-color:var(--draft);color:var(--draft);font-weight:700}
+  .chip.on{background:rgba(59,110,245,.14);border-color:var(--accent);color:var(--accent);font-weight:700}
   .hint{font-size:12px;color:var(--muted)}
   button.send{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:8px 18px;
     cursor:pointer;font:inherit}
@@ -115,6 +121,7 @@
 <body>
   <aside class="sidebar">
     <div class="brand"><span>ChatHub</span><span class="hint" id="mode-hint"></span></div>
+    <div class="ws" id="ws" title="点击切换目标工作区（git 仓库根）">📁 工作区加载中…</div>
     <div class="status" id="status">通道状态加载中…</div>
     <details class="seats"><summary>⚙ 席位配置（model / effort）</summary>
       <div id="seat-cfgs"><div class="seat-cfg tip">加载中…</div></div></details>
@@ -131,11 +138,12 @@
         <button class="mode active" data-mode="chat">💬 讨论</button>
         <button class="mode" data-mode="topic">🧠 议题</button>
         <button class="mode warn" data-mode="exec">⚙ 执行</button>
+        <span class="roster show" id="disc-roster"><span class="r-label">参与：</span><span id="disc-chips"></span></span>
         <span class="roster" id="roster"><span class="r-label">执行者：</span><span id="roster-chips"></span></span>
       </div>
       <textarea id="input" placeholder="写点什么…（模式用上方按钮选；手打【议题】/【执行】也会自动切换）"></textarea>
       <div class="row">
-        <span class="hint" id="composer-hint">讨论：四席各回一次（fable 压轴）</span>
+        <span class="hint" id="composer-hint">讨论：勾选的席位各回一次</span>
         <button class="send" id="send" disabled>发送 / 召集</button>
       </div>
     </div>
@@ -232,7 +240,7 @@ function renderMessages(msgs){
   if(atBottom) box.scrollTop = box.scrollHeight;
 }
 
-let SEAT_ORDER = ['opus','gpt','deepseek','fable'];   // /api/config 载入后覆盖
+let SEAT_ORDER = ['gpt','deepseek','fable'];   // /api/config 载入后覆盖
 function elapsedStr(ts){ const s = Math.max(0, Math.floor(Date.now()/1000 - (ts||0)));
   return s>=60 ? `${Math.floor(s/60)}分${s%60}秒` : `${s}秒`; }
 // 从现有消息推断「谁正在干活」：执行/互查/验收有引擎写的标记消息，讨论按顺序推断下一席
@@ -246,15 +254,20 @@ function busyState(msgs){
     return {exec:true, label:`🔍 交叉互查中…（执行者互审对方 diff，已 ${since}）`};
   }
   if(last && last.speaker==='system' && /验收中/.test(last.body)){
-    return {exec:true, label:`🏛 fable 验收中…（已 ${since}）`};
+    return {exec:true, label:`🏛 ${hubConfig.acceptor||'fable'} 验收中…（已 ${since}）`};
   }
-  if(last && /^【互查 /.test(last.body||'')){
-    return {exec:true, label:`🔍 互查/参考意见进行中…（已 ${since}）`};
+  if(last && last.speaker==='system' && /规格审查/.test(last.body)){
+    return {exec:true, label:`🔍 规格审查中…（已 ${since}）`};
+  }
+  if(last && /^【互查 |^【规格审查 /.test(last.body||'')){
+    return {exec:true, label:`🔍 审查/参考意见进行中…（已 ${since}）`};
   }
   const spoken = new Set();
   for(let i=msgs.length-1;i>=0;i--){ const s=msgs[i].speaker;
     if(s==='Erico') break; if(SEAT_ORDER.includes(s)) spoken.add(s); }
-  const next = SEAT_ORDER.find(s => !spoken.has(s));
+  // 讨论轮按「勾选的参与席」推断下一位；没勾选信息就退回全席位
+  const order = discSel.size ? SEAT_ORDER.filter(s=>discSel.has(s)) : SEAT_ORDER;
+  const next = order.find(s => !spoken.has(s));
   return {exec:false, label: next ? `💬 ${next} 正在思考…（已 ${since}）` : `💬 处理中…（已 ${since}）`};
 }
 async function refreshMessages(force){
@@ -280,21 +293,53 @@ function startPolling(){
   pollTimer = setInterval(refreshMessages, 2000);
 }
 
-// ---- 模式与执行名单 ----
+// ---- 模式与名单（讨论参与席 / 执行名单）----
 let sendMode = 'chat';
 let modeAuto = false;      // 当前模式是否由「输入标记」自动切换（自动的才允许自动回落）
 let hubConfig = {seats:SEAT_ORDER, executors:[], exec_marker:'【执行】', topic_marker:'【议题】',
-                 acceptor:'fable', reviewer:'deepseek'};
+                 acceptor:'fable', reviewer:'deepseek', workspace:'', workspace_error:null};
 let execSel = new Set();
+let discSel = new Set();   // 本轮讨论的参与席（记住上次选择，localStorage）
+
+function renderWorkspace(){
+  const el = $('#ws');
+  const bad = !!hubConfig.workspace_error;
+  el.classList.toggle('bad', bad);
+  el.textContent = (bad?'⚠ ':'📁 ') + (hubConfig.workspace || '（未配置）');
+  el.title = '点击切换目标工作区（git 仓库根）\n当前：' + (hubConfig.workspace||'—')
+    + (bad ? '\n不可用：' + hubConfig.workspace_error : '');
+}
+async function changeWorkspace(){
+  const p = prompt('目标工作区路径（git 仓库根）：', hubConfig.workspace || '');
+  if(!p || p === hubConfig.workspace) return;
+  const r = await jpost('/api/workspace', {path: p});
+  if(!r.ok){ alert(r.data.error || '切换失败'); return; }
+  await loadConfig();
+}
 
 async function loadConfig(attempt=0){
   try{
     hubConfig = await jget('/api/config');
     if(hubConfig.seats && hubConfig.seats.length) SEAT_ORDER = hubConfig.seats;
     execSel = new Set((hubConfig.executors||[]).map(e=>e.seat));   // 默认全选
-    renderRoster();
+    // 参与席：上次选择（localStorage）∩ 现有席位；否则 config 默认名单；否则全员
+    let saved = [];
+    try{ saved = JSON.parse(localStorage.getItem('chathub.participants')||'[]'); }catch(e){}
+    if(!Array.isArray(saved)) saved = [];   // 手改/旧格式的合法 JSON 非数组也不能砖死页面
+    let init = saved.filter(s => SEAT_ORDER.includes(s));
+    if(!init.length) init = (hubConfig.default_participants||[]).filter(s => SEAT_ORDER.includes(s));
+    if(!init.length) init = [...SEAT_ORDER];
+    discSel = new Set(init);
+    renderRoster(); renderDiscRoster(); renderWorkspace(); updateHint();
   }catch(e){
     if(attempt < 3){ setTimeout(()=>loadConfig(attempt+1), 1500*(attempt+1)); return; }
+    // 兜底：讨论不能因 config 拉不下来而瘫痪（发送前端会要求勾选 chips）——
+    // 按默认席位渲染参与 chips，执行/工作区功能显式标不可用
+    discSel = new Set(SEAT_ORDER);
+    hubConfig.workspace_error = '配置加载失败（/api/config 不可达）';
+    renderDiscRoster(); renderWorkspace(); updateHint();
+    $('#status').innerHTML =
+      '<span style="color:#c04a4a">⚠ 配置加载失败——讨论按默认席位可用；执行/工作区不可用，刷新页面重试</span>';
     $('#roster-chips').innerHTML =
       '<span style="color:#c04a4a">⚠ 配置加载失败，执行模式不可用——刷新页面重试</span>';
   }
@@ -310,23 +355,41 @@ function renderRoster(){
     renderRoster(); updateHint();
   });
 }
+function renderDiscRoster(){
+  const box = $('#disc-chips');
+  box.innerHTML = SEAT_ORDER.map(s =>
+    `<button class="chip ${discSel.has(s)?'on':''}" data-seat="${s}">${s}</button>`).join('');
+  box.querySelectorAll('.chip').forEach(c => c.onclick = () => {
+    const s = c.dataset.seat;
+    discSel.has(s) ? discSel.delete(s) : discSel.add(s);
+    try{ localStorage.setItem('chathub.participants', JSON.stringify([...discSel])); }catch(e){}
+    renderDiscRoster(); updateHint();
+  });
+}
+function discOrdered(){ return SEAT_ORDER.filter(s => discSel.has(s)); }
 function setMode(m, auto=false){
   sendMode = m; modeAuto = auto;
   document.querySelectorAll('.mode').forEach(b => b.classList.toggle('active', b.dataset.mode===m));
   $('#roster').classList.toggle('show', m==='exec');
+  $('#disc-roster').classList.toggle('show', m!=='exec');
   updateHint();
 }
 function updateHint(){
   const h = $('#composer-hint');
   if(sendMode==='exec'){
     const sel = [...execSel];
+    const review = sel.length>=2 ? '互查' : `${hubConfig.spec_reviewer||'gpt'} 规格审查`;
     h.textContent = sel.length
-      ? `⚠ 执行：${sel.join(' + ')} 落地（各自分支）→ 互查 → ${hubConfig.acceptor||'fable'} 验收`
+      ? `⚠ 执行：${sel.join(' + ')} 落地（各自分支）→ ${review} → ${hubConfig.acceptor||'fable'} 验收`
       : '⚠ 执行：请先勾选至少一个执行者';
   } else if(sendMode==='topic'){
-    h.textContent = '议题：四席自主多轮讨论 → fable 出【结论】';
+    const sel = discOrdered();
+    h.textContent = sel.length
+      ? `议题：${sel.join(' → ')} 自主多轮 → ${hubConfig.synthesizer||'fable'} 出【结论】`
+      : '议题：请先勾选至少一个参与席位';
   } else {
-    h.textContent = '讨论：四席各回一次（fable 压轴）';
+    const sel = discOrdered();
+    h.textContent = sel.length ? `讨论：${sel.join(' → ')} 各回一次` : '讨论：请先勾选至少一个参与席位';
   }
 }
 
@@ -342,9 +405,15 @@ async function send(){
   if(isExec){
     const seats = [...execSel];
     if(!seats.length){ alert('执行模式：请先勾选至少一个执行者'); return; }
-    if(!confirm(`⚠ 执行授权\n\n将由 ${seats.join(' + ')} 带写权限落地本议题方案`
-      +`（各自分支，不 push、不碰 main），完成后互查并由 ${hubConfig.acceptor||'fable'} 验收。\n\n确定授权执行吗？`)) return;
+    const review = seats.length>=2 ? '互查' : `${hubConfig.spec_reviewer||'gpt'} 规格审查`;
+    if(!confirm(`⚠ 执行授权\n\n将由 ${seats.join(' + ')} 带写权限落地本议题方案\n`
+      +`（工作区：${hubConfig.workspace||'—'}，各自分支，不 push、不碰 main），\n`
+      +`完成后经 ${review}，由 ${hubConfig.acceptor||'fable'} 验收。\n\n确定授权执行吗？`)) return;
     body.executors = seats;
+  } else {
+    const parts = discOrdered();
+    if(!parts.length){ alert('请先勾选至少一个参与席位'); return; }
+    body.participants = parts;
   }
   body.text = text;
   $('#send').disabled = true;
@@ -389,6 +458,7 @@ function escapeHtml(s){ return (s||'').replace(/[&<>"]/g, c =>
 $('#send').onclick = send;
 $('#stop').onclick = stopDiscussion;
 $('#new-topic').onclick = newTopic;
+$('#ws').onclick = changeWorkspace;
 document.querySelectorAll('.mode').forEach(b => b.onclick = () => setMode(b.dataset.mode));
 $('#input').addEventListener('keydown', e => { if(e.key==='Enter' && (e.ctrlKey||e.metaKey)) send(); });
 $('#input').addEventListener('input', e => {
