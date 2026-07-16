@@ -342,7 +342,10 @@ $('#input').addEventListener('input', e => {
   else updateHint();
 });
 
-// 初始化 + 定期刷新记忆
+// 关页告别：让后台服务器自动退出（刷新也会触发，服务器等 12s 无人复连才退）
+window.addEventListener('pagehide', () => { try{ navigator.sendBeacon('/api/bye'); }catch(e){} });
+
+// 初始化 + 定期刷新记忆（这些轮询同时是服务器的存活心跳）
 loadConfig(); loadStatus(); loadTopics(); loadMemory();
 setInterval(loadStatus, 15000);
 setInterval(loadMemory, 4000);

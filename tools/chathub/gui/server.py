@@ -246,12 +246,75 @@ def api_mem_reject(mid: int):
     return jsonify({"ok": True})
 
 
+# ---- 浏览器心跳看门狗：页面关了 → 服务器自动退（治「黑窗叠罗汉」的根）----
+IDLE_EXIT = 180          # 有过连接后，无任何请求 N 秒 → 退出（容浏览器后台限流心跳）
+FIRST_GRACE = 600        # 启动后从未有浏览器连上过的宽限（手动开浏览器可能慢）
+BYE_DELAY = 12           # 收到关页信号后再等 N 秒（页面刷新也会发 bye，须给复连机会）
+import time as _time
+_last_request = _time.time()
+_seen_any = False
+_bye_at: float | None = None
+
+
+@app.before_request
+def _heartbeat():
+    global _last_request, _seen_any, _bye_at
+    _last_request = _time.time()
+    _seen_any = True
+    _bye_at = None          # 任何请求都取消待决的告别（刷新/多标签场景）
+
+
+@app.post("/api/bye")
+def api_bye():
+    """页面 pagehide 时 sendBeacon 打来的告别——短暂等待后若无人复连则退出。"""
+    global _bye_at
+    _bye_at = _time.time()
+    return jsonify({"ok": True})
+
+
+def _exit_reason(now: float) -> str | None:
+    """看门狗决策（纯函数便于测试）：返回退出原因或 None。"""
+    if engine.any_busy():
+        return None                      # 讨论/执行进行中，绝不自杀
+    if _bye_at is not None and now - _bye_at > BYE_DELAY:
+        return "浏览器已关闭（收到告别信号且无人复连）"
+    limit = IDLE_EXIT if _seen_any else FIRST_GRACE
+    if now - _last_request > limit:
+        return f"超过 {limit}s 无浏览器心跳"
+    return None
+
+
+def _watchdog():
+    while True:
+        _time.sleep(5)
+        reason = _exit_reason(_time.time())
+        if reason and not os.environ.get("CHATHUB_NO_AUTO_EXIT"):
+            print(f"⏹ {reason}，服务器自动退出。")
+            os._exit(0)
+
+
+def _port_in_use() -> bool:
+    """探测 8765 是否已有 ChatHub 在应答——Windows 允许多进程同绑端口，
+    不显式挡会静默叠罗汉：新进程活着但老进程应答，用户看到旧配置（2026-07-16 实况）。"""
+    import socket
+    try:
+        with socket.create_connection(("127.0.0.1", PORT), timeout=1.5):
+            return True
+    except OSError:
+        return False
+
+
 def main():
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
         except (AttributeError, ValueError):
             pass
+    if _port_in_use():
+        print("✗ 端口 8765 已被占用——另一个 ChatHub 还开着！")
+        print("  请找到那个黑色窗口关掉（或任务管理器结束 python），再重新双击启动。")
+        print("  旧实例用的是旧配置：不关掉它，你看到的永远是旧席位/旧功能。")
+        sys.exit(1)
     _backup_db()                # 先拍库快照（轮换留 10 份；运行期每 10 分钟再拍）
     _restore_memory_if_empty()  # 库空而 memory.md 有货 → 自动恢复记忆
     _restore_topics_if_empty()  # 议题表空而镜像有货 → 自动恢复议题
@@ -262,6 +325,8 @@ def main():
     # 启动器（bat）会自己开浏览器；设了 CHATHUB_NO_AUTO_OPEN 就不重复弹
     if not os.environ.get("CHATHUB_NO_AUTO_OPEN"):
         threading.Timer(1.0, lambda: webbrowser.open(f"http://127.0.0.1:{PORT}")).start()
+    threading.Thread(target=_watchdog, daemon=True).start()   # 浏览器关了→自动退
+    print("（页面关闭后服务器会自动退出；执行进行中不会自杀。设 CHATHUB_NO_AUTO_EXIT=1 关闭此行为）")
     app.run(host="127.0.0.1", port=PORT, threaded=True)
 
 

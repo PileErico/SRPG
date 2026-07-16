@@ -75,6 +75,11 @@ class Engine:
         with self._busy_lock:
             return tid in self._busy
 
+    def any_busy(self) -> bool:
+        """有任何议题在讨论/执行中——自动退出看门狗须避让。"""
+        with self._busy_lock:
+            return bool(self._busy)
+
     def reserve(self, tid: int) -> bool:
         """原子占用议题；HTTP 请求线程在启动后台任务前调用。"""
         with self._busy_lock:
