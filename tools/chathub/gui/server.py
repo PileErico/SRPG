@@ -36,6 +36,7 @@ except ImportError:
 from store import Store          # noqa: E402
 from engine import Engine        # noqa: E402
 import memory_export             # noqa: E402  共享记忆的可读备份镜像
+import topics_export             # noqa: E402  议题的可读备份镜像（恢复用）
 
 DB = Path(os.environ.get("CHATHUB_DB", str(HERE / "chathub.db")))
 STATIC = HERE / "static"
@@ -51,9 +52,21 @@ BACKUP_KEEP = 10
 _last_mem_md: str | None = None
 
 
-def _backup_db() -> None:
-    """启动时给 chathub.db 拍快照（轮换保留最近 N 份）——误删/损坏时可整库找回。"""
+_last_backup_ts = 0.0
+BACKUP_INTERVAL = 600            # 运行时快照最小间隔（秒）
+
+
+def _backup_db(throttled: bool = False) -> None:
+    """给 chathub.db 拍快照（轮换保留最近 N 份）——误删/损坏时可整库找回。
+
+    启动时必拍；运行时经 /api/memory 轮询触发、按 BACKUP_INTERVAL 节流
+    ——只在启动拍的教训：服务器不重启就永远没有快照（2026-07-16 第二次事故）。
+    """
+    global _last_backup_ts
+    import time as _time
     try:
+        if throttled and _time.time() - _last_backup_ts < BACKUP_INTERVAL:
+            return
         if not DB.exists() or DB.stat().st_size == 0:
             return
         import shutil
@@ -61,11 +74,30 @@ def _backup_db() -> None:
         BACKUP_DIR.mkdir(exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         shutil.copy2(DB, BACKUP_DIR / f"chathub-{stamp}.db")
+        _last_backup_ts = _time.time()
         olds = sorted(BACKUP_DIR.glob("chathub-*.db"))
         for p in olds[:-BACKUP_KEEP]:
             p.unlink()
-    except Exception as exc:  # 备份失败不阻塞启动，但要喊出来
-        print(f"⚠ db 启动快照失败：{exc}")
+    except Exception as exc:  # 备份失败不阻塞主流程，但要喊出来
+        print(f"⚠ db 快照失败：{exc}")
+
+
+def _restore_topics_if_empty() -> None:
+    """topics 表为空而镜像目录有货 → 整体恢复议题（含消息/发言人/时间戳/状态）。"""
+    try:
+        if store.list_topics():
+            return
+        mirrors = sorted(store.mirror_dir.glob("topic-*.md")) if store.mirror_dir.exists() else []
+        restored = 0
+        for p in mirrors:
+            data = topics_export.parse(p.read_text(encoding="utf-8"))
+            if data and data["messages"]:
+                store.import_topic(data["title"], data["status"], data["messages"])
+                restored += 1
+        if restored:
+            print(f"♻ 已从议题镜像恢复 {restored} 个议题（库此前为空）")
+    except Exception as exc:
+        print(f"⚠ 议题自动恢复失败：{exc}")
 
 
 def _restore_memory_if_empty() -> None:
@@ -196,6 +228,7 @@ def api_stop(tid: int):
 @app.get("/api/memory")
 def api_memory():
     _sync_memory()          # 前端每几秒轮询一次→memory.md 始终跟手（含新草案）
+    _backup_db(throttled=True)   # 运行时快照（每 10 分钟至多一次）
     return jsonify(store.list_memory())
 
 
@@ -219,8 +252,9 @@ def main():
             stream.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
         except (AttributeError, ValueError):
             pass
-    _backup_db()                # 先拍库快照（轮换留 10 份）
+    _backup_db()                # 先拍库快照（轮换留 10 份；运行期每 10 分钟再拍）
     _restore_memory_if_empty()  # 库空而 memory.md 有货 → 自动恢复记忆
+    _restore_topics_if_empty()  # 议题表空而镜像有货 → 自动恢复议题
     _sync_memory()              # 再导出一次，保证 memory.md 与库一致
     st = engine.seat_status()
     print(f"ChatHub GUI 启动：http://127.0.0.1:{PORT}")
