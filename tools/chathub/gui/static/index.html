@@ -29,6 +29,19 @@
   .status .seat{display:inline-flex;align-items:center;gap:4px;margin-right:8px}
   .dot{width:8px;height:8px;border-radius:50%;display:inline-block}
   .on{background:var(--ok)} .off{background:#c04a4a}
+  /* 席位配置（model/effort，按各席自报能力渲染） */
+  .seats{border-bottom:1px solid var(--border);font-size:12px}
+  .seats > summary{padding:8px 14px;cursor:pointer;color:var(--muted);user-select:none}
+  .seats > summary:hover{color:var(--accent)}
+  .seat-cfg{padding:6px 14px 8px}
+  .seat-cfg .nm{font-weight:700;margin-bottom:3px}
+  .seat-cfg .fld{display:flex;align-items:center;gap:5px;margin-bottom:3px}
+  .seat-cfg .fld label{color:var(--muted);width:42px;flex:0 0 42px}
+  .seat-cfg input,.seat-cfg select{flex:1;min-width:0;padding:2px 4px;border:1px solid var(--border);
+    border-radius:5px;background:var(--bg);color:var(--text);font:inherit;font-size:12px}
+  .seat-cfg input:disabled,.seat-cfg select:disabled{opacity:.5;cursor:not-allowed}
+  .seat-cfg .tip{color:var(--muted);font-size:11px}
+  .seat-cfg .err{color:#c04a4a;font-size:11px}
   .topics{flex:1;overflow-y:auto}
   .topic{padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer}
   .topic:hover{background:rgba(127,127,127,.08)}
@@ -46,7 +59,8 @@
   .msg .body{white-space:pre-wrap;word-break:break-word;background:var(--panel);
     border:1px solid var(--border);border-radius:8px;padding:8px 10px}
   .who.Erico{color:var(--erico)} .who.claude{color:var(--claude)} .who.opus{color:var(--claude)}
-  .who.gpt{color:var(--gpt)} .who.copilot{color:var(--copilot)} .who.fable{color:var(--fable)}
+  .who.gpt{color:var(--gpt)} .who.deepseek{color:var(--copilot)} .who.fable{color:var(--fable)}
+  .who.copilot{color:var(--copilot)}   /* 改名前的旧消息照原样渲染 */
   .who.system{color:var(--muted)}
   .msg.Erico .body{background:rgba(10,125,77,.06)}
   .msg.fable .body{border-left:3px solid var(--fable)}
@@ -102,6 +116,8 @@
   <aside class="sidebar">
     <div class="brand"><span>ChatHub</span><span class="hint" id="mode-hint"></span></div>
     <div class="status" id="status">通道状态加载中…</div>
+    <details class="seats"><summary>⚙ 席位配置（model / effort）</summary>
+      <div id="seat-cfgs"><div class="seat-cfg tip">加载中…</div></div></details>
     <div class="newbtn" id="new-topic">＋ 新建议题</div>
     <div class="topics" id="topics"></div>
   </aside>
@@ -147,6 +163,47 @@ async function loadStatus(){
     `<span class="seat" title="${escapeHtml(v.reason||'本地前置已就绪')}"><span class="dot ${v.online?'on':'off'}"></span>${k}</span>`).join('');
 }
 
+// ---- 席位配置：完全按各席自报的 capabilities() 渲染，前端不硬编码谁支持什么 ----
+let seatCaps = {};
+async function loadCaps(){
+  try{ seatCaps = await jget('/api/capabilities'); }catch(e){ return; }
+  const box = $('#seat-cfgs');
+  const names = Object.keys(seatCaps);
+  if(!names.length){ box.innerHTML = '<div class="seat-cfg tip">无可用席位</div>'; return; }
+  box.innerHTML = names.map(n => {
+    const c = seatCaps[n], m = c.model||{}, e = c.effort||{};
+    const sugg = (m.suggestions||[]).map(s =>
+      `<option value="${escapeHtml(s)}">`).join('');
+    const modelFld = `<div class="fld"><label>model</label>
+      <input id="m-${n}" list="ms-${n}" value="${escapeHtml(c.current.model||'')}"
+        placeholder="${m.free_input?'留空＝CLI 默认':'从建议值中选'}">
+      <datalist id="ms-${n}">${sugg}</datalist></div>`;
+    const effortFld = e.supported
+      ? `<div class="fld"><label>effort</label><select id="e-${n}">
+          <option value="">（不指定）</option>
+          ${(e.values||[]).map(v => `<option value="${escapeHtml(v)}"
+            ${c.current.effort===v?'selected':''}>${escapeHtml(v)}</option>`).join('')}
+         </select></div>`
+      : `<div class="fld"><label>effort</label><select disabled>
+          <option>本席不支持</option></select></div>
+         <div class="tip">${escapeHtml(e.hint || '该席未声明 effort 轴——如需更高强度，改 model。')}</div>`;
+    return `<div class="seat-cfg" data-seat="${n}"><div class="nm">${n}</div>
+      ${modelFld}${effortFld}<div class="err" id="err-${n}"></div></div>`;
+  }).join('');
+  names.forEach(n => {
+    const mi = document.getElementById(`m-${n}`);
+    if(mi) mi.onchange = () => setSeatOpt(n, {model: mi.value});
+    const se = document.getElementById(`e-${n}`);
+    if(se) se.onchange = () => setSeatOpt(n, {effort: se.value});
+  });
+}
+async function setSeatOpt(seat, body){
+  const r = await jpost(`/api/seats/${seat}/options`, body);
+  const err = document.getElementById(`err-${seat}`);
+  if(err) err.textContent = r.ok ? '' : ('⚠ ' + (r.data.error || '设置失败'));
+  if(!r.ok) loadCaps();          // 被拒→回滚显示为服务端的真实当前值
+}
+
 async function loadTopics(){
   const ts = await jget('/api/topics');
   const box = $('#topics');
@@ -175,7 +232,7 @@ function renderMessages(msgs){
   if(atBottom) box.scrollTop = box.scrollHeight;
 }
 
-let SEAT_ORDER = ['opus','gpt','copilot','fable'];   // /api/config 载入后覆盖
+let SEAT_ORDER = ['opus','gpt','deepseek','fable'];   // /api/config 载入后覆盖
 function elapsedStr(ts){ const s = Math.max(0, Math.floor(Date.now()/1000 - (ts||0)));
   return s>=60 ? `${Math.floor(s/60)}分${s%60}秒` : `${s}秒`; }
 // 从现有消息推断「谁正在干活」：执行/互查/验收有引擎写的标记消息，讨论按顺序推断下一席
@@ -227,7 +284,7 @@ function startPolling(){
 let sendMode = 'chat';
 let modeAuto = false;      // 当前模式是否由「输入标记」自动切换（自动的才允许自动回落）
 let hubConfig = {seats:SEAT_ORDER, executors:[], exec_marker:'【执行】', topic_marker:'【议题】',
-                 acceptor:'fable', reviewer:'copilot'};
+                 acceptor:'fable', reviewer:'deepseek'};
 let execSel = new Set();
 
 async function loadConfig(attempt=0){
@@ -346,7 +403,7 @@ $('#input').addEventListener('input', e => {
 window.addEventListener('pagehide', () => { try{ navigator.sendBeacon('/api/bye'); }catch(e){} });
 
 // 初始化 + 定期刷新记忆（这些轮询同时是服务器的存活心跳）
-loadConfig(); loadStatus(); loadTopics(); loadMemory();
+loadConfig(); loadStatus(); loadCaps(); loadTopics(); loadMemory();
 setInterval(loadStatus, 15000);
 setInterval(loadMemory, 4000);
 </script>

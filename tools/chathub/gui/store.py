@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS topics(
 CREATE TABLE IF NOT EXISTS messages(
   id       INTEGER PRIMARY KEY AUTOINCREMENT,
   topic_id INTEGER NOT NULL,
-  speaker  TEXT NOT NULL,                       -- Erico|claude|gpt|copilot
+  speaker  TEXT NOT NULL,                       -- Erico|席位名|system（纯文本无约束：改名不迁移旧消息）
   body     TEXT NOT NULL,
   created  REAL NOT NULL
 );

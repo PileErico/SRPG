@@ -5,7 +5,9 @@
 
 API：
   GET  /                          → 前端页面
-  GET  /api/status                → 三席在线状态
+  GET  /api/status                → 各席在线状态
+  GET  /api/capabilities          → 各席自报的 model/effort 能力 + 当前值
+  POST /api/seats/<seat>/options  → 改某席 model/effort（进程内生效；非法值 400）
   GET  /api/topics                → 议题列表
   POST /api/topics {title,mode}   → 新建议题 → {id}
   GET  /api/topics/<id>/messages  → 该议题消息（+busy 标记）
@@ -151,6 +153,31 @@ def api_config():
         "acceptor": engine.exec_cfg.get("acceptor"),
         "reviewer": engine.exec_cfg.get("reviewer"),
     })
+
+
+@app.get("/api/capabilities")
+def api_capabilities():
+    """各席自报的 model/effort 能力 + 当前生效值（前端据此渲染，不硬编码灰掉）。"""
+    return jsonify(engine.seat_capabilities())
+
+
+@app.post("/api/seats/<seat>/options")
+def api_seat_options(seat: str):
+    """改某席的 model / effort（进程内生效）。非法值 400 明确报错，绝不静默。"""
+    d = request.get_json(force=True, silent=True) or {}
+    changed = {}
+    try:
+        for key in ("model", "effort"):
+            if key in d:
+                engine.set_seat_option(seat, key, str(d.get(key) or ""))
+                changed[key] = d.get(key) or ""
+    except KeyError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    if not changed:
+        return jsonify({"error": "没给任何可改的键（model / effort）"}), 400
+    return jsonify({"ok": True, "changed": changed})
 
 
 @app.get("/api/topics")

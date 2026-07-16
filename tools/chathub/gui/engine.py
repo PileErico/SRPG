@@ -22,7 +22,7 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
 import broker                              # 复用 Config / load_adapter / call_with_timeout / extract_vote
-from adapters.base import Turn             # noqa: E402
+from adapters.base import RunResult, Turn  # noqa: E402
 import executor as executor_mod           # noqa: E402  执行阶段（带写权限）
 
 CTX_MSG_LIMIT = 40                          # 每次最多带本议题最近 N 条原文（防膨胀）
@@ -70,6 +70,53 @@ class Engine:
                     online, reason = False, str(exc)
             out[n] = {"online": online, "reason": reason}
         return out
+
+    def seat_capabilities(self) -> dict:
+        """各席自报能力 + 当前生效值——前端据此渲染控件，**不硬编码谁支持什么**。
+
+        capabilities() 是实例方法、返回静态 dict（探测＝施工期取证），此处不产生
+        任何模型调用。
+        """
+        out: dict[str, dict] = {}
+        for n in self.cfg.speaking_order:
+            a = self.adapters.get(n)
+            if a is None:
+                continue
+            caps = a.capabilities()
+            out[n] = {
+                "model": caps.get("model") or {},
+                "effort": caps.get("effort") or {},
+                "current": {"model": a.config.get("model") or "",
+                            "effort": a.config.get("effort") or ""},
+            }
+        return out
+
+    def set_seat_option(self, seat: str, key: str, value: str) -> None:
+        """改某席的 model / effort（进程内生效，不写回 config.yaml）。
+
+        非法值**明确报错**、绝不静默：claude CLI 遇非法 effort 是「stderr 警告 +
+        静默降默认档 + 退出码 0」（2026-07-16 实测）——不在入口拦，用户会以为
+        设了 effort，其实一直跑默认档，正是落款要防的那种悬案。
+        """
+        a = self.adapters.get(seat)
+        if a is None:
+            raise KeyError(f"席位 {seat} 不存在或适配器不可用")
+        if key not in ("model", "effort"):
+            raise ValueError(f"只支持 model / effort，收到 {key!r}")
+        caps = a.capabilities().get(key) or {}
+        value = (value or "").strip()
+        if key == "effort":
+            if not caps.get("supported"):
+                raise ValueError(f"{seat} 席不支持 effort 轴")
+            if value and value not in (caps.get("values") or []):
+                raise ValueError(f"{seat} 席的 effort 只接受 {'/'.join(caps.get('values') or [])}")
+        elif not caps.get("free_input", True) and value and value not in (caps.get("suggestions") or []):
+            raise ValueError(f"{seat} 席的 model 只接受 {'/'.join(caps.get('suggestions') or [])}")
+        # 单键赋值＝原子；空串＝回落到「不注入该参数」
+        if value:
+            a.config[key] = value
+        else:
+            a.config.pop(key, None)
 
     def is_busy(self, tid: int) -> bool:
         with self._busy_lock:
@@ -148,9 +195,14 @@ class Engine:
             parts.append(f"\n———［调度器指令］———\n{instruction}")
         return "\n".join(parts)
 
-    def _call(self, name: str, context: str, round_index: int = 0) -> str:
+    def _call(self, name: str, context: str, round_index: int = 0) -> RunResult:
+        """调一席，返回 RunResult（正文＋元数据）。元数据随返回值走，不进共享状态。"""
         turn = Turn(round_index=round_index, speaker=name, order_index=0, prior_this_round=[])
         return broker.call_with_timeout(self.adapters[name], context, turn, self.cfg.timeout_for(name))
+
+    def _signed(self, run: RunResult, body: str | None = None) -> str:
+        """正文（默认取 run.content）+ 落款。body 显式传入＝已剥标记/已加前缀的清洁正文。"""
+        return broker.with_signature(run.content if body is None else body, run.meta)
 
     # ---- 参与模式：各席一次 ----
     def run_participate(self, tid: int) -> None:
@@ -163,8 +215,8 @@ class Engine:
                 self.store.add_message(tid, name, "[跳过：适配器不可用]")
                 continue
             try:
-                body = self._call(name, self._context(topic))   # 每席重建 context→读到前席刚写的
-                self.store.add_message(tid, name, body)
+                run = self._call(name, self._context(topic))    # 每席重建 context→读到前席刚写的
+                self.store.add_message(tid, name, self._signed(run))
             except Exception as exc:  # noqa: BLE001
                 self.store.add_message(tid, name, f"[跳过：{exc}]")
 
@@ -184,9 +236,11 @@ class Engine:
                 if self.adapters.get(name) is None:
                     continue
                 try:
-                    raw = self._call(name, self._context(topic, instr), r)
-                    body, voted = broker.extract_vote(raw, self.cfg.converge_tag, self.cfg.continue_tag)
-                    self.store.add_message(tid, name, body)
+                    run = self._call(name, self._context(topic, instr), r)
+                    # 先剥标记再盖落款：反过来落款会变成末行，收敛票永远统计不到
+                    body, voted = broker.extract_vote(run.content, self.cfg.converge_tag,
+                                                      self.cfg.continue_tag)
+                    self.store.add_message(tid, name, self._signed(run, body))
                     votes.append(voted)
                 except Exception as exc:  # noqa: BLE001
                     self.store.add_message(tid, name, f"[跳过：{exc}]")
@@ -201,10 +255,11 @@ class Engine:
                 "不要复述过程，直给结论。"
             )
             try:
-                body = self._call(synth, self._context(topic, instr), 999)
+                run = self._call(synth, self._context(topic, instr), 999)
+                body = run.content
                 concl = body if body.startswith("【结论") else "【结论】" + body
-                self.store.add_message(tid, synth, concl)
-                self.store.set_topic_summary(tid, concl)
+                self.store.add_message(tid, synth, self._signed(run, concl))
+                self.store.set_topic_summary(tid, concl)   # 摘要/记忆草案存清洁正文，不带落款
                 # 结论→共享记忆「草案」，待 Erico 一键确认才生效（防错误结论污染）
                 self.store.add_memory(concl, source=f"议题#{tid}/{synth}", status="draft")
             except Exception as exc:  # noqa: BLE001
@@ -213,7 +268,7 @@ class Engine:
 
     # ---- 执行阶段：授权后由带写权限的执行者落地（opus/codex 各自分支）----
     # 流水：执行者顺序落地（可点名名单）→ 交叉互查（执行者互审对方真实 diff）
-    #       → copilot 参考意见（无文件访问，只评记录）→ fable 终验收（看全部 diff+互查）
+    #       → deepseek 参考意见（无文件访问，只评记录）→ fable 终验收（看全部 diff+互查）
     def run_execute(self, tid: int, auth_text: str,
                     only_seats: list[str] | None = None) -> None:
         topic = self.store.get_topic(tid)
@@ -276,6 +331,10 @@ class Engine:
                 continue
             tip_before = executor_mod.branch_tip(branch)
             self.store.add_message(tid, seat, f"［开始执行 → {branch} 分支］")
+            # 审计：Popen 之前构造白名单 Invocation 入库——spawn 失败/超时也留得住证据
+            self.store.add_message(
+                tid, "system",
+                executor_mod.format_audit(seat, branch, executor_mod.build_invocation(list(cmd))))
             res = executor_mod.run_executor(seat, list(cmd), branch, base, context, auth_text, timeout)
             self.store.add_message(tid, seat, res["report"])
             executor_mod.restore_branch(base)
@@ -327,12 +386,13 @@ class Engine:
                         f"=== {other} @ {obranch} 分支 diff ===\n{odiff}"
                     )
                     try:
-                        body = self._call(seat, self._context(topic, instr), 0)
-                        self.store.add_message(tid, seat, f"【互查 {other}@{obranch}】\n{body}")
+                        run = self._call(seat, self._context(topic, instr), 0)
+                        self.store.add_message(
+                            tid, seat, self._signed(run, f"【互查 {other}@{obranch}】\n{run.content}"))
                     except Exception as exc:  # noqa: BLE001
                         self.store.add_message(tid, seat, f"[互查失败：{exc}]")
 
-        # ── 4) copilot 参考意见（无文件访问：只评记录中真实存在的内容）──
+        # ── 4) 参谋席参考意见（config.execution.reviewer；无文件访问，只评记录中真实存在的内容）──
         if reviewer and reviewer not in {s for s, _, _, _ in done} \
                 and self.adapters.get(reviewer) is not None and not self._cancelled(tid):
             instr = (
@@ -341,8 +401,8 @@ class Engine:
                 "指出你认为的关键风险或双方都遗漏的问题。无补充就说「无补充。」"
             )
             try:
-                body = self._call(reviewer, self._context(topic, instr), 0)
-                self.store.add_message(tid, reviewer, body)
+                run = self._call(reviewer, self._context(topic, instr), 0)
+                self.store.add_message(tid, reviewer, self._signed(run))
             except Exception as exc:  # noqa: BLE001
                 self.store.add_message(tid, reviewer, f"[参考意见失败：{exc}]")
 
@@ -361,9 +421,10 @@ class Engine:
                 "直给判断，不复述过程。\n\n" + all_diffs
             )
             try:
-                body = self._call(acceptor, self._context(topic, instr), 0)
+                run = self._call(acceptor, self._context(topic, instr), 0)
+                body = run.content
                 verdict = body if body.startswith("【验收") else "【验收】" + body
-                self.store.add_message(tid, acceptor, verdict)
+                self.store.add_message(tid, acceptor, self._signed(run, verdict))
             except Exception as exc:  # noqa: BLE001
                 self.store.add_message(tid, acceptor, f"[验收失败：{exc}]")
         self.store.set_topic_status(tid, "executed")

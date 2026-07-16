@@ -1,6 +1,6 @@
 """ChatHub 适配器抽象接口。
 
-每个「席位」（claude/gpt/copilot…）是一个 Adapter。约定 🔒：
+每个「席位」（opus/gpt/deepseek/fable…）是一个 Adapter。约定 🔒：
 - **无状态**：chathub.md 就是全部共享记忆；适配器每次被调用都重新读上下文。
 - **只产出发言正文**：适配器 *不* 写 chathub.md——由 broker 统一盖上「名字＋时间」
   并加锁追加。这样杜绝「模型与 broker 双写」和多席并发写同一文件。

@@ -1,10 +1,13 @@
 # ChatHub 调度器配置。改这里即可，不用动 broker.py / engine.py。
 #
 # 四席分工（2026-07-16 Erico 拍板）：
-#   fable   = 项目总负责人（大局/取舍/结论/验收，不写代码）——模型 claude-fable-5
-#   opus    = 执行者1（实现视角；执行阶段在 opus 分支落地）——模型 opus（CLI 默认）
-#   gpt     = 执行者2（独立实现视角；执行阶段在 codex 分支落地）——Codex CLI
-#   copilot = 参谋席（评价与建议；无文件访问，反幻觉硬约束在适配器内置）——DeepSeek
+#   fable    = 项目总负责人（大局/取舍/结论/验收，不写代码）——模型 claude-fable-5
+#   opus     = 执行者1（实现视角；执行阶段在 opus 分支落地）——claude-opus-4-8
+#   gpt      = 执行者2（独立实现视角；执行阶段在 codex 分支落地）——Codex CLI
+#   deepseek = 参谋席（评价与建议；无文件访问，反幻觉硬约束在适配器内置）——DeepSeek HTTP
+#              （原名 copilot，2026-07-16 改名＝按模型真名叫；db 里的旧消息 speaker 不迁移）
+#
+# 🔒 席位名单的唯一真值＝下面的 speaking_order + adapters 两处，别处（README/前端）只是复述。
 
 # chathub.md 路径（相对＝相对仓库根；仅 CLI broker 用，GUI 走 SQLite）
 chathub_path: docs/chathub.md
@@ -13,7 +16,7 @@ chathub_path: docs/chathub.md
 trigger_names: [Erico, Eroco]        # Eroco 是历史笔误，一并认
 
 # 发言顺序：执行者先给实料 → 参谋评议 → fable 压轴裁决/收束
-speaking_order: [opus, gpt, copilot, fable]
+speaking_order: [opus, gpt, deepseek, fable]
 
 # 每次触发跑几轮（1 = 每人各说一次就停，等 Erico 下一条）
 max_rounds: 1
@@ -24,7 +27,7 @@ timeouts:
   opus: 150      # claude CLI 冷启动较慢
   fable: 240     # 总负责人做综合/验收，思考更久
   gpt: 90        # npx codex exec 约 10~15s，留足冗余
-  copilot: 60    # DeepSeek HTTP 较快
+  deepseek: 60   # DeepSeek HTTP 较快
 
 # watch 模式轮询间隔（秒）
 poll_interval: 3
@@ -42,13 +45,13 @@ autonomous:
 
 # —— 执行阶段（阶段③）——
 # 议题出结论后，Erico 发「【执行】<范围>」= 授权（GUI 里可勾选执行名单，只让部分执行者干活）。
-# 流程：执行者顺序落地（各自分支）→ 交叉互查（互审对方真实 diff）→ copilot 参考 → fable 验收。
+# 流程：执行者顺序落地（各自分支）→ 交叉互查（互审对方真实 diff）→ deepseek 参考 → fable 验收。
 # 不 push、不碰 main；前端二次确认防误触。
 execution:
   marker: "【执行】"
   timeout: 1800             # 执行比讨论久，给足
   cross_review: true        # 执行者互查对方分支 diff（≥2 名执行者产出 diff 才触发）
-  reviewer: copilot         # 参谋席参考意见（无文件访问，只评记录）
+  reviewer: deepseek        # 参谋席参考意见（无文件访问，只评记录）
   acceptor: fable           # 终验收（看全部 diff + 互查意见，给裁决）
   diff_char_budget: 20000   # 注入互查/验收的每分支 diff 字数上限
   executors:                # 顺序执行（共享工作区、每人跑完立即回基线）
@@ -65,6 +68,8 @@ adapters:
   fable:
     class: "adapters.claude:ClaudeAdapter"
     model: "claude-fable-5"
+    # GUI 的 model 下拉建议值（自由输入，服务端不校验——写死列表会过期，故只作建议）
+    model_suggestions: ["claude-fable-5", "claude-opus-4-8", "claude-sonnet-5"]
     timeout: 220             # 子进程超时（< broker 的 240）
     role_prompt: >-
       你是本项目的总负责人（席位 fable）。职责：把控方向与范围、做取舍与优先级判断、
@@ -74,6 +79,7 @@ adapters:
   opus:
     class: "adapters.claude:ClaudeAdapter"
     model: "claude-opus-4-8"
+    model_suggestions: ["claude-opus-4-8", "claude-fable-5", "claude-sonnet-5"]
     role_prompt: >-
       你是执行者1（席位 opus）。从实现视角发言：可行性、代码结构、边界条件、数据迁移、
       测试怎么写。讨论时给具体方案而非空泛原则；执行阶段你在 opus 分支落地实现。
@@ -85,13 +91,16 @@ adapters:
       你是执行者2（席位 gpt）。与 opus 平行的独立实现视角——不要附和他的方案，
       独立推导后再对比。执行阶段你在 codex 分支落地实现。
       方向与取舍听 fable 的裁决，但事实与技术判断上有异议要直说。
-  copilot:
+  deepseek:
     class: "adapters.deepseek:DeepSeekAdapter"
     endpoint: "https://api.deepseek.com/v1/chat/completions"
+    # ⚠ deepseek-chat 于 2026-07-24 停用。钉死 deepseek-v4-pro＋effort 探测＝
+    #    deepseek 席适配器份额（A2 分派：adapters/deepseek.py 由 gpt 席代落）——
+    #    探测通过后连同 capabilities 一起改这一行，别在这里凭文档猜。
     model: "deepseek-chat"
     api_key_env: "DEEPSEEK_API_KEY"
     role_prompt: >-
-      你是参谋席（席位 copilot）。只做评价与建议：审视别人给出的方案与证据、
+      你是参谋席（席位 deepseek）。只做评价与建议：审视别人给出的方案与证据、
       指出风险与遗漏。你没有文件访问能力——只能基于记录发言，推测必须标注（详见系统约束）。
 
 # —— 端到端自测用（把上面某席的 class 临时改成下面这个即可先跑通全链路）——

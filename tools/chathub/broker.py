@@ -48,7 +48,7 @@ DEFAULT_CONFIG = HERE / "config.yaml"
 # 无论以 `python broker.py` 还是 `python -m` 运行，都能 import 到 adapters 包
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
-from adapters.base import Adapter, Turn  # noqa: E402  (须在 sys.path 调整后)
+from adapters.base import Adapter, RunMeta, RunResult, Turn  # noqa: E402  (须在 sys.path 调整后)
 
 # 发言人行形如「claude：...」或「Erico:...」，中英冒号皆可
 SPEAKER_RE = re.compile(r"^([A-Za-z一-鿿]+)[：:]")
@@ -229,17 +229,21 @@ def load_adapter(name: str, spec: dict) -> Adapter | None:
         return None
 
 
-def call_with_timeout(adapter: Adapter, context: str, turn: Turn, timeout: float) -> str:
-    """在子线程里调适配器，超时即视为跳过。
+def call_with_timeout(adapter: Adapter, context: str, turn: Turn, timeout: float) -> RunResult:
+    """在子线程里调适配器，超时即视为跳过。返回 RunResult（正文＋元数据）。
 
     注意：Python 无法强杀线程——子进程型适配器（codex/claude CLI）**必须自带
     subprocess timeout**，此处的线程超时只是二道保险。
+
+    元数据**只随返回值出去**（局部 result 拆包）🔒：绝不落到 adapter/broker 的
+    共享可变状态上——超时后旧线程仍在跑，晚回来的那次会覆盖共享表，落款就变成
+    「盖死人的数据」。
     """
     result: dict[str, object] = {}
 
     def _run():
         try:
-            result["ok"] = adapter.generate(context, turn)
+            result["ok"] = adapter.generate_result(context, turn)
         except Exception as exc:  # noqa: BLE001
             result["err"] = exc
 
@@ -250,10 +254,42 @@ def call_with_timeout(adapter: Adapter, context: str, turn: Turn, timeout: float
         raise TimeoutError(f"{adapter.name} 超时（>{timeout}s）")
     if "err" in result:
         raise result["err"]  # type: ignore[misc]
-    body = result.get("ok")
-    if not isinstance(body, str) or not body.strip():
+    run = result.get("ok")
+    if not isinstance(run, RunResult) or not (run.content or "").strip():
         raise ValueError(f"{adapter.name} 返回空发言")
-    return body
+    return run
+
+
+def format_signature(meta: RunMeta) -> str:
+    """一行落款：model / effort / 验证状态——只读 RunResult 携带的白名单事实。
+
+    验证状态语义 🔒：requested 与 reported 均非空且相等＝verified；CLI 席无回读
+    通道 → 恒 unverified（不是故障，是「我们只能证明请求过、证不到服务端用了谁」）。
+    旧消息没有这一行，按原格式渲染即可。
+    """
+    inv = meta.invocation
+    if not (inv.executable or inv.requested_model or inv.effort):
+        # 该席适配器还没覆写 generate_result()，默认包装拿不到任何调用事实。
+        # 这时写「model: 默认」是撒谎——「默认」是一句断言，真相是「没人申报过」。
+        return "———\n［元数据未申报（该席适配器未接 RunResult）｜unverified］"
+    model = inv.requested_model or "默认（未指定）"
+    if inv.requested_model and not inv.model_injected:
+        model += "（⚠ 未注入命令行）"
+    effort = inv.effort or "—"
+    if inv.effort and not inv.effort_injected:
+        effort += "（⚠ 未注入命令行）"
+    bits = [f"model: {model}", f"effort: {effort}", meta.verification]
+    if inv.reported_model and inv.reported_model != inv.requested_model:
+        bits.append(f"⚠ 服务端回读 {inv.reported_model}")
+    for w in meta.warnings:
+        bits.append(f"⚠ {w}")
+    return "———\n［" + "｜".join(bits) + "］"
+
+
+def with_signature(body: str, meta: RunMeta) -> str:
+    """正文 + 落款。注意调用序：先 extract_vote 剥标记、再盖落款——
+    反过来会把落款变成最后一个非空行，收敛票永远统计不到。"""
+    return f"{body.rstrip()}\n\n{format_signature(meta)}"
 
 
 # ============================ 调度 ============================================
@@ -287,9 +323,10 @@ def run_round(cfg: Config, adapters: dict[str, Adapter | None], round_index: int
             continue
 
         try:
-            raw = call_with_timeout(adapter, context, turn, cfg.timeout_for(name))
+            run = call_with_timeout(adapter, context, turn, cfg.timeout_for(name))
+            raw = run.content
             body, voted = extract_vote(raw, cfg.converge_tag, cfg.continue_tag) if strip_tags else (raw, False)
-            block = append_message(cfg.chathub_path, name, body, dry_run=dry_run)
+            block = append_message(cfg.chathub_path, name, with_signature(body, run.meta), dry_run=dry_run)
             results.append((name, body, voted))
             prior.append(name)
             flag = "（收敛）" if voted else ""
@@ -343,9 +380,10 @@ def run_auto(cfg: Config, adapters: dict[str, Adapter | None], *, dry_run: bool)
     context = read_transcript(cfg.chathub_path) + f"\n\n———[调度器指令]———\n{instr}"
     turn = Turn(round_index=999, speaker=synth, order_index=0, prior_this_round=[])
     try:
-        body = call_with_timeout(adapters[synth], context, turn, cfg.timeout_for(synth))
-        append_message(cfg.chathub_path, synth, "【结论】" + body if not body.startswith("【结论") else body,
-                       dry_run=dry_run)
+        run = call_with_timeout(adapters[synth], context, turn, cfg.timeout_for(synth))
+        body = run.content
+        concl = body if body.startswith("【结论") else "【结论】" + body
+        append_message(cfg.chathub_path, synth, with_signature(concl, run.meta), dry_run=dry_run)
         print(f"✓ {synth}: 已出结论")
     except Exception as exc:  # noqa: BLE001
         print(f"✗ 结论综合失败：{exc}")

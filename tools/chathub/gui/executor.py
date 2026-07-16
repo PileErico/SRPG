@@ -2,8 +2,10 @@
 
 - claude：`claude -p`（bypassPermissions，能改文件+跑 git/测试）
 - gpt：`codex exec --sandbox workspace-write`（写限工作区、天然沙盒挡联网/越界）
-- 每个执行者在**自己的分支**（claude / codex）工作、只提交自己的改动、不 push、不碰 main。
-- copilot 不在此列（只评审，见 engine）。
+- 每个执行者在**自己的分支**（opus / codex）工作、只提交自己的改动、不 push、不碰 main。
+- deepseek 席不在此列（只评审，见 engine）——**能发言 ≠ 能执行**，两回事。
+- **审计**：spawn 前用 build_invocation() 从解析后的实际 argv 抽白名单事实，由 engine 写成
+  system 消息入库；完整命令行只留在失败路径的排障文本里，不入库。
 
 git 细节交给执行者自己做（“怎么执行是他们的事”）；本模块只：读当前分支、
 把任务喂给执行者子进程、结束后把工作区恢复到基线分支、给出分支 diffstat。
@@ -13,9 +15,15 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]   # gui→chathub→tools→仓库根
+CHATHUB = Path(__file__).resolve().parents[1]     # tools/chathub
+if str(CHATHUB) not in sys.path:
+    sys.path.insert(0, str(CHATHUB))
+
+from adapters.base import Invocation             # noqa: E402  与 adapter 路径共用同一元数据形状
 
 
 def _resolve_cmd(cmd: list[str]) -> list[str]:
@@ -38,6 +46,50 @@ def _resolve_cmd(cmd: list[str]) -> list[str]:
     if found:
         resolved[0] = found
     return resolved
+
+
+def _flag_value(argv: list[str], *flags: str) -> str | None:
+    """取 `--flag value` 形式的值（只认白名单里点名的 flag）。"""
+    for i, tok in enumerate(argv[:-1]):
+        if tok in flags:
+            return argv[i + 1]
+    return None
+
+
+def build_invocation(cmd: list[str]) -> Invocation:
+    """从**解析后的实际 argv** 抽白名单事实——与 adapter 路径同构 🔒。
+
+    只取标量（可执行文件/模型/effort/注入状态）：prompt 走 stdin 本就不在 argv 里，
+    但完整 argv 一律不留——新参数（token/路径/系统提示词）默认不入库，
+    「今天没敏感内容」是黑名单思维，白名单反着写才安全。
+    """
+    argv = _resolve_cmd(cmd)
+    model = _flag_value(argv, "--model", "-m")
+    effort = _flag_value(argv, "--effort")
+    if effort is None:                      # Codex 无 --effort，走 `-c model_reasoning_effort=<值>`
+        for i, tok in enumerate(argv[:-1]):
+            if tok == "-c" and argv[i + 1].startswith("model_reasoning_effort="):
+                effort = argv[i + 1].split("=", 1)[1]
+                break
+    return Invocation(
+        executable=argv[0] if argv else "",
+        requested_model=model,
+        reported_model=None,                # 子进程无回读通道 → 恒 unverified
+        effort=effort,
+        model_injected=model is not None,
+        effort_injected=effort is not None,
+    )
+
+
+def format_audit(seat: str, branch: str, inv: Invocation) -> str:
+    """执行审计消息正文——Popen **之前**构造，成功/失败/超时三路径共享同一证据。"""
+    def _mark(value: str | None, injected: bool) -> str:
+        if not value:
+            return "—（未注入）"
+        return f"{value}（注入✓）" if injected else f"{value}（⚠ 未注入）"
+    return (f"［执行审计｜{seat} → {branch} 分支｜executable={inv.executable}｜"
+            f"model={_mark(inv.requested_model, inv.model_injected)}｜"
+            f"effort={_mark(inv.effort, inv.effort_injected)}｜unverified（子进程无回读通道）］")
 
 
 def _kill_tree(proc: subprocess.Popen) -> None:
