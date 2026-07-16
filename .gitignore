@@ -18,3 +18,4 @@ __pycache__/
 *.py[cod]
 # ChatHub GUI 本地会话数据库（含 SQLite journal/WAL）
 /tools/chathub/gui/chathub.db*
+/tools/chathub/gui/backups/

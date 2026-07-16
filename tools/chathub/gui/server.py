@@ -46,7 +46,43 @@ engine = Engine(store)
 app = Flask(__name__, static_folder=None)
 
 MEM_MD = HERE / "memory.md"       # 共享记忆的人类可读持久备份（非 gitignore，可提交）
+BACKUP_DIR = HERE / "backups"     # db 启动快照（gitignore；2026-07-16 数据事故后加）
+BACKUP_KEEP = 10
 _last_mem_md: str | None = None
+
+
+def _backup_db() -> None:
+    """启动时给 chathub.db 拍快照（轮换保留最近 N 份）——误删/损坏时可整库找回。"""
+    try:
+        if not DB.exists() or DB.stat().st_size == 0:
+            return
+        import shutil
+        from datetime import datetime
+        BACKUP_DIR.mkdir(exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        shutil.copy2(DB, BACKUP_DIR / f"chathub-{stamp}.db")
+        olds = sorted(BACKUP_DIR.glob("chathub-*.db"))
+        for p in olds[:-BACKUP_KEEP]:
+            p.unlink()
+    except Exception as exc:  # 备份失败不阻塞启动，但要喊出来
+        print(f"⚠ db 启动快照失败：{exc}")
+
+
+def _restore_memory_if_empty() -> None:
+    """库里记忆为空而 memory.md 有条目 → 自动导回（库被重置后的自愈）。"""
+    try:
+        if store.list_memory():
+            return
+        if not MEM_MD.exists():
+            return
+        items = memory_export.parse(MEM_MD.read_text(encoding="utf-8"))
+        for it in items:
+            store.add_memory(it["content"], source=it.get("source", ""),
+                             status=it.get("status", "draft"))
+        if items:
+            print(f"♻ 已从 memory.md 恢复 {len(items)} 条共享记忆（库此前为空）")
+    except Exception as exc:
+        print(f"⚠ 记忆自动恢复失败：{exc}")
 
 
 def _sync_memory() -> None:
@@ -178,7 +214,9 @@ def main():
             stream.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
         except (AttributeError, ValueError):
             pass
-    _sync_memory()          # 启动即导出一次，保证 memory.md 与库一致
+    _backup_db()                # 先拍库快照（轮换留 10 份）
+    _restore_memory_if_empty()  # 库空而 memory.md 有货 → 自动恢复记忆
+    _sync_memory()              # 再导出一次，保证 memory.md 与库一致
     st = engine.seat_status()
     print(f"ChatHub GUI 启动：http://127.0.0.1:{PORT}")
     print("三席状态：" + " | ".join(f"{k}={'在线' if v['online'] else '离线'}" for k, v in st.items()))
