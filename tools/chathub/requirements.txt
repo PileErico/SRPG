@@ -1,6 +1,0 @@
-# ChatHub 依赖（尽量少）
-pyyaml>=6.0
-# DeepSeek adapter 走 OpenAI 兼容格式
-openai>=1.0
-# GUI 版后端
-flask>=3.0

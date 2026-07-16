@@ -13,9 +13,6 @@ mono_crash.*.json
 # 系统 / 编辑器杂物
 Thumbs.db
 .DS_Store
-# Python 缓存（tools/chathub 等本地工具生成）
+# Python 缓存（本地工具脚本生成）
 __pycache__/
 *.py[cod]
-# ChatHub GUI 本地会话数据库（含 SQLite journal/WAL）
-/tools/chathub/gui/chathub.db*
-/tools/chathub/gui/backups/
