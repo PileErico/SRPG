@@ -58,6 +58,14 @@ class GptAdapter(Adapter):
         if not cmd:
             raise AdapterError("codex_cmd 为空")
         found = shutil.which(cmd[0])
+        if not found and cmd[0].lower() in {"npx", "npx.cmd"}:
+            for candidate in (
+                Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "nodejs" / "npx.cmd",
+                Path(os.environ.get("APPDATA", "")) / "npm" / "npx.cmd",
+            ):
+                if candidate.is_file():
+                    found = str(candidate)
+                    break
         if found:
             cmd[0] = found
         return cmd

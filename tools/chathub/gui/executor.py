@@ -22,6 +22,14 @@ def _resolve_cmd(cmd: list[str]) -> list[str]:
     resolved = list(cmd)
     if resolved:
         found = shutil.which(resolved[0])
+        if not found and resolved[0].lower() in {"npx", "npx.cmd"}:
+            for candidate in (
+                Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "nodejs" / "npx.cmd",
+                Path(os.environ.get("APPDATA", "")) / "npm" / "npx.cmd",
+            ):
+                if candidate.is_file():
+                    found = str(candidate)
+                    break
         if found:
             resolved[0] = found
     return resolved
