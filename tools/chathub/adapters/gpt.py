@@ -2,6 +2,8 @@
 
 配置段（config.yaml 的 gpt 席）：
     codex_cmd: ["npx", "--yes", "@openai/codex", "exec", "--ephemeral", "--sandbox", "read-only"]
+    model: "gpt-5.6-sol"     # 可选·经 -m 注入
+    effort: "high"           # 可选·经 -c model_reasoning_effort= 注入（Codex 无 --effort）
     role_prompt: |           # 可选·角色约束
 
 通道特性（🔒 经验证）：
@@ -9,6 +11,8 @@
 - 不消耗 OpenAI API token（只走 Plus 订阅用量）
 - stdout = 发言正文；stderr = 进度/模型信息/警告（须丢弃）
 - 冷启动约 10~15s；模型为 gpt-5.6-sol（当前版本）
+- **无 `--effort` flag**（`codex exec --help` 实测）：effort 走 `-c model_reasoning_effort=<值>`；
+  `-m`/`-c` 必须插在 stdin 标记 `-` **之前**，否则被当成 prompt 参数。
 """
 from __future__ import annotations
 
@@ -25,9 +29,30 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-from adapters.base import Adapter, AdapterError, Turn
+from adapters.base import (
+    Adapter,
+    AdapterError,
+    Invocation,
+    RunMeta,
+    RunResult,
+    Turn,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]  # adapters→chathub→tools→仓库根
+
+# Codex 的 effort 配置键——`--effort` 不存在，只有 `-c <key>=<value>`。
+EFFORT_CONFIG_KEY = "model_reasoning_effort"
+
+# 封闭枚举——**施工期逐值实跑取证所得**（2026-07-16，模型 gpt-5.6-sol）。
+# ⚠ 取证要两级证据，缺一不可：
+#   ①「配置可解析」：`--strict-config` 只认键名——实测 `-c model_reasoning_effort=bogus`
+#     照样过闸，所以 strict-config **单独不构成证据**；
+#   ②「模型实际接受」：真跑一次看退出码——服务端把 bogus 打回并列出通用枚举
+#     'none','minimal','low','medium','high','xhigh','max'。
+# 而 `minimal` 虽在①②的枚举文本里，实测却被当前模型明确拒绝
+# （"'minimal' is not supported with the 'gpt-5.6-sol...' model"）——故**不写进来**。
+# CLI 大版本或默认模型升级后须重跑探测再改这里。
+EFFORT_VALUES = ("none", "low", "medium", "high", "xhigh", "max")
 
 
 def codex_subprocess_env() -> dict[str, str]:
@@ -70,7 +95,71 @@ class GptAdapter(Adapter):
             cmd[0] = found
         return cmd
 
+    def _build_args(self) -> list[str]:
+        """`-m` / `-c` 必须插在 stdin 标记 `-` **之前**——`-` 之后会被当成 prompt 参数。"""
+        args = self._resolve_cmd()
+        if self.config.get("model"):
+            args += ["-m", str(self.config["model"])]
+        if self.config.get("effort"):
+            args += ["-c", f"{EFFORT_CONFIG_KEY}={self.config['effort']}"]
+        return args + ["-"]
+
+    def _effort_error(self) -> str | None:
+        """非法 effort 返回原因串，合法/未设返回 None。"""
+        effort = self.config.get("effort")
+        if not effort:
+            return None
+        if str(effort) not in EFFORT_VALUES:
+            return (f"effort={effort!r} 不在 Codex CLI 当前模型接受的枚举 "
+                    f"{'/'.join(EFFORT_VALUES)} 内")
+        return None
+
+    def capabilities(self) -> dict:
+        return {
+            # model 服务端不校验预设列表，写死会过期 → 自由输入，建议值来自 config。
+            "model": {
+                "free_input": True,
+                "suggestions": list(self.config.get("model_suggestions") or []),
+            },
+            "effort": {"supported": True, "values": list(EFFORT_VALUES)},
+        }
+
+    def _invocation(self, args: list[str]) -> Invocation:
+        """从**实际 argv** 回读注入事实，避免与 _build_args 的条件逻辑漂移。
+
+        白名单：只取标量；prompt 走 stdin，本就不在 args 里。
+        """
+        effort_flag = f"{EFFORT_CONFIG_KEY}="
+        return Invocation(
+            executable=args[0] if args else "",
+            requested_model=str(self.config["model"]) if self.config.get("model") else None,
+            reported_model=None,           # Codex CLI 无回读通道 → 恒 unverified
+            effort=str(self.config["effort"]) if self.config.get("effort") else None,
+            model_injected="-m" in args,
+            effort_injected=any(a.startswith(effort_flag) for a in args),
+        )
+
+    def generate_result(self, context: str, turn: Turn) -> RunResult:
+        reason = self._effort_error()
+        if reason:
+            # 参数级错误：不进 CLI、不抛异常（daemon 线程里抛会静默死掉）
+            return RunResult(
+                content=f"［{self.name}：配置错误，未调用 CLI］{reason}",
+                meta=RunMeta(status="error",
+                             invocation=self._invocation(self._resolve_cmd()),
+                             warnings=[reason]),
+            )
+        args = self._build_args()
+        body = self._run(args, context, turn)   # 运行期失败照旧抛 AdapterError
+        return RunResult(content=body, meta=RunMeta(invocation=self._invocation(args)))
+
     def generate(self, context: str, turn: Turn) -> str:
+        reason = self._effort_error()
+        if reason:
+            raise AdapterError(reason)     # 旧入口无 RunResult 可携带，只能抛
+        return self._run(self._build_args(), context, turn)
+
+    def _run(self, command: list[str], context: str, turn: Turn) -> str:
         # 组装 prompt
         role_block = ""
         if self.role_prompt:
@@ -95,7 +184,6 @@ class GptAdapter(Adapter):
         timeout = self.config.get("cli_timeout", 80)  # 比 broker 超时略短
 
         # prompt 从 stdin 传给 `codex exec -`，避免 Windows 8191 字符 argv 上限。
-        command = self._resolve_cmd() + ["-"]
         try:
             proc = subprocess.run(
                 command,

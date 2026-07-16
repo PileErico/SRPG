@@ -94,10 +94,11 @@ adapters:
   deepseek:
     class: "adapters.deepseek:DeepSeekAdapter"
     endpoint: "https://api.deepseek.com/v1/chat/completions"
-    # ⚠ deepseek-chat 于 2026-07-24 停用。钉死 deepseek-v4-pro＋effort 探测＝
-    #    deepseek 席适配器份额（A2 分派：adapters/deepseek.py 由 gpt 席代落）——
-    #    探测通过后连同 capabilities 一起改这一行，别在这里凭文档猜。
-    model: "deepseek-chat"
+    # 🔒 2026-07-16 探测取证后钉死：旧串 deepseek-chat 不仅 07-24 停用，且**静默降级**——
+    #    实测其 resp.model 回读为 deepseek-v4-flash，不报错、只给弱模型。v4-pro 已实跑
+    #    verified（requested == reported）。effort 枚举见 adapters/deepseek.py。
+    model: "deepseek-v4-pro"
+    model_suggestions: ["deepseek-v4-pro", "deepseek-v4-flash"]
     api_key_env: "DEEPSEEK_API_KEY"
     role_prompt: >-
       你是参谋席（席位 deepseek）。只做评价与建议：审视别人给出的方案与证据、
