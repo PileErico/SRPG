@@ -135,6 +135,7 @@ var prof_known := []    # 已学域 id（师承/自悟解锁「已学」；未�
 var prof_slots := []    # 已装载域 id（≤ prof_slot_capacity()；非战斗可随时换）
 var prof_perks := {}    # 域id -> {阶段字符串: perk技能id}；卸载只停用，选择本身保留
 var prof_perk_state := {} # 主动 perk 的战斗运行态：skill_id -> {cd,uses}
+var reaction_state := {} # 决策36：provider_kind:provider_id:reaction_id -> limit 运行态（战斗快照持久）
 
 # —— 敌方 AI 警觉 / 仇恨（友方单位忽略这些字段；三种触发任一满足即激活，可组合）——
 # ai_threat：①视野感知——敌人进入它的「视野(sight) 且有视线(LOS)」就警觉（默认开）。见 docs/感知系统.md。
@@ -209,18 +210,34 @@ func _grip_source_active(src: String) -> bool:
 # 单位语境：stat_threshold{stat,op,value,pct_of?} / equip_state{slot,empty?|has_tag?} / self_tag{tag,has?}；
 # 交互语境（combat_ctx 结算期内有效，结算外恒 false）：target_tag{tag|any[]} / skill_tag{tag} / target_effect{effect}。
 # time_of_day / nearby_units＝光环轮（共用空间查询基建，§4.3 性能警示）；未知类型 fail-closed。
-func _when_met(c: Dictionary) -> bool:
+func _when_subject(c: Dictionary, ctx: Dictionary):
+	var sid := str(c.get("subject", "owner"))
+	if sid in ["", "owner", "self"]:
+		return ctx.get("owner", self)
+	if sid == "event.unit":
+		var ev = ctx.get("event", {})
+		return ev.get("unit") if typeof(ev) == TYPE_DICTIONARY else null
+	if sid == "target":
+		return ctx.get("target", combat_ctx.get("target"))
+	return null
+
+func _when_met(c: Dictionary, ctx: Dictionary = {}) -> bool:
+	var subject = _when_subject(c, ctx)
 	match str(c.get("type", "")):
 		"stat_threshold":
-			var v := float(stats.get(str(c.get("stat", "")), 0))
+			if subject == null:
+				return false
+			var v := float(subject.stats.get(str(c.get("stat", "")), 0))
 			var pof := str(c.get("pct_of", ""))
 			if pof != "":
-				var denom := float(stats.get(pof, 0))
+				var denom := float(subject.stats.get(pof, 0))
 				v = (v / denom * 100.0) if denom > 0.0 else 0.0
 			var thr := float(c.get("value", 0))
 			return v <= thr if str(c.get("op", ">=")) == "<=" else v >= thr
 		"equip_state":
-			var iuid := int(equipment.get(str(c.get("slot", "main_hand")), 0))
+			if subject == null:
+				return false
+			var iuid := int(subject.equipment.get(str(c.get("slot", "main_hand")), 0))
 			if bool(c.get("empty", false)):
 				return iuid == 0
 			var tag := str(c.get("has_tag", ""))
@@ -229,9 +246,9 @@ func _when_met(c: Dictionary) -> bool:
 			var item = ItemInstances.view(iuid)
 			return item != null and (item.get("tags", []) as Array).has(tag)
 		"self_tag":
-			return tags.has(str(c.get("tag", ""))) == bool(c.get("has", true))
+			return subject != null and subject.tags.has(str(c.get("tag", ""))) == bool(c.get("has", true))
 		"target_tag":
-			var tgt = combat_ctx.get("target")
+			var tgt = subject if c.has("subject") else combat_ctx.get("target")
 			if tgt == null:
 				return false
 			if c.has("any"):
@@ -243,7 +260,7 @@ func _when_met(c: Dictionary) -> bool:
 		"skill_tag":
 			return (combat_ctx.get("skill_tags", []) as Array).has(str(c.get("tag", "")))
 		"target_effect":
-			var tgt2 = combat_ctx.get("target")
+			var tgt2 = subject if c.has("subject") else combat_ctx.get("target")
 			if tgt2 == null:
 				return false
 			var eid := str(c.get("effect", ""))
@@ -251,8 +268,65 @@ func _when_met(c: Dictionary) -> bool:
 				if typeof(e) == TYPE_DICTIONARY and str(e.get("id", "")) == eid:
 					return true
 			return false
+		"event_relation":
+			var other = _when_subject({"subject": str(c.get("subject", "event.unit"))}, ctx)
+			var owner = ctx.get("owner", self)
+			if other == null or owner == null:
+				return false
+			var relation := str(ctx.get("event_relation", ""))
+			if relation == "":
+				var hostile := str(owner.faction) != str(other.faction) and not (str(owner.faction) in ["player", "ally"] and str(other.faction) in ["player", "ally"])
+				relation = "enemy" if hostile else "ally"
+			return relation == str(c.get("value", "enemy"))
+		"weapon_tag":
+			if subject == null:
+				return false
+			var item2 = ItemInstances.view(int(subject.equipment.get(str(c.get("slot", "main_hand")), 0)))
+			return item2 != null and (item2.get("tags", []) as Array).has(str(c.get("tag", "")))
+		"weapon_grip":
+			return subject != null and subject.effective_grip(str(c.get("slot", "main_hand"))) == str(c.get("value", ""))
+		"incapacitated":
+			return subject != null and subject.has_state("incapacitated") == bool(c.get("value", true))
 	push_warning("Unit：when 条件类型「%s」未实现（time_of_day/nearby_units＝光环轮）——按不满足处理" % str(c.get("type", "")))
 	return false
+
+func when_all(conds, ctx: Dictionary = {}) -> bool:
+	if typeof(conds) != TYPE_ARRAY:
+		return true
+	for c in conds:
+		if typeof(c) != TYPE_DICTIONARY or not _when_met(c, ctx):
+			return false
+	return true
+
+func reaction_key(provider_kind: String, provider_id: String, reaction_id: String) -> String:
+	return "%s:%s:%s" % [provider_kind, provider_id, reaction_id]
+
+func reaction_limit_ready(key: String, limit: Dictionary, reset_token) -> bool:
+	var max_uses := maxi(0, int(limit.get("uses", 0)))
+	if max_uses == 0:
+		return true
+	var reset := str(limit.get("reset", "battle"))
+	var st: Dictionary = reaction_state.get(key, {})
+	if st.is_empty() or (reset != "battle" and st.get("reset_token") != reset_token):
+		st = {"uses": max_uses, "reset_token": reset_token}
+		reaction_state[key] = st
+	return int(st.get("uses", max_uses)) > 0
+
+func consume_reaction_limit(key: String, limit: Dictionary, reset_token) -> void:
+	var max_uses := maxi(0, int(limit.get("uses", 0)))
+	if max_uses == 0:
+		return
+	if not reaction_limit_ready(key, limit, reset_token):
+		return
+	var st: Dictionary = reaction_state[key]
+	st["uses"] = maxi(0, int(st.get("uses", max_uses)) - 1)
+	reaction_state[key] = st
+
+func clear_reaction_provider(provider_kind: String, provider_id: String) -> void:
+	var prefix := "%s:%s:" % [provider_kind, provider_id]
+	for key in reaction_state.keys():
+		if str(key).begins_with(prefix):
+			reaction_state.erase(key)
 
 # 有效属性（保留 1 位小数）= 基础面板 + 修正：base + Σflat + base×Σpct%。面板显示用这个。
 # 去重规则 🔒：同一 source（同名 buff/技能）对同一 (stat, op) 只算一次、**取高**（重复挂不叠加、数值不同取大）；
@@ -1220,6 +1294,20 @@ func active_prof_perk_ids() -> Array:
 			var def = SkillDB.get_skill(id)
 			if def != null and bool(def.get("active", false)) and not out.has(id):
 				out.append(id)
+	return out
+
+# 已装载且熟练度阶段达标的全部 perk（含被动）；能力菜单仍用 active_prof_perk_ids 只列主动项。
+func enabled_prof_perk_ids() -> Array:
+	var out := []
+	for pid in prof_slots:
+		var rows = prof_perks.get(str(pid), {})
+		if typeof(rows) != TYPE_DICTIONARY:
+			continue
+		for stage_key in rows:
+			if int(stage_key) <= prof_stage(str(pid)):
+				var id := str(rows[stage_key])
+				if SkillDB.get_skill(id) != null and not out.has(id):
+					out.append(id)
 	return out
 
 func prof_perk_weapon_ok(perk_id: String) -> bool:

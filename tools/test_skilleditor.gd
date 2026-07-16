@@ -78,6 +78,13 @@ func _initialize() -> void:
 		"max_level": 3, "target": {"enemy": false, "ally": true, "self": true},
 		"range": 1,
 		"effects": [{"kind": "heal", "heal_pct_max_hp": {"per_level": [15, 25, 35]}, "cleanse_tags": ["bleeding"]}]})
+	arr0.append({"id": "t_reaction", "name": "反应试料", "icon": "", "category": "perk", "desc": "",
+		"active": false, "tags": [], "costs": {"ap": 0}, "cooldown": {"base": 0}, "uses_per_battle": {"base": 0},
+		"max_level": 1, "target": {"enemy": false, "ally": false, "self": true}, "range": 0,
+		"effects": [{"kind": "reaction", "id": "probe", "trigger": "unit_entered_zoc",
+			"when": [{"type": "event_relation", "value": "enemy"}],
+			"limit": {"uses": 1, "reset": "round", "scope": "owner"},
+			"actions": [{"kind": "attack", "source": "current_bws", "actor": "owner", "target": "event.unit", "overrides": []}]}]})
 	SkillDB._write_array("user://test_skills.json", arr0)
 	SkillDB._write_array("user://test_skills.json", SkillDB._read_array("user://test_skills.json"))
 	SkillDB.reload_data()
@@ -212,6 +219,12 @@ func _initialize() -> void:
 	ed._move_block(ed._blocks[0], -1)   # 顶端上移＝no-op
 	ck(str(ed._shell_collect()["effects"][0].get("kind")) == "scripted", "顶端上移 no-op（不越界）")
 
+	# —— 决策36：Skill reaction 块共用控件无损往返 ——
+	ed._shell_load("t_reaction")
+	ck(ed._blocks.size() == 1 and str(ed._blocks[0]["kind"]) == "reaction", "SkillEditor 构建 reaction 块")
+	var rcol = ed._shell_collect()
+	ck(not rcol.is_empty() and _same(rcol, SkillDB.get_skill("t_reaction")), "Skill reaction schema 无损往返")
+
 	# —— EffectEditor：bleeding_basic 往返 + 新建（效果 id 随用户重建改 2026-07-15）——
 	var fe = EffectScene.instantiate()
 	root.add_child(fe)
@@ -224,6 +237,10 @@ func _initialize() -> void:
 	ck(_same(fcol, EffectDB.get_effect("bleeding_basic")), "效果 collect 与 DB 条目全等")
 	ck(EffectDB.save_effect(fcol), "效果无改动回存成功")
 	ck(_bytes("user://test_effects.json") == fx_before, "★ 效果 canonical 字节级往返不变")
+	fe._shell_load("spear_set_stance")
+	var stance_col = fe._shell_collect()
+	ck(not stance_col.is_empty() and _same(stance_col, EffectDB.get_effect("spear_set_stance")),
+		"Effect reactions[] 共用控件无损往返（含 when/limit/override）")
 	fe._shell_new_entry()
 	fe._w_id.text = "test_chill"
 	fe._w_name.text = "深寒"

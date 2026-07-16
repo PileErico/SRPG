@@ -66,6 +66,32 @@
     "name": "立矛",
     "on_expire_apply": "",
     "permanent": false,
+    "reactions": [
+      {
+        "id": "spear_intercept",
+        "name": "立矛",
+        "trigger": "unit_entered_zoc",
+        "when": [
+          {"type": "event_relation", "value": "enemy"},
+          {"type": "weapon_tag", "subject": "owner", "tag": "weapon_spear"}
+        ],
+        "limit": {"uses": 1, "reset": "round", "scope": "owner"},
+        "actions": [
+          {
+            "kind": "attack",
+            "source": "current_bws",
+            "actor": "owner",
+            "target": "event.unit",
+            "overrides": [
+              {
+                "when": [{"type": "weapon_grip", "subject": "owner", "value": "two_handed"}],
+                "set": {"final_damage_factor": 1.2}
+              }
+            ]
+          }
+        ]
+      }
+    ],
     "stackable": false,
     "tags": ["spear_stance"]
   }

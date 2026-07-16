@@ -26,6 +26,7 @@ const WARN_COLOR := Color(0.95, 0.8, 0.35)
 var _current: Dictionary = {}
 var _tags: Array = []
 var _mod_rows: Array = []
+var _reaction_rows: Array = []
 
 # —— 控件 ——
 var _form: VBoxContainer
@@ -181,6 +182,7 @@ func _clear_form() -> void:
 		c.queue_free()
 	_tags = []
 	_mod_rows = []
+	_reaction_rows = []
 
 func _build_form() -> void:
 	_clear_form()
@@ -245,14 +247,29 @@ func _build_form() -> void:
 	_form.add_child(mods_box)
 	for m in _current.get("mods", []):
 		if typeof(m) == TYPE_DICTIONARY:
-			EditorUI.add_mod_row(mods_box, _mod_rows, StatMeta.EDITOR_STATS,
+			EditorUI.add_mod_row(mods_box, _mod_rows, StatMeta.modifier_stats(),
 				str(m.get("stat", "atk")), str(m.get("op", "flat")), float(m.get("value", 0)), _mark_dirty)
 	var addm := Button.new()
 	addm.text = "＋ 添加修正"
 	addm.pressed.connect(func():
-		EditorUI.add_mod_row(mods_box, _mod_rows, StatMeta.EDITOR_STATS, "atk", "flat", 0.0, _mark_dirty)
+		EditorUI.add_mod_row(mods_box, _mod_rows, StatMeta.modifier_stats(), "atk", "flat", 0.0, _mark_dirty)
 		_mark_dirty())
 	_form.add_child(addm)
+
+	_form.add_child(EditorUI.section_title("反应 reactions（触发条件 / 次数限制 / 动作）"))
+	var reactions_box := VBoxContainer.new()
+	reactions_box.add_theme_constant_override("separation", 6)
+	_form.add_child(reactions_box)
+	var ropts := _reaction_when_opts()
+	for reaction in _current.get("reactions", []):
+		if reaction is Dictionary:
+			EditorUI.add_reaction_editor(reactions_box, _reaction_rows, reaction, ropts, _mark_dirty)
+	var addr := Button.new()
+	addr.text = "＋ 添加反应"
+	addr.pressed.connect(func():
+		EditorUI.add_reaction_editor(reactions_box, _reaction_rows, {"id": "reaction_1", "trigger": "unit_entered_zoc", "when": [], "limit": {"uses": 1, "reset": "round", "scope": "owner"}, "actions": []}, ropts, _mark_dirty)
+		_mark_dirty())
+	_form.add_child(addr)
 
 	_form.add_child(EditorUI.section_title("到期连锁（🔒 决策20 两段式：倒计时引信/叠满质变同家族）"))
 	_w_expire_apply = OptionButton.new()
@@ -442,8 +459,25 @@ func _shell_collect() -> Dictionary:
 		mods.append({"stat": str(m["stat"].get_selected_metadata()),
 			"op": str(m["op"].get_selected_metadata()), "value": int(v) if v == floorf(v) else v})
 	out["mods"] = mods
+	var reactions := []
+	var rerrs := []
+	for reaction_entry in _reaction_rows:
+		reactions.append(EditorUI.collect_reaction_editor(reaction_entry, rerrs))
+	if not rerrs.is_empty():
+		_err("Reaction：" + str(rerrs[0]))
+		return {}
+	if reactions.is_empty(): out.erase("reactions")
+	else: out["reactions"] = reactions
 	out["on_expire_apply"] = str(_w_expire_apply.get_selected_metadata())
 	return out
+
+func _reaction_when_opts() -> Dictionary:
+	var eo := []
+	for id in EffectDB.all():
+		var effect = EffectDB.all()[id]
+		eo.append([str(id), "%s（%s）" % [str(effect.get("name", id)), str(id)]])
+	return {"stat_keys": ["HP"] + StatMeta.EDITOR_STATS, "effect_options": eo,
+		"slot_pairs": [["main_hand", "主手"], ["off_hand", "副手"]]}
 
 
 # —— 保存 / 删除（流程在外壳）——

@@ -51,6 +51,9 @@ const EDITOR_STATS := ["HP_max", "atk", "acc", "eva",
 	"finesse", "agility", "luck", "resolve",
 	"offhand_ws", "dual_strike", "weapon_block"]
 
+# 伪 stat：只供修正管线/技能编辑器，不进入单位基础面板，也不放宽物品词条 stat 白名单。
+const MODIFIER_LABELS := {"zoc_radius": "控制区半径", "knockback_chance": "被动击退概率"}
+
 # 非数值「状态旗」mod 键白名单（不在 LABELS、但属合法修正对象 stat）
 const FLAG_MOD_STATS := ["vision_state"]
 
@@ -58,9 +61,12 @@ const FLAG_MOD_STATS := ["vision_state"]
 # data lint 规则4 与 ItemInstances 运行时护栏共用此清单（stat 键清单从单一源取、严禁各处硬编码）。
 const ITEM_FORBIDDEN_STATS := ["will_fort", "body_fort"]
 
+static func modifier_stats() -> Array:
+	return EDITOR_STATS + MODIFIER_LABELS.keys()
+
 # 中文标签（缺则回退键本身）
 static func label(key: String) -> String:
-	return str(LABELS.get(key, key))
+	return str(LABELS.get(key, MODIFIER_LABELS.get(key, key)))
 
 # 修正对象 stat 键是否合法（∈LABELS 或状态旗白名单）——词条/运行时 mod 入库前校验用
 static func is_valid_mod_stat(key: String) -> bool:

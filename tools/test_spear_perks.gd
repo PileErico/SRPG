@@ -8,6 +8,7 @@ const BattleState := preload("res://BattleState.gd")
 const SkillDB := preload("res://SkillDB.gd")
 const ProfDB := preload("res://ProfDB.gd")
 const ItemInstances := preload("res://ItemInstances.gd")
+const SandboxScript := preload("res://Sandbox.gd")
 
 var _fail := 0
 
@@ -62,9 +63,32 @@ func _initialize() -> void:
 	ck(u.ap == 2 and not evs.is_empty() and u.has_state("spear_stance"), "立矛消耗2AP并施加架势")
 	ck(s._zoc_radius(u) == 2 and s._zoc_cells(u).has(Vector2i(4, 2)), "立矛ZOC扩大到2")
 	var path := [Vector2i(5, 2), Vector2i(4, 2)]
-	ck(s.spear_stance_entry_owners(enemy, path) == [u], "从圈外进入触发立矛")
-	s.mark_spear_stance_triggered(u)
-	ck(s.spear_stance_entry_owners(enemy, path).is_empty(), "同一拥有者每round只触发一次")
+	var revent := {"unit": enemy, "path": path, "kind": "voluntary"}
+	var candidates := s.reaction_candidates("unit_entered_zoc", revent)
+	ck(candidates.size() == 1 and candidates[0].owner == u, "从圈外进入触发立矛")
+	u.consume_reaction_limit(candidates[0].state_key, candidates[0].reaction.get("limit", {}), candidates[0].reset_token)
+	ck(s.reaction_candidates("unit_entered_zoc", revent).is_empty(), "同一拥有者每round只触发一次")
+	ck(s.reaction_candidates("unit_entered_zoc", {"unit": enemy, "path": path, "kind": "voluntary", "is_reaction": true}).is_empty(),
+		"反应动作不能再次触发反应")
+	var rsnap := UnitFactory.unit_to_battle_snapshot(u)
+	var ur = UnitFactory.unit_from_battle_snapshot(JSON.parse_string(JSON.stringify(rsnap)))
+	ck(not ur.reaction_state.is_empty(), "reaction limit 账本战斗快照往返")
+	s.round_num += 1
+	candidates = s.reaction_candidates("unit_entered_zoc", revent)
+	ck(candidates.size() == 1, "新 round 重置反应次数")
+	# 表现层统一分发器实际消费候选并走完整 _resolve_one，而非专用立矛攻击代码。
+	var sb = SandboxScript.new()
+	sb._state = s
+	u.stats["acc"] = 100.0
+	enemy.stats["eva"] = 0.0
+	enemy.stats["block_rate"] = 0.0
+	enemy.stats["HP_max"] = 999.0
+	enemy.stats["HP"] = 999.0
+	var hp_before := float(enemy.stats["HP"])
+	sb._dispatch_reaction_event("unit_entered_zoc", revent)
+	ck(float(enemy.stats["HP"]) < hp_before and s.reaction_candidates("unit_entered_zoc", revent).is_empty(),
+		"通用 Reaction 分发器执行 BWS 并消费次数")
+	sb.free()
 	# 强制位移解算返回逐格路径，供同一个“进入”判定口消费。
 	enemy.col = 5
 	enemy.row = 2
@@ -73,8 +97,11 @@ func _initialize() -> void:
 
 	# 双手持兼用翼矛时，迎击使用独立 final_damage_factor，而非 atk_rate/反应系数。
 	var atk: Dictionary = u.basic_attack().duplicate(true)
-	if u.effective_grip("main_hand") == "two_handed":
-		atk["final_damage_factor"] = 1.2
+	var action: Dictionary = candidates[0].reaction.get("actions", [])[0]
+	for override in action.get("overrides", []):
+		if u.when_all(override.get("when", []), candidates[0].context):
+			for key in override.get("set", {}).keys():
+				atk[key] = override["set"][key]
 	u.stats["acc"] = 100
 	var rr := {}
 	for _i in 64:
@@ -84,7 +111,8 @@ func _initialize() -> void:
 	ck(float(rr.get("final_damage_factor", 1.0)) == 1.2 and float(rr.get("atk_rate", 1.0)) == 1.0,
 		"双手立矛=最终调整1.2，非借机反应系数")
 	s._apply_turn_start_effects(u)
-	ck(not u.has_state("spear_stance") and s._zoc_radius(u) == 1, "下一次自身turn开始架势到期")
+	ck(not u.has_state("spear_stance") and s._zoc_radius(u) == 1 and u.reaction_state.is_empty(),
+		"下一次自身turn开始架势到期并清反应账本")
 
 	if _fail == 0:
 		print("=== 全部断言 PASS ===")

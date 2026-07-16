@@ -12,6 +12,7 @@ const TerrainDB := preload("res://TerrainDB.gd")
 const WorldState := preload("res://WorldState.gd")
 const EffectDB := preload("res://EffectDB.gd")
 const SkillDB := preload("res://SkillDB.gd")   # 技能施放（apply_skill：def/skill_ap_cost/resolve_num）
+const ReactionRegistry := preload("res://ReactionRegistry.gd")
 const ProfDB := preload("res://ProfDB.gd")   # 技能（熟练度域）注册表——战斗涨值挂钩用（🔒 模块_属性成长_设计.md §2.4）
 const ItemInstances := preload("res://ItemInstances.gd")   # 副手惩罚盾豁免查装备（§7.1 阶段3b）
 const MinHeap := preload("res://MinHeap.gd") # 寻路优先队列（_dijkstra；与 Overworld.find_path 共用实现）
@@ -773,11 +774,11 @@ func _resolve_compute_body(attacker, target, skill) -> Dictionary:
 	# 击退判定（🔒 2026-07-15 用户拍板：概率制击中附带——挂 hit 内 on_hit_displace，与 on_hit_effects 并列）：
 	# 门槛＝命中且未被格挡（未命中已早退）；概率＝主动块 chance ＋ 攻方被动伪 stat knockback_chance
 	# （perk 挂载口，任意攻击段都参与）**合并单掷**，直减目标肉体强韧（数值直减，非效果族的豁免二掷；可减到 0）。
-	# 借机/反击段（atk_rate 注入键）禁击退。
+	# 反应段（is_reaction）禁击退；atk_rate 只负责伤害倍率，不再兼任类型标记（决策36）。
 	# ⚠ 位移延迟结算（🔒 同日用户+Codex 三层定调）：判定层只登记请求（r["displace_req"]＋队列），
 	#   坐标变更集中在攻击动作末 flush_displaces——防双持副手段被自己第一段的位移拆断目标。
 	# ⚠ 掷骰只在 kb_dist>0 时发生：旧数据（无击退无被动）零额外 rng 抽取＝golden 零涉。
-	if not blocked and not skill.has("atk_rate"):
+	if not blocked and not bool(skill.get("is_reaction", false)):
 		var kb = skill.get("on_hit_displace", null)
 		var kb_ch := 0.0
 		var kb_dist := 0
@@ -854,37 +855,78 @@ func displace_push(unit, d: int, distance: int, origin := Vector2i.ZERO, max_dis
 		_recompute_vision_state()
 	return {"from": from, "to": cur, "steps": steps, "blocked": was_blocked, "capped": capped, "path": path}
 
-# 一次实际位移路径中，取全部被“从圈外进入”触发的立矛拥有者。生成/原地出现不调用此口。
-# 重叠控制区各自触发；同一拥有者在一条路径中只返回一次。
-func spear_stance_entry_owners(mover, path: Array) -> Array:
+# 收集一个单位当前提供的全部反应。临时效果与永久技能/专长共用同一份 schema。
+func _reaction_sources(owner) -> Array:
 	var out := []
-	if mover == null or path.size() < 2:
-		return out
+	for effect in owner.effects:
+		for reaction in effect.get("reactions", []):
+			if reaction is Dictionary:
+				out.append({"provider_kind": "effect", "provider_id": str(effect.get("id", "")), "reaction": reaction})
+	for skill_id in owner.skills:
+		var skill: Dictionary = SkillDB.get_skill(str(skill_id))
+		for block in skill.get("effects", []):
+			if str(block.get("kind", "")) == "reaction":
+				out.append({"provider_kind": "skill", "provider_id": str(skill_id), "reaction": block})
+	for perk_id in owner.enabled_prof_perk_ids():
+		var perk: Dictionary = SkillDB.get_skill(str(perk_id))
+		for block in perk.get("effects", []):
+			if str(block.get("kind", "")) == "reaction":
+				out.append({"provider_kind": "perk", "provider_id": str(perk_id), "reaction": block})
+	return out
+
+func _reaction_reset_token(limit: Dictionary) -> String:
+	match str(limit.get("reset", "round")):
+		"turn": return "%d:%d" % [round_num, active_index]
+		"battle": return "battle"
+		_: return str(round_num)
+
+func _unit_entered_owner_zoc(owner, event: Dictionary) -> bool:
+	var mover = event.get("unit")
+	var path: Array = event.get("path", [])
+	if mover == null or owner == mover or path.size() < 2:
+		return false
+	var center := Vector2i(owner.col, owner.row)
+	var radius := _zoc_radius(owner)
+	if radius <= 0:
+		return false
 	for i in range(1, path.size()):
 		var prev: Vector2i = path[i - 1]
 		var cur: Vector2i = path[i]
-		for owner in units:
-			if owner == mover or not _is_hostile(mover, owner) or owner.has_state("incapacitated") \
-					or not owner.has_active_prof_perk("perk_spear_set") or not owner.prof_perk_weapon_ok("perk_spear_set"):
-				continue
-			var stance = null
-			for e in owner.effects:
-				if str(e.get("id", "")) == "spear_set_stance":
-					stance = e
-					break
-			if stance == null or int(stance.get("triggered_round", -1)) == round_num or out.has(owner):
-				continue
-			var center := Vector2i(owner.col, owner.row)
-			var radius := _zoc_radius(owner)
-			if radius > 0 and _hex_dist(prev, center) > radius and _hex_dist(cur, center) <= radius:
-				out.append(owner)
-	return out
+		if _hex_dist(prev, center) > radius and _hex_dist(cur, center) <= radius:
+			return true
+	return false
 
-func mark_spear_stance_triggered(owner) -> void:
-	for e in owner.effects:
-		if str(e.get("id", "")) == "spear_set_stance":
-			e["triggered_round"] = round_num
-			return
+# 返回满足触发、条件与次数限制的声明式反应候选；实际动作由战场表现层统一执行。
+func reaction_candidates(trigger: String, event: Dictionary) -> Array:
+	var out := []
+	if not ReactionRegistry.implemented(trigger) or bool(event.get("is_reaction", false)):
+		return out
+	for owner in units:
+		if owner.has_state("incapacitated"):
+			continue
+		if trigger == "unit_entered_zoc" and not _unit_entered_owner_zoc(owner, event):
+			continue
+		var ctx := {"owner": owner, "event": event, "round": round_num,
+			"event_relation": "enemy" if _is_hostile(owner, event.get("unit")) else "ally"}
+		for source in _reaction_sources(owner):
+			var reaction: Dictionary = source.reaction
+			if str(reaction.get("trigger", "")) != trigger or not owner.when_all(reaction.get("when", []), ctx):
+				continue
+			var limit: Dictionary = reaction.get("limit", {})
+			var key: String = owner.reaction_key(str(source.provider_kind), str(source.provider_id), str(reaction.get("id", "")))
+			var token: String = _reaction_reset_token(limit)
+			if not owner.reaction_limit_ready(key, limit, token):
+				continue
+			out.append({
+				"owner": owner,
+				"provider_kind": source.provider_kind,
+				"provider_id": source.provider_id,
+				"reaction": reaction,
+				"state_key": key,
+				"reset_token": token,
+				"context": ctx,
+			})
+	return out
 
 # 推离方向（0–5）：取攻→守连线末段 prev→target 的邻向——相邻＝正向推开；斜距＝远离攻方的近似轴向。异常=-1。
 func _dir_away(from: Vector2i, target: Vector2i) -> int:
@@ -1098,7 +1140,9 @@ func _add_effect_by_id(target, inf: Dictionary, eid: String) -> bool:
 				push_warning("_add_effect: 同族同级异常「%s」vs「%s」（priority %d）——数据应错开优先级（lint 拦）；保守压制新者" % [eid, str(e.get("id", "")), prio])
 				return false
 			_remove_mods_by_source(target, str(e.get("source", "")))   # 新者更高：顶掉旧低者
+			target.clear_reaction_provider("effect", str(e.get("id", "")))
 			target.effects.erase(e)
+	target.clear_reaction_provider("effect", eid)   # 刷新/重挂按 limit 规则重新初始化
 	var source := "buff:" + eid
 	_remove_mods_by_source(target, source)   # 刷新/叠层：先摘旧修正、按最新（含叠层后应有的 mods）重挂
 	var dur := _eval_effect_duration(def)
@@ -1129,6 +1173,7 @@ func _add_effect_by_id(target, inf: Dictionary, eid: String) -> bool:
 			"expire_timing": str(def.get("expire_timing", "turn_end")),
 			"on_expire_apply": str(def.get("on_expire_apply", "")),   # 到期连锁施加另一效果 id（两段式，§决策20）
 			"source": source,
+			"reactions": def.get("reactions", []).duplicate(true),
 		}
 		if bool(inf.get("ignore_fort", false)):
 			e["ignore_fort"] = true   # 无视强韧 🔒（§5）：每回合豁免也跳过（快照随 effects 原样保真）
@@ -1161,6 +1206,9 @@ func _remove_mods_by_source(u, source: String) -> void:
 
 # 清空单位的效果 + 所有 buff 来源的临时修正（重开/退战/换图用）；装备/特性等常驻修正保留。
 func _clear_effects_and_buffs(u) -> void:
+	for e in u.effects:
+		if typeof(e) == TYPE_DICTIONARY and str(e.get("id", "")) != "":
+			u.clear_reaction_provider("effect", str(e.get("id", "")))
 	u.effects = []
 	if typeof(u.modifiers) == TYPE_ARRAY:
 		u.modifiers = u.modifiers.filter(func(m): return not str(m.get("source", "")).begins_with("buff:"))
@@ -1174,6 +1222,7 @@ func _cleanse_effects_with_tag(u, tag: String) -> int:
 	for e in u.effects:
 		if (e.get("tags", []) as Array).has(tag):
 			_remove_mods_by_source(u, str(e.get("source", "buff:" + str(e.get("name", "")))))
+			u.clear_reaction_provider("effect", str(e.get("id", "")))
 			removed += 1
 		else:
 			kept.append(e)
@@ -1234,6 +1283,7 @@ func _apply_turn_start_effects(u) -> Array:
 			var fort := float(u.effective_stat_f(fk))
 			if fort > 0.0 and rng.randf() * 100.0 < fort:
 				_remove_mods_by_source(u, str(e.get("source", "buff:" + str(e.get("name", "")))))
+				u.clear_reaction_provider("effect", str(e.get("id", "")))
 				events.append({"type": "fort_shrug", "name": str(e.get("name", ""))})
 				continue
 		if e.get("permanent", false) or str(e.get("expire_timing", "turn_end")) != "turn_start":
@@ -1252,6 +1302,7 @@ func _countdown_and_expire(u, e, keep: Array, events: Array, chains: Array) -> v
 		keep.append(e)
 	else:
 		_remove_mods_by_source(u, str(e.get("source", "buff:" + str(e.get("name", "")))))   # 到期：连带摘掉其挂的修正
+		u.clear_reaction_provider("effect", str(e.get("id", "")))
 		events.append({"type": "expired", "name": str(e.get("name", ""))})
 		var chain := str(e.get("on_expire_apply", ""))
 		if chain != "":

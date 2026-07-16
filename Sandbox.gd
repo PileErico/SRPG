@@ -1237,7 +1237,7 @@ func _ai_exec_move(unit, plan: Dictionary) -> bool:
 	unit.move_points -= int(plan.get("cost", 0))
 	unit.col = pick.x
 	unit.row = pick.y
-	_trigger_spear_stance_for_path(unit, path)
+	_dispatch_reaction_event("unit_entered_zoc", {"unit": unit, "path": path, "kind": "voluntary"})
 	_refresh_info()
 	await _animate_path(unit, path)
 	if phase != "battle" or battle_over:
@@ -1915,6 +1915,7 @@ func _resolve_aoo(owner, mover) -> bool:
 	var pinned := false
 	for seg in _state.attack_segments(owner):
 		var atk: Dictionary = (seg as Dictionary).duplicate()
+		atk["is_reaction"] = true
 		atk["atk_rate"] = BattleState.REACTION_RATE   # 借机路径专属注入（普攻路径无此键＝golden 零涉）
 		var res := _resolve_one(owner, mover, atk, false)
 		pinned = pinned or (bool(res.get("hit", false)) and not bool(res.get("blocked", false)))
@@ -2175,28 +2176,36 @@ func _log_displaces(evs: Array) -> void:
 				"（撞停）" if bool(ev.get("blocked", false)) else ""])
 		elif not bool(ev.get("capped", false)):   # 已在极限距离＝寸步不动不刷屏（🔒 极限=击退距离+攻击距离）
 			_log_line("　%s 无处可退" % _cname(ev["unit"]))
-		_trigger_spear_stance_for_path(ev["unit"], ev.get("path", []))
+		_dispatch_reaction_event("unit_entered_zoc", {"unit": ev["unit"], "path": ev.get("path", []), "kind": "forced"})
 		if not _state._pending_displace.is_empty():
 			pending.append_array(_state.flush_displaces())
 
-# 立矛：真实移动（主动或强制）从圈外踏入圈内时触发；生成不调用。每名架势拥有者每 round 一次。
-func _trigger_spear_stance_for_path(mover, path: Array) -> void:
-	if mover == null or path.size() < 2 or not (mover in units):
+# 统一反应入口。v1 只执行攻击动作；反应动作本身禁止再次触发反应。
+func _dispatch_reaction_event(trigger: String, event: Dictionary) -> void:
+	if bool(event.get("is_reaction", false)):
 		return
-	for owner in _state.spear_stance_entry_owners(mover, path):
-		if not (mover in units):
-			break
-		_state.mark_spear_stance_triggered(owner)
-		_log_line("%s 的[b]立矛[/b]迎击 → %s" % [_cname(owner), _cname(mover)])
-		var atk: Dictionary = owner.basic_attack().duplicate(true)   # 自动引用 BWS；不是借机，不注入 0.75
-		# 反应段标记（验收修正 2026-07-15）：值 1.0＝伤害零衰减，但吃「反应段禁击退」安全阀——
-		# 迎击发生在移动编排中途，若产击退请求会泄漏进下一个攻击动作的 flush（幻影位移）。
-		atk["atk_rate"] = 1.0
-		if owner.effective_grip("main_hand") == "two_handed":
-			atk["final_damage_factor"] = 1.2
-		_resolve_one(owner, mover, atk, false)
-		_handle_deaths()
-	# 防泄漏兜底：迎击按反应段不产位移请求；若未来松绑，就地结清防漏入他人动作（空队列＝零开销）
+	for candidate in _state.reaction_candidates(trigger, event):
+		var owner = candidate.owner
+		var target = event.get("unit")
+		if owner == null or target == null or not (owner in units) or not (target in units):
+			continue
+		var reaction: Dictionary = candidate.reaction
+		owner.consume_reaction_limit(candidate.state_key, reaction.get("limit", {}), candidate.reset_token)
+		for action in reaction.get("actions", []):
+			if str(action.get("kind", "")) != "attack" or str(action.get("source", "")) != "current_bws":
+				continue
+			_log_line("%s 的[b]%s[/b]反应 → %s" % [_cname(owner), str(reaction.get("name", reaction.get("id", "反应"))), _cname(target)])
+			var atk: Dictionary = owner.basic_attack().duplicate(true)
+			atk["is_reaction"] = true
+			for override in action.get("overrides", []):
+				if owner.when_all(override.get("when", []), candidate.context):
+					for key in override.get("set", {}).keys():
+						atk[key] = override["set"][key]
+			_resolve_one(owner, target, atk, false)
+			_handle_deaths()
+			if not (target in units):
+				break
+	# 反应攻击禁止产出击退；兜底就地清算，避免未来动作扩展时把请求泄漏进下一次攻击。
 	if not _state._pending_displace.is_empty():
 		_log_displaces(_state.flush_displaces())
 
@@ -2316,7 +2325,7 @@ func _commit_move(col: int, row: int) -> void:
 	u.move_points -= cost
 	u.col = col
 	u.row = row
-	_trigger_spear_stance_for_path(u, path)
+	_dispatch_reaction_event("unit_entered_zoc", {"unit": u, "path": path, "kind": "voluntary"})
 	_clear_selection()
 	_refresh_info()
 	_recompute_vision()   # 单位落位 → 重算玩家视野（友方移动揭开/关闭迷雾）

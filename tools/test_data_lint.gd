@@ -53,6 +53,8 @@ const EventEngine := preload("res://EventEngine.gd") # 规则10（ACTIONS 注册
 const LocationDB := preload("res://LocationDB.gd")   # 规则10（地图地点类型）
 const UnitFactory := preload("res://UnitFactory.gd") # 规则10（proto 引用）+ 规则11（快照白名单）
 const Unit := preload("res://Unit.gd")               # 规则11
+const ReactionRegistry := preload("res://ReactionRegistry.gd")
+const EditorUI := preload("res://EditorUI.gd")
 
 var _fail := 0
 func ck(cond: bool, msg: String) -> void:
@@ -177,6 +179,40 @@ func _collect_key_strings(v, key: String, out: Array) -> void:
 			for e in v:
 				_collect_key_strings(e, key, out)
 
+func _lint_reaction(reaction: Dictionary, where: String) -> void:
+	var rid := str(reaction.get("id", ""))
+	ck(rid != "", "%s：reaction id 非空" % where)
+	var trigger := str(reaction.get("trigger", ""))
+	ck(ReactionRegistry.exists(trigger), "%s/%s：trigger 已注册：%s" % [where, rid, trigger])
+	ck(not ReactionRegistry.exists(trigger) or ReactionRegistry.implemented(trigger), "%s/%s：trigger 已接线：%s" % [where, rid, trigger])
+	var known_when := []
+	for pair in EditorUI.WHEN_TYPES:
+		known_when.append(str(pair[0]))
+	for cond in reaction.get("when", []):
+		ck(cond is Dictionary and known_when.has(str(cond.get("type", ""))), "%s/%s：when 类型已注册" % [where, rid])
+	var limit = reaction.get("limit", {})
+	ck(limit is Dictionary, "%s/%s：limit 是字典" % [where, rid])
+	if limit is Dictionary:
+		ck(int(limit.get("uses", 0)) >= 1, "%s/%s：limit.uses≥1" % [where, rid])
+		ck(str(limit.get("reset", "")) in ["round", "turn", "battle"], "%s/%s：limit.reset 合法" % [where, rid])
+		ck(str(limit.get("scope", "owner")) == "owner", "%s/%s：v1 limit.scope=owner" % [where, rid])
+	var actions = reaction.get("actions", [])
+	ck(actions is Array and not actions.is_empty(), "%s/%s：至少一个 action" % [where, rid])
+	if actions is Array:
+		for action in actions:
+			ck(action is Dictionary and str(action.get("kind", "")) == "attack", "%s/%s：v1 action.kind=attack" % [where, rid])
+			if action is Dictionary:
+				ck(str(action.get("source", "")) == "current_bws", "%s/%s：v1 source=current_bws" % [where, rid])
+				ck(str(action.get("actor", "")) == "owner", "%s/%s：v1 actor=owner" % [where, rid])
+				ck(str(action.get("target", "")) == "event.unit", "%s/%s：v1 target=event.unit" % [where, rid])
+				for override in action.get("overrides", []):
+					ck(override is Dictionary and override.get("when", []) is Array and override.get("set", {}) is Dictionary,
+						"%s/%s：override={when,set}" % [where, rid])
+					if override is Dictionary:
+						for cond in override.get("when", []):
+							ck(cond is Dictionary and known_when.has(str(cond.get("type", ""))),
+								"%s/%s：override.when 类型已注册" % [where, rid])
+
 # 递归收集所有 tag 承载键里的字符串成员（tag 用点；去重）。
 # 键集（技改 §4-8 扩五类——曾漏 cold/road/wall 的同款漂移面）：
 #   数组值＝tags/match_tags/occupant_has_tags/occupant_lacks_tags/passable_by（"all"/"none" 哨兵除外）；
@@ -231,6 +267,11 @@ func _initialize() -> void:
 		ck(dm in ["fixed", "resist"], "%s duration_model∈{fixed,resist}" % eid)
 		ck(typeof(e.get("stackable", false)) == TYPE_BOOL, "%s stackable 是 bool" % eid)
 		ck(typeof(e.get("dot_pct_max_hp", 0)) in [TYPE_INT, TYPE_FLOAT], "%s dot_pct_max_hp 数值" % eid)
+		for reaction in e.get("reactions", []):
+			if reaction is Dictionary:
+				_lint_reaction(reaction, "effect %s" % eid)
+			else:
+				ck(false, "effect %s：reactions 成员是字典" % eid)
 
 	# 3) 效果引用完整性：weapons/skills 里 {effect:<id>} 必须存在于 EffectDB
 	for path in ["res://data/weapons.json", "res://data/skills.json"]:
@@ -307,6 +348,9 @@ func _initialize() -> void:
 			if typeof(s) != TYPE_DICTIONARY:
 				continue
 			var sid := str(s.get("id", "?"))
+			for block in s.get("effects", []):
+				if block is Dictionary and str(block.get("kind", "")) == "reaction":
+					_lint_reaction(block, "skill %s" % sid)
 			var costs = s.get("costs", {})
 			ck(not (s.has("ap_cost") and typeof(costs) == TYPE_DICTIONARY and costs.has("ap")),
 				"%s：costs.ap 与顶层 ap_cost 禁双写（双键桥在读取器，数据侧只留一个）" % sid)

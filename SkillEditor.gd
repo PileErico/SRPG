@@ -34,7 +34,7 @@ const HAND_SLOTS := [["main_hand", "主手"], ["off_hand", "副手"]]   # when e
 const BLOCK_KINDS := [["attack", "攻击 attack"], ["heal", "治疗 heal"],
 	["passive_stat_mods", "被动修正 passive_stat_mods"],
 	["conditional_mod", "条件修正 conditional_mod"],
-	["apply_effect", "施加效果 apply_effect"], ["scripted", "脚本 scripted"]]
+	["apply_effect", "施加效果 apply_effect"], ["reaction", "反应 reaction"], ["scripted", "脚本 scripted"]]
 # 技能 tag 下拉预设的类别（§2.1 tags：verbal 等玩家可读/可筛词；其余手动）
 # damage 类已摘（2026-07-13）：创伤定型走攻击块 damage_type 字段，不再从 tag 口进
 const SKILL_TAG_CATS := ["skill_type", "target"]
@@ -607,6 +607,9 @@ func _block_skeleton(kind: String) -> Dictionary:
 			return {"kind": "conditional_mod", "when": [], "mods": []}
 		"apply_effect":
 			return {"kind": "apply_effect", "effect": "", "chance": 100}
+		"reaction":
+			return {"kind": "reaction", "id": "reaction_1", "trigger": "unit_entered_zoc", "when": [],
+				"limit": {"uses": 1, "reset": "round", "scope": "owner"}, "actions": []}
 		_:
 			return {"kind": "scripted", "script_id": "", "params": {}}
 
@@ -676,6 +679,8 @@ func _add_block(data: Dictionary) -> void:
 			_build_conditional_block(body, entry)
 		"apply_effect":
 			_build_apply_effect_block(body, entry)
+		"reaction":
+			_build_reaction_block(body, entry)
 		"scripted":
 			_build_scripted_block(body, entry)
 		_:
@@ -831,12 +836,12 @@ func _build_passive_block(box: VBoxContainer, entry: Dictionary) -> void:
 	box.add_child(mods_box)
 	for m in entry["data"].get("mods", []):
 		if typeof(m) == TYPE_DICTIONARY:
-			EditorUI.add_mod_row(mods_box, rows, StatMeta.EDITOR_STATS,
+			EditorUI.add_mod_row(mods_box, rows, StatMeta.modifier_stats(),
 				str(m.get("stat", "atk")), str(m.get("op", "flat")), float(m.get("value", 0)), _mark_dirty)
 	var addm := Button.new()
 	addm.text = "＋ 添加修正"
 	addm.pressed.connect(func():
-		EditorUI.add_mod_row(mods_box, rows, StatMeta.EDITOR_STATS, "atk", "flat", 0.0, _mark_dirty)
+		EditorUI.add_mod_row(mods_box, rows, StatMeta.modifier_stats(), "atk", "flat", 0.0, _mark_dirty)
 		_mark_dirty())
 	box.add_child(addm)
 
@@ -876,12 +881,12 @@ func _build_conditional_block(box: VBoxContainer, entry: Dictionary) -> void:
 	entry["mods_box"] = mods_box
 	for m in entry["data"].get("mods", []):
 		if typeof(m) == TYPE_DICTIONARY:
-			EditorUI.add_mod_row(mods_box, rows, StatMeta.EDITOR_STATS,
+			EditorUI.add_mod_row(mods_box, rows, StatMeta.modifier_stats(),
 				str(m.get("stat", "atk")), str(m.get("op", "flat")), float(m.get("value", 0)), _mark_dirty)
 	var addm := Button.new()
 	addm.text = "＋ 添加修正"
 	addm.pressed.connect(func():
-		EditorUI.add_mod_row(mods_box, rows, StatMeta.EDITOR_STATS, "atk", "flat", 0.0, _mark_dirty)
+		EditorUI.add_mod_row(mods_box, rows, StatMeta.modifier_stats(), "atk", "flat", 0.0, _mark_dirty)
 		_mark_dirty())
 	box.add_child(addm)
 
@@ -893,6 +898,11 @@ func _when_opts() -> Dictionary:
 		var e = EffectDB.all()[id]
 		eo.append([str(id), "%s（%s）" % [str(e.get("name", id)), str(id)]])
 	return {"stat_keys": ["HP"] + StatMeta.EDITOR_STATS, "effect_options": eo, "slot_pairs": HAND_SLOTS}
+
+func _build_reaction_block(box: VBoxContainer, entry: Dictionary) -> void:
+	var rows := []
+	entry["reaction_rows"] = rows
+	EditorUI.add_reaction_editor(box, rows, entry["data"], _when_opts(), _mark_dirty)
 
 func _build_apply_effect_block(box: VBoxContainer, entry: Dictionary) -> void:
 	# 公式值护栏（同上）：chance 为公式对象（引擎 resolve_num 支持）时锁定只读，防 float() 报错+扁平化
@@ -1230,6 +1240,16 @@ func _collect_block(entry: Dictionary) -> Dictionary:
 				out["chance"] = int(entry["chance"].value)
 			else:
 				out.erase("chance")   # 缺省 100 不落盘（canonical 最小键）
+		"reaction":
+			if entry["reaction_rows"].is_empty():
+				_collect_err = "reaction 块不能为空"
+				return out
+			var rerrs := []
+			out = EditorUI.collect_reaction_editor(entry["reaction_rows"][0], rerrs)
+			out["kind"] = "reaction"
+			if not rerrs.is_empty():
+				_collect_err = "reaction：" + str(rerrs[0])
+				return out
 		"scripted":
 			out["script_id"] = str(entry["script_id"].text).strip_edges()
 			var ptext := str(entry["params"].text).strip_edges()

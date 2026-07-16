@@ -147,14 +147,17 @@ func _initialize() -> void:
 	s.units = [a, d2]
 	r = first_hit(s, a, d2, {"coeff": 0.0, "on_hit_displace": {"mode": "push", "distance": 1, "chance": 200}})
 	ck(not r.is_empty() and bool(r["blocked"]) and not r.has("displace_req"), "被格挡＝免推（门槛：命中且未被格挡）")
-	# 借机/反击段（atk_rate 注入键）禁击退
+	# 决策36：atk_rate 只缩放伤害，不再兼任反应标记；is_reaction 才禁击退。
 	s._clear_effects_and_buffs(a)
 	s.units = [a, d]
 	d.col = 4
 	d.row = 3
 	d.stats["body_fort"] = 0.0
-	r = first_hit(s, a, d, {"coeff": 0.0, "atk_rate": 1.0, "on_hit_displace": {"mode": "push", "distance": 1, "chance": 200}})
-	ck(not r.is_empty() and not r.has("displace_req") and s._pending_displace.is_empty(), "借机段（atk_rate 键）禁击退")
+	r = first_hit(s, a, d, {"coeff": 0.0, "atk_rate": 0.5, "on_hit_displace": {"mode": "push", "distance": 1, "chance": 200}})
+	ck(not r.is_empty() and r.has("displace_req"), "atk_rate 与反应身份正交：单独存在仍可击退")
+	s._pending_displace.clear()
+	r = first_hit(s, a, d, {"coeff": 0.0, "is_reaction": true, "on_hit_displace": {"mode": "push", "distance": 1, "chance": 200}})
+	ck(not r.is_empty() and not r.has("displace_req") and s._pending_displace.is_empty(), "反应段（is_reaction）禁击退")
 
 	# —— 3) 数据接线 + 消耗口 ——
 	var repel = SkillDB.get_skill("ws_spear_repel")

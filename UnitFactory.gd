@@ -247,6 +247,7 @@ static func unit_to_battle_snapshot(u) -> Dictionary:
 		"stats": u.stats.duplicate(),
 		"prof_xp": u.prof_xp.duplicate(), "prof_known": u.prof_known.duplicate(), "prof_slots": u.prof_slots.duplicate(),
 		"prof_perks": u.prof_perks.duplicate(true), "prof_perk_state": u.prof_perk_state.duplicate(true),
+		"reaction_state": u.reaction_state.duplicate(true),
 		"ap": u.ap, "move_points": u.move_points,
 		"morale": u.morale, "attr_picks": u.attr_picks,
 		"door_gauge": u.door_gauge, "door_checks": u.door_checks,
@@ -303,6 +304,7 @@ static func unit_from_battle_snapshot(d: Dictionary):
 	u.prof_slots = psl   # 阶段补正随 modifiers 整份快照走（prof: source），不重挂——与 trait/equip 同律
 	u.prof_perks = d.get("prof_perks", {}).duplicate(true) if typeof(d.get("prof_perks", {})) == TYPE_DICTIONARY else {}
 	u.prof_perk_state = d.get("prof_perk_state", {}).duplicate(true) if typeof(d.get("prof_perk_state", {})) == TYPE_DICTIONARY else {}
+	u.reaction_state = d.get("reaction_state", {}).duplicate(true) if typeof(d.get("reaction_state", {})) == TYPE_DICTIONARY else {}
 	u.ap = int(d.get("ap", 0))
 	u.move_points = int(d.get("move_points", 0))
 	u.morale = int(d.get("morale", 25))   # 旧快照缺省＝常态 25

@@ -9,6 +9,7 @@ const EditorTheme := preload("res://EditorTheme.gd")
 const TagDB := preload("res://TagDB.gd")       # 自由 tag 区 chip 中文标签（tag 单一词表）
 const StatMeta := preload("res://StatMeta.gd") # 修正行 stat 中文标签
 const ItemTooltip := preload("res://ItemTooltip.gd")   # 物品选择器悬停富预览（通用渲染组件复用）
+const ReactionRegistry := preload("res://ReactionRegistry.gd")
 
 # —— 基础构件 ——
 
@@ -416,6 +417,10 @@ const WHEN_TYPES := [
 	["target_tag", "目标标签 target_tag（结算内）"],
 	["skill_tag", "技能标签 skill_tag（结算内）"],
 	["target_effect", "目标效果 target_effect（结算内）"],
+	["event_relation", "事件单位关系 event_relation"],
+	["weapon_tag", "武器标签 weapon_tag"],
+	["weapon_grip", "武器握持 weapon_grip"],
+	["incapacitated", "失能状态 incapacitated"],
 ]
 
 # 一行 when 条件：类型下拉 + 按类型的参数子控件 + ✕。cond＝原始条件 dict（原样持有，
@@ -483,6 +488,8 @@ static func _when_build_params(pbox: HBoxContainer, entry: Dictionary, cond: Dic
 			on_change.call()
 	match t:
 		"stat_threshold":   # {stat, op(>=缺省|<=), value, pct_of?}——读裸 stats（§4.3 递归防护）
+			w["subject"] = dropdown([["owner", "自身 owner"], ["event.unit", "事件单位 event.unit"]], str(cond.get("subject", "owner")), chg)
+			pbox.add_child(w["subject"])
 			var pairs := []
 			for k in opts.get("stat_keys", []):
 				pairs.append([str(k), "%s %s" % [str(k), StatMeta.label(str(k))]])
@@ -505,6 +512,8 @@ static func _when_build_params(pbox: HBoxContainer, entry: Dictionary, cond: Dic
 			w["pct_of"] = dropdown(pkeys, str(cond.get("pct_of", "")), chg)   # 非空＝stat/pct_of×100 与阈值比
 			pbox.add_child(w["pct_of"])
 		"equip_state":   # {slot, empty?:true | has_tag?:"tag"}；两键皆无＝有装备即可
+			w["subject"] = dropdown([["owner", "自身 owner"], ["event.unit", "事件单位 event.unit"]], str(cond.get("subject", "owner")), chg)
+			pbox.add_child(w["subject"])
 			w["slot"] = dropdown(opts.get("slot_pairs", [["main_hand", "主手"], ["off_hand", "副手"]]),
 				str(cond.get("slot", "main_hand")), chg)
 			pbox.add_child(w["slot"])
@@ -528,6 +537,8 @@ static func _when_build_params(pbox: HBoxContainer, entry: Dictionary, cond: Dic
 				tl.editable = str(mob.get_selected_metadata()) == "has_tag"
 				chg.call())
 		"self_tag":   # {tag, has?(缺省 true)}
+			w["subject"] = dropdown([["owner", "自身 owner"], ["event.unit", "事件单位 event.unit"]], str(cond.get("subject", "owner")), chg)
+			pbox.add_child(w["subject"])
 			var sl := LineEdit.new()
 			sl.text = str(cond.get("tag", ""))
 			sl.placeholder_text = "自身 tag（如 flying）"
@@ -542,6 +553,8 @@ static func _when_build_params(pbox: HBoxContainer, entry: Dictionary, cond: Dic
 			w["has"] = hc
 			pbox.add_child(hc)
 		"target_tag":   # {tag:"x"} 或 {any:[...]}——逗号分隔；收集沿原键形（保字节）
+			w["subject"] = dropdown([["target", "结算目标 target"], ["owner", "自身 owner"], ["event.unit", "事件单位 event.unit"]], str(cond.get("subject", "target")), chg)
+			pbox.add_child(w["subject"])
 			var tt := []
 			if cond.has("any"):
 				for x in cond.get("any", []):
@@ -564,6 +577,8 @@ static func _when_build_params(pbox: HBoxContainer, entry: Dictionary, cond: Dic
 			w["tag"] = kl
 			pbox.add_child(kl)
 		"target_effect":   # {effect}——目标身上效果 id（EffectDB 引用）
+			w["subject"] = dropdown([["target", "结算目标 target"], ["owner", "自身 owner"], ["event.unit", "事件单位 event.unit"]], str(cond.get("subject", "target")), chg)
+			pbox.add_child(w["subject"])
 			var cur := str(cond.get("effect", ""))
 			var pairs2 := [["", "（选效果…）"]]
 			pairs2.append_array(opts.get("effect_options", []))
@@ -576,6 +591,39 @@ static func _when_build_params(pbox: HBoxContainer, entry: Dictionary, cond: Dic
 				pairs2.append([cur, "⚠ 悬空引用：" + cur])   # 悬空引用保值（同 _ensure_meta_option 口径）
 			w["effect"] = dropdown(pairs2, cur, chg)
 			pbox.add_child(w["effect"])
+		"event_relation":
+			w["subject"] = dropdown([["event.unit", "事件单位 event.unit"]], str(cond.get("subject", "event.unit")), chg)
+			pbox.add_child(w["subject"])
+			w["value"] = dropdown([["enemy", "敌对 enemy"], ["ally", "友方 ally"]], str(cond.get("value", "enemy")), chg)
+			pbox.add_child(w["value"])
+		"weapon_tag":
+			w["subject"] = dropdown([["owner", "反应拥有者 owner"], ["event.unit", "事件单位 event.unit"]], str(cond.get("subject", "owner")), chg)
+			pbox.add_child(w["subject"])
+			w["slot"] = dropdown(opts.get("slot_pairs", [["main_hand", "主手"], ["off_hand", "副手"]]), str(cond.get("slot", "main_hand")), chg)
+			pbox.add_child(w["slot"])
+			var wt := LineEdit.new()
+			wt.text = str(cond.get("tag", ""))
+			wt.placeholder_text = "武器 tag（如 weapon_spear）"
+			wt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			wt.text_changed.connect(func(_t2): chg.call())
+			w["tag"] = wt
+			pbox.add_child(wt)
+		"weapon_grip":
+			w["subject"] = dropdown([["owner", "反应拥有者 owner"], ["event.unit", "事件单位 event.unit"]], str(cond.get("subject", "owner")), chg)
+			pbox.add_child(w["subject"])
+			w["slot"] = dropdown(opts.get("slot_pairs", [["main_hand", "主手"], ["off_hand", "副手"]]), str(cond.get("slot", "main_hand")), chg)
+			pbox.add_child(w["slot"])
+			w["value"] = dropdown([["one_handed", "单手 one_handed"], ["two_handed", "双手 two_handed"]], str(cond.get("value", "two_handed")), chg)
+			pbox.add_child(w["value"])
+		"incapacitated":
+			w["subject"] = dropdown([["owner", "反应拥有者 owner"], ["event.unit", "事件单位 event.unit"]], str(cond.get("subject", "owner")), chg)
+			pbox.add_child(w["subject"])
+			var ic := CheckBox.new()
+			ic.text = "须为失能（关＝须未失能）"
+			ic.button_pressed = bool(cond.get("value", true))
+			ic.toggled.connect(func(_v): chg.call())
+			w["value"] = ic
+			pbox.add_child(ic)
 
 # when 行收集（护栏：字节级保留）：类型未变＝duplicate 原条件、只更新表单拥有的键（未知键透传）；
 # 换过类型＝从 {type} 重建（旧类型键作废）；锁定行＝原样返回。缺省值不落盘（canonical 最小键：
@@ -590,6 +638,9 @@ static func collect_when_row(entry: Dictionary, errs: Array) -> Dictionary:
 	var w: Dictionary = entry["params"]
 	match t:
 		"stat_threshold":
+			var sts := str(w["subject"].get_selected_metadata())
+			if data.has("subject") or sts != "owner": out["subject"] = sts
+			else: out.erase("subject")
 			out["stat"] = str(w["stat"].get_selected_metadata())
 			var op := str(w["op"].get_selected_metadata())
 			if op == "<=" or out.has("op"):
@@ -601,6 +652,9 @@ static func collect_when_row(entry: Dictionary, errs: Array) -> Dictionary:
 			else:
 				out.erase("pct_of")
 		"equip_state":
+			var eqs := str(w["subject"].get_selected_metadata())
+			if data.has("subject") or eqs != "owner": out["subject"] = eqs
+			else: out.erase("subject")
 			out["slot"] = str(w["slot"].get_selected_metadata())
 			match str(w["mode"].get_selected_metadata()):
 				"empty":
@@ -618,6 +672,9 @@ static func collect_when_row(entry: Dictionary, errs: Array) -> Dictionary:
 					if bool(out.get("empty", false)):
 						out.erase("empty")
 		"self_tag":
+			var sls := str(w["subject"].get_selected_metadata())
+			if data.has("subject") or sls != "owner": out["subject"] = sls
+			else: out.erase("subject")
 			var tg2 := str(w["tag"].text).strip_edges()
 			if tg2 == "":
 				errs.append("self_tag 条件 tag 不能为空")
@@ -626,6 +683,9 @@ static func collect_when_row(entry: Dictionary, errs: Array) -> Dictionary:
 			if not hv or out.has("has"):
 				out["has"] = hv
 		"target_tag":
+			var tts := str(w["subject"].get_selected_metadata())
+			if data.has("subject") or tts != "target": out["subject"] = tts
+			else: out.erase("subject")
 			var list := []
 			for p in str(w["tags"].text).split(","):
 				var s := str(p).strip_edges()
@@ -644,10 +704,213 @@ static func collect_when_row(entry: Dictionary, errs: Array) -> Dictionary:
 				errs.append("skill_tag 条件 tag 不能为空")
 			out["tag"] = tg3
 		"target_effect":
+			var tes := str(w["subject"].get_selected_metadata())
+			if data.has("subject") or tes != "target": out["subject"] = tes
+			else: out.erase("subject")
 			var eid := str(w["effect"].get_selected_metadata())
 			if eid == "":
 				errs.append("target_effect 条件未选效果")
 			out["effect"] = eid
+		"event_relation":
+			var ers := str(w["subject"].get_selected_metadata())
+			if data.has("subject") or ers != "event.unit": out["subject"] = ers
+			else: out.erase("subject")
+			out["value"] = str(w["value"].get_selected_metadata())
+		"weapon_tag":
+			var wts := str(w["subject"].get_selected_metadata())
+			if data.has("subject") or wts != "owner": out["subject"] = wts
+			else: out.erase("subject")
+			var wslot := str(w["slot"].get_selected_metadata())
+			if data.has("slot") or wslot != "main_hand": out["slot"] = wslot
+			else: out.erase("slot")
+			var wtag := str(w["tag"].text).strip_edges()
+			if wtag == "":
+				errs.append("weapon_tag 条件 tag 不能为空")
+			out["tag"] = wtag
+		"weapon_grip":
+			var wgs := str(w["subject"].get_selected_metadata())
+			if data.has("subject") or wgs != "owner": out["subject"] = wgs
+			else: out.erase("subject")
+			var wgslot := str(w["slot"].get_selected_metadata())
+			if data.has("slot") or wgslot != "main_hand": out["slot"] = wgslot
+			else: out.erase("slot")
+			out["value"] = str(w["value"].get_selected_metadata())
+		"incapacitated":
+			out["subject"] = str(w["subject"].get_selected_metadata())
+			out["value"] = bool(w["value"].button_pressed)
+	return out
+
+
+# —— Reaction 编辑器（决策36：Effect.reactions[] 与 Skill reaction 块共用）——
+
+static func add_reaction_editor(parent: Node, entries: Array, reaction: Dictionary, opts: Dictionary, on_change := Callable()) -> Dictionary:
+	var panel := PanelContainer.new()
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 5)
+	panel.add_child(box)
+	var entry := {"data": reaction, "panel": panel, "when_rows": [], "action_rows": []}
+	var head := HBoxContainer.new()
+	entry["id"] = LineEdit.new()
+	entry["id"].text = str(reaction.get("id", ""))
+	entry["id"].placeholder_text = "reaction id"
+	entry["id"].size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	entry["id"].text_changed.connect(func(_t): if on_change.is_valid(): on_change.call())
+	head.add_child(entry["id"])
+	entry["name"] = LineEdit.new()
+	entry["name"].text = str(reaction.get("name", ""))
+	entry["name"].placeholder_text = "显示名（可空）"
+	entry["name"].size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	entry["name"].text_changed.connect(func(_t): if on_change.is_valid(): on_change.call())
+	head.add_child(entry["name"])
+	entry["trigger"] = dropdown(ReactionRegistry.options(), str(reaction.get("trigger", "unit_entered_zoc")), on_change)
+	for i in entry["trigger"].item_count:
+		var tid := str(entry["trigger"].get_item_metadata(i))
+		if not ReactionRegistry.implemented(tid):
+			entry["trigger"].set_item_disabled(i, true)
+	head.add_child(entry["trigger"])
+	var rm := Button.new()
+	rm.text = "✕"
+	rm.pressed.connect(func():
+		entries.erase(entry)
+		panel.queue_free()
+		if on_change.is_valid(): on_change.call())
+	head.add_child(rm)
+	box.add_child(head)
+	var trigger_warn := label("⚠ 该触发词尚未接线：数据不可入库")
+	trigger_warn.add_theme_color_override("font_color", Color(0.95, 0.8, 0.35))
+	trigger_warn.visible = not ReactionRegistry.implemented(str(reaction.get("trigger", "unit_entered_zoc")))
+	entry["trigger_warn"] = trigger_warn
+	box.add_child(trigger_warn)
+	entry["trigger"].item_selected.connect(func(_i):
+		trigger_warn.visible = not ReactionRegistry.implemented(str(entry["trigger"].get_selected_metadata())))
+
+	var when_box := VBoxContainer.new()
+	box.add_child(when_box)
+	for cond in reaction.get("when", []):
+		if cond is Dictionary:
+			add_when_row(when_box, entry["when_rows"], cond, opts, on_change)
+	var add_when := Button.new()
+	add_when.text = "+ 触发条件 when"
+	add_when.pressed.connect(func(): add_when_row(when_box, entry["when_rows"], {"type": "event_relation", "value": "enemy"}, opts, on_change); if on_change.is_valid(): on_change.call())
+	box.add_child(add_when)
+
+	var limit: Dictionary = reaction.get("limit", {})
+	var limit_row := HBoxContainer.new()
+	limit_row.add_child(label("次数限制"))
+	var uses := SpinBox.new()
+	uses.min_value = 0
+	uses.max_value = 99
+	uses.value = float(limit.get("uses", 1))
+	uses.value_changed.connect(func(_v): if on_change.is_valid(): on_change.call())
+	entry["uses"] = uses
+	limit_row.add_child(uses)
+	entry["reset"] = dropdown([["round", "每大回合"], ["turn", "每小回合"], ["battle", "每场战斗"]], str(limit.get("reset", "round")), on_change)
+	limit_row.add_child(entry["reset"])
+	entry["scope"] = dropdown([["owner", "拥有者 owner"]], str(limit.get("scope", "owner")), on_change)
+	limit_row.add_child(entry["scope"])
+	box.add_child(limit_row)
+
+	var actions_box := VBoxContainer.new()
+	entry["actions_box"] = actions_box
+	box.add_child(actions_box)
+	for action in reaction.get("actions", []):
+		if action is Dictionary:
+			_add_reaction_action(actions_box, entry["action_rows"], action, opts, on_change)
+	var add_action := Button.new()
+	add_action.text = "+ 反应动作（攻击）"
+	add_action.pressed.connect(func(): _add_reaction_action(actions_box, entry["action_rows"], {"kind": "attack", "source": "current_bws", "actor": "owner", "target": "event.unit", "overrides": []}, opts, on_change); if on_change.is_valid(): on_change.call())
+	box.add_child(add_action)
+	parent.add_child(panel)
+	entries.append(entry)
+	return entry
+
+static func _add_reaction_action(parent: Node, rows: Array, action: Dictionary, opts: Dictionary, on_change: Callable) -> void:
+	var box := VBoxContainer.new()
+	var row := HBoxContainer.new()
+	var entry := {"data": action, "box": box, "override_rows": []}
+	entry["kind"] = dropdown([["attack", "攻击 attack"]], str(action.get("kind", "attack")), on_change)
+	entry["source"] = dropdown([["current_bws", "当前 BWS"]], str(action.get("source", "current_bws")), on_change)
+	entry["actor"] = dropdown([["owner", "拥有者 owner"]], str(action.get("actor", "owner")), on_change)
+	entry["target"] = dropdown([["event.unit", "事件单位 event.unit"]], str(action.get("target", "event.unit")), on_change)
+	for key in ["kind", "source", "actor", "target"]:
+		row.add_child(entry[key])
+	var rm := Button.new()
+	rm.text = "✕"
+	rm.pressed.connect(func(): rows.erase(entry); box.queue_free(); if on_change.is_valid(): on_change.call())
+	row.add_child(rm)
+	box.add_child(row)
+	var overrides_box := VBoxContainer.new()
+	box.add_child(overrides_box)
+	for override in action.get("overrides", []):
+		if override is Dictionary:
+			_add_reaction_override(overrides_box, entry["override_rows"], override, opts, on_change)
+	var add_override := Button.new()
+	add_override.text = "+ 条件覆盖 override"
+	add_override.pressed.connect(func(): _add_reaction_override(overrides_box, entry["override_rows"], {"when": [], "set": {"final_damage_factor": 1.0}}, opts, on_change); if on_change.is_valid(): on_change.call())
+	box.add_child(add_override)
+	parent.add_child(box)
+	rows.append(entry)
+
+static func _add_reaction_override(parent: Node, rows: Array, override: Dictionary, opts: Dictionary, on_change: Callable) -> void:
+	var box := VBoxContainer.new()
+	var entry := {"data": override, "box": box, "when_rows": []}
+	for cond in override.get("when", []):
+		if cond is Dictionary:
+			add_when_row(box, entry["when_rows"], cond, opts, on_change)
+	var row := HBoxContainer.new()
+	var add_when := Button.new()
+	add_when.text = "+ 覆盖条件"
+	add_when.pressed.connect(func(): add_when_row(box, entry["when_rows"], {"type": "weapon_grip", "subject": "owner", "value": "two_handed"}, opts, on_change); if on_change.is_valid(): on_change.call())
+	row.add_child(add_when)
+	row.add_child(label("设置 final_damage_factor"))
+	var factor := SpinBox.new()
+	factor.min_value = 0
+	factor.max_value = 10
+	factor.step = 0.05
+	factor.value = float(override.get("set", {}).get("final_damage_factor", 1.0))
+	factor.value_changed.connect(func(_v): if on_change.is_valid(): on_change.call())
+	entry["factor"] = factor
+	row.add_child(factor)
+	var rm := Button.new()
+	rm.text = "✕"
+	rm.pressed.connect(func(): rows.erase(entry); box.queue_free(); if on_change.is_valid(): on_change.call())
+	row.add_child(rm)
+	box.add_child(row)
+	parent.add_child(box)
+	rows.append(entry)
+
+static func collect_reaction_editor(entry: Dictionary, errs: Array) -> Dictionary:
+	var out: Dictionary = (entry["data"] as Dictionary).duplicate(true)
+	var rid := str(entry["id"].text).strip_edges()
+	if rid == "": errs.append("reaction id 不能为空")
+	out["id"] = rid
+	var name := str(entry["name"].text).strip_edges()
+	if name == "": out.erase("name")
+	else: out["name"] = name
+	var trigger := str(entry["trigger"].get_selected_metadata())
+	if not ReactionRegistry.exists(trigger): errs.append("未知 reaction trigger：" + trigger)
+	elif not ReactionRegistry.implemented(trigger): errs.append("reaction trigger 尚未接线：" + trigger)
+	out["trigger"] = trigger
+	var conds := []
+	for wr in entry["when_rows"]: conds.append(collect_when_row(wr, errs))
+	out["when"] = conds
+	out["limit"] = {"uses": int(entry["uses"].value), "reset": str(entry["reset"].get_selected_metadata()), "scope": str(entry["scope"].get_selected_metadata())}
+	var actions := []
+	for ar in entry["action_rows"]:
+		var action: Dictionary = (ar["data"] as Dictionary).duplicate(true)
+		for key in ["kind", "source", "actor", "target"]: action[key] = str(ar[key].get_selected_metadata())
+		var overrides := []
+		for ore in ar["override_rows"]:
+			var override: Dictionary = (ore["data"] as Dictionary).duplicate(true)
+			var owhen := []
+			for wr in ore["when_rows"]: owhen.append(collect_when_row(wr, errs))
+			override["when"] = owhen
+			override["set"] = {"final_damage_factor": _numv(float(ore["factor"].value))}
+			overrides.append(override)
+		action["overrides"] = overrides
+		actions.append(action)
+	if actions.is_empty(): errs.append("reaction 至少需要一个动作")
+	out["actions"] = actions
 	return out
 
 # 数值归一：整数值落 int（JSON 往返 5 与 5.0 字节不同——与 SkillEditor._num / JsonRegistry.intify 同口径）
