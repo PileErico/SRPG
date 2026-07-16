@@ -209,6 +209,7 @@ async function refreshMessages(force){
     const st = busyState(d.messages);
     $('#busy-label').textContent = st.label;
     busyEl.classList.toggle('exec', st.exec);
+    if(busyEl.style.display !== 'flex') $('#stop').disabled = false;  // 新一轮开始→停止键复位
     busyEl.style.display = 'flex';
   } else {
     busyEl.style.display = 'none';
@@ -224,17 +225,22 @@ function startPolling(){
 
 // ---- 模式与执行名单 ----
 let sendMode = 'chat';
+let modeAuto = false;      // 当前模式是否由「输入标记」自动切换（自动的才允许自动回落）
 let hubConfig = {seats:SEAT_ORDER, executors:[], exec_marker:'【执行】', topic_marker:'【议题】',
                  acceptor:'fable', reviewer:'copilot'};
 let execSel = new Set();
 
-async function loadConfig(){
+async function loadConfig(attempt=0){
   try{
     hubConfig = await jget('/api/config');
     if(hubConfig.seats && hubConfig.seats.length) SEAT_ORDER = hubConfig.seats;
     execSel = new Set((hubConfig.executors||[]).map(e=>e.seat));   // 默认全选
     renderRoster();
-  }catch(e){/* 配置取不到就用默认 */}
+  }catch(e){
+    if(attempt < 3){ setTimeout(()=>loadConfig(attempt+1), 1500*(attempt+1)); return; }
+    $('#roster-chips').innerHTML =
+      '<span style="color:#c04a4a">⚠ 配置加载失败，执行模式不可用——刷新页面重试</span>';
+  }
 }
 function renderRoster(){
   const box = $('#roster-chips');
@@ -247,8 +253,8 @@ function renderRoster(){
     renderRoster(); updateHint();
   });
 }
-function setMode(m){
-  sendMode = m;
+function setMode(m, auto=false){
+  sendMode = m; modeAuto = auto;
   document.querySelectorAll('.mode').forEach(b => b.classList.toggle('active', b.dataset.mode===m));
   $('#roster').classList.toggle('show', m==='exec');
   updateHint();
@@ -271,11 +277,12 @@ async function send(){
   const ta = $('#input'); let text = ta.value.trim();
   if(!text || currentTopic===null) return;
   const body = {};
-  if(sendMode==='topic' && !text.includes(hubConfig.topic_marker) && !text.includes('@自动')){
-    text = hubConfig.topic_marker + text;             // 按钮选了议题→自动补标记
-  }
-  if(sendMode==='exec' || text.includes(hubConfig.exec_marker)){
-    if(!text.includes(hubConfig.exec_marker)) text = hubConfig.exec_marker + text;
+  // 语义=「以标记开头」，与后端一致；正文中段引用【议题】/【执行】不触发
+  let isExec  = text.startsWith(hubConfig.exec_marker);
+  let isTopic = text.startsWith(hubConfig.topic_marker) || text.startsWith('@自动');
+  if(sendMode==='topic' && !isTopic && !isExec){ text = hubConfig.topic_marker + text; isTopic = true; }
+  if(sendMode==='exec'  && !isExec){ text = hubConfig.exec_marker + text; isExec = true; }
+  if(isExec){
     const seats = [...execSel];
     if(!seats.length){ alert('执行模式：请先勾选至少一个执行者'); return; }
     if(!confirm(`⚠ 执行授权\n\n将由 ${seats.join(' + ')} 带写权限落地本议题方案`
@@ -310,7 +317,7 @@ async function loadMemory(){
   if(!shown.length){ box.innerHTML = '<div class="empty">议题得出结论后会自动生成记忆草案，确认后跨议题共享。</div>'; return; }
   box.innerHTML = shown.map(i => `<div class="mem ${i.status}">
       <span class="tag">${i.status==='approved'?'已确认':'草案'}</span>
-      <div style="margin-top:5px">${escapeHtml(i.content).slice(0,400)}</div>
+      <div style="margin-top:5px">${escapeHtml((i.content||'').slice(0,400))}</div>
       ${i.source?`<div class="src">${escapeHtml(i.source)}</div>`:''}
       ${i.status==='draft'?`<div class="acts">
         <button onclick="mem(${i.id},'approve')">✓ 确认入库</button>
@@ -328,9 +335,10 @@ $('#new-topic').onclick = newTopic;
 document.querySelectorAll('.mode').forEach(b => b.onclick = () => setMode(b.dataset.mode));
 $('#input').addEventListener('keydown', e => { if(e.key==='Enter' && (e.ctrlKey||e.metaKey)) send(); });
 $('#input').addEventListener('input', e => {
-  const v = e.target.value;   // 手打标记 → 自动切换模式按钮
-  if(v.includes(hubConfig.exec_marker)) setMode('exec');
-  else if(v.trimStart().startsWith(hubConfig.topic_marker) || v.includes('@自动')) setMode('topic');
+  const t = e.target.value.trimStart();   // 开头标记 → 自动切换；删掉标记 → 自动切的模式回落
+  if(t.startsWith(hubConfig.exec_marker)) setMode('exec', true);
+  else if(t.startsWith(hubConfig.topic_marker) || t.startsWith('@自动')) setMode('topic', true);
+  else if(modeAuto) setMode('chat', true);
   else updateHint();
 });
 

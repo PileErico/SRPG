@@ -153,6 +153,18 @@ def api_send(tid: int):
     if exec_seats is not None and not (
             isinstance(exec_seats, list) and all(isinstance(s, str) for s in exec_seats)):
         return jsonify({"error": "executors 须为席位名字符串数组"}), 400
+    # 标记语义=「以标记开头」（与 engine.dispatch/前端一致）——先判模式，再入库
+    exec_marker = engine.exec_cfg.get("marker", "【执行】")
+    t = text.lstrip()
+    if engine.exec_cfg.get("executors") and t.startswith(exec_marker):
+        mode = "execute"
+    elif bool(engine.cfg.auto_marker) and (t.startswith(engine.cfg.auto_marker) or t.startswith("@自动")):
+        mode = "auto"
+    else:
+        mode = "reactive"
+    # 执行必须带明确的非空名单——防「绕过前端确认（脚本直连/config 竞态）→全员带写权限开跑」
+    if mode == "execute" and not exec_seats:
+        return jsonify({"error": "执行需要明确执行名单：请在界面的执行模式下勾选执行者"}), 400
     if not engine.reserve(tid):
         return jsonify({"error": "本议题正在讨论中，请稍候"}), 409
     try:
@@ -161,13 +173,6 @@ def api_send(tid: int):
     except Exception:
         engine.release(tid)
         raise
-    exec_marker = engine.exec_cfg.get("marker", "【执行】")
-    if engine.exec_cfg.get("executors") and exec_marker in text:
-        mode = "execute"
-    elif bool(engine.cfg.auto_marker) and (engine.cfg.auto_marker in text or "@自动" in text):
-        mode = "auto"
-    else:
-        mode = "reactive"
     try:
         threading.Thread(
             target=engine.dispatch, args=(tid, text),

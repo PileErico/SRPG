@@ -44,6 +44,9 @@ class Engine:
         self._busy: set[int] = set()        # 正在跑的议题 id（防重复触发）
         self._busy_lock = threading.Lock()
         self._cancel: dict[int, threading.Event] = {}
+        # 执行工作区互斥：busy 按议题隔离，但所有执行共享同一 git 工作区——
+        # 两个议题同时进执行阶段会互相 checkout 踩踏（审查发现#1），全局串行化
+        self._exec_lock = threading.Lock()
 
     # ---- 状态 ----
     def seat_status(self) -> dict:
@@ -211,19 +214,42 @@ class Engine:
         topic = self.store.get_topic(tid)
         context = self._context(topic)
         all_execs = self.exec_cfg.get("executors") or []
+        # 空名单=取消（[] 曾被当「不过滤」反向放行全员——审查发现#6）；None=不过滤
+        if only_seats is not None and not only_seats:
+            self.store.add_message(tid, "system", "［执行取消：执行名单为空——没有勾选任何执行者］")
+            return
         execs = [e for e in all_execs
-                 if not only_seats or e.get("seat") in only_seats]
+                 if only_seats is None or e.get("seat") in only_seats]
         if not execs:
             self.store.add_message(
                 tid, "system",
                 f"［执行取消：名单 {only_seats} 与配置的执行者 "
                 f"{[e.get('seat') for e in all_execs]} 无交集］")
             return
+        # 基线校验（审查发现#5）：detached HEAD 或基线撞执行分支名 → 全链路静默腐坏，拒绝执行
+        base = executor_mod.current_branch()
+        exec_branches = {e.get("branch") for e in all_execs}
+        if base == "HEAD" or base in exec_branches:
+            self.store.add_message(
+                tid, "system",
+                f"［执行拒绝：当前基线分支异常（{base}）——可能处于 detached HEAD 或停留在执行分支上。"
+                f"请先在仓库 `git checkout <正常工作分支>` 再重新授权执行。］")
+            return
+        # 全局执行互斥：所有执行共享同一 git 工作区，跨议题并发会互相踩踏
+        if not self._exec_lock.acquire(blocking=False):
+            self.store.add_message(tid, "system", "［执行排队失败：另一议题正在执行中，请等它结束后重试］")
+            return
+        try:
+            self._run_execute_locked(tid, topic, context, auth_text, execs, base)
+        finally:
+            self._exec_lock.release()
+
+    def _run_execute_locked(self, tid: int, topic: dict, context: str, auth_text: str,
+                            execs: list[dict], base: str) -> None:
         timeout = float(self.exec_cfg.get("timeout", 1200))
         diff_budget = int(self.exec_cfg.get("diff_char_budget", 20_000))
         acceptor = self.exec_cfg.get("acceptor")
         reviewer = self.exec_cfg.get("reviewer")
-        base = executor_mod.current_branch()
         dirt_baseline = executor_mod.worktree_status()
         roster = ", ".join(e.get("seat", "?") for e in execs)
         self.store.add_message(
@@ -232,7 +258,7 @@ class Engine:
             f"流程：落地→互查→{reviewer or '—'} 参考→{acceptor or '—'} 验收｜不 push/不碰 main］")
 
         # ── 1) 逐执行者落地（每人跑完立即回基线，防止下一位在别人分支上开工）──
-        done: list[tuple[str, str, bool]] = []          # (seat, branch, ok)
+        done: list[tuple[str, str, bool, bool]] = []    # (seat, branch, ok, fresh=本轮真更新了分支)
         for e in execs:
             if self._cancelled(tid):
                 self.store.add_message(tid, "system", "［执行已由用户停止］")
@@ -243,34 +269,44 @@ class Engine:
             if self.adapters.get(seat) is None:
                 self.store.add_message(tid, "system", f"［{seat} 通道不可用，跳过执行］")
                 continue
+            tip_before = executor_mod.branch_tip(branch)
             self.store.add_message(tid, seat, f"［开始执行 → {branch} 分支］")
             res = executor_mod.run_executor(seat, list(cmd), branch, base, context, auth_text, timeout)
             self.store.add_message(tid, seat, res["report"])
             executor_mod.restore_branch(base)
+            tip_after = executor_mod.branch_tip(branch)
+            fresh = tip_after is not None and tip_after != tip_before
             leftover = executor_mod.new_dirt(dirt_baseline)
             if leftover:
                 self.store.add_message(
                     tid, "system",
                     "⚠［" + seat + " 执行后工作区出现未提交遗留（未自动清理，请人工确认）］\n"
                     + "\n".join(leftover[:20]))
-            done.append((seat, branch, bool(res.get("ok"))))
+                # 滚动基线：A 的遗留不再栽给 B（审查发现#4）
+                dirt_baseline = executor_mod.worktree_status()
+            done.append((seat, branch, bool(res.get("ok")), fresh))
 
-        # ── 2) 执行记录：恢复基线 + 各分支 diffstat + 抽取真实 diff ──
+        # ── 2) 执行记录：恢复基线 + 各分支 diffstat + 抽取真实 diff（仅本轮更新过的分支）──
         note = executor_mod.restore_branch(base)
         diffs: dict[str, tuple[str, str]] = {}          # seat -> (branch, diff文本)
         lines = ["【执行记录】", note]
-        for seat, branch, ok in done:
-            stat = executor_mod.branch_diffstat(branch, base) or "（无 diff 或分支未创建）"
-            lines.append(f"— {seat} @ {branch} 分支：{'✓完成' if ok else '✗失败'}\n{stat}")
-            d = executor_mod.branch_diff(branch, base, diff_budget)
-            if d:
-                diffs[seat] = (branch, d)
+        for seat, branch, ok, fresh in done:
+            if fresh:
+                stat = executor_mod.branch_diffstat(branch, base) or "（分支已更新但相对基线无差异）"
+                lines.append(f"— {seat} @ {branch} 分支：{'✓完成' if ok else '✗失败'}\n{stat}")
+                d = executor_mod.branch_diff(branch, base, diff_budget)
+                if d:
+                    diffs[seat] = (branch, d)
+            else:
+                # 分支本轮未动（spawn 失败/超时/执行者没提交）——旧分支 diff 是上轮遗留，不纳入审查
+                lines.append(f"— {seat} @ {branch} 分支：{'✓完成' if ok else '✗失败'}"
+                             f"（本轮未更新分支——不纳入互查/验收；若分支存在，其内容为上轮遗留）")
         self.store.add_message(tid, "system", "\n".join(lines))
 
         # ── 3) 交叉互查：执行者互审对方分支的真实 diff（只读）──
         if self.exec_cfg.get("cross_review", True) and len(diffs) >= 2 and not self._cancelled(tid):
             self.store.add_message(tid, "system", "［交叉互查：执行者互审对方分支 diff］")
-            for seat, branch, ok in done:
+            for seat, branch, ok, fresh in done:
                 if self._cancelled(tid):
                     break
                 if self.adapters.get(seat) is None:
@@ -292,7 +328,7 @@ class Engine:
                         self.store.add_message(tid, seat, f"[互查失败：{exc}]")
 
         # ── 4) copilot 参考意见（无文件访问：只评记录中真实存在的内容）──
-        if reviewer and reviewer not in {s for s, _, _ in done} \
+        if reviewer and reviewer not in {s for s, _, _, _ in done} \
                 and self.adapters.get(reviewer) is not None and not self._cancelled(tid):
             instr = (
                 "请你作为参谋席给 Erico 一段简短参考意见：基于上方执行报告、diffstat 与互查意见"
@@ -330,9 +366,11 @@ class Engine:
     # ---- 后台入口：按消息标记选模式 ----
     def dispatch(self, tid: int, user_text: str, *, reserved: bool = False,
                  exec_seats: list[str] | None = None) -> str:
+        # 标记语义=「以标记开头」（与前端一致；正文中段引用【议题】/【执行】不触发——审查发现#11）
         exec_marker = self.exec_cfg.get("marker", "【执行】")
-        is_exec = bool(self.exec_cfg.get("executors")) and exec_marker in user_text
-        auto = bool(self.cfg.auto_marker) and (self.cfg.auto_marker in user_text or "@自动" in user_text)
+        t = user_text.lstrip()
+        is_exec = bool(self.exec_cfg.get("executors")) and t.startswith(exec_marker)
+        auto = bool(self.cfg.auto_marker) and (t.startswith(self.cfg.auto_marker) or t.startswith("@自动"))
         if not reserved and not self.reserve(tid):
             raise RuntimeError("本议题正在讨论中")
         try:

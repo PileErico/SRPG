@@ -19,20 +19,38 @@ REPO_ROOT = Path(__file__).resolve().parents[3]   # gui→chathub→tools→仓�
 
 
 def _resolve_cmd(cmd: list[str]) -> list[str]:
+    """解析可执行文件；shutil.which 找不到时按 npm 全局目录兜底（npx/claude 通用——
+    审查发现原先只兜 npx，导致 opus 席讨论在线、执行 spawn 必败的自相矛盾）。"""
     resolved = list(cmd)
-    if resolved:
-        found = shutil.which(resolved[0])
-        if not found and resolved[0].lower() in {"npx", "npx.cmd"}:
-            for candidate in (
-                Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "nodejs" / "npx.cmd",
-                Path(os.environ.get("APPDATA", "")) / "npm" / "npx.cmd",
-            ):
-                if candidate.is_file():
-                    found = str(candidate)
-                    break
-        if found:
-            resolved[0] = found
+    if not resolved:
+        return resolved
+    found = shutil.which(resolved[0])
+    if not found:
+        base = resolved[0].lower()
+        base = base[:-4] if base.endswith(".cmd") else base
+        for candidate in (
+            Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "nodejs" / f"{base}.cmd",
+            Path(os.environ.get("APPDATA", "")) / "npm" / f"{base}.cmd",
+        ):
+            if candidate.is_file():
+                found = str(candidate)
+                break
+    if found:
+        resolved[0] = found
     return resolved
+
+
+def _kill_tree(proc: subprocess.Popen) -> None:
+    """杀整棵进程树——Windows 上 TerminateProcess 只杀 .cmd 外壳，node 里的
+    codex/claude 会活着继续改文件（审查确认的真事故路径），须 taskkill /T /F。"""
+    try:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+                           capture_output=True, timeout=15)
+        else:
+            proc.kill()
+    except Exception:
+        pass
 
 
 def _executor_env(seat: str) -> dict[str, str]:
@@ -57,6 +75,14 @@ def _git(*args: str, timeout: float = 30) -> subprocess.CompletedProcess:
 def current_branch() -> str:
     r = _git("rev-parse", "--abbrev-ref", "HEAD")
     return (r.stdout or "").strip() or "HEAD"
+
+
+def branch_tip(branch: str) -> str | None:
+    """分支 tip 哈希；分支不存在返回 None。用于判定「本轮是否真的更新了分支」，
+    防止上一轮遗留的同名分支 diff 被当成本轮产出送审（审查发现#2）。"""
+    r = _git("rev-parse", "--verify", "--quiet", branch)
+    tip = (r.stdout or "").strip()
+    return tip if r.returncode == 0 and tip else None
 
 
 def restore_branch(base: str) -> str:
@@ -121,19 +147,26 @@ def run_executor(seat: str, cmd: list[str], branch: str, base: str,
     prompt = EXEC_PROMPT.format(seat=seat, branch=branch, base=base, context=context, auth=auth)
     command = _resolve_cmd(cmd)
     try:
-        proc = subprocess.run(command, input=prompt, cwd=REPO_ROOT, capture_output=True,
-                              text=True, encoding="utf-8", errors="replace", timeout=timeout,
-                              env=_executor_env(seat))
-    except subprocess.TimeoutExpired:
-        restore_branch(base)
-        return {"ok": False, "report": (f"[{seat} 失败｜阶段=超时(>{timeout}s，子进程已 kill)｜"
-                                        f"命令={command[0]}｜已尝试恢复到 {base}]")}
+        proc = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, cwd=REPO_ROOT, text=True,
+                                encoding="utf-8", errors="replace", env=_executor_env(seat))
     except FileNotFoundError as exc:
         return {"ok": False, "report": f"[{seat} 失败｜阶段=spawn(找不到可执行文件)｜命令={command[0]}｜{exc}]"}
     except OSError as exc:
         return {"ok": False, "report": f"[{seat} 失败｜阶段=spawn(OS 拒绝启动)｜命令={command[0]}｜{exc}]"}
-    out = (proc.stdout or "").strip()
-    err = (proc.stderr or "").strip()
+    try:
+        out, err = proc.communicate(input=prompt, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_tree(proc)                    # 杀整棵树，不留继续写文件的僵尸
+        try:
+            proc.communicate(timeout=15)
+        except Exception:
+            pass
+        restore_branch(base)
+        return {"ok": False, "report": (f"[{seat} 失败｜阶段=超时(>{timeout}s，已 taskkill 进程树)｜"
+                                        f"命令={command[0]}｜已尝试恢复到 {base}]")}
+    out = (out or "").strip()
+    err = (err or "").strip()
     if proc.returncode == 0 and out:
         return {"ok": True, "report": out}
     tail = err[-600:] if err else "（stderr 为空）"
