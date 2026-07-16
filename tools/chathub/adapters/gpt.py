@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import shutil
@@ -27,6 +28,17 @@ if hasattr(sys.stderr, "reconfigure"):
 from adapters.base import Adapter, AdapterError, Turn
 
 REPO_ROOT = Path(__file__).resolve().parents[3]  # adapters→chathub→tools→仓库根
+
+
+def codex_subprocess_env() -> dict[str, str]:
+    """避开 Store/App-Alias 版 pwsh；Codex Windows 沙箱无法启动 WindowsApps 内程序。"""
+    env = os.environ.copy()
+    path_key = next((k for k in env if k.lower() == "path"), "Path")
+    env[path_key] = os.pathsep.join(
+        p for p in env.get(path_key, "").split(os.pathsep)
+        if p and "windowsapps" not in p.lower()
+    )
+    return env
 
 
 class GptAdapter(Adapter):
@@ -84,6 +96,7 @@ class GptAdapter(Adapter):
                 text=True,
                 timeout=timeout,
                 cwd=str(REPO_ROOT),
+                env=codex_subprocess_env(),
                 # Codex CLI 需要 UTF-8；Windows 默认 GBK 会乱码
                 encoding="utf-8",
                 errors="replace",

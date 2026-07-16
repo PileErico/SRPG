@@ -35,6 +35,7 @@ except ImportError:
 
 from store import Store          # noqa: E402
 from engine import Engine        # noqa: E402
+import memory_export             # noqa: E402  共享记忆的可读备份镜像
 
 DB = Path(os.environ.get("CHATHUB_DB", str(HERE / "chathub.db")))
 STATIC = HERE / "static"
@@ -43,6 +44,21 @@ PORT = 8765
 store = Store(DB)
 engine = Engine(store)
 app = Flask(__name__, static_folder=None)
+
+MEM_MD = HERE / "memory.md"       # 共享记忆的人类可读持久备份（非 gitignore，可提交）
+_last_mem_md: str | None = None
+
+
+def _sync_memory() -> None:
+    """把当前共享记忆镜像到 memory.md；内容变了才写盘（省 I/O，利于 git diff）。"""
+    global _last_mem_md
+    try:
+        content = memory_export.render(store.list_memory())
+        if content != _last_mem_md:
+            MEM_MD.write_text(content, encoding="utf-8")
+            _last_mem_md = content
+    except Exception:
+        pass  # 备份失败不影响主流程
 
 
 @app.get("/")
@@ -112,18 +128,21 @@ def api_stop(tid: int):
 
 @app.get("/api/memory")
 def api_memory():
+    _sync_memory()          # 前端每几秒轮询一次→memory.md 始终跟手（含新草案）
     return jsonify(store.list_memory())
 
 
 @app.post("/api/memory/<int:mid>/approve")
 def api_mem_approve(mid: int):
     store.set_memory_status(mid, "approved")
+    _sync_memory()
     return jsonify({"ok": True})
 
 
 @app.post("/api/memory/<int:mid>/reject")
 def api_mem_reject(mid: int):
     store.set_memory_status(mid, "rejected")
+    _sync_memory()
     return jsonify({"ok": True})
 
 
@@ -133,6 +152,7 @@ def main():
             stream.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
         except (AttributeError, ValueError):
             pass
+    _sync_memory()          # 启动即导出一次，保证 memory.md 与库一致
     st = engine.seat_status()
     print(f"ChatHub GUI 启动：http://127.0.0.1:{PORT}")
     print("三席状态：" + " | ".join(f"{k}={'在线' if v['online'] else '离线'}" for k, v in st.items()))

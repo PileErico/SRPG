@@ -10,10 +10,35 @@ git 细节交给执行者自己做（“怎么执行是他们的事”）；本�
 """
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]   # gui→chathub→tools→仓库根
+
+
+def _resolve_cmd(cmd: list[str]) -> list[str]:
+    resolved = list(cmd)
+    if resolved:
+        found = shutil.which(resolved[0])
+        if found:
+            resolved[0] = found
+    return resolved
+
+
+def _executor_env(seat: str) -> dict[str, str]:
+    env = os.environ.copy()
+    if seat == "gpt":
+        # Store 版 pwsh 位于 WindowsApps；Codex workspace-write 沙箱以受限令牌
+        # CreateProcessAsUserW 启动它会报 Windows error 5/1920。移除后 Codex
+        # 自动回退到 System32 的 Windows PowerShell，可正常执行仓库命令。
+        path_key = next((k for k in env if k.lower() == "path"), "Path")
+        env[path_key] = os.pathsep.join(
+            p for p in env.get(path_key, "").split(os.pathsep)
+            if p and "windowsapps" not in p.lower()
+        )
+    return env
 
 
 def _git(*args: str, timeout: float = 30) -> subprocess.CompletedProcess:
@@ -60,14 +85,16 @@ def run_executor(seat: str, cmd: list[str], branch: str, base: str,
                  context: str, auth: str, timeout: float = 1200) -> dict:
     """启动一个执行者子进程，prompt 走 stdin。返回 {ok, report}。"""
     prompt = EXEC_PROMPT.format(seat=seat, branch=branch, base=base, context=context, auth=auth)
+    command = _resolve_cmd(cmd)
     try:
-        proc = subprocess.run(cmd, input=prompt, cwd=REPO_ROOT, capture_output=True,
-                              text=True, encoding="utf-8", errors="replace", timeout=timeout)
+        proc = subprocess.run(command, input=prompt, cwd=REPO_ROOT, capture_output=True,
+                              text=True, encoding="utf-8", errors="replace", timeout=timeout,
+                              env=_executor_env(seat))
     except subprocess.TimeoutExpired:
         restore_branch(base)
         return {"ok": False, "report": f"[{seat} 执行超时 >{timeout}s，已尝试恢复到 {base}]"}
     except FileNotFoundError as exc:
-        return {"ok": False, "report": f"[找不到执行命令 {cmd[0]}：{exc}]"}
+        return {"ok": False, "report": f"[找不到执行命令 {command[0]}：{exc}]"}
     out = (proc.stdout or "").strip()
     err = (proc.stderr or "").strip()
     if proc.returncode == 0 and out:
