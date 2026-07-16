@@ -33,6 +33,21 @@ autonomous:
   converge_tag: "[收敛]"    # 席位「我无补充」的行标记
   continue_tag: "[继续]"    # 席位「还要继续」的行标记
 
+# —— 执行阶段（阶段③）——
+# 议题出结论后，Erico 在该议题里发「【执行】<范围>」= 授权 → claude/codex 带写权限
+# 各自在自己分支落地，copilot 只评审；不 push、不碰 main。前端会二次确认防误触。
+execution:
+  marker: "【执行】"
+  timeout: 1800             # 执行比讨论久，给足
+  reviewer: copilot         # 只评审、不改代码
+  executors:                # 顺序执行（共享工作区、串行避免互踩）
+    - seat: claude
+      branch: claude
+      cmd: ["claude", "-p", "--permission-mode", "bypassPermissions"]
+    - seat: gpt
+      branch: codex
+      cmd: ["npx", "--yes", "@openai/codex", "exec", "--sandbox", "workspace-write", "--ephemeral", "-"]
+
 # 各席位适配器接线。class = "模块路径:类名"。
 #   ⚠ 未落地的适配器 broker 会容错跳过，不影响其它席位。
 #   接线负责人：deepseek/gpt = copilot；claude = 待独立 CLI 装好后我写。

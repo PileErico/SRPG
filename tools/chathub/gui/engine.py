@@ -12,13 +12,18 @@ import sys
 import threading
 from pathlib import Path
 
+import yaml
+
 HERE = Path(__file__).resolve().parent
 CHATHUB = HERE.parent                      # tools/chathub
 if str(CHATHUB) not in sys.path:
     sys.path.insert(0, str(CHATHUB))
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
 
 import broker                              # 复用 Config / load_adapter / call_with_timeout / extract_vote
 from adapters.base import Turn             # noqa: E402
+import executor as executor_mod           # noqa: E402  执行阶段（带写权限）
 
 CTX_MSG_LIMIT = 40                          # 每次最多带本议题最近 N 条原文（防膨胀）
 CTX_CHAR_BUDGET = 50_000                    # 总上下文字符硬上限（约束成本）
@@ -29,9 +34,13 @@ SINGLE_MESSAGE_LIMIT = 8_000                 # 单条异常长消息也不能吞
 class Engine:
     def __init__(self, store, config_path: Path | None = None):
         self.store = store
-        self.cfg = broker.Config.load(config_path or broker.DEFAULT_CONFIG)
+        cfg_path = Path(config_path or broker.DEFAULT_CONFIG)
+        self.cfg = broker.Config.load(cfg_path)
         self.adapters = {n: broker.load_adapter(n, spec)
                          for n, spec in self.cfg.adapters.items()}
+        # 执行阶段配置（execution:）——独立读原始 yaml，不改 broker.Config
+        raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+        self.exec_cfg = raw.get("execution") or {}
         self._busy: set[int] = set()        # 正在跑的议题 id（防重复触发）
         self._busy_lock = threading.Lock()
         self._cancel: dict[int, threading.Event] = {}
@@ -193,16 +202,67 @@ class Engine:
                 self.store.add_message(tid, synth, f"[结论失败：{exc}]")
         self.store.set_topic_status(tid, "concluded")
 
+    # ---- 执行阶段：授权后由带写权限的执行者落地（claude/codex 各自分支）----
+    def run_execute(self, tid: int, auth_text: str) -> None:
+        topic = self.store.get_topic(tid)
+        context = self._context(topic)
+        execs = self.exec_cfg.get("executors") or []
+        timeout = float(self.exec_cfg.get("timeout", 1200))
+        base = executor_mod.current_branch()
+        self.store.add_message(
+            tid, "system",
+            f"［执行已授权｜基线分支={base}｜依次执行：{', '.join(e.get('seat', '?') for e in execs)}｜"
+            f"{self.exec_cfg.get('reviewer', 'copilot')} 仅评审｜不 push/不碰 main］")
+
+        done: list[tuple[str, str]] = []
+        for e in execs:
+            if self._cancelled(tid):
+                self.store.add_message(tid, "system", "［执行已由用户停止］")
+                break
+            seat, branch, cmd = e.get("seat"), e.get("branch"), e.get("cmd")
+            if not (seat and branch and cmd):
+                continue
+            if self.adapters.get(seat) is None:
+                self.store.add_message(tid, "system", f"［{seat} 通道不可用，跳过执行］")
+                continue
+            self.store.add_message(tid, seat, f"［开始执行 → {branch} 分支］")
+            res = executor_mod.run_executor(seat, list(cmd), branch, base, context, auth_text, timeout)
+            self.store.add_message(tid, seat, res["report"])
+            done.append((seat, branch))
+
+        note = executor_mod.restore_branch(base)
+        lines = ["【执行记录】", note]
+        for seat, branch in done:
+            stat = executor_mod.branch_diffstat(branch, base) or "（无 diff 或分支未创建）"
+            lines.append(f"— {seat} @ {branch} 分支：\n{stat}")
+        self.store.add_message(tid, "system", "\n".join(lines))
+
+        reviewer = self.exec_cfg.get("reviewer")
+        if reviewer and self.adapters.get(reviewer) is not None and not self._cancelled(tid):
+            instr = ("以上执行者分别在各自分支落地了方案。请你（评审席，不改代码）对比两版实现，"
+                     "指出各自优劣、风险、遗漏，建议 Erico 采用哪版或如何合并。")
+            try:
+                body = self._call(reviewer, self._context(topic, instr), 0)
+                self.store.add_message(tid, reviewer, body)
+            except Exception as exc:  # noqa: BLE001
+                self.store.add_message(tid, reviewer, f"[评审失败：{exc}]")
+        self.store.set_topic_status(tid, "executed")
+
     # ---- 后台入口：按消息标记选模式 ----
     def dispatch(self, tid: int, user_text: str, *, reserved: bool = False) -> str:
+        exec_marker = self.exec_cfg.get("marker", "【执行】")
+        is_exec = bool(self.exec_cfg.get("executors")) and exec_marker in user_text
         auto = bool(self.cfg.auto_marker) and (self.cfg.auto_marker in user_text or "@自动" in user_text)
         if not reserved and not self.reserve(tid):
             raise RuntimeError("本议题正在讨论中")
         try:
+            if is_exec:
+                self.run_execute(tid, user_text)
+                return "execute"
             if auto:
                 self.run_topic(tid)
-            else:
-                self.run_participate(tid)
+                return "auto"
+            self.run_participate(tid)
         finally:
             self.release(tid)
-        return "auto" if auto else "reactive"
+        return "reactive"

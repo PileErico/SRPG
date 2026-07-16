@@ -164,6 +164,11 @@ function startPolling(){
 async function send(){
   const ta = $('#input'); const text = ta.value.trim();
   if(!text || currentTopic===null) return;
+  // 执行阶段二次确认：会让 claude/codex 真的改仓库（各自分支，不碰 main）
+  if(text.includes('【执行】')){
+    if(!confirm('⚠ 执行授权\n\n这会让 claude 和 codex 带写权限、按本议题的方案真的改动仓库文件'
+      +'（各自在 claude / codex 分支，不 push、不碰 main）。\n\n确定授权执行吗？')) return;
+  }
   $('#send').disabled = true;
   const r = await jpost(`/api/topics/${currentTopic}/send`, {text});
   if(r.ok){ ta.value=''; await refreshMessages(); }
@@ -209,8 +214,11 @@ $('#stop').onclick = stopDiscussion;
 $('#new-topic').onclick = newTopic;
 $('#input').addEventListener('keydown', e => { if(e.key==='Enter' && (e.ctrlKey||e.metaKey)) send(); });
 $('#input').addEventListener('input', e => {
-  const auto = e.target.value.trimStart().startsWith('【议题】') || e.target.value.includes('@自动');
-  $('#composer-hint').textContent = auto ? '议题模式：三席自主多轮讨论→出结论' : '普通消息＝参与模式 · 【议题】开头＝议题模式';
+  const v = e.target.value;
+  let hint = '普通消息＝参与模式 · 【议题】开头＝议题模式 · 【执行】＝授权落地';
+  if(v.includes('【执行】')) hint = '⚠ 执行模式：claude/codex 将带写权限改仓库（各自分支）';
+  else if(v.trimStart().startsWith('【议题】') || v.includes('@自动')) hint = '议题模式：三席自主多轮讨论→出结论';
+  $('#composer-hint').textContent = hint;
 });
 
 // 初始化 + 定期刷新记忆
