@@ -23,9 +23,20 @@ from pathlib import Path
 # 允许 `python adapters/claude.py --test` 直接跑（把 tools/chathub 挂上 path）
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from adapters.base import Adapter, AdapterError, Turn  # noqa: E402
+from adapters.base import (  # noqa: E402
+    Adapter,
+    AdapterError,
+    Invocation,
+    RunMeta,
+    RunResult,
+    Turn,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]        # adapters→chathub→tools→仓库根
+
+# `claude --effort` 的封闭枚举——**施工期实测 CLI 取证所得**（2026-07-16）。
+# ⚠ CLI 大版本升级后须重跑探测再改这里；model 轴相反：服务端不校验，自由输入。
+EFFORT_VALUES = ("low", "medium", "high", "xhigh", "max")
 
 # 席位名动态注入——同一适配器可承载多个席位（fable/opus 都是 ClaudeAdapter，仅 model 不同）
 DEFAULT_ROLE_TMPL = (
@@ -70,12 +81,68 @@ class ClaudeAdapter(Adapter):
         args += ["--append-system-prompt", role]
         if self.config.get("model"):
             args += ["--model", str(self.config["model"])]
+        if self.config.get("effort"):
+            args += ["--effort", str(self.config["effort"])]
         if self.config.get("permission_mode"):
             args += ["--permission-mode", str(self.config["permission_mode"])]
         return args
 
-    def generate(self, context: str, turn: Turn) -> str:
+    def _effort_error(self) -> str | None:
+        """非法 effort 返回原因串，合法/未设返回 None。"""
+        effort = self.config.get("effort")
+        if not effort:
+            return None
+        if str(effort) not in EFFORT_VALUES:
+            return (f"effort={effort!r} 不在 claude CLI 支持的枚举 "
+                    f"{'/'.join(EFFORT_VALUES)} 内")
+        return None
+
+    def capabilities(self) -> dict:
+        return {
+            # model 服务端不校验（别名或全名都吃），写死列表会过期——故自由输入，
+            # 建议值来自 config 该席位段，不硬编码。
+            "model": {
+                "free_input": True,
+                "suggestions": list(self.config.get("model_suggestions") or []),
+            },
+            "effort": {"supported": True, "values": list(EFFORT_VALUES)},
+        }
+
+    def _invocation(self, args: list[str]) -> Invocation:
+        """从**实际 argv** 回读注入事实，避免与 _build_args 的条件逻辑漂移。
+
+        白名单：只取标量，args 里的 role prompt / stdin 上下文一律不带。
+        """
+        return Invocation(
+            executable=args[0] if args else "",
+            requested_model=str(self.config["model"]) if self.config.get("model") else None,
+            reported_model=None,           # CLI 无回读通道 → 恒 unverified
+            effort=str(self.config["effort"]) if self.config.get("effort") else None,
+            model_injected="--model" in args,
+            effort_injected="--effort" in args,
+        )
+
+    def generate_result(self, context: str, turn: Turn) -> RunResult:
+        reason = self._effort_error()
+        if reason:
+            # 参数级错误：不进 CLI、不抛异常（daemon 线程里抛会静默死掉）
+            return RunResult(
+                content=f"［{self.name}：配置错误，未调用 CLI］{reason}",
+                meta=RunMeta(status="error",
+                             invocation=self._invocation(self._resolve_cmd()),
+                             warnings=[reason]),
+            )
         args = self._build_args()
+        body = self._run(args, context)    # 运行期失败照旧抛 AdapterError
+        return RunResult(content=body, meta=RunMeta(invocation=self._invocation(args)))
+
+    def generate(self, context: str, turn: Turn) -> str:
+        reason = self._effort_error()
+        if reason:
+            raise AdapterError(reason)     # 旧入口无 RunResult 可携带，只能抛
+        return self._run(self._build_args(), context)
+
+    def _run(self, args: list[str], context: str) -> str:
         prompt = context + self.config.get("ask", DEFAULT_ASK_TMPL.format(name=self.name))
         timeout = float(self.config.get("timeout", 140))
         try:
