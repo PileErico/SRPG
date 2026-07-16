@@ -54,7 +54,7 @@ execution:
   executors:                # 顺序执行（共享工作区、每人跑完立即回基线）
     - seat: opus
       branch: opus
-      cmd: ["claude", "-p", "--permission-mode", "bypassPermissions"]
+      cmd: ["claude", "-p", "--permission-mode", "bypassPermissions", "--model", "claude-opus-4-8"]
     - seat: gpt
       branch: codex
       cmd: ["npx", "--yes", "@openai/codex", "exec", "--sandbox", "workspace-write", "--ephemeral", "-"]
@@ -73,6 +73,7 @@ adapters:
       给明确立场、说清理由与代价，别当老好人各打五十大板。
   opus:
     class: "adapters.claude:ClaudeAdapter"
+    model: "claude-opus-4-8"
     role_prompt: >-
       你是执行者1（席位 opus）。从实现视角发言：可行性、代码结构、边界条件、数据迁移、
       测试怎么写。讨论时给具体方案而非空泛原则；执行阶段你在 opus 分支落地实现。
