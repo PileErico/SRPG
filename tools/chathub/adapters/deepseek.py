@@ -88,30 +88,36 @@ class DeepSeekAdapter(Adapter):
             params["reasoning_effort"] = str(self.config["effort"])
         return params
 
-    def _invocation(self, params: dict, reported_model: str | None = None) -> Invocation:
-        """从**实际请求参数**回读注入事实——与 claude/gpt 席「从真 argv 回读」同构。
+    def _invocation(self, params: dict | None, reported_model: str | None = None) -> Invocation:
+        """params ＝ **实际发出的请求参数**（None＝预检拦截、根本没发请求）。
 
-        绝不改回从 self.config 推断：那记录的是意图而非事实，预检拦截（根本没发请求）
-        时会谎报 injected=True。白名单：只取标量，messages/上下文一律不进。
+        字段分两类，口径与 claude/gpt 席逐字一致 🔒：
+        - requested_* ＝ **意图**（我们要的是谁），来自 config/self.model：预检拦截时也照报，
+          否则落款会写成「model: 默认（未指定）」——那是断言，而真相是「配好了但没发出去」。
+        - injected/reported ＝ **事实**，只从 params/响应回读：绝不从 config 推断，
+          否则预检拦截（什么都没发）时会谎报 injected=True。
+        白名单：只取标量，messages/上下文一律不进。
         """
+        sent = params or {}
         return Invocation(
             executable="api:deepseek",     # HTTP 席无可执行文件 → 填标识串
-            requested_model=params.get("model"),
+            requested_model=self.model,
             reported_model=reported_model,  # resp.model ＝ 硬证据，本席可 verified
-            effort=params.get("reasoning_effort"),
-            model_injected="model" in params,
-            effort_injected="reasoning_effort" in params,
+            effort=str(self.config["effort"]) if self.config.get("effort") else None,
+            model_injected="model" in sent,
+            effort_injected="reasoning_effort" in sent,
         )
 
     def generate_result(self, context: str, turn: Turn) -> RunResult:
         reason = self._effort_error()
         if reason:
             # 参数级错误：不发请求、不抛异常（daemon 线程里抛会静默死掉）。
-            # 传空 params ＝ 事实就是「什么都没发出去」，injected 全 False。
+            # params=None ＝ 事实就是「什么都没发出去」，injected 全 False；
+            # 但 requested_* 照报意图——与 gpt 席错误路径同口径。
             return RunResult(
                 content=f"［{self.name}：配置错误，未发请求］{reason}",
                 meta=RunMeta(status="error",
-                             invocation=self._invocation({}),
+                             invocation=self._invocation(None),
                              warnings=[reason]),
             )
         params = self._build_params()

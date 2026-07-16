@@ -30,7 +30,7 @@ import re
 import sys
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -71,6 +71,8 @@ class Config:
     synthesizer: str                   # 收敛后由谁写【结论】
     converge_tag: str                  # 席位「我已收敛」的行标记
     continue_tag: str                  # 席位「还要继续」的行标记
+    arbiter: str                       # 拍板权归谁（空＝无人有拍板权，功能关闭）
+    verdict_tag: str                   # arbiter「本议题到此定案」的行标记
 
     @classmethod
     def load(cls, path: Path) -> "Config":
@@ -100,6 +102,9 @@ class Config:
             synthesizer=str(auto.get("synthesizer") or (order[0] if order else "")),
             converge_tag=str(auto.get("converge_tag", "[收敛]")),
             continue_tag=str(auto.get("continue_tag", "[继续]")),
+            # arbiter 无默认值：旧 config 没这键＝拍板权关闭，行为与 C 之前完全一致
+            arbiter=str(auto.get("arbiter") or ""),
+            verdict_tag=str(auto.get("verdict_tag", "[拍板]")),
         )
 
     def timeout_for(self, name: str) -> float:
@@ -157,15 +162,61 @@ def last_trigger_message(text: str, trigger_names: list[str], known_names: list[
     return "\n".join(collected)
 
 
+def _last_nonempty(body: str) -> str:
+    """发言的最后一个非空行（strip 后）；全空返回 ""。"""
+    for line in reversed(body.splitlines()):
+        if line.strip():
+            return line.strip()
+    return ""
+
+
+def _drop_tag_lines(body: str, tags: tuple[str, ...]) -> str:
+    """剥掉「整行严格等于某标签」的行；剥空了就退回原文（宁可留标签也不吞正文）。"""
+    cleaned = [ln for ln in body.splitlines() if ln.strip() not in tags]
+    return "\n".join(cleaned).strip() or body.strip()
+
+
 def extract_vote(body: str, converge_tag: str, continue_tag: str) -> tuple[str, bool]:
     """从发言里剥离收敛/继续标记行，返回（清洁正文, 是否投收敛）。"""
-    lines = body.splitlines()
-    nonempty = [ln.strip() for ln in lines if ln.strip()]
     # 只有最后一个非空行严格等于标签才计票；正文引用“[收敛]”不应误触发。
-    voted = bool(nonempty) and nonempty[-1] == converge_tag
-    cleaned = [ln for ln in lines if ln.strip() not in (converge_tag, continue_tag)]
-    result = "\n".join(cleaned).strip()
-    return (result or body.strip()), voted
+    last = _last_nonempty(body)
+    voted = bool(last) and last == converge_tag
+    return _drop_tag_lines(body, (converge_tag, continue_tag)), voted
+
+
+def extract_verdict(body: str, verdict_tag: str) -> tuple[str, bool]:
+    """从 **arbiter 席**的发言里剥离拍板标记行，返回（清洁正文, 是否拍板）。
+
+    与 extract_vote 共用同一套严格末行匹配 🔒：只有最后一个非空行严格等于标签才算数，
+    正文里行内引用「[拍板]」（如复述本条规则）不触发。
+    调用方负责只对 arbiter 席调用——别处写这个标签一律是普通文本。
+    """
+    last = _last_nonempty(body)
+    if not verdict_tag or not last or last != verdict_tag:
+        return body, False
+    return _drop_tag_lines(body, (verdict_tag,)), True
+
+
+def with_arbiter_clause(cfg: Config, instruction: str, seat: str) -> str:
+    """给 arbiter 席的轮次指令追加拍板授权说明；非 arbiter 席原样返回。
+
+    CLI 与 GUI 共用此函数——两处各写一份提示词，早晚漂移成「两套规则」。
+    """
+    if not (cfg.arbiter and cfg.verdict_tag and seat == cfg.arbiter):
+        return instruction
+    return instruction + (
+        f"\n【拍板权】你是本桌的 arbiter（{cfg.arbiter}）：若讨论已可定案、不需要其它席位再补充，"
+        f"就在发言**最后单独一行**写 {cfg.verdict_tag}（替代 {cfg.converge_tag}/{cfg.continue_tag}）"
+        f"——本轮剩余席位立即跳过，讨论直接进入结论综合。"
+        f"慎用：只在你已有明确裁决、继续讨论只会重复时才用。"
+    )
+
+
+def verdict_notice(cfg: Config, skipped: list[str]) -> str:
+    """拍板留痕（system 消息）：CLI/GUI 共用同一句，措辞不分叉。"""
+    who = "、".join(skipped) if skipped else "无（其后已无待发言席位）"
+    return (f"［{cfg.arbiter} 已拍板（{cfg.verdict_tag}）：本轮剩余席位跳过——{who}。"
+            f"讨论直接进入结论综合。拍板只收当轮，被跳过席位下轮正常参与、不是禁言。］")
 
 
 class _FileLock:
@@ -293,16 +344,25 @@ def with_signature(body: str, meta: RunMeta) -> str:
 
 
 # ============================ 调度 ============================================
+@dataclass
+class RoundOutcome:
+    """一轮的结果。spoke ＝ [(席位名, 清洁正文, 是否投收敛)]；ruled ＝ arbiter 已拍板。"""
+
+    spoke: list[tuple[str, str, bool]] = field(default_factory=list)
+    ruled: bool = False
+
+
 def run_round(cfg: Config, adapters: dict[str, Adapter | None], round_index: int,
               *, dry_run: bool, instruction: str = "", dedup: bool = True,
-              strip_tags: bool = False) -> list[tuple[str, str, bool]]:
-    """跑一轮：按顺序逐席发言。返回 [(席位名, 清洁正文, 是否投收敛)]。
+              strip_tags: bool = False) -> RoundOutcome:
+    """跑一轮：按顺序逐席发言。返回 RoundOutcome（发言清单 + 是否已拍板）。
 
     - instruction：broker 注入到 context 末尾的「调度器指令」（模式相关，适配器无需改）。
     - dedup：True＝本次触发已发言过的席位跳过（参与模式续轮）；议题模式关它、每轮全员再说。
-    - strip_tags：True＝剥离并统计发言里的收敛/继续标记（议题模式）。
+    - strip_tags：True＝议题模式——剥离并统计收敛/继续标记，且 arbiter 的拍板标记生效
+      （两者同属「轮次标记」家族，没有只要其一的场景）。
     """
-    results: list[tuple[str, str, bool]] = []
+    outcome = RoundOutcome()
     prior: list[str] = []
     already = set(speakers_since_trigger(
         read_transcript(cfg.chathub_path), cfg.trigger_names, cfg.speaking_order
@@ -315,28 +375,43 @@ def run_round(cfg: Config, adapters: dict[str, Adapter | None], round_index: int
         turn = Turn(round_index=round_index, speaker=name, order_index=i, prior_this_round=list(prior))
         context = read_transcript(cfg.chathub_path)  # 每席都读到「前面席位刚写的」
         if instruction:
-            context += f"\n\n———[调度器指令]———\n{instruction}"
+            instr = with_arbiter_clause(cfg, instruction, name) if strip_tags else instruction
+            context += f"\n\n———[调度器指令]———\n{instr}"
 
         if adapter is None:
             append_message(cfg.chathub_path, name, "[本轮跳过：适配器未接线]", dry_run=dry_run)
             print(f"— {name}: 跳过（未接线）")
             continue
 
+        ruled = False
         try:
             run = call_with_timeout(adapter, context, turn, cfg.timeout_for(name))
             raw = run.content
-            body, voted = extract_vote(raw, cfg.converge_tag, cfg.continue_tag) if strip_tags else (raw, False)
+            if strip_tags:
+                # 拍板只认 arbiter：别席写这个标签就是普通文本，不剥也不生效
+                if name == cfg.arbiter:
+                    raw, ruled = extract_verdict(raw, cfg.verdict_tag)
+                body, voted = extract_vote(raw, cfg.converge_tag, cfg.continue_tag)
+            else:
+                body, voted = raw, False
             block = append_message(cfg.chathub_path, name, with_signature(body, run.meta), dry_run=dry_run)
-            results.append((name, body, voted))
+            outcome.spoke.append((name, body, voted))
             prior.append(name)
-            flag = "（收敛）" if voted else ""
+            flag = "（拍板）" if ruled else "（收敛）" if voted else ""
             print(f"✓ {name}: 已发言（{len(body)} 字）{flag}")
             if dry_run:
                 print(block)
         except Exception as exc:  # noqa: BLE001
             append_message(cfg.chathub_path, name, f"[本轮跳过：{exc}]", dry_run=dry_run)
             print(f"✗ {name}: 跳过（{exc}）")
-    return results
+
+        if ruled:
+            outcome.ruled = True
+            skipped = [n for n in cfg.speaking_order[i + 1:] if n not in already]
+            append_message(cfg.chathub_path, "system", verdict_notice(cfg, skipped), dry_run=dry_run)
+            print(f"⚖ {cfg.arbiter} 拍板：跳过本轮剩余 {len(skipped)} 席")
+            break
+    return outcome
 
 
 def _auto_round_instruction(cfg: Config, r: int) -> str:
@@ -355,13 +430,17 @@ def run_auto(cfg: Config, adapters: dict[str, Adapter | None], *, dry_run: bool)
     """议题模式：自主多轮讨论至收敛（或达轮次上限），再由 synthesizer 出【结论】。"""
     print(f"🧠 议题模式：至多 {cfg.auto_max_rounds} 轮，收敛后由 {cfg.synthesizer!r} 出结论")
     for r in range(cfg.auto_max_rounds):
-        results = run_round(cfg, adapters, r, dry_run=dry_run,
+        outcome = run_round(cfg, adapters, r, dry_run=dry_run,
                             instruction=_auto_round_instruction(cfg, r),
                             dedup=False, strip_tags=True)
-        if not results:
+        if not outcome.spoke:
             print("· 本轮无人发言，终止。")
             break
-        votes = [v for _, _, v in results]
+        # 拍板＝arbiter 单方收口，不看票数；仍照常走下面的结论综合
+        if outcome.ruled:
+            print(f"· {cfg.arbiter} 已拍板，进入结论综合。")
+            break
+        votes = [v for _, _, v in outcome.spoke]
         print(f"— 第 {r + 1} 轮收敛票：{sum(votes)}/{len(votes)}")
         if all(votes):
             print("· 全员收敛，进入结论综合。")
@@ -413,7 +492,7 @@ def run_once(cfg: Config, adapters: dict[str, Adapter | None],
     else:
         print(f"▶ 触发（{who!r}）· 参与模式（各席一次）")
         for r in range(cfg.max_rounds):
-            if not run_round(cfg, adapters, r, dry_run=dry_run):
+            if not run_round(cfg, adapters, r, dry_run=dry_run).spoke:
                 break
     return True
 

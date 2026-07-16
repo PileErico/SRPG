@@ -228,23 +228,36 @@ class Engine:
                 self.store.add_message(tid, "system", "［议题讨论已由用户停止］")
                 return
             votes: list[bool] = []
+            ruled = False
             instr = broker._auto_round_instruction(self.cfg, r)
-            for name in self.cfg.speaking_order:
+            for i, name in enumerate(self.cfg.speaking_order):
                 if self._cancelled(tid):
                     self.store.add_message(tid, "system", "［议题讨论已由用户停止］")
                     return
                 if self.adapters.get(name) is None:
                     continue
                 try:
-                    run = self._call(name, self._context(topic, instr), r)
+                    # 拍板授权说明只发给 arbiter；与 CLI 共用 broker 的同一套函数，
+                    # 提示词/剥标记/留痕措辞都不分叉（GUI 与 CLI 一致靠共用实现，不靠两处对齐）
+                    seat_instr = broker.with_arbiter_clause(self.cfg, instr, name)
+                    run = self._call(name, self._context(topic, seat_instr), r)
+                    raw = run.content
+                    if name == self.cfg.arbiter:      # 拍板只认 arbiter，别席写了就是普通文本
+                        raw, ruled = broker.extract_verdict(raw, self.cfg.verdict_tag)
                     # 先剥标记再盖落款：反过来落款会变成末行，收敛票永远统计不到
-                    body, voted = broker.extract_vote(run.content, self.cfg.converge_tag,
+                    body, voted = broker.extract_vote(raw, self.cfg.converge_tag,
                                                       self.cfg.continue_tag)
                     self.store.add_message(tid, name, self._signed(run, body))
                     votes.append(voted)
                 except Exception as exc:  # noqa: BLE001
                     self.store.add_message(tid, name, f"[跳过：{exc}]")
-            if votes and all(votes):
+                if ruled:
+                    skipped = [n for n in self.cfg.speaking_order[i + 1:]
+                               if self.adapters.get(n) is not None]
+                    self.store.add_message(tid, "system", broker.verdict_notice(self.cfg, skipped))
+                    break
+            # 拍板＝arbiter 单方收口（不看票数），但结论综合照常走
+            if ruled or (votes and all(votes)):
                 break
 
         synth = self.cfg.synthesizer

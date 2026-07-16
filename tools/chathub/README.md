@@ -37,7 +37,8 @@ py -3 -m pip install -r requirements.txt # pyyaml + openai + flask
 **三个模式按钮**（输入框上方，手打标记也会自动切换）：
 
 - 💬 **讨论**：写话发送 → 四席各回一次 → 停，你主持。
-- 🧠 **议题**：自动补【议题】标记 → 四席自主多轮讨论（至多 4 轮，全员收敛提前停）→ fable 出【结论】→ 结论进右栏「共享记忆·草案」，你点 ✓ 确认后跨议题共享。
+- 🧠 **议题**：自动补【议题】标记 → 四席自主多轮讨论（至多 4 轮；**全员收敛**或 **fable 拍板**提前停）→ fable 出【结论】→ 结论进右栏「共享记忆·草案」，你点 ✓ 确认后跨议题共享。
+  - **拍板权**（`autonomous.arbiter`＝fable）：fable 在发言最后单独一行写 `[拍板]`，本轮剩余席位立即跳过、直接进结论综合——不必再凑齐全票收敛。只有 arbiter 写才算数（别席写就是普通文本），严格末行匹配（正文里引用「[拍板]」不触发）。拍板**只收当轮**，被跳过的席位下轮正常参与，留痕写在 system 消息里。
 - ⚙ **执行**：先勾选**执行名单**（opus→opus 分支 / gpt→codex 分支，可只选一个）→ 发送时二次确认 → 流程：
   1. 执行者按名单顺序落地（各自分支；每人跑完立即回基线，防止在别人分支上开工）；
   2. **交叉互查**：执行者互审对方分支的真实 diff（≥2 人产出 diff 才触发）；
@@ -65,7 +66,9 @@ config.yaml**（重启回落到 config 的值）。控件完全按各席自报�
 ## 配置（`config.yaml`）
 
 - `speaking_order` 发言顺序（＋`adapters` ＝ **席位名单的唯一真值**）；`timeouts` 每席超时；
-  `autonomous` 议题模式参数（synthesizer=fable）。
+  `autonomous` 议题模式参数（`synthesizer`=fable 出结论、`arbiter`=fable 有拍板权、
+  `converge_tag`/`continue_tag`/`verdict_tag` 三个行标记）。删掉 `arbiter` 即关闭拍板权，
+  行为回落到「全票收敛才停」。
 - `execution`：执行者名单（seat/branch/cmd）、`cross_review`、`acceptor`（fable）、`reviewer`（deepseek）、`diff_char_budget`。
 - `adapters.<席>`：接线 + `role_prompt`（角色约束）+ `model` + 可选 `effort` / `model_suggestions`
   （GUI 下拉的建议值——model 轴服务端不校验，写死列表会过期，故只作建议、允许自由输入）。
@@ -77,6 +80,11 @@ config.yaml**（重启回落到 config 的值）。控件完全按各席自报�
   （如 `claude.py` 的 `EFFORT_VALUES`）是**施工期实测取证**硬编码进去的，运行期不做任何探测调用。
   实测行为：`claude -p --effort <非法值>` 是「stderr 警告 + 静默降回默认档 + 退出码 0」——
   枚举过期不会报错，只会让你以为设了 effort 其实没生效。适配器入口的预检就是唯一拦截点。
+- **HTTP 席（DeepSeek）的重跑触发条件不是「CLI 升级」**，而是：**模型停用日到期**（如
+  `deepseek-chat` 的 2026-07-24）、**`model` 串变更**、或**服务端枚举变化**。同样只认实测：
+  该席文档称 effort 只有 `{high, max}`，实测五个值全通过（见 `deepseek.py:EFFORT_VALUES`）——
+  **文档不是证据，跑通才是**。停用的 model 串更阴：`deepseek-chat` 不报错，`resp.model` 回读
+  是 `deepseek-v4-flash`——**静默降级**，全靠落款的 verified 才看得见。
 - **invocation 白名单原则 🔒**：落款/审计只记标量（executable / model / effort / 是否注入），
   prompt、上下文、完整 argv 一律不入库。**新参数默认不记**——「今天的命令行没有敏感内容」是
   黑名单思维，明天加个 token 就漏了；白名单反着写，新参数默认安全。完整命令行只允许出现在
