@@ -72,10 +72,31 @@ def branch_diffstat(branch: str, base: str) -> str:
     return (r.stdout or "").strip()
 
 
+def branch_diff(branch: str, base: str, max_chars: int = 20_000) -> str:
+    """分支相对基线的完整 diff（截断至 max_chars）——供互查/验收席阅读真实改动。"""
+    r = _git("diff", f"{base}...{branch}", timeout=60)
+    d = (r.stdout or "").strip()
+    if len(d) > max_chars:
+        total = len(d)
+        d = d[:max_chars] + f"\n…［diff 已截断：全文 {total} 字，仅展示前 {max_chars} 字］"
+    return d
+
+
+def worktree_status() -> set[str]:
+    """工作区 porcelain 状态快照（含未跟踪），供执行前后对比查执行者遗留。"""
+    r = _git("status", "--porcelain")
+    return {line for line in (r.stdout or "").splitlines() if line.strip()}
+
+
+def new_dirt(baseline: set[str]) -> list[str]:
+    """相对基线快照新出现的未提交条目（执行者遗留的脏改动）。"""
+    return sorted(worktree_status() - baseline)
+
+
 EXEC_PROMPT = """你是本项目的执行者（{seat}）。用户 Erico 已授权执行下面这个方案。你拥有本仓库的写权限。
 
 务必遵守：
-1. `git checkout -B {branch}`（从 {base} 分叉），只在 **{branch}** 分支上工作。
+1. `git checkout -B {branch} {base}`（显式从 {base} 分叉——不要省略起点参数），只在 **{branch}** 分支上工作。
 2. 按方案实现：改代码/数据，必要时跑 headless 测试（`tools/run_tests.ps1` 须 pwsh7）。
 3. **只提交你自己改动的文件——显式 `git add <具体路径>`，严禁 `git add -A` / `git add .`**；提交信息写清改了什么。仓库里已存在的未提交文件（美术 WIP 等）一律别碰、别提交。
 4. **不要 push、不要切到/提交到 main、不要装包、不要删目录、不要联网。**
@@ -91,7 +112,12 @@ EXEC_PROMPT = """你是本项目的执行者（{seat}）。用户 Erico 已授�
 
 def run_executor(seat: str, cmd: list[str], branch: str, base: str,
                  context: str, auth: str, timeout: float = 1200) -> dict:
-    """启动一个执行者子进程，prompt 走 stdin。返回 {ok, report}。"""
+    """启动一个执行者子进程，prompt 走 stdin。返回 {ok, report}。
+
+    失败报告结构化（席位共识 2026-07-16）：标明失败阶段（spawn/运行/超时）、
+    解析后的真实命令路径、退出码、stderr 末尾——「executor 坏了」和「席没干活」
+    必须一眼可分。
+    """
     prompt = EXEC_PROMPT.format(seat=seat, branch=branch, base=base, context=context, auth=auth)
     command = _resolve_cmd(cmd)
     try:
@@ -100,12 +126,17 @@ def run_executor(seat: str, cmd: list[str], branch: str, base: str,
                               env=_executor_env(seat))
     except subprocess.TimeoutExpired:
         restore_branch(base)
-        return {"ok": False, "report": f"[{seat} 执行超时 >{timeout}s，已尝试恢复到 {base}]"}
+        return {"ok": False, "report": (f"[{seat} 失败｜阶段=超时(>{timeout}s，子进程已 kill)｜"
+                                        f"命令={command[0]}｜已尝试恢复到 {base}]")}
     except FileNotFoundError as exc:
-        return {"ok": False, "report": f"[找不到执行命令 {command[0]}：{exc}]"}
+        return {"ok": False, "report": f"[{seat} 失败｜阶段=spawn(找不到可执行文件)｜命令={command[0]}｜{exc}]"}
+    except OSError as exc:
+        return {"ok": False, "report": f"[{seat} 失败｜阶段=spawn(OS 拒绝启动)｜命令={command[0]}｜{exc}]"}
     out = (proc.stdout or "").strip()
     err = (proc.stderr or "").strip()
     if proc.returncode == 0 and out:
         return {"ok": True, "report": out}
-    tail = err[-600:] if err else "（无输出）"
-    return {"ok": False, "report": f"[{seat} 退出码 {proc.returncode}] {out}\n{tail}".strip()}
+    tail = err[-600:] if err else "（stderr 为空）"
+    return {"ok": False,
+            "report": (f"[{seat} 失败｜阶段=运行返回｜命令={command[0]}｜退出码={proc.returncode}]\n"
+                       f"{out}\nstderr 尾：{tail}").strip()}

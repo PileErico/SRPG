@@ -8,11 +8,12 @@
   :root{
     --bg:#f6f7f9; --panel:#fff; --border:#e3e6ea; --text:#1b1f24; --muted:#6b7480;
     --accent:#3b6ef5; --erico:#0a7d4d; --claude:#c6603f; --gpt:#3a7d8c; --copilot:#7a5bb0;
-    --draft:#b8860b; --ok:#0a7d4d;
+    --fable:#8a63d2; --draft:#b8860b; --ok:#0a7d4d;
   }
   @media (prefers-color-scheme:dark){
     :root{ --bg:#15181c; --panel:#1e2227; --border:#2c313a; --text:#e6e9ee; --muted:#8b95a3;
-      --accent:#5b86f7; --erico:#4fd08a; --claude:#e0846a; --gpt:#5fb4c6; --copilot:#a98be0; }
+      --accent:#5b86f7; --erico:#4fd08a; --claude:#e0846a; --gpt:#5fb4c6; --copilot:#a98be0;
+      --fable:#b79df0; }
   }
   :root[data-theme="dark"]{ --bg:#15181c; --panel:#1e2227; --border:#2c313a; --text:#e6e9ee; --muted:#8b95a3; }
   :root[data-theme="light"]{ --bg:#f6f7f9; --panel:#fff; --border:#e3e6ea; --text:#1b1f24; --muted:#6b7480; }
@@ -44,9 +45,11 @@
   .msg .who{font-weight:700;font-size:12px;margin-bottom:2px}
   .msg .body{white-space:pre-wrap;word-break:break-word;background:var(--panel);
     border:1px solid var(--border);border-radius:8px;padding:8px 10px}
-  .who.Erico{color:var(--erico)} .who.claude{color:var(--claude)}
-  .who.gpt{color:var(--gpt)} .who.copilot{color:var(--copilot)}
+  .who.Erico{color:var(--erico)} .who.claude{color:var(--claude)} .who.opus{color:var(--claude)}
+  .who.gpt{color:var(--gpt)} .who.copilot{color:var(--copilot)} .who.fable{color:var(--fable)}
+  .who.system{color:var(--muted)}
   .msg.Erico .body{background:rgba(10,125,77,.06)}
+  .msg.fable .body{border-left:3px solid var(--fable)}
   .time{color:var(--muted);font-weight:400;font-size:11px;margin-left:6px}
   .busy{padding:8px 18px;font-size:12px;display:flex;align-items:center;gap:8px;
     border-top:1px solid var(--border);background:rgba(59,110,245,.06)}
@@ -62,6 +65,18 @@
   .composer textarea{width:100%;resize:vertical;min-height:52px;padding:8px;border-radius:8px;
     border:1px solid var(--border);background:var(--bg);color:var(--text);font:inherit}
   .composer .row{display:flex;justify-content:space-between;align-items:center;margin-top:6px;gap:8px}
+  /* 模式按钮 + 执行者名单 */
+  .modes{display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap}
+  .mode{padding:5px 14px;border:1px solid var(--border);border-radius:16px;background:var(--bg);
+    color:var(--muted);cursor:pointer;font:inherit;font-size:13px}
+  .mode.active{background:rgba(59,110,245,.14);border-color:var(--accent);color:var(--accent);font-weight:700}
+  .mode.warn.active{background:rgba(184,134,11,.16);border-color:var(--draft);color:var(--draft)}
+  .roster{display:none;align-items:center;gap:6px;margin-left:10px}
+  .roster.show{display:inline-flex}
+  .roster .r-label{font-size:12px;color:var(--muted)}
+  .chip{padding:3px 10px;border:1px solid var(--border);border-radius:12px;background:var(--bg);
+    color:var(--muted);cursor:pointer;font:inherit;font-size:12px}
+  .chip.sel{background:rgba(184,134,11,.16);border-color:var(--draft);color:var(--draft);font-weight:700}
   .hint{font-size:12px;color:var(--muted)}
   button.send{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:8px 18px;
     cursor:pointer;font:inherit}
@@ -96,9 +111,15 @@
     <div class="busy" id="busy" style="display:none"><span class="pulse"></span><span id="busy-label">处理中…</span>
       <button id="stop">停止（当前席结束后）</button></div>
     <div class="composer">
-      <textarea id="input" placeholder="写点什么… 普通消息＝参与模式（各回一次）；以【议题】开头＝议题模式（自主多轮→结论）"></textarea>
+      <div class="modes">
+        <button class="mode active" data-mode="chat">💬 讨论</button>
+        <button class="mode" data-mode="topic">🧠 议题</button>
+        <button class="mode warn" data-mode="exec">⚙ 执行</button>
+        <span class="roster" id="roster"><span class="r-label">执行者：</span><span id="roster-chips"></span></span>
+      </div>
+      <textarea id="input" placeholder="写点什么…（模式用上方按钮选；手打【议题】/【执行】也会自动切换）"></textarea>
       <div class="row">
-        <span class="hint" id="composer-hint">普通消息＝参与模式 · 【议题】开头＝议题模式</span>
+        <span class="hint" id="composer-hint">讨论：四席各回一次（fable 压轴）</span>
         <button class="send" id="send" disabled>发送 / 召集</button>
       </div>
     </div>
@@ -154,20 +175,29 @@ function renderMessages(msgs){
   if(atBottom) box.scrollTop = box.scrollHeight;
 }
 
-const SEAT_ORDER = ['claude','gpt','copilot'];
+let SEAT_ORDER = ['opus','gpt','copilot','fable'];   // /api/config 载入后覆盖
 function elapsedStr(ts){ const s = Math.max(0, Math.floor(Date.now()/1000 - (ts||0)));
   return s>=60 ? `${Math.floor(s/60)}分${s%60}秒` : `${s}秒`; }
-// 从现有消息推断「谁正在干活」：执行阶段引擎会先写「开始执行→X分支」，讨论则按顺序推断下一席
+// 从现有消息推断「谁正在干活」：执行/互查/验收有引擎写的标记消息，讨论按顺序推断下一席
 function busyState(msgs){
   const last = msgs[msgs.length-1] || null;
+  const since = last ? elapsedStr(last.created) : '0秒';
   if(last && SEAT_ORDER.includes(last.speaker) && /开始执行/.test(last.body)){
-    return {exec:true, label:`⚙ ${last.speaker} 正在执行中…（已 ${elapsedStr(last.created)}｜改代码/跑测试，可能数分钟，全程静默）`};
+    return {exec:true, label:`⚙ ${last.speaker} 正在执行中…（已 ${since}｜改代码/跑测试，可能数分钟，全程静默）`};
+  }
+  if(last && last.speaker==='system' && /交叉互查/.test(last.body)){
+    return {exec:true, label:`🔍 交叉互查中…（执行者互审对方 diff，已 ${since}）`};
+  }
+  if(last && last.speaker==='system' && /验收中/.test(last.body)){
+    return {exec:true, label:`🏛 fable 验收中…（已 ${since}）`};
+  }
+  if(last && /^【互查 /.test(last.body||'')){
+    return {exec:true, label:`🔍 互查/参考意见进行中…（已 ${since}）`};
   }
   const spoken = new Set();
   for(let i=msgs.length-1;i>=0;i--){ const s=msgs[i].speaker;
     if(s==='Erico') break; if(SEAT_ORDER.includes(s)) spoken.add(s); }
   const next = SEAT_ORDER.find(s => !spoken.has(s));
-  const since = last ? elapsedStr(last.created) : '0秒';
   return {exec:false, label: next ? `💬 ${next} 正在思考…（已 ${since}）` : `💬 处理中…（已 ${since}）`};
 }
 async function refreshMessages(force){
@@ -192,19 +222,71 @@ function startPolling(){
   pollTimer = setInterval(refreshMessages, 2000);
 }
 
-async function send(){
-  const ta = $('#input'); const text = ta.value.trim();
-  if(!text || currentTopic===null) return;
-  // 执行阶段二次确认：会让 claude/codex 真的改仓库（各自分支，不碰 main）
-  if(text.includes('【执行】')){
-    if(!confirm('⚠ 执行授权\n\n这会让 claude 和 codex 带写权限、按本议题的方案真的改动仓库文件'
-      +'（各自在 claude / codex 分支，不 push、不碰 main）。\n\n确定授权执行吗？')) return;
+// ---- 模式与执行名单 ----
+let sendMode = 'chat';
+let hubConfig = {seats:SEAT_ORDER, executors:[], exec_marker:'【执行】', topic_marker:'【议题】',
+                 acceptor:'fable', reviewer:'copilot'};
+let execSel = new Set();
+
+async function loadConfig(){
+  try{
+    hubConfig = await jget('/api/config');
+    if(hubConfig.seats && hubConfig.seats.length) SEAT_ORDER = hubConfig.seats;
+    execSel = new Set((hubConfig.executors||[]).map(e=>e.seat));   // 默认全选
+    renderRoster();
+  }catch(e){/* 配置取不到就用默认 */}
+}
+function renderRoster(){
+  const box = $('#roster-chips');
+  box.innerHTML = (hubConfig.executors||[]).map(e =>
+    `<button class="chip ${execSel.has(e.seat)?'sel':''}" data-seat="${e.seat}" `
+    +`title="落地到 ${e.branch} 分支">${e.seat}→${e.branch}</button>`).join('');
+  box.querySelectorAll('.chip').forEach(c => c.onclick = () => {
+    const s = c.dataset.seat;
+    execSel.has(s) ? execSel.delete(s) : execSel.add(s);
+    renderRoster(); updateHint();
+  });
+}
+function setMode(m){
+  sendMode = m;
+  document.querySelectorAll('.mode').forEach(b => b.classList.toggle('active', b.dataset.mode===m));
+  $('#roster').classList.toggle('show', m==='exec');
+  updateHint();
+}
+function updateHint(){
+  const h = $('#composer-hint');
+  if(sendMode==='exec'){
+    const sel = [...execSel];
+    h.textContent = sel.length
+      ? `⚠ 执行：${sel.join(' + ')} 落地（各自分支）→ 互查 → ${hubConfig.acceptor||'fable'} 验收`
+      : '⚠ 执行：请先勾选至少一个执行者';
+  } else if(sendMode==='topic'){
+    h.textContent = '议题：四席自主多轮讨论 → fable 出【结论】';
+  } else {
+    h.textContent = '讨论：四席各回一次（fable 压轴）';
   }
+}
+
+async function send(){
+  const ta = $('#input'); let text = ta.value.trim();
+  if(!text || currentTopic===null) return;
+  const body = {};
+  if(sendMode==='topic' && !text.includes(hubConfig.topic_marker) && !text.includes('@自动')){
+    text = hubConfig.topic_marker + text;             // 按钮选了议题→自动补标记
+  }
+  if(sendMode==='exec' || text.includes(hubConfig.exec_marker)){
+    if(!text.includes(hubConfig.exec_marker)) text = hubConfig.exec_marker + text;
+    const seats = [...execSel];
+    if(!seats.length){ alert('执行模式：请先勾选至少一个执行者'); return; }
+    if(!confirm(`⚠ 执行授权\n\n将由 ${seats.join(' + ')} 带写权限落地本议题方案`
+      +`（各自分支，不 push、不碰 main），完成后互查并由 ${hubConfig.acceptor||'fable'} 验收。\n\n确定授权执行吗？`)) return;
+    body.executors = seats;
+  }
+  body.text = text;
   $('#send').disabled = true;
-  const r = await jpost(`/api/topics/${currentTopic}/send`, {text});
-  if(r.ok){ ta.value=''; await refreshMessages(); }
-  else alert(r.data.error || '发送失败');
-  if(!r.ok) await refreshMessages();
+  const r = await jpost(`/api/topics/${currentTopic}/send`, body);
+  if(r.ok){ ta.value=''; setMode('chat'); await refreshMessages(); }
+  else { alert(r.data.error || '发送失败'); await refreshMessages(); }
 }
 
 async function stopDiscussion(){
@@ -243,17 +325,17 @@ function escapeHtml(s){ return (s||'').replace(/[&<>"]/g, c =>
 $('#send').onclick = send;
 $('#stop').onclick = stopDiscussion;
 $('#new-topic').onclick = newTopic;
+document.querySelectorAll('.mode').forEach(b => b.onclick = () => setMode(b.dataset.mode));
 $('#input').addEventListener('keydown', e => { if(e.key==='Enter' && (e.ctrlKey||e.metaKey)) send(); });
 $('#input').addEventListener('input', e => {
-  const v = e.target.value;
-  let hint = '普通消息＝参与模式 · 【议题】开头＝议题模式 · 【执行】＝授权落地';
-  if(v.includes('【执行】')) hint = '⚠ 执行模式：claude/codex 将带写权限改仓库（各自分支）';
-  else if(v.trimStart().startsWith('【议题】') || v.includes('@自动')) hint = '议题模式：三席自主多轮讨论→出结论';
-  $('#composer-hint').textContent = hint;
+  const v = e.target.value;   // 手打标记 → 自动切换模式按钮
+  if(v.includes(hubConfig.exec_marker)) setMode('exec');
+  else if(v.trimStart().startsWith(hubConfig.topic_marker) || v.includes('@自动')) setMode('topic');
+  else updateHint();
 });
 
 // 初始化 + 定期刷新记忆
-loadStatus(); loadTopics(); loadMemory();
+loadConfig(); loadStatus(); loadTopics(); loadMemory();
 setInterval(loadStatus, 15000);
 setInterval(loadMemory, 4000);
 </script>

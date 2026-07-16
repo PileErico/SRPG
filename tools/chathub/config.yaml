@@ -1,13 +1,19 @@
-# ChatHub 调度器配置。改这里即可，不用动 broker.py。
+# ChatHub 调度器配置。改这里即可，不用动 broker.py / engine.py。
+#
+# 四席分工（2026-07-16 Erico 拍板）：
+#   fable   = 项目总负责人（大局/取舍/结论/验收，不写代码）——模型 claude-fable-5
+#   opus    = 执行者1（实现视角；执行阶段在 opus 分支落地）——模型 opus（CLI 默认）
+#   gpt     = 执行者2（独立实现视角；执行阶段在 codex 分支落地）——Codex CLI
+#   copilot = 参谋席（评价与建议；无文件访问，反幻觉硬约束在适配器内置）——DeepSeek
 
-# chathub.md 路径（相对＝相对仓库根，也可写绝对路径）
+# chathub.md 路径（相对＝相对仓库根；仅 CLI broker 用，GUI 走 SQLite）
 chathub_path: docs/chathub.md
 
 # 触发闸：最后一条发言人 ∈ 此列表才开一轮（防 AI 互相触发的无限回环）
 trigger_names: [Erico, Eroco]        # Eroco 是历史笔误，一并认
 
-# 发言顺序（claude 先回，copilot 看到 claude 已写再接——单调度器天然保证）
-speaking_order: [claude, gpt, copilot]
+# 发言顺序：执行者先给实料 → 参谋评议 → fable 压轴裁决/收束
+speaking_order: [opus, gpt, copilot, fable]
 
 # 每次触发跑几轮（1 = 每人各说一次就停，等 Erico 下一条）
 max_rounds: 1
@@ -15,54 +21,77 @@ max_rounds: 1
 # 每席独立超时（秒）；未列出的用 default_timeout
 default_timeout: 90
 timeouts:
-  claude: 150      # CLI 冷启动较慢
-  gpt: 90          # npx codex exec 约 10~15s，留足冗余
-  copilot: 60      # DeepSeek HTTP 较快
+  opus: 150      # claude CLI 冷启动较慢
+  fable: 240     # 总负责人做综合/验收，思考更久
+  gpt: 90        # npx codex exec 约 10~15s，留足冗余
+  copilot: 60    # DeepSeek HTTP 较快
 
 # watch 模式轮询间隔（秒）
 poll_interval: 3
 
 # —— 议题模式（模式②）——
-# 参与模式（默认）：Erico 写一条 → 三席各回一次 → 停（以 Erico 为主）。
-# 议题模式：Erico 消息里带 marker → 三席自主多轮讨论至收敛 → synthesizer 出【结论】。
+# 参与模式（默认）：Erico 写一条 → 各席各回一次 → 停（以 Erico 为主）。
+# 议题模式：Erico 消息里带 marker → 各席自主多轮讨论至收敛 → synthesizer 出【结论】。
 #   触发写法示例：  Erico：【议题】火药域该不该拆成火枪/爆破两支？
 autonomous:
   marker: "【议题】"        # 也永远兼容 "@自动"
   max_rounds: 4             # 自主讨论轮数上限（防不收敛）
-  synthesizer: claude       # 收敛后由谁写【结论】（默认取 speaking_order 首位）
+  synthesizer: fable        # 总负责人出【结论】
   converge_tag: "[收敛]"    # 席位「我无补充」的行标记
   continue_tag: "[继续]"    # 席位「还要继续」的行标记
 
 # —— 执行阶段（阶段③）——
-# 议题出结论后，Erico 在该议题里发「【执行】<范围>」= 授权 → claude/codex 带写权限
-# 各自在自己分支落地，copilot 只评审；不 push、不碰 main。前端会二次确认防误触。
+# 议题出结论后，Erico 发「【执行】<范围>」= 授权（GUI 里可勾选执行名单，只让部分执行者干活）。
+# 流程：执行者顺序落地（各自分支）→ 交叉互查（互审对方真实 diff）→ copilot 参考 → fable 验收。
+# 不 push、不碰 main；前端二次确认防误触。
 execution:
   marker: "【执行】"
   timeout: 1800             # 执行比讨论久，给足
-  reviewer: copilot         # 只评审、不改代码
-  executors:                # 顺序执行（共享工作区、串行避免互踩）
-    - seat: claude
-      branch: claude
+  cross_review: true        # 执行者互查对方分支 diff（≥2 名执行者产出 diff 才触发）
+  reviewer: copilot         # 参谋席参考意见（无文件访问，只评记录）
+  acceptor: fable           # 终验收（看全部 diff + 互查意见，给裁决）
+  diff_char_budget: 20000   # 注入互查/验收的每分支 diff 字数上限
+  executors:                # 顺序执行（共享工作区、每人跑完立即回基线）
+    - seat: opus
+      branch: opus
       cmd: ["claude", "-p", "--permission-mode", "bypassPermissions"]
     - seat: gpt
       branch: codex
       cmd: ["npx", "--yes", "@openai/codex", "exec", "--sandbox", "workspace-write", "--ephemeral", "-"]
 
 # 各席位适配器接线。class = "模块路径:类名"。
-#   ⚠ 未落地的适配器 broker 会容错跳过，不影响其它席位。
-#   接线负责人：deepseek/gpt = copilot；claude = 待独立 CLI 装好后我写。
+#   ⚠ 某席不可用（缺 CLI/key）会被容错跳过，不阻塞其它席位。
 adapters:
-  claude:
-    class: "adapters.claude:ClaudeAdapter"      # 待写（needs: npm i -g @anthropic-ai/claude-code）
-    # role_prompt: 见 prompts（可选，交由适配器读取）
+  fable:
+    class: "adapters.claude:ClaudeAdapter"
+    model: "claude-fable-5"
+    timeout: 220             # 子进程超时（< broker 的 240）
+    role_prompt: >-
+      你是本项目的总负责人（席位 fable）。职责：把控方向与范围、做取舍与优先级判断、
+      发现讨论跑偏或过度工程时把它拉回、在议题收敛时综合【结论】、在执行完成后做验收裁决。
+      你不亲自写代码——执行细节交给 opus 和 gpt。你的发言重判断而非罗列：
+      给明确立场、说清理由与代价，别当老好人各打五十大板。
+  opus:
+    class: "adapters.claude:ClaudeAdapter"
+    role_prompt: >-
+      你是执行者1（席位 opus）。从实现视角发言：可行性、代码结构、边界条件、数据迁移、
+      测试怎么写。讨论时给具体方案而非空泛原则；执行阶段你在 opus 分支落地实现。
+      方向与取舍听 fable 的裁决，但事实与技术判断上有异议要直说。
   gpt:
-    class: "adapters.gpt:GptAdapter"            # copilot：封装 npx @openai/codex exec
+    class: "adapters.gpt:GptAdapter"
     codex_cmd: ["npx", "--yes", "@openai/codex", "exec", "--ephemeral", "--sandbox", "read-only"]
+    role_prompt: >-
+      你是执行者2（席位 gpt）。与 opus 平行的独立实现视角——不要附和他的方案，
+      独立推导后再对比。执行阶段你在 codex 分支落地实现。
+      方向与取舍听 fable 的裁决，但事实与技术判断上有异议要直说。
   copilot:
-    class: "adapters.deepseek:DeepSeekAdapter"  # copilot：HTTP api.deepseek.com
+    class: "adapters.deepseek:DeepSeekAdapter"
     endpoint: "https://api.deepseek.com/v1/chat/completions"
     model: "deepseek-chat"
     api_key_env: "DEEPSEEK_API_KEY"
+    role_prompt: >-
+      你是参谋席（席位 copilot）。只做评价与建议：审视别人给出的方案与证据、
+      指出风险与遗漏。你没有文件访问能力——只能基于记录发言，推测必须标注（详见系统约束）。
 
 # —— 端到端自测用（把上面某席的 class 临时改成下面这个即可先跑通全链路）——
 #   class: "stub:StubAdapter"

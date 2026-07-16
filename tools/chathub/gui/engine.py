@@ -47,17 +47,18 @@ class Engine:
 
     # ---- 状态 ----
     def seat_status(self) -> dict:
+        """按适配器类型（非席位名）做前置检查：HTTP 席查 key、CLI 席查可执行文件。"""
         out = {}
         for n in self.cfg.speaking_order:
             a = self.adapters.get(n)
             online, reason = a is not None, ""
             if a is None:
                 reason = "适配器加载失败"
-            elif n == "copilot":
-                env_name = a.config.get("api_key_env", "DEEPSEEK_API_KEY")
+            elif a.config.get("api_key_env"):            # HTTP 型（deepseek 等）
+                env_name = a.config["api_key_env"]
                 online = bool(os.environ.get(env_name))
                 reason = "" if online else f"缺少环境变量 {env_name}"
-            elif hasattr(a, "_resolve_cmd"):
+            elif hasattr(a, "_resolve_cmd"):             # CLI 型（claude/codex）
                 try:
                     cmd = a._resolve_cmd()[0]
                     online = Path(cmd).exists() or shutil.which(cmd) is not None
@@ -202,19 +203,36 @@ class Engine:
                 self.store.add_message(tid, synth, f"[结论失败：{exc}]")
         self.store.set_topic_status(tid, "concluded")
 
-    # ---- 执行阶段：授权后由带写权限的执行者落地（claude/codex 各自分支）----
-    def run_execute(self, tid: int, auth_text: str) -> None:
+    # ---- 执行阶段：授权后由带写权限的执行者落地（opus/codex 各自分支）----
+    # 流水：执行者顺序落地（可点名名单）→ 交叉互查（执行者互审对方真实 diff）
+    #       → copilot 参考意见（无文件访问，只评记录）→ fable 终验收（看全部 diff+互查）
+    def run_execute(self, tid: int, auth_text: str,
+                    only_seats: list[str] | None = None) -> None:
         topic = self.store.get_topic(tid)
         context = self._context(topic)
-        execs = self.exec_cfg.get("executors") or []
+        all_execs = self.exec_cfg.get("executors") or []
+        execs = [e for e in all_execs
+                 if not only_seats or e.get("seat") in only_seats]
+        if not execs:
+            self.store.add_message(
+                tid, "system",
+                f"［执行取消：名单 {only_seats} 与配置的执行者 "
+                f"{[e.get('seat') for e in all_execs]} 无交集］")
+            return
         timeout = float(self.exec_cfg.get("timeout", 1200))
+        diff_budget = int(self.exec_cfg.get("diff_char_budget", 20_000))
+        acceptor = self.exec_cfg.get("acceptor")
+        reviewer = self.exec_cfg.get("reviewer")
         base = executor_mod.current_branch()
+        dirt_baseline = executor_mod.worktree_status()
+        roster = ", ".join(e.get("seat", "?") for e in execs)
         self.store.add_message(
             tid, "system",
-            f"［执行已授权｜基线分支={base}｜依次执行：{', '.join(e.get('seat', '?') for e in execs)}｜"
-            f"{self.exec_cfg.get('reviewer', 'copilot')} 仅评审｜不 push/不碰 main］")
+            f"［执行已授权｜基线分支={base}｜执行名单：{roster}｜"
+            f"流程：落地→互查→{reviewer or '—'} 参考→{acceptor or '—'} 验收｜不 push/不碰 main］")
 
-        done: list[tuple[str, str]] = []
+        # ── 1) 逐执行者落地（每人跑完立即回基线，防止下一位在别人分支上开工）──
+        done: list[tuple[str, str, bool]] = []          # (seat, branch, ok)
         for e in execs:
             if self._cancelled(tid):
                 self.store.add_message(tid, "system", "［执行已由用户停止］")
@@ -228,28 +246,90 @@ class Engine:
             self.store.add_message(tid, seat, f"［开始执行 → {branch} 分支］")
             res = executor_mod.run_executor(seat, list(cmd), branch, base, context, auth_text, timeout)
             self.store.add_message(tid, seat, res["report"])
-            done.append((seat, branch))
+            executor_mod.restore_branch(base)
+            leftover = executor_mod.new_dirt(dirt_baseline)
+            if leftover:
+                self.store.add_message(
+                    tid, "system",
+                    "⚠［" + seat + " 执行后工作区出现未提交遗留（未自动清理，请人工确认）］\n"
+                    + "\n".join(leftover[:20]))
+            done.append((seat, branch, bool(res.get("ok"))))
 
+        # ── 2) 执行记录：恢复基线 + 各分支 diffstat + 抽取真实 diff ──
         note = executor_mod.restore_branch(base)
+        diffs: dict[str, tuple[str, str]] = {}          # seat -> (branch, diff文本)
         lines = ["【执行记录】", note]
-        for seat, branch in done:
+        for seat, branch, ok in done:
             stat = executor_mod.branch_diffstat(branch, base) or "（无 diff 或分支未创建）"
-            lines.append(f"— {seat} @ {branch} 分支：\n{stat}")
+            lines.append(f"— {seat} @ {branch} 分支：{'✓完成' if ok else '✗失败'}\n{stat}")
+            d = executor_mod.branch_diff(branch, base, diff_budget)
+            if d:
+                diffs[seat] = (branch, d)
         self.store.add_message(tid, "system", "\n".join(lines))
 
-        reviewer = self.exec_cfg.get("reviewer")
-        if reviewer and self.adapters.get(reviewer) is not None and not self._cancelled(tid):
-            instr = ("以上执行者分别在各自分支落地了方案。请你（评审席，不改代码）对比两版实现，"
-                     "指出各自优劣、风险、遗漏，建议 Erico 采用哪版或如何合并。")
+        # ── 3) 交叉互查：执行者互审对方分支的真实 diff（只读）──
+        if self.exec_cfg.get("cross_review", True) and len(diffs) >= 2 and not self._cancelled(tid):
+            self.store.add_message(tid, "system", "［交叉互查：执行者互审对方分支 diff］")
+            for seat, branch, ok in done:
+                if self._cancelled(tid):
+                    break
+                if self.adapters.get(seat) is None:
+                    continue
+                for other, (obranch, odiff) in diffs.items():
+                    if other == seat:
+                        continue
+                    instr = (
+                        f"【互查】你是执行者 {seat}（你的实现在 {diffs.get(seat, ('?', ''))[0]} 分支）。"
+                        f"请只读审查 {other} 在 {obranch} 分支的实现——下面是其相对基线的真实 diff。"
+                        f"指出：①正确性问题；②风险/遗漏；③它比你的版本好的地方。"
+                        f"不要改任何代码，直接给审查意见。\n\n"
+                        f"=== {other} @ {obranch} 分支 diff ===\n{odiff}"
+                    )
+                    try:
+                        body = self._call(seat, self._context(topic, instr), 0)
+                        self.store.add_message(tid, seat, f"【互查 {other}@{obranch}】\n{body}")
+                    except Exception as exc:  # noqa: BLE001
+                        self.store.add_message(tid, seat, f"[互查失败：{exc}]")
+
+        # ── 4) copilot 参考意见（无文件访问：只评记录中真实存在的内容）──
+        if reviewer and reviewer not in {s for s, _, _ in done} \
+                and self.adapters.get(reviewer) is not None and not self._cancelled(tid):
+            instr = (
+                "请你作为参谋席给 Erico 一段简短参考意见：基于上方执行报告、diffstat 与互查意见"
+                "（你没有文件访问能力，只能评价记录中真实存在的内容；推测必须以「推测：」标注），"
+                "指出你认为的关键风险或双方都遗漏的问题。无补充就说「无补充。」"
+            )
             try:
                 body = self._call(reviewer, self._context(topic, instr), 0)
                 self.store.add_message(tid, reviewer, body)
             except Exception as exc:  # noqa: BLE001
-                self.store.add_message(tid, reviewer, f"[评审失败：{exc}]")
+                self.store.add_message(tid, reviewer, f"[参考意见失败：{exc}]")
+
+        # ── 5) fable 终验收：看全部真实 diff + 互查/参考意见，给裁决 ──
+        if acceptor and self.adapters.get(acceptor) is not None and not self._cancelled(tid):
+            self.store.add_message(tid, "system", f"［{acceptor} 验收中…］")
+            all_diffs = "\n\n".join(
+                f"=== {seat} @ {branch} 分支 diff ===\n{d}"
+                for seat, (branch, d) in diffs.items()) or "（无任何分支产生 diff）"
+            instr = (
+                "【验收】你是项目总负责人。执行者已在各自分支落地，互查与参考意见在上方记录中，"
+                "下面是各分支相对基线的真实 diff。请给出验收裁决：\n"
+                "1) 各版是否正确完成了方案（有无必须修复项，逐条列出）；\n"
+                "2) 建议采用哪版 / 如何合并（明确到分支名）；\n"
+                "3) 合并前必做与可选改进。\n"
+                "直给判断，不复述过程。\n\n" + all_diffs
+            )
+            try:
+                body = self._call(acceptor, self._context(topic, instr), 0)
+                verdict = body if body.startswith("【验收") else "【验收】" + body
+                self.store.add_message(tid, acceptor, verdict)
+            except Exception as exc:  # noqa: BLE001
+                self.store.add_message(tid, acceptor, f"[验收失败：{exc}]")
         self.store.set_topic_status(tid, "executed")
 
     # ---- 后台入口：按消息标记选模式 ----
-    def dispatch(self, tid: int, user_text: str, *, reserved: bool = False) -> str:
+    def dispatch(self, tid: int, user_text: str, *, reserved: bool = False,
+                 exec_seats: list[str] | None = None) -> str:
         exec_marker = self.exec_cfg.get("marker", "【执行】")
         is_exec = bool(self.exec_cfg.get("executors")) and exec_marker in user_text
         auto = bool(self.cfg.auto_marker) and (self.cfg.auto_marker in user_text or "@自动" in user_text)
@@ -257,7 +337,7 @@ class Engine:
             raise RuntimeError("本议题正在讨论中")
         try:
             if is_exec:
-                self.run_execute(tid, user_text)
+                self.run_execute(tid, user_text, only_seats=exec_seats)
                 return "execute"
             if auto:
                 self.run_topic(tid)

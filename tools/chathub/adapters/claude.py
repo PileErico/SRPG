@@ -27,15 +27,20 @@ from adapters.base import Adapter, AdapterError, Turn  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[3]        # adapters→chathub→tools→仓库根
 
-DEFAULT_ROLE = (
-    "你是一场多 AI 设计讨论中的参与者，代号 claude，正在与 gpt、copilot 及用户 "
-    "Erico 于 docs/chathub.md 协作。规则：只输出你本轮的发言正文——不要加"
-    "「claude：」前缀、不要加时间戳、不要写任何文件、不要复述整段历史。可以引用"
-    "项目文件里的事实。若无补充就回一句「无补充。」。"
+# 席位名动态注入——同一适配器可承载多个席位（fable/opus 都是 ClaudeAdapter，仅 model 不同）
+DEFAULT_ROLE_TMPL = (
+    "你是一场多 AI 设计讨论中的参与者，与其他 AI 席位及用户 Erico 协作。"
+    "可以引用项目文件里的事实。"
 )
 
-DEFAULT_ASK = (
-    "\n\n———\n以上是 chathub.md 全文。请针对最后一条尚未回应的发言，发表你（claude）"
+OUTPUT_RULES_TMPL = (
+    "你的席位名：{name}。输出规则：只输出你本轮的发言正文——不要加"
+    "「{name}：」前缀、不要加时间戳、不要写任何文件、不要复述整段历史。"
+    "若无补充就回一句「无补充。」。"
+)
+
+DEFAULT_ASK_TMPL = (
+    "\n\n———\n以上是共享讨论记录。请针对最后一条尚未回应的发言，发表你（{name}）"
     "本轮的观点。只输出发言正文。"
 )
 
@@ -60,9 +65,9 @@ class ClaudeAdapter(Adapter):
 
     def _build_args(self) -> list[str]:
         args = self._resolve_cmd() + ["-p", "--output-format", "text"]
-        role = self.config.get("role_prompt", DEFAULT_ROLE)
-        if role:
-            args += ["--append-system-prompt", role]
+        identity = self.config.get("role_prompt") or DEFAULT_ROLE_TMPL
+        role = f"{identity}\n{OUTPUT_RULES_TMPL.format(name=self.name)}"
+        args += ["--append-system-prompt", role]
         if self.config.get("model"):
             args += ["--model", str(self.config["model"])]
         if self.config.get("permission_mode"):
@@ -71,7 +76,7 @@ class ClaudeAdapter(Adapter):
 
     def generate(self, context: str, turn: Turn) -> str:
         args = self._build_args()
-        prompt = context + self.config.get("ask", DEFAULT_ASK)
+        prompt = context + self.config.get("ask", DEFAULT_ASK_TMPL.format(name=self.name))
         timeout = float(self.config.get("timeout", 140))
         try:
             proc = subprocess.run(

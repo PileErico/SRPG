@@ -78,7 +78,7 @@ class GptAdapter(Adapter):
 
         prompt = (
             f"{role_block}"
-            f"你是一个参与多人技术讨论的 AI 助手，席位名为 gpt。\n"
+            f"你是一个参与多人技术讨论的 AI 助手，席位名为 {self.name}。\n"
             f"当前讨论记录在共享 Markdown 文件中，以下是完整对话历史：\n\n"
             f"{context}\n\n"
             f"—— 本轮你是第 {turn.order_index + 1} 个发言的 AI。\n"

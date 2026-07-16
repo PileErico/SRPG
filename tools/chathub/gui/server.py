@@ -71,6 +71,20 @@ def api_status():
     return jsonify(engine.seat_status())
 
 
+@app.get("/api/config")
+def api_config():
+    """前端所需的调度配置：模式标记、执行名单候选、验收/参考席。"""
+    return jsonify({
+        "seats": engine.cfg.speaking_order,
+        "topic_marker": engine.cfg.auto_marker,
+        "exec_marker": engine.exec_cfg.get("marker", "【执行】"),
+        "executors": [{"seat": e.get("seat"), "branch": e.get("branch")}
+                      for e in (engine.exec_cfg.get("executors") or [])],
+        "acceptor": engine.exec_cfg.get("acceptor"),
+        "reviewer": engine.exec_cfg.get("reviewer"),
+    })
+
+
 @app.get("/api/topics")
 def api_topics():
     return jsonify(store.list_topics())
@@ -98,6 +112,11 @@ def api_send(tid: int):
     text = (d.get("text") or "").strip()
     if not text:
         return jsonify({"error": "空消息"}), 400
+    # 执行名单（可选）：GUI 勾选的执行者，如 ["gpt"]——只让这些席执行
+    exec_seats = d.get("executors")
+    if exec_seats is not None and not (
+            isinstance(exec_seats, list) and all(isinstance(s, str) for s in exec_seats)):
+        return jsonify({"error": "executors 须为席位名字符串数组"}), 400
     if not engine.reserve(tid):
         return jsonify({"error": "本议题正在讨论中，请稍候"}), 409
     try:
@@ -106,15 +125,22 @@ def api_send(tid: int):
     except Exception:
         engine.release(tid)
         raise
-    auto = bool(engine.cfg.auto_marker) and (engine.cfg.auto_marker in text or "@自动" in text)
+    exec_marker = engine.exec_cfg.get("marker", "【执行】")
+    if engine.exec_cfg.get("executors") and exec_marker in text:
+        mode = "execute"
+    elif bool(engine.cfg.auto_marker) and (engine.cfg.auto_marker in text or "@自动" in text):
+        mode = "auto"
+    else:
+        mode = "reactive"
     try:
         threading.Thread(
-            target=engine.dispatch, args=(tid, text), kwargs={"reserved": True}, daemon=True
+            target=engine.dispatch, args=(tid, text),
+            kwargs={"reserved": True, "exec_seats": exec_seats}, daemon=True,
         ).start()
     except Exception:
         engine.release(tid)
         raise
-    return jsonify({"ok": True, "mode": "auto" if auto else "reactive"})
+    return jsonify({"ok": True, "mode": mode})
 
 
 @app.post("/api/topics/<int:tid>/stop")
