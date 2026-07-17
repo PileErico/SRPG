@@ -774,11 +774,12 @@ func _resolve_compute_body(attacker, target, skill) -> Dictionary:
 	# 击退判定（🔒 2026-07-15 用户拍板：概率制击中附带——挂 hit 内 on_hit_displace，与 on_hit_effects 并列）：
 	# 门槛＝命中且未被格挡（未命中已早退）；概率＝主动块 chance ＋ 攻方被动伪 stat knockback_chance
 	# （perk 挂载口，任意攻击段都参与）**合并单掷**，直减目标肉体强韧（数值直减，非效果族的豁免二掷；可减到 0）。
-	# 反应段（is_reaction）禁击退；atk_rate 只负责伤害倍率，不再兼任类型标记（决策36）。
+	# 反应段同样判定击退（⚠ 2026-07-17 用户翻案·涌现口径：机制不硬禁反应链，链条由 limit 天然有界）；
+	# atk_rate 只负责伤害倍率，不兼任类型标记（决策36）。
 	# ⚠ 位移延迟结算（🔒 同日用户+Codex 三层定调）：判定层只登记请求（r["displace_req"]＋队列），
 	#   坐标变更集中在攻击动作末 flush_displaces——防双持副手段被自己第一段的位移拆断目标。
 	# ⚠ 掷骰只在 kb_dist>0 时发生：旧数据（无击退无被动）零额外 rng 抽取＝golden 零涉。
-	if not blocked and not bool(skill.get("is_reaction", false)):
+	if not blocked:
 		var kb = skill.get("on_hit_displace", null)
 		var kb_ch := 0.0
 		var kb_dist := 0
@@ -899,7 +900,7 @@ func _unit_entered_owner_zoc(owner, event: Dictionary) -> bool:
 # 返回满足触发、条件与次数限制的声明式反应候选；实际动作由战场表现层统一执行。
 func reaction_candidates(trigger: String, event: Dictionary) -> Array:
 	var out := []
-	if not ReactionRegistry.implemented(trigger) or bool(event.get("is_reaction", false)):
+	if not ReactionRegistry.implemented(trigger):   # 反应可再触发反应（⚠ 2026-07-17 涌现口径；原 event.is_reaction 防链守卫撤销）
 		return out
 	for owner in units:
 		if owner.has_state("incapacitated"):

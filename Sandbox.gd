@@ -1902,6 +1902,7 @@ func _zoc_on_leave(mover) -> bool:
 		return false   # 该格的 ZOC 拥有者本 round 都已对它触发过 → 放行
 	zoc_triggered[_zoc_key(owner, mover)] = true   # 触发一次（无论命中与否，本 round 不再对它触发）
 	var stopped := _resolve_aoo(owner, mover)
+	_log_displaces(_state.flush_displaces())   # 借机也可产出击退（涌现口径）——反应动作末就地结算；被推者必已被钉住
 	_handle_deaths()
 	if int(mover.stats.get("HP", 0)) <= 0:
 		return true   # 移动者被借机打死，自然停下
@@ -2180,10 +2181,9 @@ func _log_displaces(evs: Array) -> void:
 		if not _state._pending_displace.is_empty():
 			pending.append_array(_state.flush_displaces())
 
-# 统一反应入口。v1 只执行攻击动作；反应动作本身禁止再次触发反应。
+# 统一反应入口。v1 只执行攻击动作。反应可再触发反应（⚠ 2026-07-17 用户翻案·涌现口径——
+# 原「Reaction 不触发 Reaction」铁律撤销）：链条由 limit 账本（如每 round 一次）天然有界，flush loop guard 兜底。
 func _dispatch_reaction_event(trigger: String, event: Dictionary) -> void:
-	if bool(event.get("is_reaction", false)):
-		return
 	for candidate in _state.reaction_candidates(trigger, event):
 		var owner = candidate.owner
 		var target = event.get("unit")
@@ -2205,7 +2205,8 @@ func _dispatch_reaction_event(trigger: String, event: Dictionary) -> void:
 			_handle_deaths()
 			if not (target in units):
 				break
-	# 反应攻击禁止产出击退；兜底就地清算，避免未来动作扩展时把请求泄漏进下一次攻击。
+	# 反应攻击的击退在此就地结算（＝该反应动作自己的动作末 flush）；_log_displaces 会对被推者
+	# 再分发 forced 进入事件——反应链在此延续（涌现口径），由 limit 有界。
 	if not _state._pending_displace.is_empty():
 		_log_displaces(_state.flush_displaces())
 

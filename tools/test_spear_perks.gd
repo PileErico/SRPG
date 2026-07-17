@@ -68,14 +68,16 @@ func _initialize() -> void:
 	ck(candidates.size() == 1 and candidates[0].owner == u, "从圈外进入触发立矛")
 	u.consume_reaction_limit(candidates[0].state_key, candidates[0].reaction.get("limit", {}), candidates[0].reset_token)
 	ck(s.reaction_candidates("unit_entered_zoc", revent).is_empty(), "同一拥有者每round只触发一次")
-	ck(s.reaction_candidates("unit_entered_zoc", {"unit": enemy, "path": path, "kind": "voluntary", "is_reaction": true}).is_empty(),
-		"反应动作不能再次触发反应")
+	ck(s.reaction_candidates("unit_entered_zoc", {"unit": enemy, "path": path, "kind": "forced", "is_reaction": true}).is_empty(),
+		"limit 耗尽后强制位移/反应链事件同样不再触发（涌现口径：防链靠 limit 不靠事件标记）")
 	var rsnap := UnitFactory.unit_to_battle_snapshot(u)
 	var ur = UnitFactory.unit_from_battle_snapshot(JSON.parse_string(JSON.stringify(rsnap)))
 	ck(not ur.reaction_state.is_empty(), "reaction limit 账本战斗快照往返")
 	s.round_num += 1
 	candidates = s.reaction_candidates("unit_entered_zoc", revent)
 	ck(candidates.size() == 1, "新 round 重置反应次数")
+	ck(s.reaction_candidates("unit_entered_zoc", {"unit": enemy, "path": path, "kind": "forced", "is_reaction": true}).size() == 1,
+		"被推进 ZOC／反应链事件在 limit 就绪时照常触发（涌现口径 2026-07-17：反应可触发反应）")
 	# 表现层统一分发器实际消费候选并走完整 _resolve_one，而非专用立矛攻击代码。
 	var sb = SandboxScript.new()
 	sb._state = s
