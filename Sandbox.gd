@@ -1138,7 +1138,9 @@ func _begin_active_turn() -> void:
 		# 回合开始对称 tick（§2.2 顺序 tick→失能→行动）：强韧豁免掷 + 递减/到期 turn_start 效果
 		for ev in _state._apply_turn_start_effects(u):
 			if str(ev.get("type", "")) == "expired":
-				_log_line("%s %s 结束" % [_cname(u), str(ev.get("name", ""))])
+				var apc := int(ev.get("ap_cost", 0))
+				_log_line("%s %s 结束%s" % [_cname(u), str(ev.get("name", "")),
+					("（起身耗 %d AP）" % apc) if apc > 0 else ""])
 			elif str(ev.get("type", "")) == "fort_shrug":
 				_log_line("[color=#7FD5A0]%s 凭强韧挣脱了「%s」[/color]" % [_cname(u), str(ev.get("name", ""))])
 			elif str(ev.get("type", "")) == "morale":

@@ -52,7 +52,8 @@ const EDITOR_STATS := ["HP_max", "atk", "acc", "eva",
 	"offhand_ws", "dual_strike", "weapon_block"]
 
 # 伪 stat：只供修正管线/技能编辑器，不进入单位基础面板，也不放宽物品词条 stat 白名单。
-const MODIFIER_LABELS := {"zoc_radius": "控制区半径", "knockback_chance": "被动击退概率"}
+const MODIFIER_LABELS := {"zoc_radius": "控制区半径", "knockback_chance": "被动击退概率",
+	"crit_def": "暴击防御"}   # 暴击防御＝运气＋此修正（🔒 2026-07-17：踉跄类 debuff 挂负值）
 
 # 非数值「状态旗」mod 键白名单（不在 LABELS、但属合法修正对象 stat）
 const FLAG_MOD_STATS := ["vision_state"]

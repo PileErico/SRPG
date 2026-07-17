@@ -630,6 +630,28 @@ func _initialize() -> void:
 				ck(not w.has("bws_2h") and not w.has("ews_2h"),
 					"%s：bws_2h/ews_2h 双手槽·组只属兼用件（决策35 修订）" % wid2)
 
+	# 14) 异常整理三新键（🔒 2026-07-17）：instanced 与 stackable 互斥、v1 禁携 reactions（实例 provider 键会互踩）；
+	#     reapply_escalates_to 引用存在＋非自身；expire_ap_cost 非负整数
+	if typeof(eff_arr) == TYPE_ARRAY:
+		var eff_ids := {}
+		for ef in eff_arr:
+			if typeof(ef) == TYPE_DICTIONARY:
+				eff_ids[str(ef.get("id", ""))] = true
+		for ef in eff_arr:
+			if typeof(ef) != TYPE_DICTIONARY:
+				continue
+			var eid14 := str(ef.get("id", "?"))
+			if bool(ef.get("instanced", false)):
+				ck(not bool(ef.get("stackable", false)), "%s：instanced 与 stackable 互斥（多实例=独立条目、叠层=单条目层数）" % eid14)
+				ck((ef.get("reactions", []) as Array).is_empty(), "%s：instanced 效果 v1 禁携 reactions（实例 provider 键会互踩）" % eid14)
+			var esc14 := str(ef.get("reapply_escalates_to", ""))
+			if esc14 != "":
+				ck(eff_ids.has(esc14), "%s：reapply_escalates_to 引用「%s」不存在（升级链悬空）" % [eid14, esc14])
+				ck(esc14 != eid14, "%s：reapply_escalates_to 禁指向自身（升级链成环）" % eid14)
+			if ef.has("expire_ap_cost"):
+				ck(typeof(ef.get("expire_ap_cost")) == TYPE_INT and int(ef.get("expire_ap_cost")) >= 0,
+					"%s：expire_ap_cost 须非负整数（倒地起身成本）" % eid14)
+
 	if _fail == 0:
 		print("=== 数据 lint 全 PASS ===")
 		quit(0)

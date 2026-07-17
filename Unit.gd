@@ -188,6 +188,12 @@ func _mod_active(m: Dictionary) -> bool:
 func _grip_source_active(src: String) -> bool:
 	if not src.begins_with("equip:"):
 		return true
+	# 缴械 🔒（2026-07-17）：被禁用武器整件下线——固有面板与词条修正一并休眠（防具/饰品 equip 源不在手槽，不受影响）。
+	# weapon_disabled 只读 effects/equipment/ItemInstances，无递归环（同 effective_grip 安全性论证）。
+	var uid := int(src.get_slice(":", 1))
+	for s in ["main_hand", "off_hand"]:
+		if int(equipment.get(s, 0)) == uid and weapon_disabled(s):
+			return false
 	var seg := src.get_slice(":", 2)
 	var is_1h := seg.begins_with("i1_")
 	if not is_1h and not seg.begins_with("i_"):
@@ -780,7 +786,20 @@ func current_main_weapon_name() -> String:
 #   ① 武器 "bws"（旧键 "bas" 双键桥）→ SkillDB 条目 → flatten_bws 扁平 legacy attack dict；
 #   ② 双读窗口：无 bws 键 → 回退旧内联 attack（迁移后正式数据不应走到；lint 收口后删此分支）；
 #   ③ 无武器攻击 = {}（调用方兜 UNARMED）。悬空 bws 引用 / flatten 空（引用了无 attack 块技能，lint 另拦）＝警告后走回退链。
+# 缴械 🔒（2026-07-17 异常整理）：武器技能＋武器本身双禁用——该件 BWS/EWS 不可用、固有面板/词条修正休眠、
+# 带武器要求的 perk 失效；徒手/格斗技/天生武器（innate_weapon tag）照用不受缴械；盾（shield tag）绑臂不可夺，豁免。
+func weapon_disabled(slot: String) -> bool:
+	if not has_state("disarmed"):
+		return false
+	var item = ItemInstances.view(int(equipment.get(slot, 0)))
+	if item == null:
+		return false
+	var t: Array = item.get("tags", [])
+	return not (t.has("innate_weapon") or t.has("shield"))
+
 func _weapon_attack_of(slot: String) -> Dictionary:
+	if weapon_disabled(slot):
+		return {}   # 缴械：该件武器技能整体不可用（普攻自然退徒手）
 	var item = ItemInstances.view(int(equipment.get(slot, 0)))
 	if item == null:
 		return {}
@@ -811,6 +830,8 @@ func _main_weapon_attack() -> Dictionary:
 # 一切扩张走 zoc_radius 修正〔立矛+1、将来远程 ZOC perk+1〕，半径 0＝无 ZOC）。
 # 判据＝主手持械件 tag（恒读主手 🔒）：melee 或 unarmed（天生武器拳脚）→ 1，其余（远程/盾主手）→ 0；主手空＝徒手 1。
 func zoc_base() -> int:
+	if weapon_disabled("main_hand"):
+		return 1   # 缴械退徒手＝天生近战
 	var item = ItemInstances.view(int(equipment.get("main_hand", 0)))
 	if item == null:
 		return 1
@@ -1069,7 +1090,7 @@ func ews_entries() -> Array:
 	var out := []
 	var seen := {}
 	var item = ItemInstances.view(int(equipment.get("main_hand", 0)))
-	if item != null:
+	if item != null and not weapon_disabled("main_hand"):   # 缴械：该件 EWS 整体不可用
 		var versat: bool = (item.get("tags", []) as Array).has("versatile")
 		for e in item.get("ews", []):
 			_append_ews_entry(out, seen, e, "main_hand", "one_handed" if versat else "")
@@ -1079,7 +1100,7 @@ func ews_entries() -> Array:
 	var oh := int(equipment.get("off_hand", 0))
 	if oh != 0 and oh != int(equipment.get("main_hand", 0)):   # 双手武器占双槽＝无独立副手
 		var oitem = ItemInstances.view(oh)
-		if oitem != null:
+		if oitem != null and not weapon_disabled("off_hand"):   # 缴械同禁副手武器（盾/天生武器豁免）
 			var oh_shield: bool = (oitem.get("tags", []) as Array).has("shield")
 			if oh_shield or can_use_offhand_ws():   # 盾豁免双武器门槛（用户裁定）；武器须 offhand_ws
 				var oversat: bool = (oitem.get("tags", []) as Array).has("versatile")
@@ -1327,6 +1348,8 @@ func prof_perk_weapon_ok(perk_id: String) -> bool:
 	var req := str(def.get("requires_weapon_tag", ""))
 	if req == "":
 		return true
+	if weapon_disabled("main_hand"):
+		return false   # 缴械：带武器要求的 perk 被动同禁（🔒 2026-07-17）
 	var item = ItemInstances.view(int(equipment.get("main_hand", 0)))
 	return item != null and (item.get("tags", []) as Array).has(req)
 

@@ -81,7 +81,8 @@
   {"id": "slashing", "cn": "斩击", "cat": "damage", "status": "in_use", "desc": "伤害类型 damage_type 词表（攻击块字段，非技能 tag——2026-07-13 迁移）"},
 
   {"id": "bleeding", "cn": "流血类", "cat": "effect", "status": "in_use", "desc": "回合末按最大生命%掉血；可被清流血类技能整批移除"},
-  {"id": "incapacitated", "cn": "失能", "cat": "effect", "status": "in_use", "desc": "眩晕/麻痹等：该单位回合直接跳过（不行动即不行使 ZOC/借机）；Unit.has_state 消费"},
+  {"id": "incapacitated", "cn": "失能", "cat": "effect", "status": "in_use", "desc": "眩晕/倒地等异常的附属属性（非独立效果）：跳过行动阶段（其他异常照常结算）、不参与任何反应（无 ZOC/借机/迎击/闪避/格挡）；结算时点最迟（先 tick 到期后判失能）；Unit.has_state 消费"},
+  {"id": "disarmed", "cn": "缴械", "cat": "effect", "status": "in_use", "desc": "武器技能+武器本身双禁用（固有面板/词条修正休眠、带武器要求的 perk 失效）；徒手/格斗技/天生武器 innate_weapon 照用、盾豁免；Unit.weapon_disabled 消费"},
   {"id": "silenced", "cn": "失语", "cat": "effect", "status": "in_use", "desc": "禁用带 verbal tag 的能力；Unit.has_state 消费"},
   {"id": "spear_stance", "cn": "立矛架势", "cat": "effect", "status": "in_use", "desc": "立矛 perk 的持续状态标记；扩大 ZOC 并开放进入迎击"},
 

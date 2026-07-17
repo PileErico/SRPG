@@ -50,6 +50,9 @@ var _w_hot: SpinBox
 var _w_expire_apply: OptionButton
 var _w_model_warn: Label    # §25：resist↔fort tag 错配黄条（模型/标签任一变动即刷新）
 var _w_chain_hint: Label    # §25：on_expire_apply 连锁链提示（成环/悬空警示）
+var _w_instanced: CheckBox  # 多实例（🔒 2026-07-17 流血翻案：每次施加=独立实例；与 stackable 互斥）
+var _w_escalate: OptionButton   # 再施加升级为（🔒 2026-07-17 踉跄→倒地升级链）
+var _w_expire_ap: SpinBox   # 到期扣 AP（🔒 2026-07-17 倒地起身成本）
 
 
 # —— §26 跨编辑器定位口 ——
@@ -229,6 +232,10 @@ func _build_form() -> void:
 	_w_stackable = EditorUI.add_check(_form, "可叠层 stackable（关＝同 id 重置时长不叠）", bool(_current.get("stackable", false)), _mark_dirty)
 	_w_stackable.toggled.connect(func(_v): _update_links())
 	_w_maxstacks = EditorUI.add_spin(_form, "叠层上限 max_stacks（0=无硬上限）", float(_current.get("max_stacks", 0)), 0, 99, 1, _mark_dirty)
+	# 多实例（🔒 2026-07-17 流血翻案）：每次施加=独立新实例各自倒数——不刷新旧时长、不叠层、
+	# 不参与跨击同族压制（高低级流血共存=不同伤口）；时长即软上限。与 stackable 互斥（lint 同口径）。
+	_w_instanced = EditorUI.add_check(_form, "多实例叠加 instanced（流血类：每次施加=独立实例各自倒数；与可叠层互斥）", bool(_current.get("instanced", false)), _mark_dirty)
+	_w_instanced.toggled.connect(func(_v): _update_links())
 	# 异常优先级（🔒 决策34）：同族（同 cat=effect 异常 tag）异 id → 恒高者起效（高顶低、低不生效）；
 	# 同族禁同级（lint 执法）保证覆盖顺序确定。无族 tag 的效果不参与。0=缺省不落键。
 	_w_priority = EditorUI.add_spin(_form, "异常优先级 priority（同族异 id 高者起效；同族禁同级）", float(_current.get("priority", 0)), -99, 99, 1, _mark_dirty)
@@ -288,6 +295,22 @@ func _build_form() -> void:
 	_w_chain_hint = _warn("")   # 连锁链提示（文案在 _update_chain_hint 联动填）
 	_w_chain_hint.visible = false
 	_form.add_child(_w_chain_hint)
+	# 升级链＋起身成本（🔒 2026-07-17 异常整理·踉跄→倒地：再施加同 id=升级；对方已挂升级目标=本效果免疫；
+	# 施加升级目标时顶掉链条下位——两者不并存。到期扣 AP=倒地起身成本，turn 开始移除时结算。）
+	_w_escalate = OptionButton.new()
+	_w_escalate.add_item("（无）")
+	_w_escalate.set_item_metadata(0, "")
+	for id in EffectDB.all():
+		if str(id) == _loaded_id:
+			continue
+		var e2 = EffectDB.all()[id]
+		_w_escalate.add_item("%s（%s）" % [str(e2.get("name", id)), str(id)])
+		_w_escalate.set_item_metadata(_w_escalate.item_count - 1, str(id))
+	_ensure_meta_option(_w_escalate, str(_current.get("reapply_escalates_to", "")))
+	_select_meta(_w_escalate, str(_current.get("reapply_escalates_to", "")))
+	_w_escalate.item_selected.connect(func(_i): _mark_dirty())
+	_form.add_child(EditorUI.field_row("再施加升级为 reapply_escalates_to（踉跄+踉跄=倒地）", _w_escalate))
+	_w_expire_ap = EditorUI.add_spin(_form, "到期扣 AP expire_ap_cost（倒地起身成本；0=无不落键）", float(_current.get("expire_ap_cost", 0)), 0, 9, 1, _mark_dirty)
 
 	if str(_current.get("sustain_by_caster", "")) != "" and bool(_current.get("sustain_by_caster", false)):
 		_form.add_child(_warn("sustain_by_caster 预留（光环轮）——现不生效，字段保留原样"))
@@ -311,8 +334,11 @@ func _update_links() -> void:
 		_w_model_warn.visible = true
 	else:
 		_w_model_warn.visible = false
-	# 2) 不适用位灰化：max_stacks 只在可叠层时生效；permanent 不递减不到期＝时长/到期时点无意义
-	_w_maxstacks.editable = _w_stackable.button_pressed
+	# 2) 不适用位灰化：max_stacks 只在可叠层时生效；permanent 不递减不到期＝时长/到期时点无意义；
+	#    instanced 与 stackable 互斥（🔒 2026-07-17：多实例=各自独立条目，叠层=单条目层数，两模型不并用）
+	_w_maxstacks.editable = _w_stackable.button_pressed and not _w_instanced.button_pressed
+	_w_stackable.disabled = _w_instanced.button_pressed
+	_w_instanced.disabled = _w_stackable.button_pressed
 	_w_duration.editable = not _w_perm.button_pressed
 	_w_timing.disabled = _w_perm.button_pressed
 	_update_chain_hint()
@@ -449,6 +475,19 @@ func _shell_collect() -> Dictionary:
 		out["on_hit_ok"] = true   # 白名单（2026-07-15）：false=缺省不落键
 	else:
 		out.erase("on_hit_ok")
+	if _w_instanced.button_pressed:
+		out["instanced"] = true   # 多实例（2026-07-17）：false=缺省不落键
+	else:
+		out.erase("instanced")
+	var esc_id := str(_w_escalate.get_selected_metadata())
+	if esc_id != "":
+		out["reapply_escalates_to"] = esc_id
+	else:
+		out.erase("reapply_escalates_to")
+	if int(_w_expire_ap.value) > 0:
+		out["expire_ap_cost"] = int(_w_expire_ap.value)
+	else:
+		out.erase("expire_ap_cost")
 	out["dot_pct_max_hp"] = int(_w_dot.value)
 	out["hot_flat"] = int(_w_hot.value)
 	var mods := []

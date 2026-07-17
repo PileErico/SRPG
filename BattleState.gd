@@ -549,6 +549,8 @@ func _hit_chance_detail(attacker, target, skill = null) -> Dictionary:
 	var acc: int = int(round(base_hit + attacker.effective_stat_f("acc") + attacker.effective_stat_f("finesse"))) \
 		+ attacker.morale_combat_mod()   # 士气档位 🔒 §10.7：命中平加 ±5/10（稳定 0）
 	var eva := int(round(target.effective_stat_f("eva") + target.effective_stat_f("agility")))
+	if target.has_state("incapacitated"):
+		eva = 0   # 失能不自主闪避（🔒 2026-07-17 异常整理：失能＝不参与任何反应；非必中——攻方仍会失手）
 	var eff: float = attacker.eff_mult("hit_eff") * target.eff_reduce("eva_eff")
 	eff *= _terrain_eff_factor(attacker, "hit_eff", true)    # 攻方地块命中效能（增益向）
 	eff *= _terrain_eff_factor(target, "eva_eff", false)     # 守方地块闪避效能（森林掩蔽·减免向）
@@ -645,9 +647,12 @@ func _resolve_compute_body(attacker, target, skill) -> Dictionary:
 	if not hit:
 		r["morale_att"] = _morale_add(attacker, -1)   # 士气：失手 −1（🔒 §10.7）
 		return r
-	# 暴击 🔒 §10.6：无人身底率——crit_rate 面板（招式/武器承载）＋技巧×0.5 −受击方运气，钳底 0
+	# 暴击 🔒 §10.6：无人身底率——crit_rate 面板（招式/武器承载）＋技巧×0.5 −受击方**暴击防御**，钳底 0。
+	# 暴击防御＝运气＋crit_def 伪 stat 修正（🔒 2026-07-17 定名：运气的压暴作用命名为可 debuff 的派生量——
+	# 既有数值零迁移；踉跄类异常挂 crit_def 负修正即扣暴击防御）。
 	var cr := maxf(0.0, float(attacker.effective_stat_f("crit_rate")) \
-		+ float(attacker.effective_stat_f("finesse")) * 0.5 - float(target.effective_stat_f("luck")))
+		+ float(attacker.effective_stat_f("finesse")) * 0.5 \
+		- float(target.effective_stat_f("luck")) - float(target.effective_stat_f("crit_def")))
 	var crit := rng.randf() * 100.0 < cr
 	# 伤害 = 攻击 × 系数 [× 暴击] [× 效能≠100%]；暴击威力＝crit_dmg ＋ 运气×0.5（🔒 §10.6 二次修订：运气加爆伤）
 	var coeff := float(skill.get("coeff", 1.0))
@@ -676,6 +681,8 @@ func _resolve_compute_body(attacker, target, skill) -> Dictionary:
 	out *= final_factor
 	# 格挡 + 全域减伤 G = max(0, 1−格挡性能/100) × 防御效能因子（下限 clamp🔒）
 	var br := float(target.effective_stat_f("block_rate"))
+	if target.has_state("incapacitated"):
+		br = 0.0   # 失能不自主格挡（🔒 2026-07-17 异常整理）
 	var blocked := rng.randf() * 100.0 < br
 	if not blocked:
 		r["morale_att"] = _morale_add(attacker, 2)   # 士气：命中 +2、被格挡无变化（🔒 §10.7）
@@ -734,11 +741,13 @@ func _resolve_compute_body(attacker, target, skill) -> Dictionary:
 		r["door_result"] = _door_settle_state(target)
 	# On-Hit Effects 双挂点合并——技能侧＋武器侧同性质只是来源不同（🔒 2026-07-15 键级统一：
 	# 技能攻击块旧单条 inflict → 与武器同形的 on_hit_effects 数组；旧键双读窗口，lint 禁回流）。
-	# 单击合并规则（🔒 决策33/34，用户口径）：
-	# ①同 effect id：**概率取高只掷一次**（施加概率在武器/技能侧、不在异常本身；ignore_fort 取或）；
+	# 单击合并规则（🔒 决策33/34＋2026-07-17 异常整理翻案）：
+	# ①同 effect id：**概率相加合掷一次**（⚠ 原「取高」翻案——剑普通流血＋技能普通流血＝概率叠加；
+	#   施加概率在武器/技能侧、不在异常本身；ignore_fort 取或）；
 	# ②异 id 同族（共享 cat=effect 异常 tag——各种出血变体都带 bleeding）：**只按优先级更高的那条施加**
-	#   （概率与效果都取高者，低者本次不掷）；③无关异常各自独立掷。
-	# 目标身上已挂同族旧效果的覆盖/压制＝_add_effect_by_id 优先级闸（跨击语义）。空手/无实例＝无武器侧。
+	#   （拖割普通流血＋锯齿剑高级流血→只掷高级，低者本次不掷）；③无关异常各自独立掷。
+	# 目标身上已挂同族旧效果：非实例化效果走 _add_effect_by_id 优先级闸（跨击压制）；
+	# instanced 效果（流血类）实例共存不压制——不同伤口（🔒 2026-07-17）。空手/无实例＝无武器侧。
 	var cands := []   # [{inf, from_skill}]
 	for se in skill.get("on_hit_effects", []):
 		if typeof(se) == TYPE_DICTIONARY and str(se.get("effect", "")) != "":
@@ -759,8 +768,8 @@ func _resolve_compute_body(attacker, target, skill) -> Dictionary:
 		for f in final:
 			var finf: Dictionary = f["inf"]
 			var fid := str(finf.get("effect", ""))
-			if ceid != "" and ceid == fid:                      # ①同 id：概率取高
-				finf["chance"] = maxf(float(finf.get("chance", 100.0)), float(cinf.get("chance", 100.0)))
+			if ceid != "" and ceid == fid:                      # ①同 id：概率相加合掷一次（2026-07-17 翻案原「取高」）
+				finf["chance"] = float(finf.get("chance", 100.0)) + float(cinf.get("chance", 100.0))
 				if bool(cinf.get("ignore_fort", false)):
 					finf["ignore_fort"] = true
 				f["from_skill"] = bool(f["from_skill"]) or bool(c["from_skill"])
@@ -1129,18 +1138,38 @@ func _add_effect_by_id(target, inf: Dictionary, eid: String) -> bool:
 	if def == null:
 		push_warning("_add_effect: 未知效果 id=%s（EffectDB 无此条目，跳过）" % eid)
 		return false
+	# 升级链＋互斥（🔒 2026-07-17 异常整理·踉跄→倒地）：
+	# ①目标已挂本效果的升级目标 → 免疫不生效（倒地者不吃踉跄）；
+	# ②目标已挂同 id 且本效果带 reapply_escalates_to → 摘掉自身、改施加升级目标（踉跄+踉跄=倒地）；
+	# ③施加某效果时顶掉「以它为升级目标」的链条下位（直接施加倒地也摘在场踉跄——两者不并存）。
+	var esc := str(def.get("reapply_escalates_to", ""))
+	if esc != "":
+		for e in target.effects:
+			if str(e.get("id", "")) == esc:
+				return false
+		for e in target.effects:
+			if str(e.get("id", "")) == eid:
+				_purge_effect_entry(target, e)
+				return _add_effect_by_id(target, {"id": esc}, esc)
+	for e in target.effects.duplicate():
+		var edef0 = EffectDB.get_effect(str(e.get("id", "")))
+		if edef0 != null and str(edef0.get("reapply_escalates_to", "")) == eid:
+			_purge_effect_entry(target, e)
 	# 异常优先级（🔒 决策34）：同族（共享 cat=effect 异常 tag）异 id → 恒高优先级起效——
 	# 已挂更高者＝新效果被压制不生效；新者更高＝顶掉旧低者（修正一并摘）。
 	# 同级＝数据错误（lint 同族禁同级；运行时保守压制新者+告警）。同 id 不走此闸（刷新/叠层照旧）。
+	# ⚠ instanced（多实例，流血类 🔒 2026-07-17 翻案）：不参与跨击同族压制——高低级流血实例共存（不同伤口）；
+	#   单击内高低择一仍在 on-hit 合并层。已挂的 instanced 效果同样不被新效果顶掉。
+	var instanced := bool(def.get("instanced", false))
 	var fam: Array = EffectDB.family_tags(def)
-	if not fam.is_empty():
+	if not fam.is_empty() and not instanced:
 		var prio := int(def.get("priority", 0))
 		for e in target.effects.duplicate():
 			if str(e.get("id", "")) == eid:
 				continue
 			var edef = EffectDB.get_effect(str(e.get("id", "")))
-			if edef == null:
-				continue   # 匿名/悬空效果不参与优先级
+			if edef == null or bool(edef.get("instanced", false)):
+				continue   # 匿名/悬空/多实例效果不参与优先级
 			var shared := false
 			for t in EffectDB.family_tags(edef):
 				if fam.has(t):
@@ -1154,20 +1183,27 @@ func _add_effect_by_id(target, inf: Dictionary, eid: String) -> bool:
 			if eprio == prio:
 				push_warning("_add_effect: 同族同级异常「%s」vs「%s」（priority %d）——数据应错开优先级（lint 拦）；保守压制新者" % [eid, str(e.get("id", "")), prio])
 				return false
-			_remove_mods_by_source(target, str(e.get("source", "")))   # 新者更高：顶掉旧低者
-			target.clear_reaction_provider("effect", str(e.get("id", "")))
-			target.effects.erase(e)
-	target.clear_reaction_provider("effect", eid)   # 刷新/重挂按 limit 规则重新初始化
+			_purge_effect_entry(target, e)   # 新者更高：顶掉旧低者
 	var source := "buff:" + eid
-	_remove_mods_by_source(target, source)   # 刷新/叠层：先摘旧修正、按最新（含叠层后应有的 mods）重挂
+	if instanced:
+		# 多实例（🔒 2026-07-17 流血翻案）：每次施加＝独立新实例（不刷新旧时长、不叠层、各自倒数）；
+		# per-instance 唯一 source——到期/清除各摘各的修正，互不误伤。v1 lint：instanced 禁 stackable/禁携 reactions。
+		var n := 1
+		while _source_in_use(target, "%s#%d" % [source, n]):
+			n += 1
+		source = "%s#%d" % [source, n]
+	else:
+		target.clear_reaction_provider("effect", eid)   # 刷新/重挂按 limit 规则重新初始化
+		_remove_mods_by_source(target, source)   # 刷新/叠层：先摘旧修正、按最新（含叠层后应有的 mods）重挂
 	var dur := _eval_effect_duration(def)
 	var stackable := bool(def.get("stackable", false))
 	var max_stacks := int(def.get("max_stacks", 0))
 	var existing = null
-	for e in target.effects:
-		if str(e.get("id", "")) == eid:
-			existing = e
-			break
+	if not instanced:
+		for e in target.effects:
+			if str(e.get("id", "")) == eid:
+				existing = e
+				break
 	if existing != null:
 		existing["duration"] = dur   # 同 id：刷新时长
 		if stackable:
@@ -1192,6 +1228,8 @@ func _add_effect_by_id(target, inf: Dictionary, eid: String) -> bool:
 		}
 		if bool(inf.get("ignore_fort", false)):
 			e["ignore_fort"] = true   # 无视强韧 🔒（§5）：每回合豁免也跳过（快照随 effects 原样保真）
+		if int(def.get("expire_ap_cost", 0)) > 0:
+			e["expire_ap_cost"] = int(def.get("expire_ap_cost", 0))   # 到期扣 AP（🔒 2026-07-17 倒地起身成本；烙进条目=快照安全）
 		if stackable:
 			e["stacks"] = 1
 		target.effects.append(e)
@@ -1218,6 +1256,19 @@ func _remove_mods_by_source(u, source: String) -> void:
 	if u == null or typeof(u.modifiers) != TYPE_ARRAY:
 		return
 	u.modifiers = u.modifiers.filter(func(m): return str(m.get("source", "")) != source)
+
+# 摘掉一条效果实体（修正 + 反应账本 + 条目）——升级链/互斥/顶替共用（🔒 2026-07-17）。
+func _purge_effect_entry(target, e: Dictionary) -> void:
+	_remove_mods_by_source(target, str(e.get("source", "")))
+	target.clear_reaction_provider("effect", str(e.get("id", "")))
+	target.effects.erase(e)
+
+# 目标身上是否已有某 source 的效果（instanced 实例 source 唯一化探测用）。
+func _source_in_use(target, source: String) -> bool:
+	for e in target.effects:
+		if str(e.get("source", "")) == source:
+			return true
+	return false
 
 # 清空单位的效果 + 所有 buff 来源的临时修正（重开/退战/换图用）；装备/特性等常驻修正保留。
 func _clear_effects_and_buffs(u) -> void:
@@ -1318,7 +1369,13 @@ func _countdown_and_expire(u, e, keep: Array, events: Array, chains: Array) -> v
 	else:
 		_remove_mods_by_source(u, str(e.get("source", "buff:" + str(e.get("name", "")))))   # 到期：连带摘掉其挂的修正
 		u.clear_reaction_provider("effect", str(e.get("id", "")))
-		events.append({"type": "expired", "name": str(e.get("name", ""))})
+		var apc := int(e.get("expire_ap_cost", 0))
+		if apc > 0:
+			u.ap = maxi(0, int(u.ap) - apc)   # 起身成本（🔒 2026-07-17 倒地：turn 开始移除时扣 AP）
+		var ev := {"type": "expired", "name": str(e.get("name", ""))}
+		if apc > 0:
+			ev["ap_cost"] = apc
+		events.append(ev)
 		var chain := str(e.get("on_expire_apply", ""))
 		if chain != "":
 			chains.append(chain)
