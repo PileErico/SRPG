@@ -807,6 +807,16 @@ func _weapon_attack_of(slot: String) -> Dictionary:
 func _main_weapon_attack() -> Dictionary:
 	return _weapon_attack_of("main_hand")
 
+# ZOC 底值（🔒 2026-07-17 用户整理：ZOC 存在性＝半径算术——近战武器 1 / 远程武器 0 / 徒手＝天生近战 1；
+# 一切扩张走 zoc_radius 修正〔立矛+1、将来远程 ZOC perk+1〕，半径 0＝无 ZOC）。
+# 判据＝主手持械件 tag（恒读主手 🔒）：melee 或 unarmed（天生武器拳脚）→ 1，其余（远程/盾主手）→ 0；主手空＝徒手 1。
+func zoc_base() -> int:
+	var item = ItemInstances.view(int(equipment.get("main_hand", 0)))
+	if item == null:
+		return 1
+	var t: Array = item.get("tags", [])
+	return 1 if (t.has("melee") or t.has("unarmed")) else 0
+
 # 基础攻击 ＝ 恒读主手武器 🔒（§6.2）：主手无武器攻击 → 徒手 UNARMED（不退副手）。
 # 比路兹起降已把活跃爪换进主手，故此处天然正确、无需 airborne 分支。
 func basic_attack() -> Dictionary:

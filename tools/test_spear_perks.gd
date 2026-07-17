@@ -116,7 +116,7 @@ func _initialize() -> void:
 	ck(not u.has_state("spear_stance") and s._zoc_radius(u) == 1 and u.reaction_state.is_empty(),
 		"下一次自身turn开始架势到期并清反应账本")
 
-	# 被动离开 ZOC 借机（⚠ 2026-07-17 用户二拍·涌现口径）：队友推开＝旁观者补刀；推动者本人正在行动腾不出手＝排除。
+	# 被动离开 ZOC 借机（🔒 借机条件② 2026-07-17）：队友推开＝旁观者补刀；当前行动单位（推动者）腾不出手＝排除。
 	var s2 := BattleState.new()
 	s2._new_grassland(9, 7)
 	s2.rng.seed = 20260717
@@ -125,17 +125,64 @@ func _initialize() -> void:
 	var victim := Unit.new("受害", "enemy", 4, 3)
 	for x in [pusher, watcher, victim]:
 		x.stats["HP"] = float(x.stats.get("HP_max", 40))
-	var ev := {"unit": victim, "steps": 1, "blocked": false, "capped": false, "by": pusher,
+	var ev := {"unit": victim, "steps": 1, "blocked": false, "capped": false,
 		"from": Vector2i(4, 3), "to": Vector2i(4, 2), "path": [Vector2i(4, 3), Vector2i(4, 2)]}
-	s2.units = [pusher, victim]   # 场上只有推动者邻 from 格 → 排除后无人借机
+	s2.units = [pusher, victim]   # 场上只有当前行动者（推动者）邻 from 格 → 排除后无人借机
+	s2.turn_order = [pusher]
+	s2.active_index = 0
 	var sb2 = SandboxScript.new()
 	sb2._state = s2
 	sb2._log_displaces([ev.duplicate(true)])
-	ck(s2.zoc_triggered.is_empty(), "推动者自己不借机（正在行动腾不出手）")
-	s2.units = [pusher, watcher, victim]   # 加入旁观队友（也邻 from 格）→ 借机成立
+	ck(s2.zoc_triggered.is_empty(), "当前行动单位（推动者）不借机（条件②：轮到谁行动谁腾不出手）")
+	s2.units = [pusher, watcher, victim]   # 加入旁观队友（也邻 from 格，非行动者）→ 借机成立
 	sb2._log_displaces([ev.duplicate(true)])
 	ck(s2.zoc_triggered.has(s2._zoc_key(watcher, victim)), "队友推开＝旁观者对被动离开者借机（每 round 每对子去重）")
+	# 飞行单位无视近战 ZOC（🔒 2026-07-17）：被推穿也不挨借机
+	s2.zoc_triggered.clear()
+	victim.tags.append("flying")
+	sb2._log_displaces([ev.duplicate(true)])
+	ck(s2.zoc_triggered.is_empty(), "飞行单位无视近战 ZOC＝被推穿不挨借机")
+	ck(not s2._in_hostile_zoc(Vector2i(4, 3), victim) and not s2._unit_entered_owner_zoc(watcher, {"unit": victim, "path": [Vector2i(7, 3), Vector2i(6, 3)]}),
+		"飞行对 ZOC 全豁免（停步判定/迎击触发同免——同路径地面单位会触发）")
+	victim.tags.erase("flying")
 	sb2.free()
+
+	# ZOC 内部挪动耗尽移动点 / 离开圈外保留剩余（🔒 2026-07-17）
+	var s3 := BattleState.new()
+	s3._new_grassland(9, 7)
+	s3.rng.seed = 3
+	var sentinel := Unit.new("哨卫", "player", 4, 3)
+	var walker := Unit.new("走位", "enemy", 3, 3)
+	for x in [sentinel, walker]:
+		x.stats["HP"] = float(x.stats.get("HP_max", 40))
+	s3.units = [sentinel, walker]
+	s3.turn_order = [walker]
+	s3.active_index = 0
+	var sb3 = SandboxScript.new()
+	sb3._state = s3
+	var in_cell := Vector2i(-9, -9)
+	var out_cell := Vector2i(-9, -9)
+	for nb in s3._neighbors(walker.col, walker.row):
+		if not s3._cell_in_bounds(nb.x, nb.y) or nb == Vector2i(sentinel.col, sentinel.row):
+			continue
+		if s3._hex_dist(nb, Vector2i(sentinel.col, sentinel.row)) == 1:
+			in_cell = nb
+		elif s3._hex_dist(nb, Vector2i(sentinel.col, sentinel.row)) >= 2:
+			out_cell = nb
+	ck(in_cell.x >= 0 and out_cell.x >= 0, "试场存在同圈相邻格与圈外相邻格")
+	walker.move_points = 5
+	s3.zoc_triggered[s3._zoc_key(sentinel, walker)] = true   # 掐掉借机随机性，只验移动点规则
+	sb3._ai_exec_move(walker, {"cell": in_cell, "path": [Vector2i(3, 3), in_cell], "cost": 1})
+	ck(Vector2i(walker.col, walker.row) == in_cell and walker.move_points == 0,
+		"ZOC 内部挪动＝耗尽全部移动点（躲过借机也走不快）")
+	walker.col = 3
+	walker.row = 3
+	walker.move_points = 5
+	s3.zoc_triggered[s3._zoc_key(sentinel, walker)] = true
+	sb3._ai_exec_move(walker, {"cell": out_cell, "path": [Vector2i(3, 3), out_cell], "cost": 1})
+	ck(Vector2i(walker.col, walker.row) == out_cell and walker.move_points == 4,
+		"离开圈外＝剩余移动点保留、圈外自由行动")
+	sb3.free()
 
 	if _fail == 0:
 		print("=== 全部断言 PASS ===")

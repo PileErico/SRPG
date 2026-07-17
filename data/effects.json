@@ -62,7 +62,7 @@
     "id": "spear_set_stance",
     "kind": "buff",
     "max_stacks": 0,
-    "mods": [{"stat": "zoc_radius", "op": "flat", "value": 2}],
+    "mods": [{"stat": "zoc_radius", "op": "flat", "value": 1}],
     "name": "立矛",
     "on_expire_apply": "",
     "permanent": false,

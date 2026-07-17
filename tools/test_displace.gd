@@ -159,13 +159,11 @@ func _initialize() -> void:
 	s._pending_displace.clear()
 	r = first_hit(s, a, d, {"coeff": 0.0, "is_reaction": true, "on_hit_displace": {"mode": "push", "distance": 1, "chance": 200}})
 	ck(not r.is_empty() and r.has("displace_req"), "反应段（is_reaction）同样判定击退（涌现口径）")
-	ck(not s._pending_displace.is_empty() and s._pending_displace[-1].get("by") == a,
-		"位移请求携带推动者 by（被动离开借机的排除依据）")
 	s._pending_displace.clear()
-	# 被动离开借机的排除口（2026-07-17 二拍）：推动者本人不借机，其余 ZOC 拥有者照常
+	# 借机条件②排除口（🔒 2026-07-17）：当前行动单位腾不出手，其余 ZOC 拥有者照常
 	s.zoc_triggered.clear()
-	ck(s._first_zoc_owner(Vector2i(d.col, d.row), d) == a, "无排除＝推动者也是候选拥有者")
-	ck(s._first_zoc_owner(Vector2i(d.col, d.row), d, a) == null, "排除推动者＝无人借机")
+	ck(s._first_zoc_owner(Vector2i(d.col, d.row), d) == a, "无排除＝行动者也是候选拥有者")
+	ck(s._first_zoc_owner(Vector2i(d.col, d.row), d, a) == null, "排除当前行动单位＝无人借机")
 
 	# —— 3) 数据接线 + 消耗口 ——
 	var repel = SkillDB.get_skill("ws_spear_repel")

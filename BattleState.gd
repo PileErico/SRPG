@@ -225,7 +225,7 @@ func _dijkstra(unit, budget: int) -> Dictionary:
 		if u == unit:
 			continue
 		occupied[Vector2i(u.col, u.row)] = true
-		if _is_hostile(unit, u):
+		if _is_hostile(unit, u) and not unit.is_airborne():   # 飞行无视近战 ZOC 🔒：不停步不借机
 			for c in _zoc_cells(u):
 				zoc[c] = true
 	var open = MinHeap.new()
@@ -285,10 +285,12 @@ func _path_via(came: Dictionary, cell: Vector2i) -> Array:
 # ============ ZOC 机制（控制区 + 借机判定的模型部分）============
 
 # 单位的 ZOC 半径；失能不产生控制区。立矛效果把伪属性 zoc_radius 提到 2。
+# ZOC 半径（🔒 2026-07-17 用户整理·半径算术）：底值＝武器决定（近战1/远程0，Unit.zoc_base）＋ zoc_radius 修正合计；
+# 失能＝0。半径 0＝无 ZOC——借机/停步/耗尽/迎击等一切依附机制自然归零，无需存在性特判。
 func _zoc_radius(unit) -> int:
 	if unit == null or unit.has_state("incapacitated"):
 		return 0
-	return maxi(1, int(unit.effective_stat("zoc_radius")))
+	return maxi(0, unit.zoc_base() + int(unit.effective_stat("zoc_radius")))
 
 # 单位的 ZOC（控制区）= 半径内、除自身外的界内格。
 func _zoc_cells(unit) -> Dictionary:
@@ -302,25 +304,33 @@ func _zoc_cells(unit) -> Dictionary:
 func _zoc_key(owner, mover) -> String:
 	return "%d_%d" % [owner.get_instance_id(), mover.get_instance_id()]
 
-# cell 是否落在「敌对于 mover 的某单位」的 ZOC 内（= 与某敌对单位相邻）
+# cell 是否落在「敌对于 mover 的某单位」的 ZOC 内（= 与某敌对单位相邻）。
+# 飞行单位无视近战 ZOC 🔒（2026-07-17 用户整理；将来「空域警戒」对空 ZOC 另设属性再开）。
 func _in_hostile_zoc(cell: Vector2i, mover) -> bool:
+	if mover != null and mover.is_airborne():
+		return false
 	for u in units:
 		if u != mover and _is_hostile(mover, u) and _hex_dist(cell, Vector2i(u.col, u.row)) <= _zoc_radius(u):
 			return true
 	return false
 
 # 取 cell 处第一个「本 round 尚未对 mover 触发过」的敌对 ZOC 拥有者（找不到=null）。
-# exclude＝排除者（被动位移借机 2026-07-17 用户口径：推动者本人正在行动、腾不出手补刀——队友推开才有借机）。
+# exclude＝当前行动单位（🔒 借机条件② 2026-07-17：轮到谁行动谁腾不出手——我推开敌人自己不补刀、队友推开才有刀）。
+# 飞行 mover 无视近战 ZOC → 恒无拥有者。
 func _first_zoc_owner(cell: Vector2i, mover, exclude = null):
+	if mover != null and mover.is_airborne():
+		return null
 	for u in units:
 		if u != mover and u != exclude and _is_hostile(mover, u) and _hex_dist(cell, Vector2i(u.col, u.row)) <= _zoc_radius(u):
 			if not zoc_triggered.has(_zoc_key(u, mover)):
 				return u
 	return null
 
-# 移动范围内、属于敌方 ZOC 的格（移动模式自动标红）
+# 移动范围内、属于敌方 ZOC 的格（移动模式自动标红）；飞行 mover 无视近战 ZOC → 不标红
 func _enemy_zoc_in_range(mover, reach: Dictionary) -> Dictionary:
 	var out := {}
+	if mover != null and mover.is_airborne():
+		return out
 	for u in units:
 		if u == mover or not _is_hostile(mover, u):
 			continue
@@ -800,13 +810,13 @@ func _resolve_compute_body(attacker, target, skill) -> Dictionary:
 					# ＝目标离攻击者的最终距离上限——跨请求累计生效（贴脸双翼矛 1→2→3；第2格起步 2→3 封顶）
 					var kb_cap: int = maxi(0, int(skill.get("range", 1))) + kb_dist
 					_pending_displace.append({"unit": target, "dir": kd, "distance": kb_dist,
-						"origin": Vector2i(attacker.col, attacker.row), "max_dist": kb_cap, "by": attacker})
+						"origin": Vector2i(attacker.col, attacker.row), "max_dist": kb_cap})
 					r["displace_req"] = {"dir": kd, "distance": kb_dist, "max_dist": kb_cap}
 	return r
 
 # ============ 位移解算器（displace 族首铺 🔒 红队报告 §2-1：swap/push/pull/charge 四模式规划共用一个解算器，
-# 本次落 push；被动位移不受 ZOC 停步 🔒；被动离开/穿过敌对 ZOC 照样吃借机——唯推动者除外
-# 〔正在行动腾不出手，⚠ 2026-07-17 用户二拍翻案原「不触发借机」〕，判定在宿主 _log_displaces）============
+# 本次落 push；被动位移不受 ZOC 停步 🔒；被动离开/穿过敌对 ZOC 照样吃借机——唯当前行动单位除外
+# 〔借机条件② 2026-07-17：轮到谁行动谁腾不出手，⚠ 翻案原「不触发借机」〕，判定在宿主 _log_displaces）============
 
 # 位移延迟结算队列（🔒 2026-07-15 用户定调「攻击流程先结算完，再走位移效果」——攻击动作三层：
 # 动作(1AP)→攻击判定(逐段/逐目标独立掷)→伤害判定；击退判定挂攻击判定层、坐标变更集中在动作末）。
@@ -825,7 +835,7 @@ func flush_displaces() -> Array:
 		var res := displace_push(u, int(req["dir"]), int(req["distance"]),
 			req.get("origin", Vector2i.ZERO), int(req.get("max_dist", -1)))
 		events.append({"unit": u, "steps": int(res["steps"]), "blocked": bool(res["blocked"]),
-			"capped": bool(res.get("capped", false)), "by": req.get("by"),
+			"capped": bool(res.get("capped", false)),
 			"from": res["from"], "to": res["to"], "path": res.get("path", [res["from"], res["to"]])})
 	_pending_displace.clear()
 	return events
@@ -887,6 +897,8 @@ func _unit_entered_owner_zoc(owner, event: Dictionary) -> bool:
 	var mover = event.get("unit")
 	var path: Array = event.get("path", [])
 	if mover == null or owner == mover or path.size() < 2:
+		return false
+	if mover.is_airborne():   # 飞行无视近战 ZOC 🔒 → 借用 ZOC 当触发条件的反应（立矛迎击）同样够不着
 		return false
 	var center := Vector2i(owner.col, owner.row)
 	var radius := _zoc_radius(owner)

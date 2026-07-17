@@ -1228,6 +1228,7 @@ func _ai_exec_move(unit, plan: Dictionary) -> bool:
 		unit.ap -= 1
 		unit.move_points += unit.move_allowance(_state._tile_tags_at(unit.col, unit.row))   # effective 口径＋脚下地块条件（与预览范围 _dijkstra 一致）
 	# ZOC 借机：离开起点前判定（敌方离开我方控制区也会被借机）；被钉住则本次没走成
+	var was_in_zoc := _in_hostile_zoc(Vector2i(unit.col, unit.row), unit)
 	if _zoc_on_leave(unit):
 		unit.move_points = 0
 		_refresh_info()
@@ -1237,6 +1238,8 @@ func _ai_exec_move(unit, plan: Dictionary) -> bool:
 	unit.move_points -= int(plan.get("cost", 0))
 	unit.col = pick.x
 	unit.row = pick.y
+	if was_in_zoc and _in_hostile_zoc(pick, unit):
+		unit.move_points = 0   # ZOC 内部挪动＝耗尽全部移动点（🔒 2026-07-17：躲得过借机也走不快；离开圈外才自由）
 	_dispatch_reaction_event("unit_entered_zoc", {"unit": unit, "path": path, "kind": "voluntary"})
 	_refresh_info()
 	await _animate_path(unit, path)
@@ -2176,12 +2179,12 @@ func _log_displaces(evs: Array) -> void:
 		if int(ev.get("steps", 0)) > 0:
 			_log_line("　%s 被击退 %d 格%s" % [_cname(mover), int(ev["steps"]),
 				"（撞停）" if bool(ev.get("blocked", false)) else ""])
-			# 被动离开/穿过敌对 ZOC 照样吃借机（⚠ 2026-07-17 用户二拍·涌现口径：借机＝空手者逮破绽——
-			# 队友推开我补刀；唯推动者〔ev.by〕本人正在行动腾不出手，排除）。与自愿移动同律：
-			# 沿途逐格判「离开时所在格」、一次位移最多一记、每 round 每对子去重；借机不中断位移（已推完）。
+			# 被动离开/穿过敌对 ZOC 照样吃借机（🔒 借机条件② 2026-07-17：轮到谁行动谁腾不出手——
+			# 我推开敌人自己不补刀、队友推开才有刀）。与自愿移动同律：沿途逐格判「离开时所在格」、
+			# 一次位移最多一记、每 round 每对子去重；借机不中断位移（已推完）。
 			var kb_path: Array = ev.get("path", [])
 			for i in range(1, kb_path.size()):
-				var zowner = _state._first_zoc_owner(kb_path[i - 1], mover, ev.get("by"))
+				var zowner = _state._first_zoc_owner(kb_path[i - 1], mover, active_unit())
 				if zowner == null:
 					continue
 				_state.zoc_triggered[_zoc_key(zowner, mover)] = true
@@ -2330,6 +2333,7 @@ func _commit_move(col: int, row: int) -> void:
 		u.ap -= 1
 		u.move_points += u.move_allowance(_state._tile_tags_at(u.col, u.row))   # effective 口径＋脚下地块条件（与预览范围 _dijkstra 一致）
 	# ZOC 借机：离开起点前判定（起点在敌对控制区内才触发）；命中被钉住则本次移动作废
+	var was_in_zoc := _in_hostile_zoc(Vector2i(u.col, u.row), u)
 	if _zoc_on_leave(u):
 		u.move_points = 0
 		_clear_selection()
@@ -2340,6 +2344,8 @@ func _commit_move(col: int, row: int) -> void:
 	u.move_points -= cost
 	u.col = col
 	u.row = row
+	if was_in_zoc and _in_hostile_zoc(Vector2i(col, row), u):
+		u.move_points = 0   # ZOC 内部挪动＝耗尽全部移动点（🔒 2026-07-17：躲得过借机也走不快；离开圈外才自由）
 	_dispatch_reaction_event("unit_entered_zoc", {"unit": u, "path": path, "kind": "voluntary"})
 	_clear_selection()
 	_refresh_info()
