@@ -100,14 +100,9 @@ func _shell_titlebar_extras(titlebar: HBoxContainer) -> void:
 		_confirm_discard))
 
 func _shell_build_right(split: HSplitContainer) -> void:
-	var scroll := ScrollContainer.new()
-	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_form = VBoxContainer.new()
-	_form.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_form.add_theme_constant_override("separation", 8)
-	scroll.add_child(_form)
-	split.add_child(scroll)
+	var fs := EditorUI.form_scroll()   # 表单定宽（排版整理 2026-07-16：不随窗口无限横向拉伸）
+	_form = fs[1]
+	split.add_child(fs[0])
 
 func _shell_show_empty() -> void:
 	_clear_form()
@@ -187,13 +182,16 @@ func _clear_form() -> void:
 func _build_form() -> void:
 	_clear_form()
 	_form.add_child(EditorUI.section_title("基础"))
-	_w_id = EditorUI.add_line(_form, "id（唯一主键；技能/武器引用它）", str(_current.get("id", "")), _mark_dirty)
-	_w_name = EditorUI.add_line(_form, "名字", str(_current.get("name", "")), _mark_dirty)
+	var idnm := EditorUI.add_line_pair(_form, "id（技能/武器引用）", str(_current.get("id", "")),
+		"名字", str(_current.get("name", "")), _mark_dirty)   # 同行（排版整理 2026-07-16）
+	_w_id = idnm[0]
+	_w_name = idnm[1]
 	_build_icon_row()
 	_w_desc = TextEdit.new()
 	_w_desc.text = str(_current.get("desc", ""))
 	_w_desc.custom_minimum_size = Vector2(0, 56)
 	_w_desc.scroll_fit_content_height = true
+	_w_desc.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY   # 自动换行（排版整理 2026-07-16）
 	_w_desc.text_changed.connect(_mark_dirty)
 	_form.add_child(EditorUI.field_row("描述 desc（buff 栏 tooltip）", _w_desc))
 	_w_kind = _dropdown_pairs("类别 kind", KINDS, str(_current.get("kind", "debuff")))

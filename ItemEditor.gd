@@ -170,14 +170,9 @@ func _shell_build_right(split: HSplitContainer) -> void:
 	right_split.split_offset = 380
 	split.add_child(right_split)
 
-	var right_scroll := ScrollContainer.new()
-	right_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	right_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_form = VBoxContainer.new()
-	_form.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_form.add_theme_constant_override("separation", 8)
-	right_scroll.add_child(_form)
-	right_split.add_child(right_scroll)
+	var fs := EditorUI.form_scroll()   # 表单定宽（排版整理 2026-07-16：不随窗口无限横向拉伸）
+	_form = fs[1]
+	right_split.add_child(fs[0])
 
 	var prev_scroll := ScrollContainer.new()
 	prev_scroll.custom_minimum_size = Vector2(230, 0)
@@ -415,14 +410,17 @@ func _build_form() -> void:
 	_select_meta(_w_kind, _current_kind)
 	_w_kind.item_selected.connect(func(i): _on_kind_changed(str(_w_kind.get_item_metadata(i))))
 	_form.add_child(EditorUI.field_row("物品大类", _w_kind))
-	_w_id = _add_line(_form, "id（唯一主键）", str(_current.get("id", "")))
-	_w_name = _add_line(_form, "名字", str(_current.get("name", "")))
+	var idnm := EditorUI.add_line_pair(_form, "id（唯一主键）", str(_current.get("id", "")),
+		"名字", str(_current.get("name", "")), _refresh_preview)   # 同行（排版整理 2026-07-16）
+	_w_id = idnm[0]
+	_w_name = idnm[1]
 	_build_icon_row()
 	# §33 风味文本 desc（全大类通用可选键；tooltip 置底斜体灰渲染）——空串保存不落键
 	_w_desc = TextEdit.new()
 	_w_desc.text = str(_current.get("desc", ""))
 	_w_desc.custom_minimum_size = Vector2(0, 56)
 	_w_desc.scroll_fit_content_height = true
+	_w_desc.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY   # 自动换行（排版整理 2026-07-16）
 	_w_desc.text_changed.connect(_refresh_preview)
 	_form.add_child(EditorUI.field_row("风味文本 desc（可空）", _w_desc))
 

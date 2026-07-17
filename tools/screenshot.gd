@@ -11,6 +11,8 @@ extends SceneTree
 ##   w / h   窗口尺寸（默认 1600×900）
 ##   frames  截图前等待帧数（默认 12；UI 有动画/延迟布局时调大）
 ##   setup   可选，调实例上的一个无参方法名（如给场景喂测试数据）
+##   call/arg 可选，调实例方法（带一个字符串参）——如 --call=_shell_load --arg=spear_set_stance 定位编辑器条目
+##   scroll  可选，bottom＝全部 ScrollContainer 滚到底（目检表单下半区）
 ## 输出：stdout 打印 "SHOT: <绝对路径> (err=0 ...)"；退出码 0=成功。
 
 func _initialize() -> void:
@@ -42,9 +44,20 @@ func _initialize() -> void:
 	var load_path := str(args.get("load", ""))
 	if load_path != "" and inst.has_method("load_from_file"):
 		inst.call("load_from_file", load_path)
+	# 可选 call 钩子：调实例方法（带一个字符串参数）——定位编辑器条目等
+	var callm := str(args.get("call", ""))
+	if callm != "" and inst.has_method(callm):
+		if args.has("arg"):
+			inst.call(callm, str(args.get("arg", "")))
+		else:
+			inst.call(callm)
 	# 等待若干帧：确保容器布局稳定 + Control._draw 至少跑过一次
 	for i in frames:
 		await process_frame
+	if str(args.get("scroll", "")) == "bottom":   # 滚到底再补几帧（滚动条重布局）
+		_scroll_bottom(get_root())
+		for i in 3:
+			await process_frame
 	var img := get_root().get_texture().get_image()
 	if img == null:
 		push_error("[screenshot] 取不到 viewport image")
@@ -57,6 +70,12 @@ func _initialize() -> void:
 	var err := img.save_png(abs_out)
 	print("SHOT: %s (err=%d, %dx%d)" % [abs_out, err, img.get_width(), img.get_height()])
 	quit(0 if err == OK else 1)
+
+func _scroll_bottom(n: Node) -> void:
+	if n is ScrollContainer:
+		(n as ScrollContainer).scroll_vertical = 999999
+	for c in n.get_children():
+		_scroll_bottom(c)
 
 # -- 之后的 --key=value → {key: value}
 func _parse_args() -> Dictionary:

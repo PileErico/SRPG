@@ -127,17 +127,21 @@ func _shell_build_right(split: HSplitContainer) -> void:
 	_panel.on_edit = _on_panel_edit
 	panel_scroll.add_child(_panel)
 
-	# 右列：编辑列（身份/标签条 + 能力 + 技艺；内容超高走纵向滚动、超宽走横向滚动不裁切）
+	# 右列：编辑列（身份/标签条 + 能力 + 技艺）——定宽（排版整理 2026-07-16：上限 760、
+	# 窗口不足缩到可用宽；原「超宽走横向滚动」废——行内容按列宽收缩，不再无限横向拉伸）
 	var edit_scroll := ScrollContainer.new()
 	edit_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	edit_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	edit_scroll.custom_minimum_size = Vector2(430, 0)
+	edit_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	cols.add_child(edit_scroll)
 	_strip = VBoxContainer.new()
 	_strip.add_theme_constant_override("separation", 4)
 	_strip.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var strip_panel := EditorUI.panelize(_strip)
-	strip_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	strip_panel.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	edit_scroll.resized.connect(func():
+		strip_panel.custom_minimum_size.x = clampf(edit_scroll.size.x - 18.0, 400.0, 760.0))
 	edit_scroll.add_child(strip_panel)
 
 
@@ -693,18 +697,20 @@ func _build_free_tag_ui() -> void:
 		pick.select(0))
 	adder.add_child(pick)
 	var manual := LineEdit.new()
-	manual.placeholder_text = "手动 tag（如 char_xxx）"
+	manual.placeholder_text = "手动 tag（如 char_xxx；回车添加）"
 	manual.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	adder.add_child(manual)
-	var addb := Button.new()
-	addb.text = "＋"
-	addb.pressed.connect(func():
+	var commit_manual := func():
 		var tt := manual.text.strip_edges()
 		if tt != "" and not _free_tags.has(tt):
 			_free_tags.append(tt)
 			_rebuild_free_box()
 			_sync_tags()
-		manual.clear())
+		manual.clear()
+	manual.text_submitted.connect(func(_t): commit_manual.call())   # 回车即加（冗余清理 2026-07-16）
+	var addb := Button.new()
+	addb.text = "＋"
+	addb.pressed.connect(commit_manual)
 	adder.add_child(addb)
 	_strip.add_child(adder)
 	_free_box = HBoxContainer.new()
@@ -780,15 +786,23 @@ func _capture_lost_refs(proto: Dictionary) -> void:
 			if not _unit.prof_slots.has(str(pid)) and not _lost_slots.has(str(pid)):
 				_lost_slots.append(str(pid))
 
-# 能力区：SkillDB 下拉 + 等级 + 添加 → chip 行（名字+等级 SpinBox+✕）
+# 能力区：等级 + SkillDB 下拉（选中即添加）→ chip 行（名字+等级 SpinBox+✕）
 func _build_skill_ui() -> void:
 	_strip.add_child(EditorUI.section_title("能力（技能 + 等级）"))
 	var adder := HBoxContainer.new()
 	adder.add_theme_constant_override("separation", 6)
+	var lv := SpinBox.new()   # 等级在前：先调级再选技能（选中即加；加错行内可改级）
+	lv.min_value = 1
+	lv.max_value = 9
+	lv.value = 1
+	lv.custom_minimum_size = Vector2(64, 0)
+	lv.tooltip_text = "学到的等级（超出该技能 max_level 自动封顶；添加后行内也可改）"
+	adder.add_child(lv)
 	var pick := OptionButton.new()
 	pick.custom_minimum_size = Vector2(220, 0)
 	pick.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	pick.add_item("（选技能…）")
+	pick.tooltip_text = "选中即添加（以左侧等级当前值）——冗余清理 2026-07-16，与技艺区选中即学同口径"
+	pick.add_item("（选技能即添加…）")
 	pick.set_item_metadata(0, "")
 	var ids: Array = SkillDB.all().keys()
 	ids.sort()
@@ -797,22 +811,12 @@ func _build_skill_ui() -> void:
 		var nm := str(def.get("name", sid)) if typeof(def) == TYPE_DICTIONARY else str(sid)
 		pick.add_item("%s（%s）" % [nm, str(sid)])
 		pick.set_item_metadata(pick.item_count - 1, str(sid))
-	adder.add_child(pick)
-	var lv := SpinBox.new()
-	lv.min_value = 1
-	lv.max_value = 9
-	lv.value = 1
-	lv.custom_minimum_size = Vector2(64, 0)
-	lv.tooltip_text = "学到的等级（超出该技能 max_level 自动封顶）"
-	adder.add_child(lv)
-	var addb := Button.new()
-	addb.text = "＋ 添加"
-	addb.pressed.connect(func():
+	pick.item_selected.connect(func(_i):
 		var sid := str(pick.get_selected_metadata())
 		if sid != "":
 			_add_skill(sid, int(lv.value))
-		pick.select(0))
-	adder.add_child(addb)
+		pick.select(0))   # 归位占位项（select() 不 re 触发 item_selected）
+	adder.add_child(pick)
 	_strip.add_child(adder)
 	_skill_box = VBoxContainer.new()
 	_skill_box.add_theme_constant_override("separation", 3)

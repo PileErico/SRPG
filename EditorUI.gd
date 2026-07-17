@@ -48,6 +48,47 @@ static func field_row(text: String, control: Control, label_w := 200) -> HBoxCon
 	row.add_child(control)
 	return row
 
+# 表单滚动容器（编辑器排版整理 2026-07-16 用户令：表单**定宽**不随窗口无限横向拉伸——
+# 上限 max_width、窗口不足时缩到可用宽；纵向滚动、禁横向滚条）。返回 [scroll, form]。
+static func form_scroll(max_width := 900.0) -> Array:
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	var wrap := HBoxContainer.new()
+	wrap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var form := VBoxContainer.new()
+	form.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	form.add_theme_constant_override("separation", 8)
+	wrap.add_child(form)
+	var pad := Control.new()
+	pad.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	wrap.add_child(pad)
+	scroll.add_child(wrap)
+	scroll.resized.connect(func():
+		form.custom_minimum_size.x = clampf(scroll.size.x - 18.0, 320.0, max_width))
+	return [scroll, form]
+
+# 两个短字段同一行（id＋名字类；行内小标签，各占一半）。返回 [LineEdit_a, LineEdit_b]。
+static func add_line_pair(parent: Node, text_a: String, val_a: String, text_b: String, val_b: String, on_change := Callable()) -> Array:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	var out := []
+	for pair in [[text_a, val_a], [text_b, val_b]]:
+		var l := Label.new()
+		l.text = str(pair[0])
+		row.add_child(l)
+		var le := LineEdit.new()
+		le.text = str(pair[1])
+		le.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		if on_change.is_valid():
+			le.text_changed.connect(func(_t): on_change.call())
+		row.add_child(le)
+		out.append(le)
+	parent.add_child(row)
+	return out
+
 # 把侧栏 VBox 包进带深色底 + 内边距的面板（与画布视觉分开）。
 static func panelize(inner: Control) -> PanelContainer:
 	var p := PanelContainer.new()
@@ -305,19 +346,21 @@ static func add_tag_list(parent: Node, label_text: String, arr: Array, options: 
 	else:
 		pick.queue_free()
 	var manual := LineEdit.new()
-	manual.placeholder_text = "手动 tag"
+	manual.placeholder_text = "手动 tag（回车添加）"
 	manual.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	adder.add_child(manual)
-	var addb := Button.new()
-	addb.text = "＋"
-	addb.pressed.connect(func():
+	var commit_manual := func():
 		var tt := manual.text.strip_edges()
 		if tt != "" and not arr.has(tt):
 			arr.append(tt)
 			_rebuild_tag_box(box, arr, on_change)
 			if on_change.is_valid():
 				on_change.call()
-		manual.clear())
+		manual.clear()
+	manual.text_submitted.connect(func(_t): commit_manual.call())   # 回车即加（冗余清理 2026-07-16）
+	var addb := Button.new()
+	addb.text = "＋"
+	addb.pressed.connect(commit_manual)
 	adder.add_child(addb)
 	parent.add_child(field_row(label_text, adder))
 	parent.add_child(box)
@@ -741,128 +784,213 @@ static func collect_when_row(entry: Dictionary, errs: Array) -> Dictionary:
 	return out
 
 
-# —— Reaction 编辑器（决策36：Effect.reactions[] 与 Skill reaction 块共用）——
+# —— Reaction 编辑器（决策36：Effect.reactions[] 与 Skill reaction 块共用；排版整理 2026-07-16）——
+# 结构：头行（⚡标题＋触发词＝身份＋✕）→ id/显示名同行 → 分节【触发条件】【次数限制】【动作】（小标题＋缩进）。
+# v1 动作形态固定（kind/source/actor/target 各仅一个合法值）＝**说明行**不摆四个假下拉，
+# 数据键原样保留（collect 从 data 兜底回填）；removable=false 供 SkillEditor reaction 块用
+# （块头已有 ✕，内层再给会造出「空 reaction 块」死态）。
 
-static func add_reaction_editor(parent: Node, entries: Array, reaction: Dictionary, opts: Dictionary, on_change := Callable()) -> Dictionary:
+static func _rx_subhead(text: String) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.add_theme_font_size_override("font_size", 12)
+	l.add_theme_color_override("font_color", Color(0.55, 0.66, 0.82))
+	return l
+
+static func _rx_indent(inner: Control) -> MarginContainer:
+	var m := MarginContainer.new()
+	m.add_theme_constant_override("margin_left", 14)
+	m.add_child(inner)
+	return m
+
+static func add_reaction_editor(parent: Node, entries: Array, reaction: Dictionary, opts: Dictionary, on_change := Callable(), removable := true) -> Dictionary:
 	var panel := PanelContainer.new()
+	var psb := StyleBoxFlat.new()
+	psb.bg_color = Color(0.05, 0.07, 0.11, 0.65)
+	psb.border_color = Color(0.35, 0.45, 0.62, 0.55)
+	psb.set_border_width_all(1)
+	psb.set_corner_radius_all(4)
+	psb.content_margin_left = 8
+	psb.content_margin_right = 8
+	psb.content_margin_top = 6
+	psb.content_margin_bottom = 8
+	panel.add_theme_stylebox_override("panel", psb)
 	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 5)
+	box.add_theme_constant_override("separation", 6)
 	panel.add_child(box)
 	var entry := {"data": reaction, "panel": panel, "when_rows": [], "action_rows": []}
+	# 头行：反应的身份＝触发词
 	var head := HBoxContainer.new()
-	entry["id"] = LineEdit.new()
-	entry["id"].text = str(reaction.get("id", ""))
-	entry["id"].placeholder_text = "reaction id"
-	entry["id"].size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	entry["id"].text_changed.connect(func(_t): if on_change.is_valid(): on_change.call())
-	head.add_child(entry["id"])
-	entry["name"] = LineEdit.new()
-	entry["name"].text = str(reaction.get("name", ""))
-	entry["name"].placeholder_text = "显示名（可空）"
-	entry["name"].size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	entry["name"].text_changed.connect(func(_t): if on_change.is_valid(): on_change.call())
-	head.add_child(entry["name"])
+	head.add_theme_constant_override("separation", 8)
+	var title := Label.new()
+	title.text = "⚡ 反应"
+	title.add_theme_color_override("font_color", Color(0.62, 0.78, 1.0))
+	head.add_child(title)
 	entry["trigger"] = dropdown(ReactionRegistry.options(), str(reaction.get("trigger", "unit_entered_zoc")), on_change)
+	entry["trigger"].size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	for i in entry["trigger"].item_count:
-		var tid := str(entry["trigger"].get_item_metadata(i))
-		if not ReactionRegistry.implemented(tid):
+		if not ReactionRegistry.implemented(str(entry["trigger"].get_item_metadata(i))):
 			entry["trigger"].set_item_disabled(i, true)
 	head.add_child(entry["trigger"])
-	var rm := Button.new()
-	rm.text = "✕"
-	rm.pressed.connect(func():
-		entries.erase(entry)
-		panel.queue_free()
-		if on_change.is_valid(): on_change.call())
-	head.add_child(rm)
+	if removable:
+		var rm := Button.new()
+		rm.text = "✕"
+		rm.tooltip_text = "移除这条反应"
+		rm.pressed.connect(func():
+			entries.erase(entry)
+			panel.queue_free()
+			if on_change.is_valid(): on_change.call())
+		head.add_child(rm)
 	box.add_child(head)
-	var trigger_warn := label("⚠ 该触发词尚未接线：数据不可入库")
+	var trigger_warn := label("⚠ 该触发词尚未接线：数据不可入库（lint 拦）")
+	trigger_warn.add_theme_font_size_override("font_size", 12)
 	trigger_warn.add_theme_color_override("font_color", Color(0.95, 0.8, 0.35))
 	trigger_warn.visible = not ReactionRegistry.implemented(str(reaction.get("trigger", "unit_entered_zoc")))
 	entry["trigger_warn"] = trigger_warn
 	box.add_child(trigger_warn)
 	entry["trigger"].item_selected.connect(func(_i):
 		trigger_warn.visible = not ReactionRegistry.implemented(str(entry["trigger"].get_selected_metadata())))
-
+	# id / 显示名同行（id＝limit 账本键的一段，改了会重置计数）
+	var idrow := HBoxContainer.new()
+	idrow.add_theme_constant_override("separation", 8)
+	idrow.add_child(_rx_subhead("id"))
+	entry["id"] = LineEdit.new()
+	entry["id"].text = str(reaction.get("id", ""))
+	entry["id"].placeholder_text = "reaction id"
+	entry["id"].size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	entry["id"].text_changed.connect(func(_t): if on_change.is_valid(): on_change.call())
+	idrow.add_child(entry["id"])
+	idrow.add_child(_rx_subhead("显示名"))
+	entry["name"] = LineEdit.new()
+	entry["name"].text = str(reaction.get("name", ""))
+	entry["name"].placeholder_text = "（可空＝战斗记录用 id）"
+	entry["name"].size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	entry["name"].text_changed.connect(func(_t): if on_change.is_valid(): on_change.call())
+	idrow.add_child(entry["name"])
+	box.add_child(idrow)
+	# —— 触发条件 ——
+	box.add_child(_rx_subhead("触发条件 when（全部满足才触发；空＝无条件）"))
 	var when_box := VBoxContainer.new()
-	box.add_child(when_box)
+	when_box.add_theme_constant_override("separation", 3)
 	for cond in reaction.get("when", []):
 		if cond is Dictionary:
 			add_when_row(when_box, entry["when_rows"], cond, opts, on_change)
 	var add_when := Button.new()
-	add_when.text = "+ 触发条件 when"
-	add_when.pressed.connect(func(): add_when_row(when_box, entry["when_rows"], {"type": "event_relation", "value": "enemy"}, opts, on_change); if on_change.is_valid(): on_change.call())
-	box.add_child(add_when)
-
+	add_when.text = "＋ 条件"
+	add_when.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	add_when.pressed.connect(func():
+		add_when_row(when_box, entry["when_rows"], {"type": "event_relation", "value": "enemy"}, opts, on_change)
+		if on_change.is_valid(): on_change.call())
+	var when_wrap := VBoxContainer.new()
+	when_wrap.add_theme_constant_override("separation", 3)
+	when_wrap.add_child(when_box)
+	when_wrap.add_child(add_when)
+	box.add_child(_rx_indent(when_wrap))
+	# —— 次数限制 ——
+	box.add_child(_rx_subhead("次数限制 limit（账本随战斗快照）"))
 	var limit: Dictionary = reaction.get("limit", {})
 	var limit_row := HBoxContainer.new()
-	limit_row.add_child(label("次数限制"))
+	limit_row.add_theme_constant_override("separation", 6)
+	limit_row.add_child(label("次数"))
 	var uses := SpinBox.new()
-	uses.min_value = 0
+	uses.min_value = 1   # lint：uses≥1（0 无意义死配置）
 	uses.max_value = 99
-	uses.value = float(limit.get("uses", 1))
+	uses.value = maxf(1.0, float(limit.get("uses", 1)))
 	uses.value_changed.connect(func(_v): if on_change.is_valid(): on_change.call())
 	entry["uses"] = uses
 	limit_row.add_child(uses)
-	entry["reset"] = dropdown([["round", "每大回合"], ["turn", "每小回合"], ["battle", "每场战斗"]], str(limit.get("reset", "round")), on_change)
+	entry["reset"] = dropdown([["round", "每大回合重置"], ["turn", "每小回合重置"], ["battle", "每场战斗"]], str(limit.get("reset", "round")), on_change)
 	limit_row.add_child(entry["reset"])
-	entry["scope"] = dropdown([["owner", "拥有者 owner"]], str(limit.get("scope", "owner")), on_change)
+	entry["scope"] = dropdown([["owner", "计在拥有者 owner"]], str(limit.get("scope", "owner")), on_change)
 	limit_row.add_child(entry["scope"])
-	box.add_child(limit_row)
-
+	box.add_child(_rx_indent(limit_row))
+	# —— 动作 ——
+	box.add_child(_rx_subhead("动作 actions（触发后按序执行）"))
 	var actions_box := VBoxContainer.new()
+	actions_box.add_theme_constant_override("separation", 4)
 	entry["actions_box"] = actions_box
-	box.add_child(actions_box)
 	for action in reaction.get("actions", []):
 		if action is Dictionary:
 			_add_reaction_action(actions_box, entry["action_rows"], action, opts, on_change)
 	var add_action := Button.new()
-	add_action.text = "+ 反应动作（攻击）"
-	add_action.pressed.connect(func(): _add_reaction_action(actions_box, entry["action_rows"], {"kind": "attack", "source": "current_bws", "actor": "owner", "target": "event.unit", "overrides": []}, opts, on_change); if on_change.is_valid(): on_change.call())
-	box.add_child(add_action)
+	add_action.text = "＋ 动作（攻击）"
+	add_action.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	add_action.pressed.connect(func():
+		_add_reaction_action(actions_box, entry["action_rows"],
+			{"kind": "attack", "source": "current_bws", "actor": "owner", "target": "event.unit", "overrides": []}, opts, on_change)
+		if on_change.is_valid(): on_change.call())
+	var actions_wrap := VBoxContainer.new()
+	actions_wrap.add_theme_constant_override("separation", 4)
+	actions_wrap.add_child(actions_box)
+	actions_wrap.add_child(add_action)
+	box.add_child(_rx_indent(actions_wrap))
 	parent.add_child(panel)
 	entries.append(entry)
 	return entry
 
 static func _add_reaction_action(parent: Node, rows: Array, action: Dictionary, opts: Dictionary, on_change: Callable) -> void:
+	var panel := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.09, 0.11, 0.15, 0.85)
+	sb.set_corner_radius_all(3)
+	sb.set_content_margin_all(6)
+	panel.add_theme_stylebox_override("panel", sb)
 	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 4)
+	panel.add_child(box)
+	var entry := {"data": action, "box": panel, "override_rows": []}
 	var row := HBoxContainer.new()
-	var entry := {"data": action, "box": box, "override_rows": []}
-	entry["kind"] = dropdown([["attack", "攻击 attack"]], str(action.get("kind", "attack")), on_change)
-	entry["source"] = dropdown([["current_bws", "当前 BWS"]], str(action.get("source", "current_bws")), on_change)
-	entry["actor"] = dropdown([["owner", "拥有者 owner"]], str(action.get("actor", "owner")), on_change)
-	entry["target"] = dropdown([["event.unit", "事件单位 event.unit"]], str(action.get("target", "event.unit")), on_change)
-	for key in ["kind", "source", "actor", "target"]:
-		row.add_child(entry[key])
+	row.add_theme_constant_override("separation", 6)
+	var dsc := Label.new()
+	dsc.text = "⚔ 攻击：拥有者以当前武器普攻（BWS）攻击事件单位"
+	dsc.tooltip_text = "v1 动作形态固定（kind=attack / source=current_bws / actor=owner / target=event.unit）——\n新动作类型随触发词接线开放，届时此处变为可选下拉"
+	dsc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(dsc)
 	var rm := Button.new()
 	rm.text = "✕"
-	rm.pressed.connect(func(): rows.erase(entry); box.queue_free(); if on_change.is_valid(): on_change.call())
+	rm.tooltip_text = "移除该动作"
+	rm.pressed.connect(func(): rows.erase(entry); panel.queue_free(); if on_change.is_valid(): on_change.call())
 	row.add_child(rm)
 	box.add_child(row)
+	box.add_child(_rx_subhead("条件覆盖 overrides（满足条件 → 改这次攻击的参数）"))
 	var overrides_box := VBoxContainer.new()
-	box.add_child(overrides_box)
+	overrides_box.add_theme_constant_override("separation", 4)
 	for override in action.get("overrides", []):
 		if override is Dictionary:
 			_add_reaction_override(overrides_box, entry["override_rows"], override, opts, on_change)
 	var add_override := Button.new()
-	add_override.text = "+ 条件覆盖 override"
-	add_override.pressed.connect(func(): _add_reaction_override(overrides_box, entry["override_rows"], {"when": [], "set": {"final_damage_factor": 1.0}}, opts, on_change); if on_change.is_valid(): on_change.call())
-	box.add_child(add_override)
-	parent.add_child(box)
+	add_override.text = "＋ 覆盖"
+	add_override.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	add_override.pressed.connect(func():
+		_add_reaction_override(overrides_box, entry["override_rows"], {"when": [], "set": {"final_damage_factor": 1.0}}, opts, on_change)
+		if on_change.is_valid(): on_change.call())
+	var ow := VBoxContainer.new()
+	ow.add_theme_constant_override("separation", 4)
+	ow.add_child(overrides_box)
+	ow.add_child(add_override)
+	box.add_child(_rx_indent(ow))
+	parent.add_child(panel)
 	rows.append(entry)
 
 static func _add_reaction_override(parent: Node, rows: Array, override: Dictionary, opts: Dictionary, on_change: Callable) -> void:
 	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 3)
 	var entry := {"data": override, "box": box, "when_rows": []}
+	var when_box := VBoxContainer.new()   # 条件行固定在设置行上方（原实现后加行会落到设置行下面）
+	when_box.add_theme_constant_override("separation", 3)
 	for cond in override.get("when", []):
 		if cond is Dictionary:
-			add_when_row(box, entry["when_rows"], cond, opts, on_change)
+			add_when_row(when_box, entry["when_rows"], cond, opts, on_change)
+	box.add_child(when_box)
 	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
 	var add_when := Button.new()
-	add_when.text = "+ 覆盖条件"
-	add_when.pressed.connect(func(): add_when_row(box, entry["when_rows"], {"type": "weapon_grip", "subject": "owner", "value": "two_handed"}, opts, on_change); if on_change.is_valid(): on_change.call())
+	add_when.text = "＋ 条件"
+	add_when.pressed.connect(func():
+		add_when_row(when_box, entry["when_rows"], {"type": "weapon_grip", "subject": "owner", "value": "two_handed"}, opts, on_change)
+		if on_change.is_valid(): on_change.call())
 	row.add_child(add_when)
-	row.add_child(label("设置 final_damage_factor"))
+	row.add_child(label("→ 最终伤害调整 final_damage_factor ×"))
 	var factor := SpinBox.new()
 	factor.min_value = 0
 	factor.max_value = 10
@@ -873,6 +1001,7 @@ static func _add_reaction_override(parent: Node, rows: Array, override: Dictiona
 	row.add_child(factor)
 	var rm := Button.new()
 	rm.text = "✕"
+	rm.tooltip_text = "移除该覆盖"
 	rm.pressed.connect(func(): rows.erase(entry); box.queue_free(); if on_change.is_valid(): on_change.call())
 	row.add_child(rm)
 	box.add_child(row)
@@ -898,7 +1027,10 @@ static func collect_reaction_editor(entry: Dictionary, errs: Array) -> Dictionar
 	var actions := []
 	for ar in entry["action_rows"]:
 		var action: Dictionary = (ar["data"] as Dictionary).duplicate(true)
-		for key in ["kind", "source", "actor", "target"]: action[key] = str(ar[key].get_selected_metadata())
+		# v1 动作形态固定＝说明行无控件：四键从 data 原样保留、缺省兜底（排版整理 2026-07-16）
+		for kv in [["kind", "attack"], ["source", "current_bws"], ["actor", "owner"], ["target", "event.unit"]]:
+			if str(action.get(kv[0], "")) == "":
+				action[kv[0]] = kv[1]
 		var overrides := []
 		for ore in ar["override_rows"]:
 			var override: Dictionary = (ore["data"] as Dictionary).duplicate(true)

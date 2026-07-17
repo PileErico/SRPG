@@ -137,14 +137,9 @@ func _shell_build_right(split: HSplitContainer) -> void:
 	right_split.split_offset = 420
 	split.add_child(right_split)
 
-	var scroll := ScrollContainer.new()
-	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_form = VBoxContainer.new()
-	_form.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_form.add_theme_constant_override("separation", 8)
-	scroll.add_child(_form)
-	right_split.add_child(scroll)
+	var fs := EditorUI.form_scroll()   # 表单定宽（排版整理 2026-07-16：不随窗口无限横向拉伸）
+	_form = fs[1]
+	right_split.add_child(fs[0])
 
 	var prev_scroll := ScrollContainer.new()
 	prev_scroll.custom_minimum_size = Vector2(230, 0)
@@ -268,13 +263,16 @@ func _build_form() -> void:
 	_clear_form()
 	# 1. 基础
 	_form.add_child(EditorUI.section_title("基础"))
-	_w_id = EditorUI.add_line(_form, "id（唯一主键）", str(_current.get("id", "")), _mark_dirty)
-	_w_name = EditorUI.add_line(_form, "名字", str(_current.get("name", "")), _mark_dirty)
+	var idnm := EditorUI.add_line_pair(_form, "id（唯一主键）", str(_current.get("id", "")),
+		"名字", str(_current.get("name", "")), _mark_dirty)   # 同行（排版整理 2026-07-16）
+	_w_id = idnm[0]
+	_w_name = idnm[1]
 	_build_icon_row()
 	_w_desc = TextEdit.new()
 	_w_desc.text = str(_current.get("desc", ""))
 	_w_desc.custom_minimum_size = Vector2(0, 64)
 	_w_desc.scroll_fit_content_height = true
+	_w_desc.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY   # 自动换行（排版整理 2026-07-16：不出横向滚条）
 	_w_desc.text_changed.connect(_mark_dirty)
 	_form.add_child(EditorUI.field_row("描述 desc", _w_desc))
 	# 类别 category（旧键 nature 兼容读——数据已迁，残档兜底；写盘只落 category）
@@ -401,20 +399,20 @@ func _build_form() -> void:
 	for b in _current.get("effects", []):
 		if typeof(b) == TYPE_DICTIONARY:
 			_add_block(b)
-	var addrow := HBoxContainer.new()
-	addrow.add_theme_constant_override("separation", 6)
+	# 选中即添加（冗余清理 2026-07-16 用户令：去「下拉选中→再点添加」二段式——与角色编辑器选中即学同口径）
 	_block_pick = OptionButton.new()
+	_block_pick.add_item("（＋ 添加效果块…）")
+	_block_pick.set_item_metadata(0, "")
 	for p in BLOCK_KINDS:
 		_block_pick.add_item(str(p[1]))
 		_block_pick.set_item_metadata(_block_pick.item_count - 1, str(p[0]))
-	addrow.add_child(_block_pick)
-	var addb := Button.new()
-	addb.text = "＋ 添加效果块"
-	addb.pressed.connect(func():
-		_add_block(_block_skeleton(str(_block_pick.get_selected_metadata())))
-		_mark_dirty())
-	addrow.add_child(addb)
-	_form.add_child(addrow)
+	_block_pick.item_selected.connect(func(_i):
+		var k := str(_block_pick.get_selected_metadata())
+		if k != "":
+			_add_block(_block_skeleton(k))
+			_mark_dirty()
+		_block_pick.select(0))   # 归位占位项（select() 不 re 触发 item_selected）
+	_form.add_child(_block_pick)
 
 	_form_ready = true
 	_refresh_preview()   # 载入完成 → 首刷预览
@@ -900,9 +898,10 @@ func _when_opts() -> Dictionary:
 	return {"stat_keys": ["HP"] + StatMeta.EDITOR_STATS, "effect_options": eo, "slot_pairs": HAND_SLOTS}
 
 func _build_reaction_block(box: VBoxContainer, entry: Dictionary) -> void:
+	# removable=false：块头已有 ✕，内层再给会造出「空 reaction 块」死态（collect 报错拒存）
 	var rows := []
 	entry["reaction_rows"] = rows
-	EditorUI.add_reaction_editor(box, rows, entry["data"], _when_opts(), _mark_dirty)
+	EditorUI.add_reaction_editor(box, rows, entry["data"], _when_opts(), _mark_dirty, false)
 
 func _build_apply_effect_block(box: VBoxContainer, entry: Dictionary) -> void:
 	# 公式值护栏（同上）：chance 为公式对象（引擎 resolve_num 支持）时锁定只读，防 float() 报错+扁平化
@@ -952,6 +951,7 @@ func _build_scripted_block(box: VBoxContainer, entry: Dictionary) -> void:
 	pt.text = JSON.stringify(params, "  ") if typeof(params) == TYPE_DICTIONARY and not params.is_empty() else ""
 	pt.custom_minimum_size = Vector2(0, 56)
 	pt.scroll_fit_content_height = true
+	pt.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY   # 自动换行（排版整理 2026-07-16）
 	pt.placeholder_text = "{ \"key\": value } 参数字典 JSON（空=无参数；存盘时解析校验）"
 	pt.text_changed.connect(_mark_dirty)
 	box.add_child(EditorUI.field_row("参数 params", pt))
