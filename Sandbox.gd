@@ -2172,12 +2172,26 @@ func _log_displaces(evs: Array) -> void:
 	while not pending.is_empty() and guard < 64:
 		guard += 1
 		var ev: Dictionary = pending.pop_front()
+		var mover = ev["unit"]
 		if int(ev.get("steps", 0)) > 0:
-			_log_line("　%s 被击退 %d 格%s" % [_cname(ev["unit"]), int(ev["steps"]),
+			_log_line("　%s 被击退 %d 格%s" % [_cname(mover), int(ev["steps"]),
 				"（撞停）" if bool(ev.get("blocked", false)) else ""])
+			# 被动离开/穿过敌对 ZOC 照样吃借机（⚠ 2026-07-17 用户二拍·涌现口径：借机＝空手者逮破绽——
+			# 队友推开我补刀；唯推动者〔ev.by〕本人正在行动腾不出手，排除）。与自愿移动同律：
+			# 沿途逐格判「离开时所在格」、一次位移最多一记、每 round 每对子去重；借机不中断位移（已推完）。
+			var kb_path: Array = ev.get("path", [])
+			for i in range(1, kb_path.size()):
+				var zowner = _state._first_zoc_owner(kb_path[i - 1], mover, ev.get("by"))
+				if zowner == null:
+					continue
+				_state.zoc_triggered[_zoc_key(zowner, mover)] = true
+				_resolve_aoo(zowner, mover)
+				_handle_deaths()
+				break
 		elif not bool(ev.get("capped", false)):   # 已在极限距离＝寸步不动不刷屏（🔒 极限=击退距离+攻击距离）
-			_log_line("　%s 无处可退" % _cname(ev["unit"]))
-		_dispatch_reaction_event("unit_entered_zoc", {"unit": ev["unit"], "path": ev.get("path", []), "kind": "forced"})
+			_log_line("　%s 无处可退" % _cname(mover))
+		if mover in units:   # 借机致死已离场 → 不再分发进入事件
+			_dispatch_reaction_event("unit_entered_zoc", {"unit": mover, "path": ev.get("path", []), "kind": "forced"})
 		if not _state._pending_displace.is_empty():
 			pending.append_array(_state.flush_displaces())
 

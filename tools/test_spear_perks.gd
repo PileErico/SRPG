@@ -116,6 +116,27 @@ func _initialize() -> void:
 	ck(not u.has_state("spear_stance") and s._zoc_radius(u) == 1 and u.reaction_state.is_empty(),
 		"下一次自身turn开始架势到期并清反应账本")
 
+	# 被动离开 ZOC 借机（⚠ 2026-07-17 用户二拍·涌现口径）：队友推开＝旁观者补刀；推动者本人正在行动腾不出手＝排除。
+	var s2 := BattleState.new()
+	s2._new_grassland(9, 7)
+	s2.rng.seed = 20260717
+	var pusher := Unit.new("推手", "player", 3, 3)
+	var watcher := Unit.new("旁观", "player", 5, 3)
+	var victim := Unit.new("受害", "enemy", 4, 3)
+	for x in [pusher, watcher, victim]:
+		x.stats["HP"] = float(x.stats.get("HP_max", 40))
+	var ev := {"unit": victim, "steps": 1, "blocked": false, "capped": false, "by": pusher,
+		"from": Vector2i(4, 3), "to": Vector2i(4, 2), "path": [Vector2i(4, 3), Vector2i(4, 2)]}
+	s2.units = [pusher, victim]   # 场上只有推动者邻 from 格 → 排除后无人借机
+	var sb2 = SandboxScript.new()
+	sb2._state = s2
+	sb2._log_displaces([ev.duplicate(true)])
+	ck(s2.zoc_triggered.is_empty(), "推动者自己不借机（正在行动腾不出手）")
+	s2.units = [pusher, watcher, victim]   # 加入旁观队友（也邻 from 格）→ 借机成立
+	sb2._log_displaces([ev.duplicate(true)])
+	ck(s2.zoc_triggered.has(s2._zoc_key(watcher, victim)), "队友推开＝旁观者对被动离开者借机（每 round 每对子去重）")
+	sb2.free()
+
 	if _fail == 0:
 		print("=== 全部断言 PASS ===")
 		quit(0)

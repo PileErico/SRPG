@@ -309,10 +309,11 @@ func _in_hostile_zoc(cell: Vector2i, mover) -> bool:
 			return true
 	return false
 
-# 取 cell 处第一个「本 round 尚未对 mover 触发过」的敌对 ZOC 拥有者（找不到=null）
-func _first_zoc_owner(cell: Vector2i, mover):
+# 取 cell 处第一个「本 round 尚未对 mover 触发过」的敌对 ZOC 拥有者（找不到=null）。
+# exclude＝排除者（被动位移借机 2026-07-17 用户口径：推动者本人正在行动、腾不出手补刀——队友推开才有借机）。
+func _first_zoc_owner(cell: Vector2i, mover, exclude = null):
 	for u in units:
-		if u != mover and _is_hostile(mover, u) and _hex_dist(cell, Vector2i(u.col, u.row)) <= _zoc_radius(u):
+		if u != mover and u != exclude and _is_hostile(mover, u) and _hex_dist(cell, Vector2i(u.col, u.row)) <= _zoc_radius(u):
 			if not zoc_triggered.has(_zoc_key(u, mover)):
 				return u
 	return null
@@ -799,12 +800,13 @@ func _resolve_compute_body(attacker, target, skill) -> Dictionary:
 					# ＝目标离攻击者的最终距离上限——跨请求累计生效（贴脸双翼矛 1→2→3；第2格起步 2→3 封顶）
 					var kb_cap: int = maxi(0, int(skill.get("range", 1))) + kb_dist
 					_pending_displace.append({"unit": target, "dir": kd, "distance": kb_dist,
-						"origin": Vector2i(attacker.col, attacker.row), "max_dist": kb_cap})
+						"origin": Vector2i(attacker.col, attacker.row), "max_dist": kb_cap, "by": attacker})
 					r["displace_req"] = {"dir": kd, "distance": kb_dist, "max_dist": kb_cap}
 	return r
 
 # ============ 位移解算器（displace 族首铺 🔒 红队报告 §2-1：swap/push/pull/charge 四模式规划共用一个解算器，
-# 本次落 push；被动位移一律不触发借机、不受 ZOC 停步 🔒）============
+# 本次落 push；被动位移不受 ZOC 停步 🔒；被动离开/穿过敌对 ZOC 照样吃借机——唯推动者除外
+# 〔正在行动腾不出手，⚠ 2026-07-17 用户二拍翻案原「不触发借机」〕，判定在宿主 _log_displaces）============
 
 # 位移延迟结算队列（🔒 2026-07-15 用户定调「攻击流程先结算完，再走位移效果」——攻击动作三层：
 # 动作(1AP)→攻击判定(逐段/逐目标独立掷)→伤害判定；击退判定挂攻击判定层、坐标变更集中在动作末）。
@@ -823,7 +825,7 @@ func flush_displaces() -> Array:
 		var res := displace_push(u, int(req["dir"]), int(req["distance"]),
 			req.get("origin", Vector2i.ZERO), int(req.get("max_dist", -1)))
 		events.append({"unit": u, "steps": int(res["steps"]), "blocked": bool(res["blocked"]),
-			"capped": bool(res.get("capped", false)),
+			"capped": bool(res.get("capped", false)), "by": req.get("by"),
 			"from": res["from"], "to": res["to"], "path": res.get("path", [res["from"], res["to"]])})
 	_pending_displace.clear()
 	return events

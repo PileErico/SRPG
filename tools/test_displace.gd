@@ -1,7 +1,7 @@
 extends SceneTree
 ## 击退/位移解算器回归（🔒 2026-07-15 用户拍板：概率制击中附带 on_hit_displace + displace 族首铺 push）。
 ## 覆盖：displace_push 几何/占位/地形/出图停步 → _dir_away 推离方向 → _resolve_compute 击退判定
-## （主动概率 + 被动伪 stat knockback_chance 合并单掷 / 肉体强韧数值直减 / 格挡免推 / 借机段禁入）→
+## （主动概率 + 被动伪 stat knockback_chance 合并单掷 / 肉体强韧数值直减 / 格挡免推 / 反应段照常判定〔涌现口径〕）→
 ## **位移延迟结算**（🔒 同日三层定调：判定层只登记请求、攻击动作末 flush_displaces 统一执行；
 ## 双持两段各中＝两请求依次续推）→ **极限距离**（🔒 二次拍板：极限＝击退距离＋攻击距离——
 ## 贴脸双翼矛 1→2→3、第2格起步 2→3 封顶）→ 数据接线（flatten_bws 透传）→ consume_cast 消耗口（EWS 轨）。
@@ -159,7 +159,13 @@ func _initialize() -> void:
 	s._pending_displace.clear()
 	r = first_hit(s, a, d, {"coeff": 0.0, "is_reaction": true, "on_hit_displace": {"mode": "push", "distance": 1, "chance": 200}})
 	ck(not r.is_empty() and r.has("displace_req"), "反应段（is_reaction）同样判定击退（涌现口径）")
+	ck(not s._pending_displace.is_empty() and s._pending_displace[-1].get("by") == a,
+		"位移请求携带推动者 by（被动离开借机的排除依据）")
 	s._pending_displace.clear()
+	# 被动离开借机的排除口（2026-07-17 二拍）：推动者本人不借机，其余 ZOC 拥有者照常
+	s.zoc_triggered.clear()
+	ck(s._first_zoc_owner(Vector2i(d.col, d.row), d) == a, "无排除＝推动者也是候选拥有者")
+	ck(s._first_zoc_owner(Vector2i(d.col, d.row), d, a) == null, "排除推动者＝无人借机")
 
 	# —— 3) 数据接线 + 消耗口 ——
 	var repel = SkillDB.get_skill("ws_spear_repel")
