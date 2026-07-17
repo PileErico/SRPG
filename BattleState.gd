@@ -1263,6 +1263,19 @@ func _purge_effect_entry(target, e: Dictionary) -> void:
 	target.clear_reaction_provider("effect", str(e.get("id", "")))
 	target.effects.erase(e)
 
+# 架势类效果（🔒 2026-07-17：tag "stance" 统一类别——立矛=命名层、本质架势）：**位移即解除**
+# （主动移动/被推/被拉一视同仁，涌现口径）；返回解除的效果名列表供宿主播报。
+# 将来「位移不解除架势」类 perk＝在此开豁免条件；「架势技能 AP 减免」＝技能侧 stance tag 条件。
+func clear_stance_effects(u) -> Array:
+	var out := []
+	if u == null or not ("effects" in u):
+		return out
+	for e in u.effects.duplicate():
+		if (e.get("tags", []) as Array).has("stance"):
+			out.append(str(e.get("name", e.get("id", ""))))
+			_purge_effect_entry(u, e)
+	return out
+
 # 目标身上是否已有某 source 的效果（instanced 实例 source 唯一化探测用）。
 func _source_in_use(target, source: String) -> bool:
 	for e in target.effects:

@@ -204,7 +204,7 @@ func _build_form() -> void:
 	for t in _current.get("tags", []):
 		_tags.append(str(t))
 	var opts := []
-	for c in ["effect", "effect_dim"]:
+	for c in ["effect", "effect_dim", "effect_class"]:   # effect_class＝非异常族类别标记（stance 架势——不参与优先级/豁免）
 		var ids := TagDB.ids_in_cat(c)
 		if ids.is_empty():
 			continue

@@ -85,6 +85,7 @@
   {"id": "disarmed", "cn": "缴械", "cat": "effect", "status": "in_use", "desc": "武器技能+武器本身双禁用（固有面板/词条修正休眠、带武器要求的 perk 失效）；徒手/格斗技/天生武器 innate_weapon 照用、盾豁免；Unit.weapon_disabled 消费"},
   {"id": "silenced", "cn": "失语", "cat": "effect", "status": "in_use", "desc": "禁用带 verbal tag 的能力；Unit.has_state 消费"},
   {"id": "spear_stance", "cn": "立矛架势", "cat": "effect", "status": "in_use", "desc": "立矛 perk 的持续状态标记；扩大 ZOC 并开放进入迎击"},
+  {"id": "stance", "cn": "架势", "cat": "effect_class", "status": "in_use", "desc": "架势类状态统一标记（🔒 2026-07-17：立矛=命名层、本质架势）——效果侧：位移即解除（主动/被推同律，BattleState.clear_stance_effects）；技能侧：架势技能类别（将来 AP 减免/移动不破架势类 perk 的条件挂点）。非异常族（cat 非 effect：不参与优先级/豁免）"},
 
   {"id": "verbal", "cn": "言语", "cat": "skill_type", "status": "in_use", "desc": "该能力需发声（鼓舞/号令类）——失语 silenced 期间不可用（决策19 正字为 tag）"},
 

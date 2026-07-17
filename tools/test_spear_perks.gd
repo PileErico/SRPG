@@ -184,6 +184,33 @@ func _initialize() -> void:
 		"离开圈外＝剩余移动点保留、圈外自由行动")
 	sb3.free()
 
+	# 架势类状态（🔒 2026-07-17 stance tag：立矛=命名层、本质架势）：位移即解除——主动/被推同律；原地不动保留
+	var s5 := BattleState.new()
+	s5._new_grassland(9, 7)
+	s5.rng.seed = 5
+	var sp := Unit.new("架势兵", "player", 3, 3)
+	sp.stats["HP"] = float(sp.stats.get("HP_max", 40))
+	s5.units = [sp]
+	s5.turn_order = [sp]
+	s5.active_index = 0
+	var sb5 = SandboxScript.new()
+	sb5._state = s5
+	s5._add_effect(sp, {"id": "spear_set_stance"})
+	ck(sp.has_state("stance") and s5._zoc_radius(sp) == 2, "架势在身（stance 类 tag＋ZOC 底1+1=2）")
+	sp.move_points = 5
+	sb5._ai_exec_move(sp, {"cell": Vector2i(3, 2), "path": [Vector2i(3, 3), Vector2i(3, 2)], "cost": 1})
+	ck(not sp.has_state("stance") and s5._zoc_radius(sp) == 1,
+		"主动移动＝架势解除（效果/修正一并摘）")
+	s5._add_effect(sp, {"id": "spear_set_stance"})
+	sb5._log_displaces([{"unit": sp, "steps": 1, "blocked": false, "capped": false,
+		"from": Vector2i(3, 2), "to": Vector2i(3, 1), "path": [Vector2i(3, 2), Vector2i(3, 1)]}])
+	ck(not sp.has_state("stance"), "被推＝架势同样解除（架子被撞散，主动/被动同律）")
+	s5._add_effect(sp, {"id": "spear_set_stance"})
+	sb5._log_displaces([{"unit": sp, "steps": 0, "blocked": true, "capped": false,
+		"from": Vector2i(3, 2), "to": Vector2i(3, 2), "path": [Vector2i(3, 2), Vector2i(3, 2)]}])
+	ck(sp.has_state("stance"), "被推未动（0 步顶住）＝架势保留")
+	sb5.free()
+
 	if _fail == 0:
 		print("=== 全部断言 PASS ===")
 		quit(0)

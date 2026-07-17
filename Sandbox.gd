@@ -1242,6 +1242,8 @@ func _ai_exec_move(unit, plan: Dictionary) -> bool:
 	unit.row = pick.y
 	if was_in_zoc and _in_hostile_zoc(pick, unit):
 		unit.move_points = 0   # ZOC 内部挪动＝耗尽全部移动点（🔒 2026-07-17：躲得过借机也走不快；离开圈外才自由）
+	for nm in _state.clear_stance_effects(unit):
+		_log_line("%s 的「%s」解除（架势随移动解除）" % [_cname(unit), nm])
 	_dispatch_reaction_event("unit_entered_zoc", {"unit": unit, "path": path, "kind": "voluntary"})
 	_refresh_info()
 	await _animate_path(unit, path)
@@ -2181,6 +2183,8 @@ func _log_displaces(evs: Array) -> void:
 		if int(ev.get("steps", 0)) > 0:
 			_log_line("　%s 被击退 %d 格%s" % [_cname(mover), int(ev["steps"]),
 				"（撞停）" if bool(ev.get("blocked", false)) else ""])
+			for nm in _state.clear_stance_effects(mover):   # 架势位移即解除（🔒 2026-07-17：被推同律——架子被撞散了）
+				_log_line("　%s 的「%s」被打断（架势随位移解除）" % [_cname(mover), nm])
 			# 被动离开/穿过敌对 ZOC 照样吃借机（🔒 借机条件② 2026-07-17：轮到谁行动谁腾不出手——
 			# 我推开敌人自己不补刀、队友推开才有刀）。与自愿移动同律：沿途逐格判「离开时所在格」、
 			# 一次位移最多一记、每 round 每对子去重；借机不中断位移（已推完）。
@@ -2348,6 +2352,8 @@ func _commit_move(col: int, row: int) -> void:
 	u.row = row
 	if was_in_zoc and _in_hostile_zoc(Vector2i(col, row), u):
 		u.move_points = 0   # ZOC 内部挪动＝耗尽全部移动点（🔒 2026-07-17：躲得过借机也走不快；离开圈外才自由）
+	for nm in _state.clear_stance_effects(u):
+		_log_line("%s 的「%s」解除（架势随移动解除）" % [_cname(u), nm])
 	_dispatch_reaction_event("unit_entered_zoc", {"unit": u, "path": path, "kind": "voluntary"})
 	_clear_selection()
 	_refresh_info()

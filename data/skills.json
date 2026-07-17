@@ -600,7 +600,7 @@
     "name": "立矛",
     "range": 0,
     "requires_weapon_tag": "weapon_spear",
-    "tags": [],
+    "tags": ["stance"],
     "target": {"ally": false, "enemy": false, "self": true},
     "uses_per_battle": {"base": 0},
     "weapon_kinds": [],
