@@ -1,0 +1,1154 @@
+{
+  "bridges": [],
+  "environment": {
+
+  },
+  "format_version": 4,
+  "grid": "hex_flat_oddq",
+  "height": 18,
+  "locations": [],
+  "map_type": "battle",
+  "regions": [],
+  "rivers": [],
+  "roads": [],
+  "terrain_overrides": {
+
+  },
+  "tiles": [
+    [
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      }
+    ],
+    [
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      }
+    ],
+    [
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      }
+    ],
+    [
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      }
+    ],
+    [
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      }
+    ],
+    [
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      }
+    ],
+    [
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "fh",
+        "variant": "city_center"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      }
+    ],
+    [
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "forest",
+          "variant": "forest"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      }
+    ],
+    [
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "fh",
+        "variant": "sri_pada"
+      },
+      {
+        "object": {
+          "terrain": "forest",
+          "variant": "forest"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "forest",
+          "variant": "forest"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "forest",
+          "variant": "forest"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      }
+    ],
+    [
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "object": {
+          "terrain": "forest",
+          "variant": "forest"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "randr",
+          "variant": "road_2"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "forest",
+          "variant": "forest"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "forest",
+          "variant": "forest"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "forest",
+          "variant": "forest"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      }
+    ],
+    [
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "object": {
+          "terrain": "forest",
+          "variant": "forest"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "forest",
+          "variant": "forest"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "randr",
+          "variant": "road_2"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "randr",
+          "variant": "road_7"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "randr",
+          "variant": "road_1"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "randr",
+          "variant": "road_5"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "randr",
+          "variant": "road_6"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      }
+    ],
+    [
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "object": {
+          "terrain": "forest",
+          "variant": "forest"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "randr",
+          "variant": "road_4"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "randr",
+          "variant": "road_3"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "randr",
+          "variant": "road_6"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "fh",
+          "variant": "flood_plains"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "fh",
+          "variant": "flood_plains"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      }
+    ],
+    [
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "object": {
+          "terrain": "forest",
+          "variant": "forest"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "randr",
+          "variant": "road_4"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "randr",
+          "variant": "road_1"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "fh",
+          "variant": "flood_plains"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "fh",
+          "variant": "flood_plains"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      }
+    ],
+    [
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "object": {
+          "terrain": "fh",
+          "variant": "flood_plains"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "fh",
+          "variant": "flood_plains"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "randr",
+          "variant": "road_1"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "randr",
+          "variant": "road_3"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      }
+    ],
+    [
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "object": {
+          "terrain": "fh",
+          "variant": "flood_plains"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "fh",
+          "variant": "flood_plains"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "randr",
+          "variant": "road_1"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "randr",
+          "variant": "road_1"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "fh",
+          "variant": "flood_plains"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "fh",
+          "variant": "flood_plains"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "object": {
+          "terrain": "fh",
+          "variant": "fish"
+        },
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      }
+    ],
+    [
+      {
+        "object": {
+          "terrain": "forest",
+          "variant": "forest"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "randr",
+          "variant": "road_4"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "randr",
+          "variant": "road_1"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "fh",
+          "variant": "flood_plains"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "fh",
+          "variant": "flood_plains"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "fh",
+          "variant": "flood_plains"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "fh",
+          "variant": "flood_plains"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      }
+    ],
+    [
+      {
+        "object": {
+          "terrain": "randr",
+          "variant": "road_5"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "randr",
+          "variant": "road_6"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "randr",
+          "variant": "road_3"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "fh",
+          "variant": "flood_plains"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "fh",
+          "variant": "flood_plains"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      }
+    ],
+    [
+      {
+        "object": {
+          "terrain": "fh",
+          "variant": "flood_plains"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "fh",
+          "variant": "flood_plains"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "fh",
+          "variant": "flood_plains"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "forest",
+          "variant": "forest"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "object": {
+          "terrain": "forest",
+          "variant": "forest"
+        },
+        "terrain": "plain",
+        "variant": "grassland"
+      },
+      {
+        "terrain": "water",
+        "variant": "shallow"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      },
+      {
+        "terrain": "water",
+        "variant": "deep"
+      }
+    ]
+  ],
+  "triggers": [
+    {
+      "do": [],
+      "id": "trig_1",
+      "label": "触发器1",
+      "when": {
+        "by_faction": "player",
+        "event": "enter_region",
+        "once": true,
+        "region": ""
+      }
+    }
+  ],
+  "units": [],
+  "width": 12
+}

@@ -20,6 +20,7 @@ const LocationDB := preload("res://LocationDB.gd")   # 地点类型注册表（�
 const TerrainSwatch := preload("res://TerrainSwatch.gd")   # 地块缩略图控件（笔刷显示完整六边形；与地图格同一份渲染）
 const EditorTheme := preload("res://EditorTheme.gd")   # 编辑器统一深色主题（与物品编辑器共用）
 const EditorUI := preload("res://EditorUI.gd")   # 编辑器公共 UI 控件工厂（分节/折叠/菜单/面板/确认框，与物品编辑器共用）
+const DialogueEditorScript := preload("res://DialogueEditor.gd")   # 对话编辑器（触发器「开对话 ✎」浮层内嵌）
 
 const MAX_W := 50
 const MAX_H := 50
@@ -214,14 +215,20 @@ var _layer_btns := {}             # layer_id → 图层按钮（线/地点按 ma
 # —— 图层切换 + 区域工具（左侧栏）——
 # 地形数据编辑（选中笔刷的战斗属性 → 写回 terrains.json，全局共用）
 const TERR_PASS_OPTS := [["all", "任何单位"], ["none", "不可通行"], ["tag", "限定tag"]]
-# 移动型 tag（passable_by 限定可进哪些；如深水仅 flying）。与 docs/标签词典 的移动型一致。
-const PASS_TAGS := [["ground", "地面"], ["flying", "飞行"], ["spectral", "灵体"]]
+# 移动型 tag（passable_by 限定可进哪些；如深水仅 flying/aquatic）——直读 TagDB movement 类（data/tags.json 单一源），新增移动型自动出现。
+static func _pass_tags() -> Array:
+	var out := []
+	for e in TagDB.by_cat("movement"):
+		out.append([str(e.get("id", "")), str(e.get("cn", e.get("id", "")))])
+	return out
 var _terr_cost_spin: SpinBox
 var _terr_pass_opt: OptionButton
 var _terr_pass_tag_row: HBoxContainer   # 通行=限定tag 时显示的勾选行
 var _terr_pass_checks := {}             # tag → CheckBox
 var _terr_tagcost_checks := {}          # tag_cost：tag → 启用 CheckBox
 var _terr_tagcost_spins := {}           # tag_cost：tag → 成本 SpinBox
+var _terr_tag_checks := {}              # 地形类 tag（视野/隐蔽/条件）→ CheckBox（恒全局）
+var _terr_fx_box: VBoxContainer         # 地块效果行容器（恒全局）
 var _terr_data_loading := false
 var _terr_global_dirty := false   # §19：全局地形数据（TerrainDB live 表）有未写盘改动——保存钮高亮+退出守卫
 # 地形数据编辑范围：global=改全局 terrains.json（所有图）/ map=只覆盖本图（map_terrain_overrides）
@@ -988,7 +995,7 @@ func _build_terrain_data() -> Control:
 	_terr_pass_tag_row = HBoxContainer.new()
 	_terr_pass_tag_row.add_child(_make_label("可进"))
 	_terr_pass_checks = {}
-	for pair in PASS_TAGS:
+	for pair in _pass_tags():
 		var cb := CheckBox.new()
 		cb.text = str(pair[1])
 		cb.toggled.connect(func(_on: bool): _on_terr_pass_tag_toggled())
@@ -1000,7 +1007,7 @@ func _build_terrain_data() -> Control:
 	box.add_child(_make_label("tag 成本（按移动型取更优）"))
 	_terr_tagcost_checks = {}
 	_terr_tagcost_spins = {}
-	for pair in PASS_TAGS:
+	for pair in _pass_tags():
 		var row := HBoxContainer.new()
 		var cb := CheckBox.new()
 		cb.text = str(pair[1])
@@ -1016,6 +1023,29 @@ func _build_terrain_data() -> Control:
 		_terr_tagcost_checks[str(pair[0])] = cb
 		_terr_tagcost_spins[str(pair[0])] = sp
 		box.add_child(row)
+	# —— 地形 tags（视野/隐蔽/条件挂点；恒全局——地块数据不做本图覆盖 🔒 2026-07-19 用户令）——
+	# 勾选组＝TagDB terrain 类派生（词表加新 tag 自动出现）；移动型等非地形类 tag 不受管辖、原样保留
+	box.add_child(_make_label("地块 tags（阻挡视线/掩蔽=隐蔽/条件——恒全局）"))
+	var tgrid := GridContainer.new()
+	tgrid.columns = 3
+	_terr_tag_checks = {}
+	for te in TagDB.by_cat("terrain"):
+		var tid := str(te.get("id", ""))
+		var tcb := CheckBox.new()
+		tcb.text = TagDB.cn(tid)
+		tcb.tooltip_text = tid + (("：" + str(te.get("desc", ""))) if str(te.get("desc", "")) != "" else "")
+		tcb.toggled.connect(func(_on: bool): _on_terr_tags_toggled())
+		tgrid.add_child(tcb)
+		_terr_tag_checks[tid] = tcb
+	box.add_child(tgrid)
+	# —— 地块效果（占位单位修正；恒全局）：效能修正（森林掩蔽·闪避+15%）/ 回合末回复·伤害（灵泉）同 schema ——
+	box.add_child(_make_label("地块效果（占位单位修正——恒全局）"))
+	_terr_fx_box = VBoxContainer.new()
+	box.add_child(_terr_fx_box)
+	var fx_add := Button.new()
+	fx_add.text = "＋ 新增地块效果"
+	fx_add.pressed.connect(_on_terr_fx_add)
+	box.add_child(fx_add)
 	_terr_save_btn = Button.new()
 	_terr_save_btn.text = "保存到 terrains.json"
 	_terr_save_btn.tooltip_text = "把改过的地形战斗属性写回 terrains.json（影响所有地图；编辑器与战斗共用同一份）"
@@ -1055,18 +1085,24 @@ func _refresh_terrain_data() -> void:
 	else:   # 数组 = 限定tag
 		_terr_pass_opt.select(2)
 		_terr_pass_tag_row.visible = true
-		for pair in PASS_TAGS:
+		for pair in _pass_tags():
 			_terr_pass_checks[str(pair[0])].button_pressed = (typeof(pb) == TYPE_ARRAY and pb.has(str(pair[0])))
 	# tag_cost 行：勾选并填入有覆盖的 tag
 	var tc = mv.get("tag_cost", {})
-	for pair in PASS_TAGS:
+	for pair in _pass_tags():
 		var tag := str(pair[0])
 		var has_tc: bool = typeof(tc) == TYPE_DICTIONARY and tc.has(tag)
 		_terr_tagcost_checks[tag].button_pressed = has_tc
 		if has_tc:
 			_terr_tagcost_spins[tag].value = int(tc[tag])
+	# 地形 tags 勾选组 + 地块效果行（恒全局——地块数据不做本图覆盖 🔒 2026-07-19 用户令）
+	var etags: Array = PALETTE[brush_index].get("tags", [])
+	for tid in _terr_tag_checks:
+		_terr_tag_checks[tid].button_pressed = etags.has(tid)
+	_rebuild_terr_fx_rows()
 	_terr_data_loading = false
-	if _terr_save_btn: _terr_save_btn.visible = (_terr_scope == "global")
+	# 保存钮：全局 scope 常显；本图 scope 下若有未保存的**全局**改动（tags/效果恒全局）也要露出——别把写盘口藏起来
+	if _terr_save_btn: _terr_save_btn.visible = (_terr_scope == "global") or _terr_global_dirty
 	if _terr_clear_btn: _terr_clear_btn.visible = (_terr_scope == "map")
 	_refresh_terr_ov_label()
 
@@ -1128,10 +1164,13 @@ func _terr_edit_touched() -> void:
 		_terr_global_dirty = true
 		_update_terr_save_btn()
 
-# §19：保存钮随全局脏旗变化（● 前缀 + 黄字提醒，与外壳脏可见同语义）
+# §19：保存钮随全局脏旗变化（● 前缀 + 黄字提醒，与外壳脏可见同语义）；
+# 本图 scope 下产生全局脏（tags/效果恒全局）时把按钮亮出来
 func _update_terr_save_btn() -> void:
 	if _terr_save_btn == null:
 		return
+	if _terr_global_dirty:
+		_terr_save_btn.visible = true
 	_terr_save_btn.text = "● 保存到 terrains.json（未保存）" if _terr_global_dirty else "保存到 terrains.json"
 	if _terr_global_dirty:
 		_terr_save_btn.add_theme_color_override("font_color", Color(1.0, 0.85, 0.3))
@@ -1179,13 +1218,13 @@ func _on_terr_pass_changed(idx: int) -> void:
 	else:   # 限定tag：切到数组形（非数组则初始全勾，用户取消以限制），显示勾选行
 		if typeof(_terr_move().get("passable_by")) != TYPE_ARRAY:
 			var all_tags := []
-			for pair in PASS_TAGS:
+			for pair in _pass_tags():
 				all_tags.append(str(pair[0]))
 			_terr_move()["passable_by"] = all_tags
 		_terr_pass_tag_row.visible = true
 		_terr_data_loading = true
 		var arr = _terr_move().get("passable_by", [])
-		for pair in PASS_TAGS:
+		for pair in _pass_tags():
 			_terr_pass_checks[str(pair[0])].button_pressed = (typeof(arr) == TYPE_ARRAY and arr.has(str(pair[0])))
 		_terr_data_loading = false
 		set_status("「%s」通行=限定tag：勾选可进的移动型（取消＝禁止该类）" % str(PALETTE[brush_index].label))
@@ -1196,7 +1235,7 @@ func _on_terr_pass_tag_toggled() -> void:
 	if _terr_data_loading or brush_index < 0 or brush_index >= PALETTE.size():
 		return
 	var arr := []
-	for pair in PASS_TAGS:
+	for pair in _pass_tags():
 		if _terr_pass_checks[str(pair[0])].button_pressed:
 			arr.append(str(pair[0]))
 	_terr_move()["passable_by"] = arr
@@ -1208,7 +1247,7 @@ func _on_terr_tagcost_changed() -> void:
 	if _terr_data_loading or brush_index < 0 or brush_index >= PALETTE.size():
 		return
 	var tc := {}
-	for pair in PASS_TAGS:
+	for pair in _pass_tags():
 		var tag := str(pair[0])
 		if _terr_tagcost_checks[tag].button_pressed:
 			tc[tag] = int(_terr_tagcost_spins[tag].value)
@@ -1219,6 +1258,156 @@ func _on_terr_tagcost_changed() -> void:
 		mv["tag_cost"] = tc
 	set_status("「%s」tag 成本已改" % str(PALETTE[brush_index].label))
 	_terr_edit_touched()
+
+# —— 地形 tags / 地块效果编辑（恒全局：直改 TerrainDB live 表，随「保存到 terrains.json」写盘）——
+
+# 地形类 tag 勾选 → 重建 entry.tags：勾选组只管辖 TagDB terrain 类；移动型(ground/flying…)等原样保留
+func _on_terr_tags_toggled() -> void:
+	if _terr_data_loading or brush_index < 0 or brush_index >= PALETTE.size():
+		return
+	var e = PALETTE[brush_index]
+	var keep := []
+	for t in e.get("tags", []):
+		if not _terr_tag_checks.has(str(t)):
+			keep.append(t)
+	for tid in _terr_tag_checks:
+		if _terr_tag_checks[tid].button_pressed:
+			keep.append(tid)
+	e["tags"] = keep
+	_terr_fx_touched()
+	set_status("「%s」tags＝[%s]（恒全局，点保存写回）" % [str(e.label), ", ".join(keep)])
+
+const _TERR_FX_TYPES := [["eff", "效能修正"], ["heal", "回合末回复"], ["damage", "回合末伤害"]]
+const _TERR_FX_STATS := [["evasion", "闪避"], ["accuracy", "命中"], ["attack", "攻击"], ["defense", "防御"]]
+
+func _terr_fx_touched() -> void:
+	if _terr_data_loading:
+		return
+	_terr_global_dirty = true
+	_update_terr_save_btn()
+
+func _on_terr_fx_add() -> void:
+	if brush_index < 0 or brush_index >= PALETTE.size():
+		return
+	var e = PALETTE[brush_index]
+	var fxs: Array = e.get("effects", [])
+	fxs.append({"name": "新效果", "desc": "",
+		"grant": {"layer": "效能", "stat": "evasion", "percent": 10, "nature": "buff"}})
+	e["effects"] = fxs
+	_terr_fx_touched()
+	_rebuild_terr_fx_rows()
+
+# 重灌地块效果行（选中笔刷/增删/换类型时整体重建；字段级改动就地写 live dict 不重建）
+func _rebuild_terr_fx_rows() -> void:
+	if _terr_fx_box == null or not is_instance_valid(_terr_fx_box):
+		return
+	for c in _terr_fx_box.get_children():
+		c.queue_free()
+	if brush_index < 0 or brush_index >= PALETTE.size():
+		return
+	for fx in PALETTE[brush_index].get("effects", []):
+		if fx is Dictionary:
+			_terr_fx_box.add_child(_terr_fx_row(fx))
+
+# 单条地块效果的编辑行组：名称+类型+删除 / 参数（效能 stat+带符号% ↔ tick 点数）+豁免 tag / 描述
+func _terr_fx_row(fx: Dictionary) -> Control:
+	var e = PALETTE[brush_index]
+	if typeof(fx.get("grant")) != TYPE_DICTIONARY:
+		fx["grant"] = {"layer": "效能", "stat": "evasion", "percent": 0, "nature": "buff"}
+	var g: Dictionary = fx["grant"]
+	var outer := VBoxContainer.new()
+	var r1 := HBoxContainer.new()
+	var nm := LineEdit.new()
+	nm.text = str(fx.get("name", ""))
+	nm.placeholder_text = "效果名（如 森林掩蔽）"
+	nm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	nm.text_changed.connect(func(t: String): fx["name"] = t; _terr_fx_touched())
+	r1.add_child(nm)
+	var ty := OptionButton.new()
+	for j in _TERR_FX_TYPES.size():
+		ty.add_item(str(_TERR_FX_TYPES[j][1]), j)
+	var cur_ty := 0
+	if str(g.get("layer", "效能")) == "tick":
+		cur_ty = 1 if str(g.get("kind", "heal")) == "heal" else 2
+	ty.select(cur_ty)
+	ty.item_selected.connect(func(j: int):
+		match str(_TERR_FX_TYPES[j][0]):
+			"eff": fx["grant"] = {"layer": "效能", "stat": "evasion", "percent": 10, "nature": "buff"}
+			"heal": fx["grant"] = {"layer": "tick", "kind": "heal", "amount": 5}
+			"damage": fx["grant"] = {"layer": "tick", "kind": "damage", "amount": 5}
+		_terr_fx_touched()
+		_rebuild_terr_fx_rows())
+	r1.add_child(ty)
+	var del := Button.new()
+	del.text = "✕"
+	del.tooltip_text = "删除该效果"
+	del.pressed.connect(func():
+		var fxs: Array = e.get("effects", [])
+		fxs.erase(fx)
+		e["effects"] = fxs
+		_terr_fx_touched()
+		_rebuild_terr_fx_rows())
+	r1.add_child(del)
+	outer.add_child(r1)
+	var r2 := HBoxContainer.new()
+	if str(g.get("layer", "效能")) != "tick":
+		var st := OptionButton.new()
+		var cur_st := 0
+		for j in _TERR_FX_STATS.size():
+			st.add_item("%s效能" % str(_TERR_FX_STATS[j][1]), j)
+			if str(g.get("stat", "evasion")) == str(_TERR_FX_STATS[j][0]):
+				cur_st = j
+		st.select(cur_st)
+		st.item_selected.connect(func(j: int): g["stat"] = str(_TERR_FX_STATS[j][0]); _terr_fx_touched())
+		r2.add_child(st)
+		var sp := SpinBox.new()
+		sp.min_value = -100
+		sp.max_value = 100
+		sp.suffix = "%"
+		sp.tooltip_text = "带符号幅度：正=增益(buff)、负=削减(debuff)"
+		sp.value = float(g.get("percent", 0)) * (-1.0 if str(g.get("nature", "buff")) == "debuff" else 1.0)
+		sp.value_changed.connect(func(v: float):
+			g["percent"] = absf(v)
+			g["nature"] = "debuff" if v < 0.0 else "buff"
+			_terr_fx_touched())
+		r2.add_child(sp)
+	else:
+		r2.add_child(_make_label("点数"))
+		var am := SpinBox.new()
+		am.min_value = 0
+		am.max_value = 99
+		am.value = float(g.get("amount", 0))
+		am.value_changed.connect(func(v: float): g["amount"] = int(v); _terr_fx_touched())
+		r2.add_child(am)
+	var im := LineEdit.new()
+	im.placeholder_text = "豁免 tag（逗号分隔，如 flying,undead）"
+	im.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var when = fx.get("when", {})
+	if typeof(when) == TYPE_DICTIONARY:
+		var lst0 := []
+		for t in when.get("occupant_lacks_tags", []):
+			lst0.append(str(t))
+		im.text = ",".join(lst0)
+	im.text_changed.connect(func(t: String):
+		var lst := []
+		for p in t.split(",", false):
+			var pid := str(p).strip_edges()
+			if pid != "":
+				lst.append(pid)
+		if lst.is_empty():
+			fx.erase("when")
+		else:
+			fx["when"] = {"occupant_lacks_tags": lst}
+		_terr_fx_touched())
+	r2.add_child(im)
+	outer.add_child(r2)
+	var ds := LineEdit.new()
+	ds.text = str(fx.get("desc", ""))
+	ds.placeholder_text = "描述（悬停 tooltip 用）"
+	ds.text_changed.connect(func(t: String): fx["desc"] = t; _terr_fx_touched())
+	outer.add_child(ds)
+	outer.add_child(HSeparator.new())
+	return outer
 
 func _on_save_terrain_data() -> void:
 	if _save_terrain_db():
@@ -2263,54 +2452,36 @@ func _build_action_row(a: Dictionary, idx: int) -> Control:
 	box.add_child(HSeparator.new())
 	return box
 
-# 注册表字段 → 控件（type：text/int/proto/faction/weather）。int 的 max 是宽泛上限，越界值运行时按地图 clamp。
+# 注册表字段 → 控件：单一实现在 EditorUI.event_action_field（与对话编辑器的选项结果动作共用）。
+# dialogue 字段额外挂 ✎ 跳转（浮层内嵌对话编辑器，改完回来下拉即时刷新）。
 func _build_action_field(a: Dictionary, f: Dictionary) -> Control:
-	var key := str(f.get("key", ""))
-	var flabel := str(f.get("label", key))
-	match str(f.get("type", "text")):
-		"int":
-			var row := HBoxContainer.new()
-			row.add_child(_make_label(flabel))
-			var sp := SpinBox.new()
-			sp.min_value = int(f.get("min", 0))
-			sp.max_value = int(f.get("max", 999))
-			sp.value = int(a.get(key, f.get("default", 0)))
-			sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			sp.value_changed.connect(func(val: float): _set_action_field(a, key, int(val)))
-			row.add_child(sp)
-			return row
-		"proto":
-			var protos := UnitFactory.all_prototypes()
-			var po := OptionButton.new()
-			for i in protos.size():
-				po.add_item(str(protos[i].get("name", "")))
-				if str(protos[i].get("id", "")) == str(a.get(key, "")):
-					po.select(i)
-			po.item_selected.connect(func(i: int): _set_action_field(a, key, str(protos[i].get("id", ""))))
-			return po
-		"faction":
-			var fo := OptionButton.new()
-			for i in UNIT_FACTIONS.size():
-				fo.add_item(TagDB.cn(UNIT_FACTIONS[i]))
-				if UNIT_FACTIONS[i] == str(a.get(key, f.get("default", ""))):
-					fo.select(i)
-			fo.item_selected.connect(func(i: int): _set_action_field(a, key, UNIT_FACTIONS[i]))
-			return fo
-		"weather":
-			var weathers := EnvDB.all_weathers()
-			var wo := OptionButton.new()
-			for i in weathers.size():
-				wo.add_item(str(weathers[i].get("label", weathers[i].get("id", ""))))
-				if str(weathers[i].get("id", "")) == str(a.get(key, f.get("default", "clear"))):
-					wo.select(i)
-			wo.item_selected.connect(func(i: int): _set_action_field(a, key, str(weathers[i].get("id", ""))))
-			return wo
-		_:   # "text"
-			var le := LineEdit.new()
-			le.placeholder_text = flabel
-			le.text = str(a.get(key, ""))
-			le.text_changed.connect(func(t: String): _set_action_field(a, key, t))
-			return le
+	var ctrl := EditorUI.event_action_field(a, f, func(): _dirty = true)
+	if str(f.get("type", "")) != "dialogue":
+		return ctrl
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 4)
+	ctrl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(ctrl)
+	var edit := Button.new()
+	edit.text = "✎"
+	edit.tooltip_text = "打开对话编辑器（浮层）——新建/修改对话，关闭后此下拉自动刷新"
+	edit.pressed.connect(func(): _open_dialogue_editor(str(a.get(str(f.get("key", "")), ""))))
+	row.add_child(edit)
+	return row
+
+# 触发器「开对话 ✎」→ 对话编辑器浮层（双宿主组件：独立场景/内嵌一份代码）。关闭后重灌 do 表单刷新下拉。
+var _dlg_overlay = null   # 浮层引用：开着时吞编辑器快捷键（Ctrl+Z/S、F1~F6 不落到地图上）
+
+func _open_dialogue_editor(dialogue_id: String) -> void:
+	var ed = DialogueEditorScript.new()
+	ed.embedded = true
+	add_child(ed)
+	if dialogue_id != "":
+		ed.select_dialogue(dialogue_id)
+	_dlg_overlay = ed
+	ed.closed.connect(func():
+		_dlg_overlay = null
+		_refresh_do_list())
 
 # 右栏与左栏对称：最近操作（折叠·右上，对位左栏图层）/ 地图库（主内容撑满，对位地形笔刷）/ 环境（折叠·向上展开·右下，与左栏底部地形数据对称）
 func _build_side_panel() -> Control:
@@ -2778,6 +2949,8 @@ func _make_brush_button(entry: Dictionary, group: ButtonGroup) -> Button:
 # ------------------------------------------------------------------ 事件
 
 func _unhandled_input(event: InputEvent) -> void:
+	if _dlg_overlay != null and is_instance_valid(_dlg_overlay):
+		return   # 对话编辑器浮层开着：编辑器快捷键全部休眠（撤销/存盘/切层不落到地图）
 	if not (event is InputEventKey and event.pressed and not event.echo):
 		return
 	if event.ctrl_pressed:
@@ -3479,17 +3652,22 @@ func hover_text(col: int, row: int) -> String:
 		return ""
 	var t = tiles[row][col]
 	var e = TerrainDB.entry_for(t)
-	var label := str(e.label) if e != null else "未知"
+	# 放置物压过底地形 🔒：名称/效果/tags 按生效条目显示（与战斗侧同源），有放置物时括注底地形
+	var ap = TerrainDB.applied_entry(t)
+	var label := str(ap.label) if ap != null else "未知"
+	if ap != e and e != null:
+		label = "%s（底：%s）" % [label, str(e.get("label", "?"))]
 	var base := "地形：%s（%d, %d）" % [label, col, row]
 	base += "\n可通行性：%s" % TerrainDB.passability_text(TerrainDB.effective_move(t, map_terrain_overrides))
-	base += "\n特殊效果：%s" % TerrainDB.effects_text(e)
-	var tcn := TerrainDB.tags_cn(e)
+	base += "\n特殊效果：%s" % TerrainDB.effects_text_at(t)
+	var tcn := TerrainDB.tags_cn(ap)
 	if tcn != "":
 		base += "\ntags：%s" % tcn
 	var rtxt := _regions_at(col, row)
 	if rtxt != "":
 		base += "\n区域：" + rtxt
-	var loc: Dictionary = derived_locations()["by_cell"].get(Vector2i(col, row), {})
+	# 地点＝大地图专属语义（战斗图画同款瓦片＝纯装饰，不显示地点行——农场≠村落）
+	var loc: Dictionary = (derived_locations()["by_cell"].get(Vector2i(col, row), {})) if map_type == "overworld" else {}
 	if not loc.is_empty():
 		base += "\n地点：%s〔%s〕（%s）" % [str(loc.get("label", "")), LocationDB.type_label(str(loc.get("type", ""))), str(loc.get("id", ""))]
 	var ln := _line_summary_at(col, row)

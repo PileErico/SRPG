@@ -10,6 +10,10 @@ const TagDB := preload("res://TagDB.gd")       # 自由 tag 区 chip 中文标�
 const StatMeta := preload("res://StatMeta.gd") # 修正行 stat 中文标签
 const ItemTooltip := preload("res://ItemTooltip.gd")   # 物品选择器悬停富预览（通用渲染组件复用）
 const ReactionRegistry := preload("res://ReactionRegistry.gd")
+const EventEngine := preload("res://EventEngine.gd")   # 事件动作注册表（动作字段渲染单一实现在本文件）
+const UnitFactory := preload("res://UnitFactory.gd")   # 动作字段 proto 下拉
+const EnvDB := preload("res://EnvDB.gd")               # 动作字段 weather 下拉
+const DialogueDB := preload("res://DialogueDB.gd")     # 动作字段 dialogue 下拉
 
 # —— 基础构件 ——
 
@@ -111,7 +115,9 @@ static func background() -> ColorRect:
 
 # 点标题栏收起/展开 content。进阶/占空间的段默认收起，给主内容让位。
 # expand_up=true：底部停靠段——content 在 header 之上（向上展开），header 钉死在底部原地不随开合上下跳。
-static func make_foldable(title: String, content: Control, collapsed: bool, expand_up: bool = false, on_toggle := Callable()) -> VBoxContainer:
+# header_extra：折叠钮右侧的附加控件（排序钮/⋯菜单等，点击不触发折叠）；header_bg/header_font：
+# 头部底色/字色（层级区分——一级分类深底金字、二级条目缺省浅底白字）。
+static func make_foldable(title: String, content: Control, collapsed: bool, expand_up: bool = false, on_toggle := Callable(), header_extra: Control = null, header_bg := Color(0.18, 0.22, 0.28), header_font := Color(0.86, 0.9, 0.96)) -> VBoxContainer:
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 2)
 	var hdr := Button.new()
@@ -121,13 +127,13 @@ static func make_foldable(title: String, content: Control, collapsed: bool, expa
 	hdr.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	hdr.focus_mode = Control.FOCUS_NONE
 	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.18, 0.22, 0.28)
+	sb.bg_color = header_bg
 	sb.set_corner_radius_all(3)
 	sb.set_content_margin_all(4)
 	hdr.add_theme_stylebox_override("normal", sb)
 	hdr.add_theme_stylebox_override("hover", sb)
 	hdr.add_theme_stylebox_override("pressed", sb)
-	hdr.add_theme_color_override("font_color", Color(0.86, 0.9, 0.96))
+	hdr.add_theme_color_override("font_color", header_font)
 	# 箭头：普通段 ▸收起/▾展开；向上展开段 ▴收起(点了向上开)/▾展开(点了向下收)
 	var _upd := func(open: bool):
 		var a := ("▾ " if open else "▴ ") if expand_up else ("▾ " if open else "▸ ")
@@ -139,11 +145,19 @@ static func make_foldable(title: String, content: Control, collapsed: bool, expa
 		_upd.call(pressed)
 		if on_toggle.is_valid():
 			on_toggle.call(pressed))
+	var head: Control = hdr
+	if header_extra != null:
+		var hb := HBoxContainer.new()
+		hb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		hb.add_theme_constant_override("separation", 2)
+		hb.add_child(hdr)
+		hb.add_child(header_extra)
+		head = hb
 	if expand_up:
 		box.add_child(content)   # content 在上、header 在下 → 展开时内容向上长，header 留在底部
-		box.add_child(hdr)
+		box.add_child(head)
 	else:
-		box.add_child(hdr)
+		box.add_child(head)
 		box.add_child(content)
 	return box
 
@@ -223,6 +237,95 @@ static func add_dropdown(parent: Node, text: String, pairs: Array, sel: String, 
 	parent.add_child(field_row(text, ob))
 	return ob
 
+# —— 事件动作表单（EventEngine 注册表数据驱动；触发器 do 表单与对话选项结果动作共用的单一实现）——
+
+# 注册表字段 → 控件。type：text/int/proto/faction/weather/dialogue。写值直落 a[key]、再回调 on_change（脏标记）。
+# int 的 max 是宽泛上限，越界值运行时按地图 clamp 兜底；faction 词表＝TagDB faction 类（单一源）。
+static func event_action_field(a: Dictionary, f: Dictionary, on_change := Callable()) -> Control:
+	var key := str(f.get("key", ""))
+	var flabel := str(f.get("label", key))
+	var setv := func(val):
+		a[key] = val
+		if on_change.is_valid():
+			on_change.call()
+	match str(f.get("type", "text")):
+		"int":
+			var row := HBoxContainer.new()
+			row.add_child(label(flabel))
+			var sp := SpinBox.new()
+			sp.min_value = int(f.get("min", 0))
+			sp.max_value = int(f.get("max", 999))
+			sp.value = int(a.get(key, f.get("default", 0)))
+			sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			sp.value_changed.connect(func(val: float): setv.call(int(val)))
+			row.add_child(sp)
+			return row
+		"proto":
+			var protos := UnitFactory.all_prototypes()
+			var po := OptionButton.new()
+			for i in protos.size():
+				po.add_item(str(protos[i].get("name", "")))
+				if str(protos[i].get("id", "")) == str(a.get(key, "")):
+					po.select(i)
+			po.item_selected.connect(func(i: int): setv.call(str(protos[i].get("id", ""))))
+			return po
+		"faction":
+			var facs := TagDB.by_cat("faction")   # player/ally/enemy/neutral（词表单一源）
+			var fo := OptionButton.new()
+			for i in facs.size():
+				fo.add_item(str(facs[i].get("cn", facs[i].get("id", ""))))
+				if str(facs[i].get("id", "")) == str(a.get(key, f.get("default", ""))):
+					fo.select(i)
+			fo.item_selected.connect(func(i: int): setv.call(str(facs[i].get("id", ""))))
+			return fo
+		"weather":
+			var weathers := EnvDB.all_weathers()
+			var wo := OptionButton.new()
+			for i in weathers.size():
+				wo.add_item(str(weathers[i].get("label", weathers[i].get("id", ""))))
+				if str(weathers[i].get("id", "")) == str(a.get(key, f.get("default", "clear"))):
+					wo.select(i)
+			wo.item_selected.connect(func(i: int): setv.call(str(weathers[i].get("id", ""))))
+			return wo
+		"dialogue":
+			var dlgs: Array = DialogueDB.all_dialogues()
+			var dopt := OptionButton.new()
+			dopt.add_item("—（未选）")
+			dopt.set_item_metadata(0, "")
+			var cur := str(a.get(key, ""))
+			var found := cur == ""
+			for i in dlgs.size():
+				var did := str(dlgs[i].get("id", ""))
+				dopt.add_item("%s（%s）" % [str(dlgs[i].get("label", "")), did])
+				dopt.set_item_metadata(i + 1, did)
+				found = found or did == cur
+			if not found:
+				# 数据里存着已不存在的对话 id（改名/删除后）：显式列出并选中——不悄悄显示成「未选」误导覆盖
+				dopt.add_item("⚠ 失联对话（%s）" % cur)
+				dopt.set_item_metadata(dopt.item_count - 1, cur)
+			select_meta(dopt, cur)
+			dopt.item_selected.connect(func(i: int): setv.call(str(dopt.get_item_metadata(i))))
+			dopt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			return dopt
+		_:   # "text"
+			var le := LineEdit.new()
+			le.placeholder_text = flabel
+			le.text = str(a.get(key, ""))
+			le.text_changed.connect(func(t: String): setv.call(t))
+			return le
+
+# 「＋ 添加动作」菜单（注册表驱动：新动作登记 EventEngine 即自动出现）。on_pick(action_id)。
+static func event_action_menu(text: String, on_pick: Callable) -> MenuButton:
+	var mb := MenuButton.new()
+	mb.text = text
+	mb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var pop := mb.get_popup()
+	var defs := EventEngine.action_defs()
+	for i in defs.size():
+		pop.add_item(str(defs[i]["label"]), i)
+	pop.id_pressed.connect(func(id: int): on_pick.call(str(EventEngine.action_defs()[id]["id"])))
+	return mb
+
 # —— 文件对话框工厂 ——
 # filters：[[pattern, desc], ...]，如 [["*.json","地图 JSON"]]。native RES 对话框不存在→资源访问传 native=false。
 static func make_file_dialog(mode: int, access: int, filters: Array, native := true) -> FileDialog:
@@ -297,6 +400,31 @@ static func confirm(host: Node, text: String, ok_text: String, on_ok: Callable,
 			on_cancel.call()
 		dlg.queue_free())
 	dlg.popup_centered()
+
+# 通用文本输入弹窗（一次性：关闭即自毁）；cb 收 strip_edges 后文本、仅确定时回调。
+static func text_prompt(host: Node, title: String, initial: String, cb: Callable) -> void:
+	var dlg := ConfirmationDialog.new()
+	dlg.title = title
+	dlg.ok_button_text = "确定"
+	dlg.get_cancel_button().text = "取消"
+	var vb := VBoxContainer.new()
+	vb.add_child(label(title))
+	var edit := LineEdit.new()
+	edit.custom_minimum_size = Vector2(320, 0)
+	edit.text = initial
+	vb.add_child(edit)
+	dlg.add_child(vb)
+	dlg.register_text_enter(edit)
+	dlg.confirmed.connect(func():
+		if cb.is_valid():
+			cb.call(edit.text.strip_edges()))
+	dlg.visibility_changed.connect(func():
+		if not dlg.visible:
+			dlg.queue_free())
+	host.add_child(dlg)
+	dlg.popup_centered(Vector2i(380, 150))
+	edit.select_all()
+	edit.grab_focus()
 
 # 未保存改动守卫：干净 → 直接 on_ok；脏 → 弹确认（丢弃→on_ok / 留下→on_cancel）。
 static func confirm_discard(host: Node, dirty: bool, on_ok: Callable, on_cancel := Callable(),
