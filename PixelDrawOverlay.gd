@@ -39,14 +39,16 @@ var _swatches_path := ""
 var _edit_alpha := false
 
 func setup(opts: Dictionary) -> void:
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	# ⚠️ 必须 and_offsets 版：setup 在 add_child 之后跑（已进树），只改锚点会把矩形锁在最小尺寸——
+	# 表现＝左上角一块不随窗口走的死面板（2026-07-20 用户吐槽修复；同 DialogueUI 布局守则）。
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var dim := ColorRect.new()
-	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	dim.color = Color(0, 0, 0, 0.55)
 	dim.mouse_filter = Control.MOUSE_FILTER_STOP   # 挡住底层输入
 	add_child(dim)
 	var pad := MarginContainer.new()
-	pad.set_anchors_preset(Control.PRESET_FULL_RECT)
+	pad.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	for m in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
 		pad.add_theme_constant_override(m, 18)
 	add_child(pad)

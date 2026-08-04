@@ -19,5 +19,26 @@
       "dy": 0,
       "size_mult": 1
     }
+  },
+  "empire_light_infantry": {
+    "palettes": {
+      "body": "",
+      "cslot_1": "",
+      "cslot_2": "",
+      "helmet": "",
+      "weapon": ""
+    },
+    "parts": {
+      "body": "body_base_body_32x32",
+      "cslot_1": "帝国_小盾",
+      "cslot_2": "帝国轻步兵_防具",
+      "helmet": "帝国轻步兵_头盔",
+      "weapon": "帝国_长矛"
+    },
+    "piece": {
+      "dx": 0,
+      "dy": 0,
+      "size_mult": 1
+    }
   }
 }

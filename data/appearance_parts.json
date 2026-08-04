@@ -135,20 +135,94 @@
       "tags": []
     },
     {
-      "cn": "helmet_new",
+      "cn": "shield_new",
+      "id": "shield_new",
+      "path": "res://icons/Parts/cslot_1/shield_new.png",
+      "recolorable": true,
+      "slot": "cslot_1",
+      "tags": []
+    },
+    {
+      "cn": "帝国步兵-头盔",
       "default_palette": "steel",
-      "id": "helmet_new",
-      "path": "res://icons/Parts/helmet/helmet_new.png",
+      "id": "Empire_Helmet_1",
+      "path": "res://icons/Parts/helmet/Empire_Helmet_1.png",
       "recolorable": true,
       "slot": "helmet",
       "tags": []
     },
     {
-      "cn": "cslot_2_new",
-      "id": "cslot_2_new",
-      "path": "res://icons/Parts/cslot_2/cslot_2_new.png",
+      "cn": "hair_new",
+      "id": "hair_new",
+      "path": "res://icons/Parts/weapon/hair_new.png",
+      "recolorable": true,
+      "slot": "weapon",
+      "tags": []
+    },
+    {
+      "cn": "帝国步兵_防具",
+      "id": "帝国步兵_防具",
+      "path": "res://icons/Parts/cslot_2/帝国步兵_防具.png",
       "recolorable": true,
       "slot": "cslot_2",
+      "tags": []
+    },
+    {
+      "cn": "帝国轻步兵_防具",
+      "id": "帝国轻步兵_防具",
+      "path": "res://icons/Parts/cslot_2/帝国轻步兵_防具.png",
+      "recolorable": true,
+      "slot": "cslot_2",
+      "tags": []
+    },
+    {
+      "cn": "帝国轻步兵_头盔",
+      "default_palette": "steel",
+      "id": "帝国轻步兵_头盔",
+      "path": "res://icons/Parts/helmet/帝国轻步兵_头盔.png",
+      "recolorable": true,
+      "slot": "helmet",
+      "tags": []
+    },
+    {
+      "cn": "帝国_长矛",
+      "id": "帝国_长矛",
+      "path": "res://icons/Parts/weapon/帝国_长矛.png",
+      "recolorable": true,
+      "slot": "weapon",
+      "tags": []
+    },
+    {
+      "cn": "帝国_小盾",
+      "id": "帝国_小盾",
+      "path": "res://icons/Parts/cslot_1/帝国_小盾.png",
+      "recolorable": true,
+      "slot": "cslot_1",
+      "tags": []
+    },
+    {
+      "cn": "帝国轻步兵_头盔_军士",
+      "default_palette": "steel",
+      "id": "帝国轻步兵_头盔_军士",
+      "path": "res://icons/Parts/helmet/帝国轻步兵_头盔_军士.png",
+      "recolorable": true,
+      "slot": "helmet",
+      "tags": []
+    },
+    {
+      "cn": "帝国轻步兵_防具_军士",
+      "id": "帝国轻步兵_防具_军士",
+      "path": "res://icons/Parts/cslot_2/帝国轻步兵_防具_军士.png",
+      "recolorable": true,
+      "slot": "cslot_2",
+      "tags": []
+    },
+    {
+      "cn": "帝国_双手斧",
+      "id": "帝国_双手斧",
+      "path": "res://icons/Parts/weapon/帝国_双手斧.png",
+      "recolorable": true,
+      "slot": "weapon",
       "tags": []
     }
   ],
@@ -161,17 +235,17 @@
     {
       "cn": "头发",
       "id": "hair",
-      "z": 20
+      "z": 30
     },
     {
       "cn": "头盔",
       "id": "helmet",
-      "z": 30
+      "z": 40
     },
     {
       "cn": "武器",
       "id": "weapon",
-      "z": 40
+      "z": 20
     },
     {
       "cn": "盾",
