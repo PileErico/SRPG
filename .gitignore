@@ -10,6 +10,13 @@ mono_crash.*.json
 /_*_test.gd.uid
 # 素材源压缩包（解压后的 PNG 已入库，源 zip 不入库、避免仓库膨胀）
 *.zip
+# ⚠️ PHBT v0.6.5 参考包（已购入，许可＝personal-use-only 且禁衍生分发）——
+# 素材终案 🔒 2026-07-20＝战斗地块自绘 96×96，此包只作画风/摆位参考，**永不入库、勿推公共远端**。
+/icons/Tiles/Pixel Hex Battle Tileset 0.6.5 Sorted/
+# 导出中转垃圾（画图工具默认名，用完即弃）
+sprite_*x*__*.png
+# 绘图工作文件（调色板等，不属于运行时资源）
+/forPainting/
 # 系统 / 编辑器杂物
 Thumbs.db
 .DS_Store

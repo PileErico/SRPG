@@ -15,11 +15,11 @@
 ### 数据流原则 🔒（数据 ⟂ 呈现）
 - **UI 组件自决布局**，只暴露 `set_*` / 读契约方法；**不自己抓/算数据**。
 - 数据可分散：底边栏的**地块**来自 `HexCanvas`（悬停），**提示**来自宿主——UI 只此一处排版、两处数据各自注入。
-- 反例（已纠正）：曾把底边栏塞进 `HexCanvas` 并注入提示串 = 把 UI 耦合进数据源；改为**独立组件 + 信号读取**。
+- 底边栏等外壳组件做成**独立组件 + 信号读取**（不内嵌进 `HexCanvas`，避免把 UI 耦合进数据源）。
 
 ### UI 同比缩放 🔒（1080p 基准，2026-07-07）
 - **决策**：全 UI 以 **1080p（1920×1080）为设计基准**，随视口等比缩放（更大/更小分辨率同比放缩、夹在 [0.55, 1.5]）。**地图排除**——玩家有独立的手动地图缩放（按喜好自适应），无需自动缩。
-- **不用引擎全局 stretch**（`canvas_items`）：它会连六边形战场瓦片一起缩、毁像素密度（赤道对齐 / 等比 1.5× 全废）——曾试全局 stretch 被否、根因即此。故只缩 UI、地图保持原生。
+- **不用引擎全局 stretch**（`canvas_items`）：它会连六边形战场瓦片一起缩、毁像素密度（赤道对齐 / 等比 1.5× 全废）。故只缩 UI、地图保持原生。
 - **单一源＝[UIScale.gd](../UIScale.gd)**（仿 *DB：`REF`=1080p、`MIN`/`MAX`、`factor(vp)` / `of(node)`）。
 - **两种应用**：① 固定尺寸面板（卡片 / 对话框 / 覆盖层）＝根节点整体 `scale = UIScale.of(self)`（pivot 归零或居中），自身 `resized` / 视口 `size_changed` 时重算；② 边缘吸附 HUD（底边栏 / 角标）＝不整体 scale（会脱锚），改缩字号 / 内边距等度量。
 - **已接入**：[UnitStatusPanel.gd](../UnitStatusPanel.gd) 角色卡（`_card_scale`）、[Settings.gd](../Settings.gd) 覆盖层（对话框整体缩）。
@@ -35,7 +35,7 @@
 > ⚠️ 现状文件名仍为 `BattleBottomBar.gd`（原型），迁移中改名 `MapInfoBar` 归共享层（见下「迁移」）。
 - 独立 `PanelContainer`：`PRESET_BOTTOM_WIDE` + `grow_vertical=BEGIN`（否则底边宽锚点高度塌成 0）；`mouse_filter=IGNORE` 点击穿透。
 - 布局自决：`HBox[地块 Label（撑开）· 按键提示 Label]`；API 仅 `set_terrain(text)`（多行 `hover_text`→折单行）/ `set_hint(text)`。
-- 战斗接线（[Sandbox.gd](Sandbox.gd)）：`_build` 建栏挂 `canvas` 下 → `set_hint("[调试] V迷雾 N昼夜 C天气")` → `canvas.terrain_in_popup=false` → 连 `canvas.hover_changed`→`_on_hover_bar`（越界/移出显占位，否则喂 `hover_text`）；取代原散在宿主的右下角 `_build_shortcut_hint`。
+- 战斗接线（[Sandbox.gd](Sandbox.gd)）：`_build` 建栏挂 `canvas` 下 → `set_hint("[调试] V迷雾 N昼夜 C天气")` → `canvas.terrain_in_popup=false` → 连 `canvas.hover_changed`→`_on_hover_bar`（越界/移出显占位，否则喂 `hover_text`）。
 
 ## 🟡 规划 / 迁移
 - 🔧 **`BattleBottomBar` → 改名 `MapInfoBar`**、归共享层（去 battle 前缀＝去场景耦合）。
