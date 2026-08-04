@@ -133,7 +133,7 @@ func _initialize() -> void:
 	ck(liz.move_allowance() == 3 and liz.move_allowance(["water", "shallow"]) == 4,
 		"蜥蜴人条件移动力：陆 3 / 水域 4（when_tile_tag）")
 	liz.init_vitals()
-	ck(liz.morale == 29, "决心4 → 初始士气 25+4=29（🔒 +1/点）")
+	ck(liz.momentum == 0, "气势初始 0（🔒 气势档 §2；决心职能＝检定修正、不给初始值）")
 	liz.level = 2
 	liz._apply_level_growth()
 	ck(int(liz.stats["HP_max"]) == 46 and int(liz.stats["will_fort"]) == 1 and int(liz.stats["body_fort"]) == 7,

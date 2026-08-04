@@ -16,6 +16,7 @@ const ReactionRegistry := preload("res://ReactionRegistry.gd")
 const ProfDB := preload("res://ProfDB.gd")   # 技能（熟练度域）注册表——战斗涨值挂钩用（🔒 模块_属性成长_设计.md §2.4）
 const ItemInstances := preload("res://ItemInstances.gd")   # 副手惩罚盾豁免查装备（§7.1 阶段3b）
 const MinHeap := preload("res://MinHeap.gd") # 寻路优先队列（_dijkstra；与 Overworld.find_path 共用实现）
+const MomentumDB := preload("res://MomentumDB.gd")   # 气势兑付/参数表（🔒 docs/模块_战斗_气势.md）
 
 const DEFAULT_TERRAIN := "plain"
 const DEFAULT_VARIANT := "grassland"
@@ -64,6 +65,8 @@ var ironman := false        # 开战捕获（技改 §1-10）：模型层不读�
 var _vis_visible := {}    # 当前可见格 {Vector2i:true}（派生：可由单位位置重算）
 var _vis_seen := {}       # 曾见格 {Vector2i:true}（只增不减——唯一不可重建的历史，必存）
 var omniscient := false   # 调试全知（门控 targeting/迷雾规则，属规则输入）
+var exposed := {}         # 暴露 🔒（隐蔽与视野）：{instance_id:true}——本 round 内攻击过（含反应）/被命中过的单位，
+                          # 隐蔽失效至 round 末（_wrap_round 清空；快照按池下标往返）
 
 # —— 环境：日夜 + 天气（战斗级状态）——
 var _cur_time := "day"
@@ -193,10 +196,12 @@ func _is_hostile(a, b) -> bool:
 # ============ 移动力 / 寻路 ============
 
 # 单位脚下（任意格）地块的 tags——种族条件移动力（move_overrides when_tile_tag）等地形判据用；越界=[]。
+# 该格的地块 tags＝生效条目（放置物压过底地形 🔒：有放置物只看放置物——道路铺森林＝开阔道路）。
+# 视线/隐蔽/种族条件移动力（when_tile_tag）统一走这一口。
 func _tile_tags_at(col: int, row: int) -> Array:
 	if not _cell_in_bounds(col, row):
 		return []
-	var e = TerrainDB.entry_for(tiles[row][col])
+	var e = TerrainDB.applied_entry(tiles[row][col])
 	return e.get("tags", []) if e != null else []
 
 # 单位进入该地块的移动消耗（tag 驱动）：-1 = 不可进入。
@@ -225,7 +230,11 @@ func _dijkstra(unit, budget: int) -> Dictionary:
 		if u == unit:
 			continue
 		occupied[Vector2i(u.col, u.row)] = true
-		if _is_hostile(unit, u) and not unit.is_airborne():   # 飞行无视近战 ZOC 🔒：不停步不借机
+		# 飞行无视近战 ZOC 🔒：不停步不借机。🔒 隐蔽与视野双向豁免：
+		# ①隐蔽拥有者的 ZOC 不入停步集（预览/规划零泄露——伏击截停在宿主移动结算侧 Sandbox._ambush_truncation）
+		# ②拥有者看不见移动者（移动者隐蔽/超视距）＝不停步（「隐蔽单位进敌 ZOC 不触发借机/停步」规格）
+		if _is_hostile(unit, u) and not unit.is_airborne() \
+				and _unit_visible_to_side(unit, u) and _unit_visible_to_side(u, unit):
 			for c in _zoc_cells(u):
 				zoc[c] = true
 	var open = MinHeap.new()
@@ -306,11 +315,16 @@ func _zoc_key(owner, mover) -> String:
 
 # cell 是否落在「敌对于 mover 的某单位」的 ZOC 内（= 与某敌对单位相邻）。
 # 飞行单位无视近战 ZOC 🔒（2026-07-17 用户整理；将来「空域警戒」对空 ZOC 另设属性再开）。
-func _in_hostile_zoc(cell: Vector2i, mover) -> bool:
+# visible_only=true（🔒 隐蔽与视野）：停步/耗尽类「知情压力」判定用——双向豁免：
+# 移动方看不见拥有者（隐蔽 ZOC 不泄密）∨ 拥有者看不见移动者（隐蔽移动者不受压）都不计入；
+# 借机（拥有者视角、_first_zoc_owner 自带 owner-sees-mover 门槛）不走此口。
+func _in_hostile_zoc(cell: Vector2i, mover, visible_only := false) -> bool:
 	if mover != null and mover.is_airborne():
 		return false
 	for u in units:
 		if u != mover and _is_hostile(mover, u) and _hex_dist(cell, Vector2i(u.col, u.row)) <= _zoc_radius(u):
+			if visible_only and (not _unit_visible_to_side(mover, u) or not _unit_visible_to_side(u, mover)):
+				continue
 			return true
 	return false
 
@@ -322,17 +336,21 @@ func _first_zoc_owner(cell: Vector2i, mover, exclude = null):
 		return null
 	for u in units:
 		if u != mover and u != exclude and _is_hostile(mover, u) and _hex_dist(cell, Vector2i(u.col, u.row)) <= _zoc_radius(u):
+			if not _unit_visible_to_side(u, mover):
+				continue   # 拥有者看不见移动者＝不反应（🔒 隐蔽与视野：不可见单位不触发反应）
 			if not zoc_triggered.has(_zoc_key(u, mover)):
 				return u
 	return null
 
-# 移动范围内、属于敌方 ZOC 的格（移动模式自动标红）；飞行 mover 无视近战 ZOC → 不标红
+# 移动范围内、属于敌方 ZOC 的格（移动模式自动标红）；飞行 mover 无视近战 ZOC → 不标红；
+# 🔒 隐蔽与视野双向豁免：隐蔽拥有者不标（预览零泄露）；拥有者看不见移动者也不标（对隐蔽移动者无压力）
 func _enemy_zoc_in_range(mover, reach: Dictionary) -> Dictionary:
 	var out := {}
 	if mover != null and mover.is_airborne():
 		return out
 	for u in units:
-		if u == mover or not _is_hostile(mover, u):
+		if u == mover or not _is_hostile(mover, u) \
+				or not _unit_visible_to_side(mover, u) or not _unit_visible_to_side(u, mover):
 			continue
 		for c in _zoc_cells(u):
 			if reach.has(c):
@@ -354,6 +372,7 @@ func _wrap_round() -> Array:
 	round_num += 1
 	_rebuild_turn_order()
 	zoc_triggered = {}
+	exposed = {}   # 暴露到期（🔒 隐蔽与视野：暴露持续至 round 末）——回归隐蔽资格
 	return events
 
 # 大回合末对称 tick（§2.2 第三时点）：只递减/到期 expire_timing=="round_end" 的效果
@@ -440,12 +459,17 @@ func _is_active_unit(u) -> bool:
 
 # ============ 视线（LOS；视野/迷雾的重算在 Phase 3 后续批迁入）============
 
-# 该格地形是否阻挡视线（读地形 blocks_sight tag；越界＝挡）
+# 该格地形是否阻挡视线（读地块 tags——含放置物合并；越界＝挡）
 func _tile_blocks_sight(col: int, row: int) -> bool:
 	if not _cell_in_bounds(col, row):
 		return true
-	var e = _terrain_entry(tiles[row][col])
-	return e != null and ("blocks_sight" in e.get("tags", []))
+	return "blocks_sight" in _tile_tags_at(col, row)
+
+# 该格是否为隐蔽地块（cover tag，含放置物合并；越界＝否）——站位单位仅邻近可见（🔒 隐蔽与视野）
+func _tile_conceals(col: int, row: int) -> bool:
+	if not _cell_in_bounds(col, row):
+		return false
+	return "cover" in _tile_tags_at(col, row)
 
 # a 能否看到 b：连线上「中间格」任一 blocks_sight 即挡。终点 b 自身的 blocks_sight 不挡。
 func _has_los(a: Vector2i, b: Vector2i) -> bool:
@@ -473,21 +497,22 @@ const _TERRAIN_EFF_BUCKET := {
 	"defense": "def_eff",   # 守方：减伤（减免向，折进全域减伤 G）
 }
 
-# 单位所站地块的地形定义（越界/无单位＝null）。地块效果按 tile identity 取，图级 move 覆盖不改 effects。
-func _terrain_at_unit(u):
+# 单位所站的 tile（越界/无单位＝null）。效果消费走 TerrainDB tile 级 API（放置物压过+同类取高 🔒）；
+# 图级 move 覆盖不改 effects。
+func _tile_at_unit(u):
 	if u == null or not _cell_in_bounds(u.col, u.row):
 		return null
-	return _terrain_entry(tiles[u.row][u.col])
+	return tiles[u.row][u.col]
 
 # 单位所站地块对某效能桶的连乘因子（惰性、占据者视角）。无地块/无匹配效果＝1.0（与无地形一致）。
 # gain_dir=true：增益向 ×(1+percent/100)（命中/攻击效能）；false：减免向 ×(1−percent/100)（闪避/防御效能）。
 # nature=debuff 取负；同桶多条连乘（与 eff_mult/eff_reduce 同律）；下限 clamp 0（防负因子翻转，同效能层🔒）。
 func _terrain_eff_factor(u, bucket: String, gain_dir: bool) -> float:
-	var entry = _terrain_at_unit(u)
-	if entry == null:
+	var tile = _tile_at_unit(u)
+	if tile == null:
 		return 1.0
 	var factor := 1.0
-	for g in TerrainDB.active_grants(entry, u.tags):
+	for g in TerrainDB.active_grants_at(tile, u.tags):
 		if str(g.get("layer", "效能")) != "效能":
 			continue   # 只折效能层；补正层（flat/pct）不在攻防乘算链里
 		if str(_TERRAIN_EFF_BUCKET.get(str(g.get("stat", "")), "")) != bucket:
@@ -506,10 +531,10 @@ func _apply_terrain_ticks(u) -> Array:
 	var events := []
 	if u == null:
 		return events
-	var entry = _terrain_at_unit(u)
-	if entry == null:
+	var tile = _tile_at_unit(u)
+	if tile == null:
 		return events
-	for ef in TerrainDB.active_effects(entry, u.tags):
+	for ef in TerrainDB.active_effects_at(tile, u.tags):
 		var g = ef.get("grant", null)
 		if typeof(g) != TYPE_DICTIONARY or str(g.get("layer", "")) != "tick":
 			continue
@@ -546,9 +571,9 @@ func _hit_chance_detail(attacker, target, skill = null) -> Dictionary:
 	var base_hit := 0.0
 	if typeof(skill) == TYPE_DICTIONARY:
 		base_hit = float(skill.get("hit", 0.0))   # 武器技能面板命中（横扫低/刺击高——逐技能定基准）
-	var acc: int = int(round(base_hit + attacker.effective_stat_f("acc") + attacker.effective_stat_f("finesse"))) \
-		+ attacker.morale_combat_mod()   # 士气档位 🔒 §10.7：命中平加 ±5/10（稳定 0）
+	var acc: int = int(round(base_hit + attacker.effective_stat_f("acc") + attacker.effective_stat_f("finesse")))
 	var eva := int(round(target.effective_stat_f("eva") + target.effective_stat_f("agility")))
+	# 气势命中/闪避加成已含在 acc/eva 的 effective_stat_f 暗加成里（🔒 气势档 §4）——判定与展示天然同口径
 	if target.has_state("incapacitated"):
 		eva = 0   # 失能不自主闪避（🔒 2026-07-17 异常整理：失能＝不参与任何反应；非必中——攻方仍会失手）
 	var eff: float = attacker.eff_mult("hit_eff") * target.eff_reduce("eva_eff")
@@ -635,6 +660,10 @@ func _resolve_compute(attacker, target, skill) -> Dictionary:
 	var r := _resolve_compute_body(attacker, target, skill)
 	attacker.combat_ctx = {}
 	target.combat_ctx = {}
+	# 暴露 🔒（隐蔽与视野）：出手即暴露（无论命中，含借机等反应攻击）；被攻击**命中才**暴露——均至 round 末
+	exposed[attacker.get_instance_id()] = true
+	if bool(r.get("hit", false)):
+		exposed[target.get_instance_id()] = true
 	return r
 
 func _resolve_compute_body(attacker, target, skill) -> Dictionary:
@@ -645,8 +674,7 @@ func _resolve_compute_body(attacker, target, skill) -> Dictionary:
 	var hit := roll < hc
 	var r := {"hit": hit, "roll": roll, "hc": hc, "acc": int(hd["acc"]), "eva": int(hd["eva"])}
 	if not hit:
-		r["morale_att"] = _morale_add(attacker, -1)   # 士气：失手 −1（🔒 §10.7）
-		return r
+		return r   # 失手：气势两侧均无事件（骰运不双重计费 🔒 气势档 §3）
 	# 暴击 🔒 §10.6：无人身底率——crit_rate 面板（招式/武器承载）＋技巧×0.5 −受击方**暴击防御**，钳底 0。
 	# 暴击防御＝运气＋crit_def 伪 stat 修正（🔒 2026-07-17 定名：运气的压暴作用命名为可 debuff 的派生量——
 	# 既有数值零迁移；踉跄类异常挂 crit_def 负修正即扣暴击防御）。
@@ -659,7 +687,7 @@ func _resolve_compute_body(attacker, target, skill) -> Dictionary:
 	var cmult := ((float(attacker.effective_stat_f("crit_dmg")) \
 		+ float(attacker.effective_stat_f("luck")) * 0.5) / 100.0) if crit else 1.0
 	var aeff: float = attacker.eff_mult("atk_eff") * _terrain_eff_factor(attacker, "atk_eff", true) \
-		* (1.0 + attacker.morale_combat_mod() / 100.0)   # 攻击效能桶：面板 atk_eff/100 × Π效能修正 × 攻方地块 × 士气档位因子（🔒 §10.7）
+		* (1.0 + attacker.momentum_bonus("atk_pct") / 100.0)   # 攻击效能桶：面板 atk_eff/100 × Π效能修正 × 攻方地块 × 气势总伤害系数（双手表 🔒 气势档 §4）
 	# 副手惩罚（🔒 决策5/§7.1 阶段3b）：hit 带 weapon_source=="off_hand" 且副手非盾 → ×offhand_eff/100
 	# （基础 50、单手精通 perk 经修正管线 ≤75）；offhand_factor（偷击类 hit 自带再乘，per-round 账本＝阶段6 反应侧）
 	var ohf := 1.0
@@ -672,6 +700,10 @@ func _resolve_compute_body(attacker, target, skill) -> Dictionary:
 	var bonus := _skill_bonus(attacker, skill)
 	if bonus > 0.0:
 		out += bonus
+	# 徒手气势附加物理伤害 🔒（气势档 §4）：flat 添头不吃效能，随本分量走正常减伤链——每个命中判定各带一份
+	var mflat: float = attacker.momentum_unarmed_flat()
+	if mflat > 0.0:
+		out += mflat
 	# 反应系数（🔒 决策31）：借机/反击段的 hit 带 atk_rate（借机注入 REACTION_RATE；缺省 1＝普攻零影响）——
 	# 段输出整体等比缩放（含补正），命中/暴击/格挡掷骰不受影响
 	var rrate := maxf(0.0, float(skill.get("atk_rate", 1.0)))
@@ -684,8 +716,6 @@ func _resolve_compute_body(attacker, target, skill) -> Dictionary:
 	if target.has_state("incapacitated"):
 		br = 0.0   # 失能不自主格挡（🔒 2026-07-17 异常整理）
 	var blocked := rng.randf() * 100.0 < br
-	if not blocked:
-		r["morale_att"] = _morale_add(attacker, 2)   # 士气：命中 +2、被格挡无变化（🔒 §10.7）
 	var bp := float(target.effective_stat_f("block_power")) if blocked else 0.0
 	# 防御效能 def_eff：base 100=中性、越高越减伤。def_factor = max(0, 2 − def_eff/100)
 	var deff: float = float(target.effective_stat_f("def_eff"))
@@ -701,6 +731,7 @@ func _resolve_compute_body(attacker, target, skill) -> Dictionary:
 	else:
 		components.append({"lane": "armor_first", "damage_category": dkind, "ratio": 1.0})
 	# 结算落血（分量减伤链在 CombatResolver：逐分量 甲抗/人抗/固减 + 破甲溢出保留元素；甲伤按段取件——百分比+固定值两模式）
+	var hp_before := int(target.stats.get("HP", 0))   # 气势击倒判定基准（🔒 气势档 §3：HP 打空＝此击致死）
 	var dres := CombatResolver.resolve(target, out, g, components,
 		_seg_armor_dmg_factor(attacker, skill), _seg_armor_dmg_flat(attacker, skill))
 	var hp_loss := int(round(float(dres["hp_loss"])))
@@ -821,6 +852,18 @@ func _resolve_compute_body(attacker, target, skill) -> Dictionary:
 					_pending_displace.append({"unit": target, "dir": kd, "distance": kb_dist,
 						"origin": Vector2i(attacker.col, attacker.row), "max_dist": kb_cap})
 					r["displace_req"] = {"dir": kd, "distance": kb_dist, "max_dist": kb_cap}
+	# 气势攒/泄 🔒（气势档 §3）：只进缓冲——本击不吃本击，攻击动作末 _momentum_settle_all 统一入账。
+	# 攒：有效命中(未被格挡)+1、暴击额外+1(不受格挡影响)、此击致死(HP 打空，含死门转入；死门内倒下不算)原始获取翻倍；
+	# 泄：被有效命中 −1、被暴击额外 −1（对称：被格挡的暴击同扣）。反击/借机走同一函数＝同规则攒点。
+	var base_pts := (0 if blocked else 1) + (1 if crit else 0)
+	var mgain := base_pts
+	if hp_before > 0 and int(target.stats.get("HP", 0)) <= 0:
+		mgain *= 2
+	if mgain != 0:
+		attacker._momentum_pending += mgain
+		r["momentum_gain"] = mgain
+	if base_pts != 0:
+		target._momentum_pending -= base_pts
 	return r
 
 # ============ 位移解算器（displace 族首铺 🔒 红队报告 §2-1：swap/push/pull/charge 四模式规划共用一个解算器，
@@ -925,8 +968,12 @@ func reaction_candidates(trigger: String, event: Dictionary) -> Array:
 	var out := []
 	if not ReactionRegistry.implemented(trigger):   # 反应可再触发反应（⚠ 2026-07-17 涌现口径；原 event.is_reaction 防链守卫撤销）
 		return out
+	var ev_unit = event.get("unit")
 	for owner in units:
 		if owner.has_state("incapacitated"):
+			continue
+		# 🔒 隐蔽与视野：看不见触发者＝不反应（隐蔽未揭示的移动者不触发任何敌方反应）
+		if ev_unit != null and _is_hostile(owner, ev_unit) and not _unit_visible_to_side(owner, ev_unit):
 			continue
 		if trigger == "unit_entered_zoc" and not _unit_entered_owner_zoc(owner, event):
 			continue
@@ -1312,7 +1359,12 @@ func _cleanse_effects_with_tag(u, tag: String) -> int:
 # 返回结构化事件 [{type:"dot", name, dmg, pct} | {type:"expired", name}]；不写日志。
 func _apply_turn_end_effects(u) -> Array:
 	var events := []
-	if u == null or not ("effects" in u) or u.effects.is_empty():
+	if u == null:
+		return events
+	var dev := _momentum_decay_tick(u)   # 气势衰减检定（🔒 气势档 §5）——自己回合末先掷、不依赖 effects 存在（被跳过回合照检）
+	if not dev.is_empty():
+		events.append(dev)
+	if not ("effects" in u) or u.effects.is_empty():
 		return events
 	var keep := []
 	var chains := []   # 到期连锁施加的第二段效果 id（决策20 两段式；循环内先收集、u.effects 重置后再施加，防被 keep 覆盖）
@@ -1349,7 +1401,7 @@ func _apply_turn_start_effects(u) -> Array:
 	var events := []
 	if u == null:
 		return events
-	var mev := _morale_turn_tick(u)   # 士气回合开始步（🔒 §10.7）——先于效果 tick、不依赖 effects 存在
+	var mev := _momentum_turn_start(u)   # 满气势 AP 检定（🔒 气势档 §6）——宿主 refresh_for_turn 之后、效果 tick 之前
 	if not mev.is_empty():
 		events.append(mev)
 	if not ("effects" in u) or u.effects.is_empty():
@@ -1433,43 +1485,60 @@ func grant_combat_prof(attacker, target, r: Dictionary) -> Array:
 				events.append({"unit": target, "prof": "style_armor", "stage": ns3})
 	return events
 
-# ============ 士气（骨架 v1：数值+事件；档位战斗判定延后批次；🔒 模块_属性成长_设计.md §10.7）============
+# ============ 气势（🔒 真值 docs/模块_战斗_气势.md；不可见——事件仅供 debug/测试，宿主不渲染）============
 
-# 士气变化唯一入口：负向先经决心抵消（每点抵 1、单次损失保底 1）、再钳 0~50。返回实际变化量（0=无事发生）。
-func _morale_add(u, delta: int) -> int:
-	if u == null or delta == 0:
-		return 0
-	var d := delta
-	if d < 0:
-		# 决心抵消 🔒（二次修订 2026-07-08）：每点抵 0.5 向下取整；单次损失保底 1
-		d = -maxi(1, -d - int(floorf(u.effective_stat_f("resolve") * 0.5)))
-	var before: int = u.morale
-	u.morale = clampi(before + d, 0, u.MORALE_MAX)
-	return u.morale - before
-
-# 士气·回合开始步：有邻敌＝掉 (邻敌−邻友，钳 0~6)；无邻敌＝向常态 25 回归 ±1。两者不叠加（取其一）。
-# 由 _apply_turn_start_effects 每单位 turn 开始调用。返回事件 {type:"morale",...}；无变化＝{}。
-func _morale_turn_tick(u) -> Dictionary:
-	var enemies := 0
-	var friends := 0
-	for n in _neighbors(u.col, u.row):
-		var o = unit_at(n.x, n.y)
-		if o == null:
+# 攻击动作末结算：全场缓冲入账（钳 0..25）；速度档变化（4/5 层 +1/+2）→ 重排行动序。
+# 挂 _handle_deaths_state 尾部＝每个攻击动作收尾必经（普攻/技能/借机/伏击同口），死亡处理后入账；
+# 死者缓冲随人作废。行动/段/反应期间只累缓冲不入账＝本击不吃本击 🔒。
+func _momentum_settle_all(dead: Array) -> Array:
+	var events := []
+	var resort := false
+	for u in units:
+		var p: int = u._momentum_pending
+		u._momentum_pending = 0
+		if p == 0 or (u in dead):
 			continue
-		if _is_hostile(u, o):
-			enemies += 1
-		else:
-			friends += 1
-	var applied := 0
-	if enemies > 0:
-		var loss := clampi(enemies - friends, 0, 6)
-		if loss > 0:
-			applied = _morale_add(u, -loss)
-	elif u.morale != u.MORALE_BASELINE:
-		applied = _morale_add(u, 1 if u.morale < u.MORALE_BASELINE else -1)
-	if applied == 0:
+		var before: int = u.momentum
+		u.momentum = clampi(before + p, 0, u.MOMENTUM_MAX)
+		if u.momentum == before:
+			continue
+		if MomentumDB.speed_bonus(u.momentum_layer()) != MomentumDB.speed_bonus(mini(5, before / 4)):
+			resort = true
+		events.append({"type": "momentum", "unit": u, "delta": u.momentum - before,
+			"points": u.momentum, "layer": u.momentum_layer()})
+	if resort:
+		_resort_pending()   # 速度即时生效、可插队（🔒 气势档 §4；只重排未行动区）
+	return events
+
+# 回合末衰减检定 🔒（一鼓作气，气势档 §5）：持层者掷 1d20＋决心＋等级×0.5(向下取整) vs DC=10＋层×5（≥过）；
+# 失败＝点数落 min(点数−4, 19)——非冗余区恰掉一层、冗余区(21~25)直落 19（4 层上界）。
+# 骰源＝战斗统一 rng（可 seed；Checks d20 形状，战斗内判定不走全局骰）。
+func _momentum_decay_tick(u) -> Dictionary:
+	var lyr: int = u.momentum_layer()
+	if lyr <= 0:
 		return {}
-	return {"type": "morale", "delta": applied, "morale": u.morale, "band": u.morale_band_name()}
+	var dc: int = 10 + lyr * 5
+	var roll: int = rng.randi_range(1, 20)
+	var total: int = roll + u.effective_stat("resolve") + int(floorf(float(u.level) * 0.5))
+	if total >= dc:
+		return {"type": "momentum_decay", "ok": true, "roll": roll, "total": total, "dc": dc, "points": u.momentum}
+	var before: int = u.momentum
+	u.momentum = clampi(mini(before - MomentumDB.decay_fail_drop(), MomentumDB.decay_fail_floor()), 0, u.MOMENTUM_MAX)
+	if MomentumDB.speed_bonus(u.momentum_layer()) != MomentumDB.speed_bonus(lyr):
+		_resort_pending()
+	return {"type": "momentum_decay", "ok": false, "roll": roll, "total": total, "dc": dc,
+		"points": u.momentum, "delta": u.momentum - before}
+
+# 回合开始满气势 AP 检定 🔒（气势档 §6）：满气势（5 层≥20 点，非满点数）掷 0.1×(决心＋等级)% → 本回合 +1 AP。
+# 调用点＝_apply_turn_start_effects 首步（宿主 refresh_for_turn 之后）＝每回合天然至多一次、随 AP 刷新结算。
+func _momentum_turn_start(u) -> Dictionary:
+	if u.momentum_layer() < 5:
+		return {}
+	var chance: float = MomentumDB.ap_chance_coef() * float(u.effective_stat("resolve") + u.level)
+	if rng.randf() * 100.0 >= chance:
+		return {}
+	u.ap += 1
+	return {"type": "momentum_ap", "unit": u, "ap": u.ap}
 
 # ============ 死门 + 收尸（需求 §1.11 🔒；日志/编排在宿主）============
 
@@ -1532,26 +1601,10 @@ func _handle_deaths_state() -> Dictionary:
 	for u in dead:
 		_battle_kills.append({"proto_id": u.proto_id, "victim_uid": u.uid, "faction": u.faction,
 			"by_uid": (u.last_hit_by.uid if u.last_hit_by != null else 0)})
-	# 士气（🔒 §10.7）：击败者 +3（按击杀归属，含重伤离场——"击败"口径）；
-	# 真死（dead tag / 无死门资格即死）→ 同侧存活者全场 −5；重伤离场不算"挂了"、无全场事件。
-	# 事件上抛宿主渲染（{kind:"kill"|"ally_death"}；模型不写日志）。
-	var morale_events := []
-	for u in dead:
-		if u.last_hit_by != null and not (u.last_hit_by in dead):
-			var md: int = _morale_add(u.last_hit_by, 3)
-			if md != 0:
-				morale_events.append({"kind": "kill", "who": u.last_hit_by, "delta": md})
-		if u.tags.has("dead") or not _door_eligible(u):
-			var hit_n := 0
-			for w in units:
-				if w == u or (w in dead):
-					continue
-				if not _is_hostile(u, w):
-					if _morale_add(w, -5) != 0:
-						hit_n += 1
-			if hit_n > 0:
-				morale_events.append({"kind": "ally_death", "victim": u, "count": hit_n})
-	var res := {"dead": dead, "entered_door": entered_door, "active_died": false, "new_round": false, "morale": morale_events, "round_events": []}
+	# 气势结算 🔒（气势档 §3 结算时点）：死亡/离场处理后统一入账（击倒翻倍已在缓冲里；死者缓冲作废）——
+	# 本函数＝每个攻击动作收尾必经（普攻/技能/借机/伏击/DoT 收尸同口），无缓冲时零开销。
+	var momentum_events := _momentum_settle_all(dead)
+	var res := {"dead": dead, "entered_door": entered_door, "active_died": false, "new_round": false, "momentum": momentum_events, "round_events": []}
 	if dead.is_empty():
 		return res
 	var cur = active_unit()
@@ -1573,6 +1626,7 @@ func _handle_deaths_state() -> Dictionary:
 # ============ 视野 / 战争迷雾（玩家侧；见 docs/感知系统.md 🔒）============
 
 # 单个单位的可见格：以己为心、半径 sight（六边形距离）、逐格被 LOS 裁剪。
+# 飞行观察者不受地块视野遮挡（🔒 隐蔽与视野）：sight 圈内全可见、不做 blocks_sight 裁剪。
 func _unit_visible_cells(u) -> Dictionary:
 	var out := {}
 	var here := Vector2i(u.col, u.row)
@@ -1580,10 +1634,47 @@ func _unit_visible_cells(u) -> Dictionary:
 	var sight: int = _effective_sight(u)   # 含天气加减 + 日夜最终乘子（夜×0.5）
 	if sight <= 0:
 		return out
+	var fly: bool = u.is_airborne()
 	for cell in _cells_within({here: true}, sight):
-		if _has_los(here, cell):
+		if fly or _has_los(here, cell):
 			out[cell] = true
 	return out
+
+# ============ 单位级可见性 🔒（2026-07-19 隐蔽与视野；docs/模块_战斗_设计.md）============
+
+# viewer 所属的一方（viewer 及其非敌对同伴）能否看到 target。规则：
+#   同阵营恒可见；飞行 target 对所有人可见（距离≤观察者视野即可——中间格遮挡/隐蔽均不适用）；
+#   隐蔽（cover 格）且未暴露：仅观察方任一单位邻近（距离≤1）才可见——揭示全侧共享；
+#   其余＝常规格级可见（距离≤视野 + LOS；飞行观察者免 LOS 裁剪）。
+func _unit_visible_to_side(viewer, target) -> bool:
+	if viewer == null or target == null or not _is_hostile(viewer, target):
+		return true
+	var tcell := Vector2i(target.col, target.row)
+	var airborne: bool = target.is_airborne()
+	var concealed: bool = (not airborne) and _tile_conceals(tcell.x, tcell.y) \
+		and not exposed.has(target.get_instance_id())
+	for v in units:
+		if _is_hostile(viewer, v):
+			continue   # 只数观察方自己人（viewer 与其非敌对者）
+		var vcell := Vector2i(v.col, v.row)
+		if concealed:
+			if _hex_dist(vcell, tcell) <= 1:
+				return true   # 邻近揭示（贴脸＝摸得到，不再要求视野/LOS）
+			continue
+		if _hex_dist(vcell, tcell) > _effective_sight(v):
+			continue
+		if airborne or v.is_airborne() or _has_los(vcell, tcell):
+			return true
+	return false
+
+# 玩家一方能否看到该单位（渲染/targeting 用；全知/非战斗恒可见）。
+func _unit_visible_to_player(u) -> bool:
+	if omniscient or phase != "battle" or _is_friendly(u):
+		return true
+	for v in units:
+		if _is_friendly(v):
+			return _unit_visible_to_side(v, u)   # 任一代表即可（函数内部自扫全侧）
+	return false
 
 # 重算 _vis_visible（我方/友方可见格并集）、并入 _vis_seen（历史累积）。不碰渲染。
 func _recompute_vision_state() -> void:
@@ -1609,26 +1700,30 @@ func cell_fog(cell: Vector2i) -> int:
 func _can_see_cell(cell: Vector2i) -> bool:
 	return omniscient or phase != "battle" or _vis_visible.has(cell)
 
-# 该单位是否被迷雾藏起（不该渲染）：战斗中、非全知、敌对且其所在格不在当前视野内。我方/友方永远可见。
+# 该单位是否对玩家隐藏（不该渲染）：迷雾（格不可见）∨ 隐蔽未揭示——统一走单位级可见性。
 func _unit_hidden_by_fog(u) -> bool:
-	if omniscient or phase != "battle":
-		return false
-	if _is_friendly(u):
-		return false
-	return not _vis_visible.has(Vector2i(u.col, u.row))
+	return not _unit_visible_to_player(u)
 
 # ============ AI 判定（走位/动作编排在宿主；这里只有纯判定与状态翻转）============
 
 # 该单位此刻是否应激活仇恨（三通道），不改任何状态。
 func _ai_should_aggro(unit) -> bool:
-	var here := Vector2i(unit.col, unit.row)
-	# ① 视野感知：敌人进入本单位视野(sight)且视线(LOS)不被地形挡（六边形战棋：只有地形挡、单位不挡）
+	# ① 视野感知＝**本单位自己的**视距+LOS（🔒 设计「纯看本单位自己的」——不升格为全侧共享，
+	# 免得一只哨兵看见玩家就全图警觉、③连锁编组失义），再叠单位级可见性门槛（隐蔽/暴露/邻近揭示）
 	if unit.ai_threat:
+		var here := Vector2i(unit.col, unit.row)
 		var sight: int = _effective_sight(unit)   # 含天气加减 + 日夜最终乘子
 		for h in units:
+			if not _is_hostile(unit, h):
+				continue
 			var hp := Vector2i(h.col, h.row)
-			if _is_hostile(unit, h) and _hex_dist(here, hp) <= sight and _has_los(here, hp):
-				return true
+			if _hex_dist(here, hp) > sight:
+				continue
+			if not (unit.is_airborne() or h.is_airborne() or _has_los(here, hp)):
+				continue   # 飞行观察者/飞行目标豁免地形遮挡（🔒 隐蔽与视野）
+			if not _unit_visible_to_side(unit, h):
+				continue   # 隐蔽未揭示＝当不存在（AI 对称）
+			return true
 	# ② 区域触发：敌人踏进该单位挂的区域（关卡设计者指定）
 	if unit.ai_region != "" and aggro_regions.has(unit.ai_region):
 		var cells: Dictionary = aggro_regions[unit.ai_region]
@@ -1655,13 +1750,13 @@ func _ai_set_aggro_state(unit) -> Array:
 				newly.append_array(_ai_set_aggro_state(g))   # 连锁仇恨
 	return newly
 
-# 最近的敌对单位（按六边形距离）
+# 最近的敌对单位（按六边形距离）。隐蔽未揭示的目标不入选（🔒 隐蔽与视野：AI 同规则——看不见就当不存在）。
 func _ai_nearest_hostile(unit):
 	var best = null
 	var bd := 1 << 30
 	var here := Vector2i(unit.col, unit.row)
 	for u in units:
-		if not _is_hostile(unit, u):
+		if not _is_hostile(unit, u) or not _unit_visible_to_side(unit, u):
 			continue
 		var d := _hex_dist(here, Vector2i(u.col, u.row))
 		if d < bd:
@@ -1767,6 +1862,11 @@ func to_dict() -> Dictionary:
 		var parts: PackedStringArray = str(k).split("_")
 		if parts.size() == 2 and by_iid.has(int(parts[0])) and by_iid.has(int(parts[1])):
 			zoc.append([by_iid[int(parts[0])], by_iid[int(parts[1])]])
+	# exposed：运行时 key=instance_id → 池下标（离场者残留键丢弃——round 末本就清空）
+	var expo := []
+	for k in exposed:
+		if by_iid.has(int(k)):
+			expo.append(by_iid[int(k)])
 	return {
 		"battle_v": 1,
 		"width": width, "height": height, "tiles": tiles,
@@ -1779,7 +1879,7 @@ func to_dict() -> Dictionary:
 		"roster": roster.map(func(u): return idx[u]),
 		"turn_order": turn_order.map(func(u): return idx[u]),
 		"active_index": active_index, "round_num": round_num,
-		"zoc_triggered": zoc,
+		"zoc_triggered": zoc, "exposed": expo,
 		"fired_triggers": _fired_triggers.duplicate(),
 		"battle_kills": _battle_kills.duplicate(true),
 		"campaign_battle": campaign_battle, "battle_context": _battle_context.duplicate(true),
@@ -1835,6 +1935,11 @@ func restore(d: Dictionary) -> bool:
 			var b := int(pair[1])
 			if a >= 0 and a < pool.size() and b >= 0 and b < pool.size():
 				zoc_triggered[_zoc_key(pool[a], pool[b])] = true   # 用复原对象的新 instance_id 重铸键
+	exposed = {}
+	for i in d.get("exposed", []):
+		var ei := int(i)
+		if ei >= 0 and ei < pool.size():
+			exposed[pool[ei].get_instance_id()] = true   # 同法重铸（暴露至 round 末，随战中 suspend 往返）
 	_fired_triggers = {}
 	for k in d.get("fired_triggers", {}):
 		_fired_triggers[str(k)] = true
@@ -1882,9 +1987,11 @@ func _attack_targets(attacker, cell: Vector2i, skill) -> Array:
 				out.append(u)
 	else:
 		var t = unit_at(cell.x, cell.y)
-		# 只能打「看得到的」：目标在当前视野内(非迷雾) + 攻方到目标有视线
+		# 只能打「看得到的」：目标在当前视野内(非迷雾) + 攻方到目标有视线 + **单位级可见**
+		# （🔒 隐蔽与视野：近战/单体需单位可见——隐蔽未揭示的目标点不中，同点空格；AoE 对格照常盲射）
 		if t != null and _is_hostile(attacker, t) \
-			and _can_see_cell(cell) and _has_los(Vector2i(attacker.col, attacker.row), cell):
+			and _can_see_cell(cell) and _has_los(Vector2i(attacker.col, attacker.row), cell) \
+			and (omniscient or _unit_visible_to_side(attacker, t)):
 			out.append(t)
 	return out
 

@@ -1,0 +1,17 @@
+{
+  "_note": "气势系统参数与兑付表（真值 docs/模块_战斗_气势.md；层下标 0..4＝1..5 层；speed＝全表通用）",
+  "speed": [0, 0, 0, 1, 2],
+  "unarmed_flat_per_level_layer": 0.3,
+  "decay_fail_drop": 4,
+  "decay_fail_floor": 19,
+  "ap_chance_coef": 0.1,
+  "profiles": {
+    "ranged":      {"crit_rate": [3, 5, 7, 9, 12], "acc": [3, 5, 7, 9, 12]},
+    "thrown":      {"crit_rate": [3, 5, 7, 9, 12], "acc": [3, 5, 7, 9, 12], "crit_dmg": [3, 5, 7, 9, 12]},
+    "two_handed":  {"atk_pct": [3, 5, 7, 9, 12], "crit_def": [3, 5, 7, 9, 12]},
+    "dual":        {"block_rate": [3, 5, 7, 9, 12], "offhand_eff": [2, 4, 6, 8, 10]},
+    "one_hand":    {"acc": [3, 5, 7, 9, 12], "eva": [3, 5, 7, 9, 12]},
+    "sword_board": {"acc": [3, 5, 7, 9, 12], "block_rate": [2, 4, 6, 8, 10], "block_power": [2, 4, 6, 8, 10]},
+    "unarmed":     {"acc": [3, 5, 7, 9, 12], "eva": [3, 5, 7, 9, 12], "crit_def": [3, 5, 7, 9, 12]}
+  }
+}

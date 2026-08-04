@@ -13,6 +13,7 @@ const SkillDB := preload("res://SkillDB.gd")                 # 技能注册表�
 const ProfDB := preload("res://ProfDB.gd")                   # 技艺（熟练度域）注册表（🔒 模块_属性成长_设计.md §2）
 const EquipSlots := preload("res://EquipSlots.gd")          # 槽位 / 槽位资格（tag 驱动装备资格）
 const RaceDB := preload("res://RaceDB.gd")                  # 种族底值/成长曲线/天生武器（🔒 §10.4/§10.6）
+const MomentumDB := preload("res://MomentumDB.gd")          # 气势兑付/参数表（🔒 docs/模块_战斗_气势.md）
 
 var unit_name := "新兵"
 var col := 0
@@ -93,13 +94,13 @@ var stats := {
 var ap := 0           # 本 turn 剩余 AP
 var move_points := 0  # 本 turn 剩余移动点（买移动动作时按 move 注入，可分批花、零头作废）
 
-# —— 士气（战斗运行时态，随战中快照走、不入档；🔒 模块_属性成长_设计.md §10.7）——
-# 0~50 五档（档界 0~9/10~19/20~29/30~39/40~50，常态 25 居稳定档正中）、无溃逃；初始 = 25 + 2×决心（init_vitals 时定）。
-# v1 只有数值与事件（变化入口＝BattleState._morale_add）；档位战斗判定（±命中/伤害）延后批次；五档图标 UI＝状态面板侧。
-const MORALE_MAX := 50
-const MORALE_BASELINE := 25
-const MORALE_BANDS := ["崩溃", "动摇", "稳定", "高昂", "狂热"]
-var morale := MORALE_BASELINE
+# —— 气势（战斗运行时态，随战中快照走、不入档；🔒 真值 docs/模块_战斗_气势.md）——
+# 点数＝唯一真实变量 0..25；层数＝min(5, 点数/4)；20 点升满 5 层、21~25＝冗余区；初始/战斗结束＝0。
+# 不可见 🔒：无 UI/无播报，增益直接融进 effective_stat_f＝「修正是对象」的唯一系统级暗例外（勿当漏挂 buff 修）。
+# 攒/泄走 BattleState 缓冲（_momentum_pending）、攻击动作末统一入账＝本击不吃本击。兑付表＝data/momentum.json。
+const MOMENTUM_MAX := 25
+var momentum := 0
+var _momentum_pending := 0   # 行动内攒/泄缓冲（纯瞬态：不入快照白名单、不序列化）
 
 # —— 交互语境（🔒 §4.2 阶段4）：一次攻击/技能结算期内由 BattleState._resolve_compute 设置、出结算即清——
 # {target: Unit, skill_tags: Array}。when 条件（target_tag/skill_tag/target_effect）惰性读此；
@@ -370,7 +371,14 @@ func effective_stat_f(key: String) -> float:
 		var best := 0.0
 		for k2 in equip_item: best = maxf(best, float(equip_item[k2]))
 		flat += best
-	return round1(base + flat + base * pct / 100.0)
+	var total := base + flat + base * pct / 100.0
+	# 气势暗加成 🔒（不可见原则）：兑付表键平加、面板直含——「修正是对象」的唯一系统级例外，勿改走修正管线。
+	# 覆盖：命中/闪避/暴击/暴防/爆伤/格挡两键/副手系数/速度（速度经此自动进 initiative 与 _sorted_by_speed）。
+	if momentum > 0 and key in MOMENTUM_STAT_KEYS:
+		total += momentum_bonus(key)
+	return round1(total)
+
+const MOMENTUM_STAT_KEYS := ["acc", "eva", "crit_rate", "crit_def", "crit_dmg", "block_rate", "block_power", "offhand_eff", "speed"]
 
 # —— 效能层（修正三层的第三层 op:"eff"，乘算）——
 # 增益向效能桶（攻击效能/命中效能…）：面板基（该键是面板效能 stat 时取 值/100，否则 1.0）× Π(1 + 各源%/100)。
@@ -427,24 +435,51 @@ func move_allowance(tile_tags: Array = []) -> int:
 			return maxi(0, int(o.get("move", base)) + (eff - base))   # 覆盖基础值＋保留修正差量
 	return eff
 
-# 把当前生命/护甲注满到上限（生成时调用；上限 = effective，含装备/特性）。士气一并归初始值。
+# 把当前生命/护甲注满到上限（生成时调用；上限 = effective，含装备/特性）。气势一并清零（战斗结束不跨带 🔒）。
 func init_vitals() -> void:
 	stats["HP"] = effective_stat("HP_max")
 	stats["armor"] = effective_stat("armor_max")
-	morale = clampi(MORALE_BASELINE + effective_stat("resolve"), 0, MORALE_MAX)   # 🔒 §10.7（二次修订：+1/点）
+	momentum = 0
+	_momentum_pending = 0
 
-# 当前士气档位 0~4（崩溃/动摇/稳定/高昂/狂热；档界 🔒 每 10 一档、50 归狂热）与档位名。
-func morale_band() -> int:
-	return clampi(morale / 10, 0, 4)
+# 当前气势层数 0~5（🔒 层数＝min(5, 点数/4)；20 点满 5 层、21~25 冗余区层数不再涨）。
+func momentum_layer() -> int:
+	return mini(5, momentum / 4)
 
-func morale_band_name() -> String:
-	return MORALE_BANDS[morale_band()]
+# loadout → 兑付表 id 🔒（气势档 §4）：武器类型优先级链 近战→远程→投掷（复数标签取先）；
+# 近战单手按副手分支（空/盾/武器）；天生武器(innate)/空手＝徒手。攻击结算时按当前 loadout 即时取表。
+# 只读 equipment/ItemInstances/effective_grip，无 effective_stat 递归环（同 _grip_source_active 安全性论证）。
+func momentum_profile() -> String:
+	var item = ItemInstances.view(int(equipment.get("main_hand", 0)))
+	if item == null or item.get("innate", false):
+		return "unarmed"
+	var itags: Array = item.get("tags", [])
+	if not itags.has("melee"):
+		if itags.has("ranged"):
+			return "ranged"
+		if itags.has("thrown"):
+			return "thrown"
+		# 无武器类型 tag＝按近战家族兜底（历史数据保护）
+	if effective_grip("main_hand") == "two_handed":
+		return "two_handed"
+	var oh = ItemInstances.view(int(equipment.get("off_hand", 0)))
+	if oh == null:
+		return "one_hand"
+	if (oh.get("tags", []) as Array).has("shield"):
+		return "sword_board"
+	return "dual"
 
-# 档位战斗判定 🔒（§10.7 档位效果表，2026-07-08 接线）：崩溃/动摇/稳定/高昂/狂热 → −10/−5/0/+5/+10。
-# 同一个数两用：命中＝acc 平加（_hit_chance/面板命中率行）、伤害＝atk_eff 因子（_resolve_compute ×(1+n/100)）。
-const MORALE_BAND_COMBAT := [-10, -5, 0, 5, 10]
-func morale_combat_mod() -> int:
-	return MORALE_BAND_COMBAT[morale_band()]
+# 某键的当前气势加成（flat 平加；层 0/表无键＝0）。speed 全表通用（4/5 层 +1/+2）。
+func momentum_bonus(key: String) -> float:
+	return MomentumDB.bonus(momentum_profile(), momentum_layer(), key)
+
+# 徒手气势附加物理伤害 🔒（气势档 §4）：ceil(等级×0.3×层数)；非徒手/零层＝0。
+# 消费点＝_resolve_compute 的 flat 添头位（不吃效能、走正常减伤链）——每个命中判定各带一份。
+func momentum_unarmed_flat() -> float:
+	var lyr := momentum_layer()
+	if lyr <= 0 or momentum_profile() != "unarmed":
+		return 0.0
+	return ceilf(float(level) * MomentumDB.unarmed_flat_coef() * float(lyr))
 
 # —— 等级三轨 🔒（模块_属性成长_设计.md §10.1；2026-07-08 二次修订＝20 级整齐表）——
 # 天赋 Lv 1(默认)/3/6/9/12/14/18（7 个，18 满）· 技能槽 Lv 1/4/8/11/16（5 格，16 满）·

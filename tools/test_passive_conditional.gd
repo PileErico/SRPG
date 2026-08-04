@@ -114,7 +114,7 @@ func _initialize() -> void:
 		slayer.stats["acc"] = 200.0   # hc 钳 95：64 次内必出命中样本（本段测 aeff 数学，不测命运）
 		var rb := {}
 		for _i in range(64):
-			slayer.morale = 25
+			slayer.momentum = 0
 			rb = s._resolve_compute(slayer, beast, {"coeff": 1.0})
 			if rb.get("hit", false) and not bool(rb.get("crit", false)):
 				break
@@ -123,7 +123,7 @@ func _initialize() -> void:
 			"对 beast：aeff=%.2f（5%%×3 条件条 5+10 相加）" % base_mult)
 		var rp := {}
 		for _i in range(64):
-			slayer.morale = 25
+			slayer.momentum = 0
 			rp = s._resolve_compute(slayer, plain, {"coeff": 1.0})
 			if rp.get("hit", false) and not bool(rp.get("crit", false)):
 				break

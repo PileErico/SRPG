@@ -1,7 +1,7 @@
 extends SceneTree
 ## 战斗结算链定向回归（路线图·技术债 P2「战斗结算链定向测试」2026-07-07 补齐）：
-## _resolve_compute 分支（命中/暴击/格挡/穿甲分量/士气挂点，用钳位边界与超阈值 stat 造确定性分支）/
-## end_turn DoT 致死（真死收尸链 + 死门转入 + 击杀/同伴之死士气）/ ZOC 借机模型（去重键/控制区/入区截断）/
+## _resolve_compute 分支（命中/暴击/格挡/穿甲分量/气势挂点，用钳位边界与超阈值 stat 造确定性分支）/
+## end_turn DoT 致死（真死收尸链 + 死门转入 + 气势零事件——DoT 无命中判定不攒）/ ZOC 借机模型（去重键/控制区/入区截断）/
 ## _dijkstra 行为锚（草原成本/ZOC 截断——二叉堆重构的保绿基线）。
 ## 运行：..._console.exe --headless --path "D:/1战棋" -s res://tools/test_resolve_chain.gd（退出码 0=PASS）
 
@@ -36,7 +36,8 @@ func _initialize() -> void:
 	a.stats["acc"] = 100.0   # hc 钳 95，循环内等第一次命中（seed 固定＝序列确定）
 	var r := {}
 	for _i in range(64):
-		a.morale = 25   # 失手会 −1，重置保证命中样本的士气断言干净
+		a._momentum_pending = 0   # 重置缓冲，保证命中样本的气势断言干净（失手本就无事件）
+		d._momentum_pending = 0
 		r = s._resolve_compute(a, d, {"coeff": 1.0})
 		if r.get("hit", false):
 			break
@@ -47,7 +48,8 @@ func _initialize() -> void:
 		"暴击时 cmult=(crit_dmg+运气×0.5)/100（🔒 运气加爆伤）")
 	ck(is_equal_approx(float(r["cr"]), 0.0) and not bool(r["crit"]), "基线 cr=0 必不暴击")
 	ck(not bool(r["blocked"]) and is_equal_approx(float(r["bp"]), 0.0), "block_rate 0 必不格挡（bp=0）")
-	ck(int(r["morale_att"]) == 2 and a.morale == 27, "命中未格挡：攻方士气 +2")
+	ck(int(r.get("momentum_gain", 0)) == 1 and a._momentum_pending == 1, "命中未格挡：攻方气势缓冲 +1（🔒 气势档 §3）")
+	ck(d._momentum_pending == -1 and a.momentum == 0 and d.momentum == 0, "被有效命中：守方缓冲 −1；结算前点数不动（本击不吃本击）")
 	ck(is_equal_approx(float(r["out"]), 20.0), "无暴击无效能：out=atk×coeff=20")
 	ck(int(r["hp_after"]) == int(d.stats["HP"]), "r.hp_after 与靶子实血一致")
 	ck(d.last_hit_by == a, "last_hit_by 记录击杀归属")
@@ -58,7 +60,8 @@ func _initialize() -> void:
 	d2.stats["block_power"] = 50.0
 	s.units = [a, d2]
 	a.stats["crit_rate"] = 200.0
-	a.morale = 25
+	a._momentum_pending = 0
+	d2._momentum_pending = 0
 	var r2 := {}
 	for _i in range(64):
 		r2 = s._resolve_compute(a, d2, {"coeff": 1.0})
@@ -66,8 +69,8 @@ func _initialize() -> void:
 			break
 	ck(bool(r2["crit"]) and float(r2["cr"]) >= 100.0, "crit_rate 200 必暴击")
 	ck(bool(r2["blocked"]) and is_equal_approx(float(r2["bp"]), 50.0), "block_rate 100 必格挡（bp=50）")
-	ck(not r2.has("morale_att") or int(r2.get("morale_att", 0)) == 0, "被格挡＝士气无变化")
-	ck(a.morale == 25, "被格挡后攻方士气不动")
+	ck(int(r2.get("momentum_gain", 0)) == 1, "被格挡的暴击仍 +1（暴击点不受格挡影响 🔒 气势档 §3）")
+	ck(d2._momentum_pending == -1, "被格挡的暴击：守方对称 −1")
 	a.stats["crit_rate"] = 0.0
 
 	# 穿甲分量：armor_pen 0.5 → 人/甲各半（atk20 → hp 10 + 甲 10）
@@ -92,7 +95,7 @@ func _initialize() -> void:
 	s.units = [a, d5]
 	var r5 := {}
 	for _i in range(64):
-		a.morale = 25
+		a._momentum_pending = 0
 		r5 = s._resolve_compute(a, d5, {"coeff": 1.0, "weapon_source": "off_hand"})
 		if r5.get("hit", false):
 			break
@@ -101,14 +104,14 @@ func _initialize() -> void:
 		"off_hand 无盾：×offhand_eff 50/100 → out=10")
 	a.modifiers.append({"stat": "offhand_eff", "op": "flat", "value": 25, "source": "perk:单手精通"})
 	for _i in range(64):
-		a.morale = 25
+		a._momentum_pending = 0
 		r5 = s._resolve_compute(a, d5, {"coeff": 1.0, "weapon_source": "off_hand"})
 		if r5.get("hit", false):
 			break
 		d5.stats["HP"] = int(d5.stats["HP_max"])
 	ck(is_equal_approx(float(r5["offhand"]), 0.75), "单手精通 perk flat+25 → ×0.75（走修正管线）")
 	for _i in range(64):
-		a.morale = 25
+		a._momentum_pending = 0
 		r5 = s._resolve_compute(a, d5, {"coeff": 1.0, "weapon_source": "off_hand", "offhand_factor": 0.5})
 		if r5.get("hit", false):
 			break
@@ -116,7 +119,7 @@ func _initialize() -> void:
 	ck(is_equal_approx(float(r5["offhand"]), 0.375), "偷击 offhand_factor 0.5 再乘 → 0.75×0.5=0.375（§7.1 恒定 1.5 倍关系）")
 	a.modifiers.clear()
 	for _i in range(64):
-		a.morale = 25
+		a._momentum_pending = 0
 		r5 = s._resolve_compute(a, d5, {"coeff": 1.0})
 		if r5.get("hit", false):
 			break
@@ -125,7 +128,7 @@ func _initialize() -> void:
 	ItemInstances.clear()
 	a.equipment["off_hand"] = ItemInstances.create("wood_kite_shield")
 	for _i in range(64):
-		a.morale = 25
+		a._momentum_pending = 0
 		r5 = s._resolve_compute(a, d5, {"coeff": 1.0, "weapon_source": "off_hand"})
 		if r5.get("hit", false):
 			break
@@ -138,14 +141,13 @@ func _initialize() -> void:
 	var dodge = mk("闪客", "enemy", 4, 2)
 	dodge.stats["eva"] = 300.0
 	s.units = [a, dodge]
-	a.morale = 25
 	var r4 := {}
 	for _i in range(64):
 		r4 = s._resolve_compute(a, dodge, {"coeff": 1.0})
 		if not r4.get("hit", true):
 			break
 	ck(not bool(r4.get("hit", true)), "64 次内必出失手（hc=5）")
-	ck(int(r4["morale_att"]) == -1, "失手：攻方士气 −1（决心 0 保底 1）")
+	ck(not r4.has("momentum_gain"), "失手：气势两侧均无事件（骰运不双重计费 🔒 气势档 §3）")
 
 	# —— 2) end_turn DoT 致死：真死收尸链 + 士气挂点 ——
 	var s2 = BattleState.new()
@@ -164,10 +166,9 @@ func _initialize() -> void:
 	var dres: Dictionary = s2._handle_deaths_state()
 	ck((dres["dead"] as Array).has(victim), "无死门资格敌兵：DoT 即死")
 	ck(not s2.units.has(victim) and not s2.turn_order.has(victim), "死者移出 units/turn_order")
-	ck(hero.morale == 28, "击杀归属（DoT 记 last_hit_by）：+3")
-	ck(mate.morale == 20, "同伙目睹真死：−5")
-	var mevs: Array = dres.get("morale", [])
-	ck(mevs.size() == 2, "士气事件上抛 2 条（kill+ally_death，实得 %d）" % mevs.size())
+	ck(hero.momentum == 0 and hero._momentum_pending == 0, "DoT 致死无命中判定：不攒气势（🔒 气势档 §3）")
+	var mevs: Array = dres.get("momentum", [])
+	ck(mevs.is_empty(), "无缓冲＝零气势事件（实得 %d）" % mevs.size())
 
 	# DoT 打入死门（我方＝有资格）：转入而非死
 	var s3 = BattleState.new()

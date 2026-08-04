@@ -426,7 +426,7 @@ func event_dialogue(dialogue_id: String) -> void:
 	_dialogue = ui
 	add_child(ui)
 	ui.finished.connect(func(): _dialogue = null)   # 先连再 start：start 失败同步 finished 也能清引用
-	ui.start(dialogue_id, WorldState.current)
+	ui.start(dialogue_id, WorldState.current, self)   # host=自己：选项结果动作走本场景 event_* 原语
 
 # 按 id 查内置原型（data/unit_prototypes.json）；找不到返回 {}
 func _find_proto(pid: String) -> Dictionary:
@@ -852,19 +852,19 @@ func unit_at(col: int, row: int):
 func _passability_text(mv) -> String:
 	return TerrainDB.passability_text(mv)
 
-func _effects_text(entry) -> String:
-	return TerrainDB.effects_text(entry)
-
 # 左下角悬停信息：坐标 + 名称 + 通行性 + 特殊效果 +（该格单位）
 func hover_text(col: int, row: int) -> String:
 	if row < 0 or row >= tiles.size() or col < 0 or col >= tiles[row].size():
 		return ""
 	var entry = _terrain_entry(tiles[row][col])
-	var label = entry.get("label", "未知") if entry != null else "未知"
-	# 地形段（单位信息已移到 hover_extra 的单位卡里，不再走文字行）
+	# 放置物压过底地形 🔒：名称/效果按生效条目显示（所见即所得），有放置物时括注底地形
+	var ap = TerrainDB.applied_entry(tiles[row][col])
+	var label = ap.get("label", "未知") if ap != null else "未知"
+	if ap != entry and entry != null:
+		label = "%s（底：%s）" % [label, str(entry.get("label", "?"))]
 	var s := "地形：%s（%d, %d）" % [label, col, row]
 	s += "\n可通行性：%s" % _passability_text(_effective_move(tiles[row][col]))
-	s += "\n特殊效果：%s" % _effects_text(entry)
+	s += "\n特殊效果：%s" % TerrainDB.effects_text_at(tiles[row][col])
 	return s
 
 # 左下信息栏的扩展段：悬停格若有可见单位 → 返回一张单位速览卡；否则 null（栏只剩地形段）。
@@ -1143,13 +1143,7 @@ func _begin_active_turn() -> void:
 					("（起身耗 %d AP）" % apc) if apc > 0 else ""])
 			elif str(ev.get("type", "")) == "fort_shrug":
 				_log_line("[color=#7FD5A0]%s 凭强韧挣脱了「%s」[/color]" % [_cname(u), str(ev.get("name", ""))])
-			elif str(ev.get("type", "")) == "morale":
-				var md := int(ev.get("delta", 0))
-				var shift := _morale_band_shift(u, md)
-				if shift != "":
-					_log_line(shift)
-				elif md <= -2:   # 未跨档：只报邻近围逼压力（回归 ±1 静默防刷屏）
-					_log_line("%s 遭敌围逼，士气 %d（现 %d·%s）" % [_cname(u), md, u.morale, str(ev.get("band", ""))])
+			# momentum_ap 事件不渲染（不可见原则 🔒 气势档 §1——AP 数字变化即自证）
 	# 死门单位：无法移动/行动——自动检定后跳过 turn（仿 AI 未激活即过；call_deferred 断递归链防全员死门爆栈）
 	if u != null and u.tags.has("deaths_door"):
 		u.ap = 0
@@ -1229,22 +1223,33 @@ func _ai_exec_move(unit, plan: Dictionary) -> bool:
 			return false
 		unit.ap -= 1
 		unit.move_points += unit.move_allowance(_state._tile_tags_at(unit.col, unit.row))   # effective 口径＋脚下地块条件（与预览范围 _dijkstra 一致）
+	# 伏击截停 🔒：先于离开借机**快照**（离开借机可能令伏击者暴露——截停按移动提交时刻的可见性判定）
+	var amb := _ambush_truncation(unit, path)
 	# ZOC 借机：离开起点前判定（敌方离开我方控制区也会被借机）；被钉住则本次没走成
-	var was_in_zoc := _in_hostile_zoc(Vector2i(unit.col, unit.row), unit)
+	# （内部耗尽/知情类判定 visible_only——隐蔽拥有者不经此泄密 🔒 隐蔽与视野）
+	var was_in_zoc := _in_hostile_zoc(Vector2i(unit.col, unit.row), unit, true)
 	if _zoc_on_leave(unit):
 		unit.move_points = 0
 		_refresh_info()
 		if canvas != null:
 			canvas.queue_redraw()
 		return false
-	unit.move_points -= int(plan.get("cost", 0))
-	unit.col = pick.x
-	unit.row = pick.y
-	if was_in_zoc and _in_hostile_zoc(pick, unit):
+	var land := pick
+	var mcost := int(plan.get("cost", 0))
+	if not amb.is_empty():
+		path = amb["path"]
+		land = path[path.size() - 1]
+		mcost = int(amb["cost"])
+	unit.move_points -= mcost
+	unit.col = land.x
+	unit.row = land.y
+	if was_in_zoc and _in_hostile_zoc(land, unit, true):
 		unit.move_points = 0   # ZOC 内部挪动＝耗尽全部移动点（🔒 2026-07-17：躲得过借机也走不快；离开圈外才自由）
 	for nm in _state.clear_stance_effects(unit):
 		_log_line("%s 的「%s」解除（架势随移动解除）" % [_cname(unit), nm])
 	_dispatch_reaction_event("unit_entered_zoc", {"unit": unit, "path": path, "kind": "voluntary"})
+	if not amb.is_empty():
+		_execute_ambush(amb["owner"], unit)
 	_refresh_info()
 	await _animate_path(unit, path)
 	if phase != "battle" or battle_over:
@@ -1275,14 +1280,7 @@ func _handle_deaths() -> void:
 			hover_unit = null
 		if selected_unit == u:
 			selected_unit = null
-	for mev in res.get("morale", []):   # 士气事件渲染（🔒 §10.7；模型只上抛）
-		if str(mev.get("kind", "")) == "kill":
-			var k = mev["who"]
-			_log_line("[color=%s]%s 击败对手，士气 %+d（现 %d·%s）[/color]" % [
-				OK_GREEN, _cname(k), int(mev["delta"]), k.morale, k.morale_band_name()])
-		elif str(mev.get("kind", "")) == "ally_death":
-			_log_line("[color=#D5453A]%s 之死撼动同侧全军：士气 −5（波及 %d 人，决心可抵）[/color]" % [
-				_cname(mev["victim"]), int(mev["count"])])
+	# 气势结算事件（res["momentum"]）不渲染——不可见原则 🔒（气势档 §1）；debug 观察走模型事件/测试
 	if res["new_round"]:
 		_log_round_events(res.get("round_events", []))   # 行动者阵亡越界并轮转 → round_end tick 事件同样入日志
 		_tick_weather()   # 新 round：天气计时 −1，到期重摇
@@ -1891,12 +1889,54 @@ func _zoc_key(owner, mover) -> String:
 	return _state._zoc_key(owner, mover)
 
 # cell 是否落在「敌对于 mover 的某单位」的 ZOC 内（= 与某敌对单位相邻）
-func _in_hostile_zoc(cell: Vector2i, mover) -> bool:
-	return _state._in_hostile_zoc(cell, mover)
+func _in_hostile_zoc(cell: Vector2i, mover, visible_only := false) -> bool:
+	return _state._in_hostile_zoc(cell, mover, visible_only)
 
 # 取 cell 处第一个「本 round 尚未对 mover 触发过」的敌对 ZOC 拥有者（找不到=null）
 func _first_zoc_owner(cell: Vector2i, mover):
 	return _state._first_zoc_owner(cell, mover)
+
+# 伏击截停 🔒（隐蔽与视野）：主动移动踏入「对移动方不可见」的敌对 ZOC——预览不显示、寻路不提前停步，
+# 结算走到该步即截停＋拥有者借机（拥有者出手即暴露＝揭穿）。玩家/AI 提交移动共用。
+# 返回 {}＝无伏击；否则 {path:截停路径, cost:截停耗（Σ_move_cost_at，与 dijkstra 同口径）, owner:伏击者}。
+func _ambush_truncation(mover, path: Array) -> Dictionary:
+	if mover.is_airborne() or path.size() < 2:
+		return {}   # 飞行无视近战 ZOC 🔒
+	var cost := 0
+	for i in range(1, path.size()):
+		var cell: Vector2i = path[i]
+		cost += maxi(0, _state._move_cost_at(cell.x, cell.y, mover))
+		for u in _state.units:
+			if u == mover or not _is_hostile(mover, u):
+				continue
+			var r: int = _state._zoc_radius(u)
+			if r <= 0:
+				continue
+			var uc := Vector2i(u.col, u.row)
+			if _hex_dist(path[i - 1], uc) <= r or _hex_dist(cell, uc) > r:
+				continue   # 只在「踏入」那一步触发（起点已在圈内＝离开借机的辖区）
+			if _state._unit_visible_to_side(mover, u):
+				continue   # 可见拥有者＝「踏入即停」已在寻路层拦住，不走伏击
+			if not _state._unit_visible_to_side(u, mover):
+				continue   # 拥有者也看不见移动者＝互不知情，不触发（不可见不反应）
+			if zoc_triggered.has(_zoc_key(u, mover)):
+				continue   # 本 round 已对该移动者触发过（去重同借机）
+			return {"path": path.slice(0, i + 1), "cost": cost, "owner": u}
+	return {}
+
+# 执行伏击：借机构成（🔒 决策31 反应系数）＋去重记账；出手即暴露→隐蔽揭穿，重算可见性。
+# 守卫：移动者已在先行反应（如立矛迎击）中倒下离场＝不鞭尸；同拥有者本 round 已触发过＝只截停不再出手。
+func _execute_ambush(owner, mover) -> void:
+	if not (mover in _state.units) or not (owner in _state.units):
+		return
+	if zoc_triggered.has(_zoc_key(owner, mover)):
+		return
+	zoc_triggered[_zoc_key(owner, mover)] = true
+	_log_line("%s 遭 [b]伏击[/b]！" % _cname(mover))
+	_resolve_aoo(owner, mover)   # 截停已成事实，钉住与否不再影响本次移动
+	_log_displaces(_state.flush_displaces())
+	_handle_deaths()
+	_recompute_vision()
 
 # 移动者从当前格「离开/在区内移动」前的借机判定。返回 true = 被钉住（本次移动作废）。
 # 因「踏入 ZOC 即终点」，一次移动里只有起点可能在 ZOC 内，故只需在离开起点时判一次。
@@ -2121,9 +2161,6 @@ func _resolve_one(attacker, target, skill, show_target := false) -> Dictionary:
 	lines.append("→ %s" % _oc(r["hit"], "已命中", "未命中"))
 	if not r["hit"]:
 		_spawn_hit_feedback(target, false, false, false, 0, 0)   # 飘字：未命中/闪避（看目标阵营）
-		var miss_shift := _morale_band_shift(attacker, int(r.get("morale_att", 0)))
-		if miss_shift != "":
-			lines.append(miss_shift)
 		_push_log(lines)
 		_log_prof_ups(_state.grant_combat_prof(attacker, target, r))   # 挥空也算练习（🔒 §2.4）
 		return {"hit": false, "blocked": false}
@@ -2164,9 +2201,6 @@ func _resolve_one(attacker, target, skill, show_target := false) -> Dictionary:
 	for oh in r.get("on_hit", []):
 		if bool((oh as Dictionary).get("applied", false)):
 			lines.append("　施加「%s」" % str((oh as Dictionary).get("name", "")))
-	var att_shift := _morale_band_shift(attacker, int(r.get("morale_att", 0)))
-	if att_shift != "":
-		lines.append(att_shift)
 	_push_log(lines)
 	_log_prof_ups(_state.grant_combat_prof(attacker, target, r))
 	return {"hit": true, "blocked": r["blocked"]}
@@ -2232,17 +2266,6 @@ func _dispatch_reaction_event(trigger: String, event: Dictionary) -> void:
 	# 再分发 forced 进入事件——反应链在此延续（涌现口径），由 limit 有界。
 	if not _state._pending_displace.is_empty():
 		_log_displaces(_state.flush_displaces())
-
-# 士气跨档播报（🔒 §10.7 骨架 v1：只报跨档，常规小幅波动静默防刷屏）；未跨档返回 ""。
-func _morale_band_shift(u, delta: int) -> String:
-	if delta == 0:
-		return ""
-	var before: int = clampi((u.morale - delta) / 10, 0, 4)
-	if before == u.morale_band():
-		return ""
-	var color: String = OK_GREEN if delta > 0 else "#D5453A"
-	return "[color=%s]%s 士气%s至「%s」（%+d，现 %d）[/color]" % [
-		color, _cname(u), "回升" if delta > 0 else "跌落", u.morale_band_name(), delta, u.morale]
 
 # 技艺进阶播报（只报进阶；涨值本身静默防刷屏）
 func _log_prof_ups(events: Array) -> void:
@@ -2338,8 +2361,11 @@ func _commit_move(col: int, row: int) -> void:
 			return
 		u.ap -= 1
 		u.move_points += u.move_allowance(_state._tile_tags_at(u.col, u.row))   # effective 口径＋脚下地块条件（与预览范围 _dijkstra 一致）
+	# 伏击截停 🔒：先于离开借机**快照**（离开借机可能令伏击者暴露——截停按移动提交时刻的可见性判定）
+	var amb := _ambush_truncation(u, path)
 	# ZOC 借机：离开起点前判定（起点在敌对控制区内才触发）；命中被钉住则本次移动作废
-	var was_in_zoc := _in_hostile_zoc(Vector2i(u.col, u.row), u)
+	# （内部耗尽/知情类判定 visible_only——隐蔽拥有者不经此泄密 🔒 隐蔽与视野）
+	var was_in_zoc := _in_hostile_zoc(Vector2i(u.col, u.row), u, true)
 	if _zoc_on_leave(u):
 		u.move_points = 0
 		_clear_selection()
@@ -2347,14 +2373,20 @@ func _commit_move(col: int, row: int) -> void:
 		if canvas != null:
 			canvas.queue_redraw()
 		return
+	if not amb.is_empty():
+		path = amb["path"]
+		target = path[path.size() - 1]
+		cost = int(amb["cost"])
 	u.move_points -= cost
-	u.col = col
-	u.row = row
-	if was_in_zoc and _in_hostile_zoc(Vector2i(col, row), u):
+	u.col = target.x
+	u.row = target.y
+	if was_in_zoc and _in_hostile_zoc(target, u, true):
 		u.move_points = 0   # ZOC 内部挪动＝耗尽全部移动点（🔒 2026-07-17：躲得过借机也走不快；离开圈外才自由）
 	for nm in _state.clear_stance_effects(u):
 		_log_line("%s 的「%s」解除（架势随移动解除）" % [_cname(u), nm])
 	_dispatch_reaction_event("unit_entered_zoc", {"unit": u, "path": path, "kind": "voluntary"})
+	if not amb.is_empty():
+		_execute_ambush(amb["owner"], u)
 	_clear_selection()
 	_refresh_info()
 	_recompute_vision()   # 单位落位 → 重算玩家视野（友方移动揭开/关闭迷雾）

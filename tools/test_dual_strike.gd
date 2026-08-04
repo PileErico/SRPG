@@ -41,7 +41,7 @@ func mk(nm: String, fac: String, col: int, row: int):
 		"armor_res_phys": 0, "armor_res_nature": 0,
 		"dr_flat_human": 0, "dr_flat_armor": 0,
 	}
-	u.morale = 25
+	u.momentum = 0
 	return u
 
 func _initialize() -> void:
@@ -123,7 +123,7 @@ func _initialize() -> void:
 	for seedv in range(1, 41):
 		d.stats["HP"] = 500
 		a.ap = 3
-		a.morale = 25
+		a.momentum = 0
 		sb._state.rng.seed = seedv
 		sb._do_attack(a, Vector2i(4, 3))
 		ck(a.ap == 2, "连携攻击扣 DUAL_STRIKE_AP=1（seed %d 实剩 %d）" % [seedv, a.ap])
@@ -140,7 +140,7 @@ func _initialize() -> void:
 	ck(sb._state.attack_ap_cost(a) == 2, "回单段 AP＝主手技能费 2")
 	d.stats["HP"] = 500
 	a.ap = 3
-	a.morale = 25
+	a.momentum = 0
 	sb._state.rng.seed = 7
 	sb._do_attack(a, Vector2i(4, 3))
 	ck(a.ap == 1, "单段攻击扣技能费 2")
@@ -166,7 +166,7 @@ func _initialize() -> void:
 	var hit15 := false
 	for seedv in range(1, 41):
 		mover.stats["HP"] = 500
-		owner.morale = 25
+		owner.momentum = 0
 		sb._state.rng.seed = seedv
 		sb._resolve_aoo(owner, mover)
 		var l2: int = 500 - int(mover.stats["HP"])
@@ -180,7 +180,7 @@ func _initialize() -> void:
 	var full := false
 	for seedv in range(1, 41):
 		mover.stats["HP"] = 500
-		owner.morale = 25
+		owner.momentum = 0
 		sb._state.rng.seed = seedv
 		sb._resolve_aoo(owner, mover)
 		var l3: int = 500 - int(mover.stats["HP"])
@@ -236,7 +236,7 @@ func _initialize() -> void:
 	var oh_applied := false
 	for seedv in range(1, 41):
 		v.stats["HP"] = 500
-		h.morale = 25
+		h.momentum = 0
 		sb._state.rng.seed = seedv
 		var rr: Dictionary = sb._state._resolve_compute(h, v, {"coeff": 1.0})
 		if bool(rr.get("hit", false)):
@@ -268,7 +268,7 @@ func _initialize() -> void:
 	for seedv in range(1, 41):
 		v8.effects = []
 		v8.modifiers = []
-		s8.morale = 25
+		s8.momentum = 0
 		sb._state.rng.seed = seedv
 		var r8: Dictionary = sb._state._resolve_compute(s8, v8,
 			{"coeff": 1.0, "on_hit_effects": [{"effect": "bleed_high", "chance": 0}]})
@@ -286,7 +286,7 @@ func _initialize() -> void:
 	for seedv in range(1, 41):
 		v8.effects = []
 		v8.modifiers = []
-		s8.morale = 25
+		s8.momentum = 0
 		sb._state.rng.seed = seedv
 		var r8b: Dictionary = sb._state._resolve_compute(s8, v8, {"coeff": 1.0, "inflict": {"effect": "bleed_low", "chance": 100}})
 		if bool(r8b.get("hit", false)):

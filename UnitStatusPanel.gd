@@ -1272,13 +1272,11 @@ func _build_stats(right: VBoxContainer, u) -> void:
 	col_r.add_theme_constant_override("separation", 6)
 	split.add_child(col_r)
 	_build_derived_col(col_r, u)
-	# 血量/护甲＝读 stats（有 _max 上限）；士气＝Unit.morale（0..MORALE_MAX），图标随区间取 flag1-5。
+	# 血量/护甲＝读 stats（有 _max 上限）。气势不设计量条（不可见原则 🔒 气势档 §1——只经修正属性列的数值变化体现）。
 	col_l.add_child(_stat_bar_row(float(u.effective_stat("HP")), u.effective_stat_f("HP_max"),
 		ICON_DIR + "HP_16x16.png", Color("#9A2E22")))            # 血量＝深红
 	col_l.add_child(_stat_bar_row(float(u.effective_stat("armor")), u.effective_stat_f("armor_max"),
 		ICON_DIR + "护甲值_16x16.png", Color("#66707A")))          # 护甲＝深钢灰
-	col_l.add_child(_stat_bar_row(float(u.morale), float(u.MORALE_MAX),
-		_morale_icon(int(u.morale)), _morale_color(int(u.morale), int(u.MORALE_MAX))))   # 士气＝红→绿线性
 	# 绿区：计量条下方＝面板五行（🔒 用户定序：移动力/物理抗性/自然抗性/肉体强韧/意志强韧；百分比语义带 %）
 	col_l.add_child(HSeparator.new())
 	for key in ["move", "res_phys", "res_nature", "body_fort", "will_fort"]:
@@ -1352,30 +1350,16 @@ func _build_derived_col(col: VBoxContainer, u) -> void:
 	head.add_theme_font_size_override("font_size", 12)
 	head.add_theme_color_override("font_color", Color(1, 1, 1, 0.55))
 	col.add_child(head)
-	col.add_child(_stat_kv_row("命中率", _fmt1(u.effective_stat_f("acc") + u.effective_stat_f("finesse") + u.morale_combat_mod()) + "%"))   # 含士气档位平加（🔒 §10.7）
+	col.add_child(_stat_kv_row("命中率", _fmt1(u.effective_stat_f("acc") + u.effective_stat_f("finesse")) + "%"))   # 气势暗加成已含在 acc（🔒 气势档 §4，与判定同口径）
 	col.add_child(_stat_kv_row("闪避率", _fmt1(u.effective_stat_f("eva") + u.effective_stat_f("agility")) + "%"))
 	col.add_child(_stat_kv_row("暴击率", _fmt1(u.effective_stat_f("crit_rate") + u.effective_stat_f("finesse") * 0.5) + "%"))
 	col.add_child(_stat_kv_row("暴击伤害", _fmt1(u.effective_stat_f("crit_dmg") + u.effective_stat_f("luck") * 0.5) + "%"))
-	col.add_child(_stat_kv_row("暴击防御", _fmt1(u.effective_stat_f("luck")) + "%"))   # 运气压对方暴击（−1%/点）
+	col.add_child(_stat_kv_row("暴击防御", _fmt1(u.effective_stat_f("luck") + u.effective_stat_f("crit_def")) + "%"))   # 运气＋crit_def 伪 stat（与结算同口径：踉跄 debuff/气势同显）
 	col.add_child(_stat_kv_row("格挡率", _fmt1(u.effective_stat_f("block_rate")) + "%"))
 	col.add_child(_stat_kv_row("格挡性能", _fmt1(u.effective_stat_f("block_power")) + "%"))
 
 func _fmt1(v: float) -> String:
 	return str(int(v)) if is_equal_approx(v, floorf(v)) else String.num(v, 1)
-
-# 士气图标：按当前值五档 → flag1-5（<10 / 10-19 / 20-29 / 30-39 / ≥40）；与 Unit.morale_band() 一致，默认 25 落 flag3。
-func _morale_icon(morale: int) -> String:
-	var n := 1
-	if morale >= 40: n = 5
-	elif morale >= 30: n = 4
-	elif morale >= 20: n = 3
-	elif morale >= 10: n = 2
-	return ICON_DIR + "flag%d_16x16.png" % n
-
-# 士气条色：随值线性 红(0)→绿(满)——走 HSV 色相插值（红→黄→绿），比 RGB 直插好看。
-func _morale_color(morale: int, mmax: int) -> Color:
-	var t := clampf(float(morale) / float(maxi(1, mmax)), 0.0, 1.0)
-	return Color.from_hsv(lerpf(0.0, 0.33, t), 0.72, 0.66)
 
 # 一条「图标 + 横向计量条」：条内右对齐叠「当前 / 上限」；深底 + 指定色填充（同技能页深槽调性）。
 func _stat_bar_row(cur: float, max_raw: float, icon_path: String, fill_color: Color) -> Control:

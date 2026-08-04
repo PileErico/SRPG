@@ -7,7 +7,7 @@ extends SceneTree
 ##  3) 效果引用完整性：weapons/skills 里 on_hit/apply 的 {effect:<id>} 引用必须在 EffectDB 存在
 ##     （当前无引用形态即空过；阶段1.2b bleed 迁引用后此项开始守护悬空 id）。
 ##     3b) On-Hit 白名单（🔒 2026-07-15 用户令）：weapons/skills 的 on_hit_effects 引用的效果须 on_hit_ok=true
-##     （效果库勾选制——防士气/变身类效果被击中施加引用）。
+##     （效果库勾选制——防变身类等非命中向效果被击中施加引用）。
 ##  4) 强韧不入物品（🔒 模块_属性成长_设计.md §5）：weapons/armor/accessories 的 mods 出现 will_fort/body_fort 即 FAIL。
 ##  5) damage_category 白名单 ∈ {physical,fire,ice,thunder,holy} + damage_type 白名单 ∈ {slashing,piercing,bludgeoning} + 禁键 damage_kind + 禁键 armor_dmg（2026-07-15 拆 pct/flat）
 ##     （未知种别在 CombatResolver 会告警回退物理轨；数据侧在此挡住）。
@@ -574,8 +574,9 @@ func _initialize() -> void:
 	# 11) 战中快照白名单机械执法（技改 §1-3：新运行态字段忘扩白名单＝suspend 静默丢数据，原纯靠注释纪律）
 	# 瞬态豁免表（新增豁免须在此登记并注明理由）：
 	#   faction＝tags 的计算视图（快照存 tags 自动复原）；last_hit_by＝对象引用（BattleState 层按下标另存）；
-	#   combat_ctx＝结算瞬态（_resolve_compute 包裹层 set/clear，跨回合无意义）。
-	var snap_exempt := ["faction", "last_hit_by", "combat_ctx"]
+	#   combat_ctx＝结算瞬态（_resolve_compute 包裹层 set/clear，跨回合无意义）；
+	#   _momentum_pending＝气势行动内攒/泄缓冲（🔒 气势档：动作内无 suspend 点，_momentum_settle_all 行动末即清）。
+	var snap_exempt := ["faction", "last_hit_by", "combat_ctx", "_momentum_pending"]
 	var snap_keys: Array = UnitFactory.unit_to_battle_snapshot(Unit.new()).keys()
 	var unit_vars := []
 	for prop in Unit.new().get_property_list():

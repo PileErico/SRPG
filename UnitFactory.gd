@@ -249,7 +249,7 @@ static func unit_to_battle_snapshot(u) -> Dictionary:
 		"prof_perks": u.prof_perks.duplicate(true), "prof_perk_state": u.prof_perk_state.duplicate(true),
 		"reaction_state": u.reaction_state.duplicate(true),
 		"ap": u.ap, "move_points": u.move_points,
-		"morale": u.morale, "attr_picks": u.attr_picks,
+		"momentum": u.momentum, "attr_picks": u.attr_picks,
 		"door_gauge": u.door_gauge, "door_checks": u.door_checks,
 		"effects": u.effects.duplicate(true),
 		"modifiers": u.modifiers.duplicate(true),   # 整份含 trait/equip 烘焙条 + buff:/env: 临时条（source 配对保真 🔒）
@@ -307,7 +307,7 @@ static func unit_from_battle_snapshot(d: Dictionary):
 	u.reaction_state = d.get("reaction_state", {}).duplicate(true) if typeof(d.get("reaction_state", {})) == TYPE_DICTIONARY else {}
 	u.ap = int(d.get("ap", 0))
 	u.move_points = int(d.get("move_points", 0))
-	u.morale = int(d.get("morale", 25))   # 旧快照缺省＝常态 25
+	u.momentum = int(d.get("momentum", 0))   # 旧快照（morale 键）忽略、缺省 0（🔒 气势档 §8 迁移口径）
 	u.attr_picks = int(d.get("attr_picks", 0))
 	u.door_gauge = int(d.get("door_gauge", 0))
 	u.door_checks = int(d.get("door_checks", 0))

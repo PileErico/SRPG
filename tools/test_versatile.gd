@@ -39,7 +39,7 @@ func mk(nm: String, fac: String, col: int, row: int):
 		"armor_res_phys": 0, "armor_res_nature": 0,
 		"dr_flat_human": 0, "dr_flat_armor": 0,
 	}
-	u.morale = 25
+	u.momentum = 0
 	return u
 
 func _initialize() -> void:

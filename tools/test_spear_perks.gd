@@ -86,10 +86,18 @@ func _initialize() -> void:
 	enemy.stats["block_rate"] = 0.0
 	enemy.stats["HP_max"] = 999.0
 	enemy.stats["HP"] = 999.0
+	# 命中链有 95% 硬帽（_hit_chance clampi 5..95）——单发断言必掉血＝约 5% 假阳。
+	# 消费次数＝确定性（每次分发后即断言）；落伤＝掷骰，miss 则进新 round 重置 limit 重试。
 	var hp_before := float(enemy.stats["HP"])
-	sb._dispatch_reaction_event("unit_entered_zoc", revent)
-	ck(float(enemy.stats["HP"]) < hp_before and s.reaction_candidates("unit_entered_zoc", revent).is_empty(),
-		"通用 Reaction 分发器执行 BWS 并消费次数")
+	var bws_landed := false
+	for _r in 32:
+		sb._dispatch_reaction_event("unit_entered_zoc", revent)
+		ck(s.reaction_candidates("unit_entered_zoc", revent).is_empty(), "通用 Reaction 分发器消费次数")
+		if float(enemy.stats["HP"]) < hp_before:
+			bws_landed = true
+			break
+		s.round_num += 1
+	ck(bws_landed, "通用 Reaction 分发器执行 BWS（重试至命中落伤）")
 	sb.free()
 	# 强制位移解算返回逐格路径，供同一个“进入”判定口消费。
 	enemy.col = 5
