@@ -66,6 +66,7 @@ func _ready() -> void:
 	right.add_child(_menu_button("👤 角色编辑器", _on_char_editor, false, true))
 	right.add_child(_menu_button("⚔️ 物品编辑器", _on_item_editor, false, true))
 	right.add_child(_menu_button("🤺 技能编辑器（能力 · 效果）", _on_skill_editor, false, true))
+	right.add_child(_menu_button("💬 对话编辑器", _on_dialogue_editor, false, true))
 	right.add_child(_menu_button("🎨 外观工坊（换装换色）", _on_appearance_workshop, false, true))
 	right.add_child(_menu_button("🗻 地块绘制工坊", _on_terrain_workshop, false, true))
 
@@ -175,6 +176,9 @@ func _on_char_editor() -> void:
 
 func _on_skill_editor() -> void:
 	get_tree().change_scene_to_file("res://SkillEditor.tscn")
+
+func _on_dialogue_editor() -> void:
+	get_tree().change_scene_to_file("res://DialogueEditor.tscn")
 
 func _on_appearance_workshop() -> void:
 	get_tree().change_scene_to_file("res://AppearanceWorkshop.tscn")

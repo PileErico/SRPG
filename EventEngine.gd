@@ -22,7 +22,9 @@ const GLOBAL_EVENT_GAP_HOURS := 24   # 全局事件间隔（BB 式防世界事�
 
 # ============ ① 动作元数据注册表（单一源：运行时 execute_action 与编辑器动作表单共用）============
 # fields.type → 编辑器控件：text＝单行文本(placeholder=label) / int＝SpinBox(min/max) / proto＝原型下拉
-#             / faction＝阵营下拉 / weather＝天气下拉。col/row 的 max 是宽泛上限——运行时按地图尺寸 clamp 兜底。
+#             / faction＝阵营下拉 / weather＝天气下拉 / dialogue＝对话下拉（DialogueDB）。
+# 控件渲染单一实现＝EditorUI.event_action_field（触发器 do 表单与对话选项结果动作共用）。
+# col/row 的 max 是宽泛上限——运行时按地图尺寸 clamp 兜底。
 const ACTIONS := [
 	{"id": "show_message", "label": "弹消息", "fields": [
 		{"key": "text", "label": "内容", "type": "text", "default": "消息"},
@@ -44,7 +46,7 @@ const ACTIONS := [
 		{"key": "map", "label": "战斗地图路径", "type": "text", "default": "res://maps/sandbox.json"},
 	]},
 	{"id": "dialogue", "label": "开对话", "fields": [
-		{"key": "dialogue_id", "label": "对话id（data/dialogues.json）", "type": "text", "default": ""},
+		{"key": "dialogue_id", "label": "对话", "type": "dialogue", "default": ""},
 	]},
 	{"id": "add_rep", "label": "改声望", "fields": [
 		{"key": "faction_id", "label": "派系id（data/factions.json）", "type": "text", "default": ""},

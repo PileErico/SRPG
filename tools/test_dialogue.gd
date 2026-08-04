@@ -20,8 +20,17 @@ func ck(cond: bool, msg: String) -> void:
 class StubHost:
 	extends RefCounted
 	var got := ""
+	var items := []      # [item_id, count] 记录（event_give_item）
+	var gold := 0
+	var flags := {}
 	func event_dialogue(id: String) -> void:
 		got = id
+	func event_give_item(item_id: String, count: int) -> void:
+		items.append([item_id, count])
+	func event_give_gold(amount: int) -> void:
+		gold += amount
+	func event_set_flag(key: String, value) -> void:
+		flags[key] = value
 
 func _initialize() -> void:
 	print("=== M8 对话系统测试开始 ===")
@@ -111,6 +120,66 @@ func _initialize() -> void:
 	sb._dialogue.advance()
 	ck(sb._dialogue == null, "Sandbox 对话结束清引用")
 	sb.free()
+
+	# 8) 选项结果动作（choices.actions＝EventEngine 动作表同一注册表）：有宿主执行 / 无宿主跳过不崩
+	var tmp := "user://_test_dialogues.json"
+	var tf = FileAccess.open(tmp, FileAccess.WRITE)
+	tf.store_string(JSON.stringify({
+		"_note": "测试临时对话库", "format_version": 1,
+		"dialogues": [{"id": "dlg_t", "label": "测试", "nodes": [
+			{"id": "n1", "speaker": "甲", "text": "拿好。", "choices": [
+				{"text": "多谢", "next": "", "actions": [
+					{"action": "give_item", "item_id": "potion_x", "count": 2},
+					{"action": "give_gold", "amount": 30},
+					{"action": "set_flag", "key": "took_gift", "value": "true"}]},
+				{"text": "不要", "next": ""}]}]}]}))
+	tf.close()
+	DialogueDB._path_override = tmp
+	DialogueDB.reload_data()
+	var host := StubHost.new()
+	var ui6 = DialogueUI.new()
+	ck(ui6.start("dlg_t", null, host), "临时库开播（host 注入）")
+	ui6.choose(0)
+	ck(host.items == [["potion_x", 2]] and host.gold == 30 and host.flags.get("took_gift") == true,
+		"选项结果动作：给物品/给钱/设flag 全经宿主原语落地（无 ws 也执行）")
+	ui6.free()
+	var ui7 = DialogueUI.new()
+	ui7.start("dlg_t", null)   # 不传 host → 动作跳过（仅警告）
+	ui7.choose(0)
+	ck(not ui7.is_active(), "无宿主：动作跳过、跳转照常不崩")
+	ui7.free()
+
+	# 9) DialogueDB 编辑侧：增改 → save → 重读（顶层 _note/format_version 保留；数据往返）
+	var dlgs: Array = DialogueDB.all_dialogues()
+	dlgs.append({"id": "dlg_saved", "label": "存盘验证", "nodes": [{"id": "n1", "speaker": "乙", "text": "在。", "next": ""}]})
+	DialogueDB.reindex()
+	ck(DialogueDB.dialogue("dlg_saved") != null, "reindex 后新对话可查")
+	ck(DialogueDB.save(), "save 写盘成功")
+	DialogueDB.reload_data()
+	ck(DialogueDB.dialogue("dlg_saved") != null and DialogueDB.all_dialogues().size() == 2, "重读：新对话持久化")
+	var root_check = JSON.parse_string(FileAccess.get_file_as_string(tmp))
+	ck(str(root_check.get("_note", "")) == "测试临时对话库" and int(root_check.get("format_version", 0)) == 1,
+		"save 保留顶层 _note/format_version")
+
+	# 10) 对话编辑器逻辑（不进树纯逻辑：加对话/加节点自动接链/id 改名同步引用/lint 悬空检测）
+	var EditorScript := preload("res://DialogueEditor.gd")
+	var ed = EditorScript.new()
+	ed._on_add_dialogue()   # UI 未建（_list 等 null 守卫）；数据路径照走
+	ck(DialogueDB.all_dialogues().size() == 3, "编辑器：新建对话入库")
+	ed._sel = DialogueDB.all_dialogues().size() - 1
+	ed._node_sel = 0
+	ed._on_add_node()
+	var ns: Array = ed._nodes()
+	ck(ns.size() == 2 and str(ns[0].get("next", "")) == str(ns[1].get("id", "")), "新增节点：上一末节点自动接链")
+	ed._rename_node(ns[1], "n_renamed")
+	ck(str(ns[0].get("next", "")) == "n_renamed", "节点改名：next 引用自动同步")
+	ns[0]["next"] = "ghost"
+	ck(not ed._lint().is_empty(), "lint：悬空跳转被检出")
+	ns[0]["next"] = ""
+	ed.free()
+	DialogueDB._path_override = ""
+	DialogueDB.reload_data()   # 还原真库
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(tmp))
 
 	WorldState.current = null
 	if _fail == 0:

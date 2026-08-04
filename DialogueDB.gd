@@ -6,8 +6,9 @@ extends RefCounted
 const PATH := "res://data/dialogues.json"
 const JsonRegistry := preload("res://JsonRegistry.gd")
 
-static var _dialogues := []   # 有序对话定义
+static var _dialogues := []   # 有序对话定义（live 引用——对话编辑器直改后 reindex+save）
 static var _by_id := {}       # dialogue_id -> entry
+static var _root := {}        # 原始顶层字典（format_version/_note）——save 时保留
 static var _loaded := false
 static var _path_override := ""   # 测试注入缝
 
@@ -18,6 +19,7 @@ static func _ensure() -> void:
 	if _loaded:
 		return
 	_loaded = true
+	_root = JsonRegistry.read_dict(_path())
 	var r = JsonRegistry.load_indexed(_path(), "dialogues")
 	_dialogues = r["list"]
 	_by_id = r["by_id"]
@@ -25,6 +27,20 @@ static func _ensure() -> void:
 static func reload_data() -> void:
 	_loaded = false
 	_ensure()
+
+# 编辑器增删/改 id 后重建索引（列表是 live 引用，索引须随之重铸）
+static func reindex() -> void:
+	_by_id = {}
+	for d in _dialogues:
+		if typeof(d) == TYPE_DICTIONARY and str(d.get("id", "")) != "":
+			_by_id[str(d["id"])] = d
+
+# 写盘（对话编辑器唯一出口）：保留顶层 format_version/_note，只更新 dialogues
+static func save() -> bool:
+	_ensure()
+	var out := _root if typeof(_root) == TYPE_DICTIONARY and not _root.is_empty() else {}
+	out["dialogues"] = _dialogues
+	return JsonRegistry.write_json(_path(), out, "DialogueDB")
 
 static func all_dialogues() -> Array:
 	_ensure()

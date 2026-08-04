@@ -1,5 +1,5 @@
 {
-  "_note": "对话单一数据源（M8）。dialogue={id,label,nodes[]}；node={id,speaker,side:left|right(缺省left),portrait(res://路径,可省),text, next|choices}。无 choices=纯演出节点（点击推进 next；next 空/缺省=结束）；choices=[{text,next,set_flags?,rep?}]——set_flags 写 WorldState.flags、rep 按 {faction:delta} 累加声望（无战役档=效果跳过）。首节点=nodes[0]。DialogueDB 读本文件。",
+  "_note": "对话单一数据源（M8）。dialogue={id,label,nodes[]}；node={id,speaker,side:left|right(缺省left),portrait(res://路径,可省),text, next|choices}。无 choices=纯演出节点（点击推进 next；next 空/缺省=结束）；choices=[{text,next,set_flags?,rep?,actions?}]——set_flags 写 WorldState.flags、rep 按 {faction:delta} 累加声望（无战役档=两者跳过）；actions=[EventEngine 动作…]（与触发器 do 同一注册表：give_item/give_gold/set_flag/add_rep/start_battle…，按开对话宿主的 event_* 原语执行）。首节点=nodes[0]。DialogueDB 读写本文件（编辑=对话编辑器）。",
   "format_version": 1,
   "dialogues": [
     {

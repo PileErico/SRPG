@@ -11,10 +11,12 @@ signal finished
 const DialogueDB := preload("res://DialogueDB.gd")
 const TextureCache := preload("res://TextureCache.gd")
 const FactionDB := preload("res://FactionDB.gd")   # 声望唯一写口（钳制/默认值在它那）
+const EventEngine := preload("res://EventEngine.gd")   # 选项结果动作＝触发器动作表同一注册表
 
 var _dlg = null    # 当前对话定义（null=未播放/已结束）
 var _node = null   # 当前节点
-var _ws = null     # 选项效果落点（WorldState；null=无战役档，效果跳过）
+var _ws = null     # 选项效果落点（WorldState；null=无战役档，set_flags/rep 跳过）
+var _host = null   # 选项结果动作的执行宿主（event_* 原语；null=动作跳过并警告）
 var _left_portrait := ""    # 两侧立绘记忆：说话方点亮，另一侧保持上次立绘变暗（VN 惯例）
 var _right_portrait := ""
 
@@ -29,7 +31,8 @@ var _right_rect: TextureRect
 # ============ 播放核心（纯逻辑，headless 可测）============
 
 # 开始播放：查对话 → 进首节点。返回是否成功开播（不存在/空对话＝直接 finished 自毁）。
-func start(dialogue_id: String, ws = null) -> bool:
+# host＝选项结果动作的执行宿主（拥有 event_* 原语的场景；触发器开对话时传开它的那个宿主）。
+func start(dialogue_id: String, ws = null, host = null) -> bool:
 	var dlg = DialogueDB.dialogue(dialogue_id)
 	if dlg == null:
 		push_warning("DialogueUI：对话「%s」不存在（data/dialogues.json）" % dialogue_id)
@@ -37,6 +40,7 @@ func start(dialogue_id: String, ws = null) -> bool:
 		return false
 	_dlg = dlg
 	_ws = ws
+	_host = host
 	_enter_node(DialogueDB.first_node(dlg))
 	return _node != null
 
@@ -52,15 +56,19 @@ func advance() -> void:
 		return
 	_goto(str(_node.get("next", "")))
 
-# 分支节点：选第 i 项——先落效果、再跳转
+# 分支节点：选第 i 项——先落**状态**效果（set_flags/rep，供将来条件门读新值）、再跳转、
+# **最后**执行结果动作：跳转若走到结束，finished 已发、宿主对话引用已清——「开对话」链式衔接由此可行
+# （next 非空时链开对话仍会被宿主「已有对话」守卫拦下并警告——作者应把链式动作放在结束型选项上）。
 func choose(i: int) -> void:
 	if _node == null:
 		return
 	var cs: Array = _node.get("choices", [])
 	if i < 0 or i >= cs.size() or typeof(cs[i]) != TYPE_DICTIONARY:
 		return
-	_apply_choice_effects(cs[i])
-	_goto(str(cs[i].get("next", "")))
+	var c: Dictionary = cs[i]
+	_apply_choice_state(c)
+	_goto(str(c.get("next", "")))
+	_apply_choice_actions(c)
 
 func _goto(next_id: String) -> void:
 	if next_id == "":
@@ -86,8 +94,8 @@ func _enter_node(nd) -> void:
 			_left_portrait = p
 	_refresh_ui()
 
-# 选项效果：set_flags 写世界 flag / rep 累加声望——需求「分支影响限于个人剧情、支线走向」，flag+声望先兜住
-func _apply_choice_effects(c: Dictionary) -> void:
+# 选项状态效果：set_flags 写世界 flag / rep 累加声望（皆需 ws；无档＝跳过仅警告）。
+func _apply_choice_state(c: Dictionary) -> void:
 	if _ws == null:
 		if c.has("set_flags") or c.has("rep"):
 			push_warning("DialogueUI：无战役档（沙盒模式），选项效果 set_flags/rep 跳过")
@@ -100,6 +108,19 @@ func _apply_choice_effects(c: Dictionary) -> void:
 	if typeof(rp) == TYPE_DICTIONARY:
 		for f in rp:
 			FactionDB.add_rep(_ws, str(f), int(rp[f]))   # 唯一写口：默认值兜底+[-100,100] 钳制
+
+# 选项结果动作＝EventEngine 动作表同一注册表（给物品/给钱/设flag/改声望/开战斗/连锁对话…），
+# 按宿主 event_* 原语执行（无 ws 也走；宿主缺原语＝EventEngine 警告跳过；无宿主＝警告跳过）。
+func _apply_choice_actions(c: Dictionary) -> void:
+	var acts = c.get("actions", [])
+	if typeof(acts) != TYPE_ARRAY or acts.is_empty():
+		return
+	if _host == null:
+		push_warning("DialogueUI：宿主未提供（start 未传 host），选项结果动作跳过")
+		return
+	for a in acts:
+		if typeof(a) == TYPE_DICTIONARY:
+			EventEngine.execute_action(a, _host)
 
 func _finish() -> void:
 	_node = null
