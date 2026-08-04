@@ -693,7 +693,7 @@ func event_dialogue(dialogue_id: String) -> void:
 	_dialogue = ui
 	add_child(ui)
 	ui.finished.connect(func(): _dialogue = null)   # 先连再 start：start 失败同步 finished 也能清引用
-	ui.start(dialogue_id, WorldState.current)
+	ui.start(dialogue_id, WorldState.current, self)   # host=自己：选项结果动作走本场景 event_* 原语
 
 # 进入战斗（do: start_battle）：事件遭遇战，无来由上下文
 func event_start_battle(map_path: String) -> void:
