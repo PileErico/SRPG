@@ -23,6 +23,10 @@ var _root: VBoxContainer
 var _variant_tiles := {}   # key -> { idx(int): Button }（idx=-1＝程序兜底缩略）
 var _preview: TilePreview
 var _msg: Label
+var _px_w_spin: SpinBox        # 画布规格：宽（六边形满宽；比例恒定 √3/2，宽定则六边形定）
+var _px_head_spin: SpinBox     # 画布规格：顶部留白（界外物件头部空间；高＝六边形高+留白）
+var _px_info: Label
+var _px_loading := false
 var _sel_key := ""
 var _sel_idx := 0
 # 左栏态（§10/§12：跨 _rebuild 保活）
@@ -110,6 +114,21 @@ func _build_left() -> Control:
 		_filter = t.strip_edges().to_lower()
 		_populate_left_list())   # 只重灌清单、不整页重建——输入框焦点不丢
 	outer.add_child(fbox)
+	# 素材整理（2026-07-20 用户令：整理功能进工坊，不再只靠 MapEditor 笔刷侧）
+	var mrow := HBoxContainer.new()
+	mrow.add_theme_constant_override("separation", 6)
+	var addcat := Button.new()
+	addcat.text = "＋ 新建分类"
+	addcat.tooltip_text = "新建一个空分类（立即写盘；空分类也显示，随后可往里新建地块/移入条目）"
+	addcat.pressed.connect(_on_new_category)
+	mrow.add_child(addcat)
+	var addent := Button.new()
+	addent.text = "＋ 新建地块"
+	addent.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	addent.tooltip_text = "新建一条地形/放置物条目（起名+归类+本色；通行/效果等数据细调在地图编辑器·地形数据）"
+	addent.pressed.connect(_on_new_entry)
+	mrow.add_child(addent)
+	outer.add_child(mrow)
 	_left_scroll = ScrollContainer.new()
 	_left_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_left_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -145,8 +164,8 @@ func _populate_left_list() -> void:
 	order.append(TerrainDB.DEFAULT_CATEGORY)
 	for cat in order:
 		var entries: Array = groups.get(cat, [])
-		if entries.is_empty():
-			continue   # 空分类不占位（分类增删管理在 MapEditor 笔刷侧，这里纯浏览）
+		if entries.is_empty() and (str(cat) == TerrainDB.DEFAULT_CATEGORY or _filter != ""):
+			continue   # 空的「待定」不占位；过滤中空组不占位。用户分类空也显示——新建分类后可见、可收新条目
 		_left_list.add_child(_category_group(str(cat), entries))
 	_refresh_selection()
 
@@ -178,20 +197,65 @@ func _category_group(cat: String, entries: Array) -> Control:
 		collapsed = not has_sel                 # 首见默认：含当前选中的组展开、其余收起
 	if not collapsed:
 		build.call()
+	# 一级（分类）头：深底+金字区分层级 + ↑↓ 排序（待定恒垫底不参与排序）
+	var extra: Control = null
+	if cat != TerrainDB.DEFAULT_CATEGORY:
+		extra = _order_btns(func(d: int): _move_category(cat, d))
 	return EditorUI.make_foldable("%s (%d)" % [cat, entries.size()], content, collapsed, false,
 		func(open: bool):
 			_fold_cat[cat] = not open
 			if open:
-				build.call())
+				build.call(),
+		extra, Color(0.07, 0.09, 0.13), Color(0.93, 0.80, 0.45))
 
 # 单个地形行（原左栏一行：折叠标题 + 变体条）；折叠态按 entry_key 记（§10）。
+# 二级头保留缺省浅底色（与一级深色区分）；↑↓＝分类内排序（与 MapEditor 笔刷栏同源同序）。
 func _terrain_row(entry: Dictionary) -> Control:
 	var key := _entry_key(entry)
 	var art := TerrainDB.art_of(entry)
 	var title := "%s  ·  %d 变体" % [str(entry.get("label", entry.get("id", "?"))), art.size()]
 	var collapsed := bool(_fold.get(key, false))
+	var tile := {"terrain": entry.get("terrain"), "variant": entry.get("variant")}
 	return EditorUI.make_foldable(title, _terrain_content(entry), collapsed, false,
-		func(open: bool): _fold[key] = not open)
+		func(open: bool): _fold[key] = not open,
+		_order_btns(func(d: int): _move_entry_order(tile, d)))
+
+# ↑↓ 排序钮对（header_extra 用；on_move 收 -1/+1）
+func _order_btns(on_move: Callable) -> Control:
+	var hb := HBoxContainer.new()
+	hb.add_theme_constant_override("separation", 2)
+	for pair in [["↑", -1], ["↓", 1]]:
+		var b := Button.new()
+		b.text = str(pair[0])
+		b.custom_minimum_size = Vector2(26, 0)
+		b.focus_mode = Control.FOCUS_NONE
+		var d := int(pair[1])
+		b.pressed.connect(func(): on_move.call(d))
+		hb.add_child(b)
+	return hb
+
+# 分类排序：categories 数组相邻交换（待定不在数组、恒垫底——与 MapEditor 同规则）
+func _move_category(cat: String, delta: int) -> void:
+	var cats: Array = TerrainDB.categories()
+	var idx := cats.find(cat)
+	var j := idx + delta
+	if idx < 0 or j < 0 or j >= cats.size():
+		return
+	var tmp = cats[idx]
+	cats[idx] = cats[j]
+	cats[j] = tmp
+	TerrainDB.set_categories(cats)
+	if not TerrainDB.save():
+		_set_msg("分类排序写盘失败", false); return
+	_rebuild()
+
+# 条目排序：分类内与最近邻交换（TerrainDB.move_entry；顺序与 MapEditor 笔刷栏共用 _palette 单一源）
+func _move_entry_order(tile: Dictionary, delta: int) -> void:
+	if not TerrainDB.move_entry(tile, delta):
+		return   # 到头
+	if not TerrainDB.save():
+		_set_msg("条目排序写盘失败", false); return
+	_rebuild()
 
 func _terrain_content(entry: Dictionary) -> Control:
 	var box := VBoxContainer.new()
@@ -285,15 +349,62 @@ func _build_right() -> Control:
 	pv.add_child(_preview)
 	frame.add_child(pv)
 	vb.add_child(frame)
+	# 画布规格（像素密度**逐条目可调**；六边形比例/外形恒定——宽定则六边形定，高＝六边形高+顶部留白）
+	var pxrow := HBoxContainer.new()
+	pxrow.add_theme_constant_override("separation", 6)
+	var pl := Label.new(); pl.text = "画布宽"; pl.add_theme_font_size_override("font_size", 12)
+	pxrow.add_child(pl)
+	# ⚠️ 先配 min/max/step、**最后**连 value_changed：min_value 赋值会把默认 value(0) 钳到下限并发信号——
+	# 先连后配＝建 UI 瞬间对选中条目静默写入 16 宽规格（2026-07-20 草原被污染事故，勿回退此序）
+	_px_w_spin = SpinBox.new()
+	_px_w_spin.min_value = 16; _px_w_spin.max_value = 256; _px_w_spin.step = 2
+	_px_w_spin.tooltip_text = "六边形满宽像素数（32=旧规格 / 96=PHBT 参考密度）；六边形高按 √3/2 比例自动跟随"
+	pxrow.add_child(_px_w_spin)
+	var hl := Label.new(); hl.text = "顶部留白"; hl.add_theme_font_size_override("font_size", 12)
+	pxrow.add_child(hl)
+	_px_head_spin = SpinBox.new()
+	_px_head_spin.min_value = 0; _px_head_spin.max_value = 64
+	_px_head_spin.tooltip_text = "六边形上方的界外物件空间（树冠/道具探头用；96 宽配 12＝PHBT 同款 96×96）"
+	pxrow.add_child(_px_head_spin)
+	_px_w_spin.value_changed.connect(func(_v: float): _on_px_changed())
+	_px_head_spin.value_changed.connect(func(_v: float): _on_px_changed())
+	_px_info = Label.new()
+	_px_info.add_theme_font_size_override("font_size", 12)
+	_px_info.add_theme_color_override("font_color", Color(0.65, 0.7, 0.78))
+	_px_info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	pxrow.add_child(_px_info)
+	vb.add_child(pxrow)
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 6)
 	var edit := Button.new(); edit.text = "✎ 编辑所选变体"; edit.pressed.connect(_edit_selected)
 	var dup := Button.new(); dup.text = "⧉ 复制为新变体"; dup.tooltip_text = "以所选变体为底稿另起一张（保存为新变体，不覆盖原图）——差分变体不用从零画"
 	dup.pressed.connect(_copy_selected_as_new)
+	var base := Button.new(); base.text = "🎨 以其他地块为底稿…"
+	base.tooltip_text = "从任意已有手绘变体里挑一张当底稿，画进当前地形的新变体（跨条目版「复制为新变体」；尺寸不符自动缩放）"
+	base.pressed.connect(_pick_base_dialog)
 	var imp := Button.new(); imp.text = "＋ 导入 PNG"; imp.pressed.connect(_import_variant)
 	var del := Button.new(); del.text = "🗑 删除变体"; del.pressed.connect(_delete_selected)
-	row.add_child(edit); row.add_child(dup); row.add_child(imp); row.add_child(del)
+	row.add_child(edit); row.add_child(dup); row.add_child(base); row.add_child(imp); row.add_child(del)
 	vb.add_child(row)
+	# 条目整理行（2026-07-20 用户令：整理功能进工坊）——作用于左栏当前选中的条目
+	var orow := HBoxContainer.new()
+	orow.add_theme_constant_override("separation", 6)
+	var ren := Button.new(); ren.text = "✏ 条目改名"; ren.pressed.connect(_rename_entry)
+	orow.add_child(ren)
+	var mv := EditorUI.make_menu("📁 移到分类")
+	var mpop := mv.get_popup()
+	var cats := _all_category_names()
+	for ci in cats.size():
+		mpop.add_item("→ " + str(cats[ci]), ci)
+	mpop.id_pressed.connect(func(id: int):
+		if id >= 0 and id < cats.size():
+			_move_entry_category(str(cats[id])))
+	orow.add_child(mv)
+	var dele := Button.new(); dele.text = "🗑 删除条目"
+	dele.tooltip_text = "从 terrains.json 整条移除（已画 PNG 保留在 icons/Tiles/ 不删）"
+	dele.pressed.connect(_delete_entry_sel)
+	orow.add_child(dele)
+	vb.add_child(orow)
 	_msg = Label.new()
 	_msg.add_theme_font_size_override("font_size", 12)
 	vb.add_child(_msg)
@@ -305,51 +416,118 @@ func _update_preview() -> void:
 	var entry = _entry_by_key(_sel_key)
 	if entry == null:
 		return
+	# 对齐与地图同口径：放置物按 art_anchor 钉赤道 + 先铺兜底地面再叠 art（HexCanvas 两遍绘制）
 	_preview.set_tile(Color.html(str(entry.get("color", "#888888"))), Color.html(str(entry.get("accent", "#aaaaaa"))),
-		str(entry.get("decor", "none")), TerrainDB.art_of(entry), _sel_idx)
+		str(entry.get("decor", "none")), TerrainDB.art_of(entry), _sel_idx,
+		TerrainDB.art_anchor_of(entry), bool(entry.get("is_object", false)))
+	_refresh_px_row(entry)
+
+# —— 画布规格行（像素密度逐条目可调；六边形比例恒定）——
+
+# 该宽度下的六边形像素高（√3/2 比例向上取整；32 宽＝旧规格 28 特例，与既有居中判定一致）
+func _hex_rows_for(w: int) -> int:
+	if w == 32:
+		return 28
+	return int(ceil(HexTileRender.SQRT3 * 0.5 * float(w)))
+
+func _refresh_px_row(entry) -> void:
+	if _px_w_spin == null or not is_instance_valid(_px_w_spin):
+		return
+	_px_loading = true
+	var px := TerrainDB.art_px_of(entry)
+	_px_w_spin.value = px.x
+	_px_head_spin.value = maxi(0, px.y - _hex_rows_for(px.x))
+	var anc := TerrainDB.art_anchor_of(entry)
+	_px_info.text = "＝%d×%d · 锚行 %s" % [px.x, px.y,
+		(str(int(anc)) if anc >= 0.0 else str(int(_hex_equator_row(px))) + "(存盘时写死)")]
+	_px_loading = false
+
+# 规格改动→写 entry.art_px + 自动锚行（已有手绘且自带锚行＝不动它，防覆写 randr 类手调值）→ 立即写盘。
+# 回到 32 宽 0 留白＝抹掉 art_px/art_anchor（回归旧规格居中判定，JSON 保持干净）。
+func _on_px_changed() -> void:
+	if _px_loading:
+		return
+	var entry = _entry_by_key(_sel_key)
+	if entry == null:
+		return
+	var w := int(_px_w_spin.value)
+	var h := _hex_rows_for(w) + int(_px_head_spin.value)
+	if Vector2i(w, h) == TerrainDB.art_px_of(entry):
+		return   # 无变化（UI 重建回填/同值重设）＝不写盘不动锚
+	if w == 32 and h == 28:
+		entry.erase("art_px")
+		if TerrainDB.art_of(entry).is_empty():
+			entry.erase("art_anchor")
+	else:
+		entry["art_px"] = [w, h]
+		var keep_anchor: bool = TerrainDB.art_anchor_of(entry) >= 0.0 and not TerrainDB.art_of(entry).is_empty()
+		if not keep_anchor:
+			entry["art_anchor"] = HexTileRender.hex_anchor_row(w, h)
+	if TerrainDB.save():
+		_set_msg("「%s」画布规格 → %d×%d（已写盘；已有变体尺寸不符时编辑会按新画布缩放——建议定稿密度后再批量画）" % [str(entry.get("label", "?")), w, h], true)
+	else:
+		_set_msg("画布规格写盘失败", false)
+	_refresh_px_row(entry)
+	_update_preview()
 
 # —— 绘制变体（PixelDrawOverlay 共享组件 §16；六边形轮廓/遮罩对照 + §28 实时拼贴预览）——
 # base_img：§27「复制为新变体」传底稿（idx=-1 时作为初始内容，保存走新变体档号）。
 func _open_draw(entry, idx: int, base_img: Image = null) -> void:
 	_draw_entry = entry
 	_draw_idx = idx
-	var sz := HexTileRender.tile_px_size()
+	var sz := TerrainDB.art_px_of(entry)   # per-entry 画布规格（battle 词表 96×96；缺省旧 32×28）
 	var art := TerrainDB.art_of(entry)
 	var initial: Image = base_img
 	if initial == null and idx >= 0 and idx < art.size():
 		var tex := TextureCache.get_tex_file(str(art[idx]))
 		if tex != null:
 			initial = tex.get_image()
+	if initial != null and (initial.get_width() != sz.x or initial.get_height() != sz.y):
+		initial = initial.duplicate()
+		initial.resize(sz.x, sz.y, Image.INTERPOLATE_NEAREST)   # 旧变体与当前画布规格不符→按新规格缩放编辑
 	var base := Color.html(str(entry.get("color", "#888888")))
 	var acc := Color.html(str(entry.get("accent", "#aaaaaa")))
 	var nlabel := ("变体 #%d" % idx) if idx >= 0 else ("新变体 #%d" % art.size())
 
 	# §28 实时拼贴预览：live 纹理挂 TextureCache 虚拟路径 → mini TilePreview 与地图完全同一渲染链。
 	# 纹理复用同一实例（update），赤道锚钉 hex 遮罩赤道行——免半成品按内容找最宽行上下乱窜。
+	# WYSIWYG（2026-07-20 用户令）：7 格**全部**画当前画布——画什么显示什么，绝不混抽既有变体
+	# （单元素 art 池：pick_art 任何 seed 都命中 live；此前邻格按 seed 混旧变体＝「乱显示东西」）。
 	var live_tex := ImageTexture.create_from_image(initial if initial != null else Image.create(sz.x, sz.y, false, Image.FORMAT_RGBA8))
 	TextureCache.put_file(LIVE_ART_PATH, live_tex)
-	var art_pv: Array = art.duplicate()
-	var live_idx := idx
-	if idx >= 0 and idx < art_pv.size():
-		art_pv[idx] = LIVE_ART_PATH      # 编辑现有：该变体位换成 live
-	else:
-		art_pv.append(LIVE_ART_PATH)     # 新变体：追加 live（邻格照旧混既有变体，看接缝）
-		live_idx = art_pv.size() - 1
+	var art_pv: Array = [LIVE_ART_PATH]
+	var live_idx := 0
 	var mini := TilePreview.new()
-	mini.custom_minimum_size = Vector2(240, 180)
-	var eq := _hex_equator_row()
+	mini.custom_minimum_size = Vector2(240, 260)
+	# 锚行：放置物用 entry 声明的 art_anchor（与地图钉法一致）；地形块钉 hex 遮罩赤道行（免半成品最宽行乱窜）
+	var eq := TerrainDB.art_anchor_of(entry)
+	if eq < 0.0:
+		eq = _hex_equator_row(sz)
+	var is_obj := bool(entry.get("is_object", false))
+	# 无垫底（2026-07-20 用户令）：不铺任何程序地面——灰白 hex 轮廓参考线（与画板同判定）合成在
+	# 画作**下层**进 live 纹理，7 格只见轮廓+已画像素；要铺底自己走「以其他地块为底稿」。
+	var ref_img := _hex_border_img(sz.x, sz.y, Color(0.78, 0.80, 0.85, 0.9))
 	var refresh := func(im: Image):
-		live_tex.update(im)
-		mini.set_tile(base, acc, str(entry.get("decor", "none")), art_pv, live_idx, eq)
+		var comp: Image = ref_img.duplicate()
+		var src := im
+		if src.get_format() != Image.FORMAT_RGBA8:
+			src = im.duplicate()
+			src.convert(Image.FORMAT_RGBA8)
+		comp.blend_rect(src, Rect2i(0, 0, sz.x, sz.y), Vector2i.ZERO)
+		live_tex.update(comp)
+		mini.set_tile(base, acc, str(entry.get("decor", "none")), art_pv, live_idx, eq, false)
 
+	# 放置物＝全画布可画（界外物件——树冠/道具在六边形界外是正当内容，轮廓线仅作对位参考）；
+	# 底地形＝锁 hex 内（存盘时同判定再清一次界外）。
 	var ov = PixelDrawOverlay.new()
 	add_child(ov)
 	ov.setup({
-		"title": "绘制地块 · %s · %s　（银白线＝六边形轮廓 · 暗区＝界外不可画 · 滚轮缩放 · 中键平移 · 右键吸管）" % [str(entry.get("label", "?")), nlabel],
+		"title": "绘制地块 · %s · %s　（银白线＝六边形轮廓%s · 滚轮缩放 · 中键平移 · 右键吸管）" % [
+			str(entry.get("label", "?")), nlabel, "（放置物：界外可画）" if is_obj else " · 暗区＝界外不可画"],
 		"canvas_w": sz.x, "canvas_h": sz.y,
 		"initial": initial,
-		"onion": _build_hex_ref(sz.x, sz.y),
-		"paint_mask": _build_hex_mask(sz.x, sz.y),
+		"onion": _build_hex_ref(sz.x, sz.y, not is_obj),
+		"paint_mask": {} if is_obj else _build_hex_mask(sz.x, sz.y),
 		"brush": base,
 		"edit_alpha": true,
 		"ramp_label": "快捷色（地形本色系）",
@@ -380,14 +558,14 @@ func _copy_selected_as_new() -> void:
 	_set_msg("以变体 #%d 为底稿新建（保存为新变体）" % _sel_idx, true)
 
 # hex 遮罩的赤道行＝最宽带最高行（与 HexTileRender._widest_row 同判定、对遮罩算）；live 预览锚定用。
-func _hex_equator_row() -> float:
-	var s := HexTileRender.tile_px_size()
+# 按画布规格算（旧 32×28 居中 / 新规格底对齐——判定单一源 hex_contains_px）。
+func _hex_equator_row(s: Vector2i) -> float:
 	var counts := []
 	var best := 0
 	for y in s.y:
 		var c := 0
 		for x in s.x:
-			if HexTileRender.tile_hex_contains(x, y):
+			if HexTileRender.hex_contains_px(x, y, s.x, s.y):
 				c += 1
 		counts.append(c)
 		best = maxi(best, c)
@@ -411,7 +589,12 @@ func _save_variant() -> void:
 		path = "%s/%d.png" % [dir, _next_free_index(dir)]   # 新变体：下一个空档号（避开已存文件，删后不撞号）
 		new_art.append(path)
 	var out_img: Image = _ov.canvas.get_image()
-	_hex_mask_image(out_img)   # 界外清透（belt-and-suspenders，即使 paint_mask 漏了）
+	if not bool(_draw_entry.get("is_object", false)):
+		_hex_mask_image(out_img)   # 底地形界外清透（belt-and-suspenders）；放置物界外物件正当、不清
+	# 工坊出品＝画布对齐（所见即所得）：条目无锚行则存盘时写死＝遮罩赤道行（32×28→13 / 96×96→54）。
+	# 「最宽行自算」只适用于画满六边形的图，对稀疏内容（一条曲线/几株草）会钉错高度——工坊图不猜。
+	if TerrainDB.art_anchor_of(_draw_entry) < 0.0:
+		_draw_entry["art_anchor"] = int(_hex_equator_row(TerrainDB.art_px_of(_draw_entry)))
 	if out_img.save_png(path) != OK:
 		_set_msg("保存失败（写盘）：%s" % path, false); return
 	var tile := {"terrain": str(_draw_entry.get("terrain", "")), "variant": str(_draw_entry.get("variant", ""))}
@@ -434,29 +617,38 @@ func _next_free_index(dir: String) -> int:
 		i += 1
 	return i
 
-# 把界外像素清透（保存兜底：与 paint_mask 同一 tile_hex_contains 判定）。
+# 把界外像素清透（保存兜底：与 paint_mask 同一 hex_contains_px 判定）。放置物不清（界外物件正当）。
 func _hex_mask_image(im: Image) -> void:
-	for y in im.get_height():
-		for x in im.get_width():
-			if not HexTileRender.tile_hex_contains(x, y):
+	var w := im.get_width()
+	var h := im.get_height()
+	for y in h:
+		for x in w:
+			if not HexTileRender.hex_contains_px(x, y, w, h):
 				im.set_pixel(x, y, Color(0, 0, 0, 0))
 
-# 画布对照参考图（onion）：界外暗块 + hex 内缘银白轮廓（供对齐；被绘制像素盖住即已画到位）。
-func _build_hex_ref(w: int, h: int) -> ImageTexture:
+# hex 内缘轮廓 Image（单一实现：onion 参考 / live 拼贴预览的灰白参考线共用同一判定）
+func _hex_border_img(w: int, h: int, col: Color) -> Image:
 	var im := Image.create(w, h, false, Image.FORMAT_RGBA8)
 	im.fill(Color(0, 0, 0, 0))
 	for y in h:
 		for x in w:
-			if not HexTileRender.tile_hex_contains(x, y):
-				im.set_pixel(x, y, Color(0, 0, 0, 1))          # 界外禁区（onion 0.30α 后淡显）
-	for y in h:
-		for x in w:
-			if not HexTileRender.tile_hex_contains(x, y):
+			if not HexTileRender.hex_contains_px(x, y, w, h):
 				continue
 			for d: Vector2i in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
-				if not HexTileRender.tile_hex_contains(x + d.x, y + d.y):
-					im.set_pixel(x, y, Color(1, 1, 1, 1))       # hex 内缘＝轮廓
+				if not HexTileRender.hex_contains_px(x + d.x, y + d.y, w, h):
+					im.set_pixel(x, y, col)       # hex 内缘＝轮廓
 					break
+	return im
+
+# 画布对照参考图（onion）：hex 内缘银白轮廓（供对齐）；mask_outside=true 另铺界外暗块（底地形禁区淡显），
+# 放置物传 false＝只留轮廓参考线、界外照常可画。
+func _build_hex_ref(w: int, h: int, mask_outside := true) -> ImageTexture:
+	var im := _hex_border_img(w, h, Color(1, 1, 1, 1))
+	if mask_outside:
+		for y in h:
+			for x in w:
+				if not HexTileRender.hex_contains_px(x, y, w, h):
+					im.set_pixel(x, y, Color(0, 0, 0, 1))          # 界外禁区（onion 0.30α 后淡显）
 	return ImageTexture.create_from_image(im)
 
 # 落笔遮罩：hex 内的像素集合（PixelDrawCanvas.paint_mask）。
@@ -464,7 +656,7 @@ func _build_hex_mask(w: int, h: int) -> Dictionary:
 	var m := {}
 	for y in h:
 		for x in w:
-			if HexTileRender.tile_hex_contains(x, y):
+			if HexTileRender.hex_contains_px(x, y, w, h):
 				m[Vector2i(x, y)] = true
 	return m
 
@@ -495,10 +687,13 @@ func _do_import(entry, src_path: String) -> void:
 		_set_msg("读取失败：%s" % src_path, false); return
 	if im.get_format() != Image.FORMAT_RGBA8:
 		im.convert(Image.FORMAT_RGBA8)
-	var sz := HexTileRender.tile_px_size()
+	var sz := TerrainDB.art_px_of(entry)   # per-entry 画布规格
 	if im.get_width() != sz.x or im.get_height() != sz.y:
-		im.resize(sz.x, sz.y, Image.INTERPOLATE_NEAREST)   # 尺寸不符→缩到瓦片尺寸（宽容）
-	_hex_mask_image(im)
+		im.resize(sz.x, sz.y, Image.INTERPOLATE_NEAREST)   # 尺寸不符→缩到该条目瓦片尺寸（宽容）
+	if not bool(entry.get("is_object", false)):
+		_hex_mask_image(im)   # 底地形清界外；放置物保留界外物件
+	if TerrainDB.art_anchor_of(entry) < 0.0:
+		entry["art_anchor"] = int(_hex_equator_row(sz))   # 导入同律：画布对齐、不留给最宽行去猜
 	var key := _entry_key(entry)
 	var dir := "res://icons/Tiles/" + key
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(dir))
@@ -557,6 +752,242 @@ func _do_delete_variant(entry, idx: int) -> void:
 		# idx > _sel_idx：所选不受影响
 	_set_msg("已删除变体 #%d" % idx, true)
 	_rebuild()
+
+# —— 素材整理（2026-07-20 用户令：新建分类 / 新建地块 / 底稿选取 / 条目改名·移分类·删除 进工坊）——
+
+func _all_category_names() -> Array:
+	var out := []
+	for c in TerrainDB.categories():
+		out.append(str(c))
+	if not out.has(TerrainDB.DEFAULT_CATEGORY):
+		out.append(TerrainDB.DEFAULT_CATEGORY)
+	return out
+
+func _on_new_category() -> void:
+	EditorUI.text_prompt(self, "新建分类名", "", func(nm: String):
+		if nm == "" or nm == TerrainDB.DEFAULT_CATEGORY:
+			_set_msg("分类名不能为空/「%s」" % TerrainDB.DEFAULT_CATEGORY, false); return
+		var cats: Array = TerrainDB.categories()
+		if cats.has(nm):
+			_set_msg("分类「%s」已存在" % nm, false); return
+		cats.append(nm)
+		TerrainDB.set_categories(cats)
+		if not TerrainDB.save():
+			cats.erase(nm)
+			TerrainDB.set_categories(cats)
+			_set_msg("新建分类写盘失败", false); return
+		_fold_cat[nm] = false
+		_rebuild()
+		_set_msg("已新建分类「%s」——往里「＋新建地块」，或选中条目「📁 移到分类」搬进来" % nm, true))
+
+# 「＋新建地块」弹窗：起名 + 键(组/变体 id) + 归类 + 适用图 + 放置物 + 本/辅色。
+# 通行/tag/效果等数据细调走地图编辑器·地形数据面板（单一编辑口，不在工坊复刻表单）。
+func _on_new_entry() -> void:
+	var dlg := ConfirmationDialog.new()
+	dlg.title = "新建地块"
+	dlg.ok_button_text = "创建"
+	dlg.get_cancel_button().text = "取消"
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 6)
+	var cur = _entry_by_key(_sel_key)
+	var name_e := LineEdit.new()
+	name_e.custom_minimum_size = Vector2(260, 0)
+	name_e.placeholder_text = "如 焦土 / 断墙"
+	vb.add_child(EditorUI.field_row("显示名", name_e, 90))
+	var terr_e := LineEdit.new()
+	terr_e.placeholder_text = "组 id，如 bt"
+	vb.add_child(EditorUI.field_row("组 id", terr_e, 90))
+	var vari_e := LineEdit.new()
+	vari_e.placeholder_text = "变体 id，如 scorched"
+	vb.add_child(EditorUI.field_row("变体 id", vari_e, 90))
+	var hint := Label.new()
+	hint.text = "条目键＝组_变体（小写字母/数字/下划线），全库唯一；战斗自绘系沿用组 id「bt」"
+	hint.add_theme_font_size_override("font_size", 12)
+	hint.add_theme_color_override("font_color", Color(0.65, 0.7, 0.78))
+	vb.add_child(hint)
+	var cat_pairs := []
+	for c in _all_category_names():
+		cat_pairs.append([str(c)])
+	var def_cat := TerrainDB.category_of(cur) if cur != null else TerrainDB.DEFAULT_CATEGORY
+	var cat_ob := EditorUI.dropdown(cat_pairs, def_cat)
+	vb.add_child(EditorUI.field_row("分类", cat_ob, 90))
+	var scope_ob := EditorUI.dropdown([["battle", "战斗"], ["overworld", "大地图"], ["both", "通用"]], "battle")
+	vb.add_child(EditorUI.field_row("适用图", scope_ob, 90))
+	var obj_cb := CheckBox.new()
+	obj_cb.text = "放置物（画在放置物层、界外可画、压过底地形）"
+	vb.add_child(obj_cb)
+	var c1 := ColorPickerButton.new()
+	c1.custom_minimum_size = Vector2(90, 0)
+	c1.color = Color.html(str(cur.get("color", "#6b7d5e"))) if cur != null else Color("#6b7d5e")
+	vb.add_child(EditorUI.field_row("本色", c1, 90))
+	var c2 := ColorPickerButton.new()
+	c2.custom_minimum_size = Vector2(90, 0)
+	c2.color = Color.html(str(cur.get("accent", "#93a878"))) if cur != null else Color("#93a878")
+	vb.add_child(EditorUI.field_row("辅色", c2, 90))
+	dlg.add_child(vb)
+	dlg.register_text_enter(name_e)
+	dlg.confirmed.connect(func():
+		var cat_m = cat_ob.get_item_metadata(cat_ob.selected) if cat_ob.selected >= 0 else null
+		var scope_m = scope_ob.get_item_metadata(scope_ob.selected) if scope_ob.selected >= 0 else null
+		_create_entry(name_e.text, terr_e.text, vari_e.text,
+			str(cat_m) if cat_m != null else TerrainDB.DEFAULT_CATEGORY,
+			str(scope_m) if scope_m != null else "battle",
+			obj_cb.button_pressed, c1.color, c2.color))
+	dlg.visibility_changed.connect(func():
+		if not dlg.visible:
+			dlg.queue_free())
+	add_child(dlg)
+	dlg.popup_centered(Vector2i(520, 0))
+	name_e.grab_focus()
+
+func _create_entry(lbl: String, t: String, v: String, cat: String, scope: String, is_obj: bool, c1: Color, c2: Color) -> void:
+	lbl = lbl.strip_edges()
+	t = t.strip_edges().to_lower()
+	v = v.strip_edges().to_lower()
+	if lbl == "":
+		_set_msg("新建地块：显示名不能为空", false); return
+	if not t.is_valid_ascii_identifier() or not v.is_valid_ascii_identifier():
+		_set_msg("新建地块：组/变体 id 须为小写字母/数字/下划线（如 bt / scorched）", false); return
+	var entry := {
+		"label": lbl, "terrain": t, "variant": v,
+		"color": "#" + c1.to_html(false), "accent": "#" + c2.to_html(false),
+		"decor": "none", "tags": ["ground"],
+		"move": {"cost": 1, "passable_by": "all"}, "effects": [],
+	}
+	if scope != "both":
+		entry["scope"] = scope
+	if cat != "" and cat != TerrainDB.DEFAULT_CATEGORY:
+		entry["category"] = cat
+	if is_obj:
+		entry["is_object"] = true
+	if not TerrainDB.add_entry(entry):
+		_set_msg("新建失败：条目 %s_%s 已存在（换个 id）" % [t, v], false); return
+	if not TerrainDB.save():
+		TerrainDB.delete_entry({"terrain": t, "variant": v})   # 写盘失败→回滚内存表
+		_set_msg("新建失败（terrains.json 写盘）", false); return
+	_sel_key = "%s_%s" % [t, v]
+	_sel_idx = -1
+	_fold_cat[cat if cat != "" else TerrainDB.DEFAULT_CATEGORY] = false
+	_rebuild()
+	_set_msg("已新建「%s」（%s_%s）——点 ✎ 开画；通行/效果等数据在地图编辑器·地形数据里细调" % [lbl, t, v], true)
+
+# 以任意已有地块的手绘变体为底稿，画进**当前所选条目**的新变体（跨条目版「复制为新变体」）。
+func _pick_base_dialog() -> void:
+	var target = _entry_by_key(_sel_key)
+	if target == null:
+		_set_msg("先在左栏选一个地形（底稿会画进它的新变体）", false); return
+	var pop := PopupPanel.new()
+	add_child(pop)
+	var v := VBoxContainer.new()
+	v.custom_minimum_size = Vector2(720, 560)
+	v.add_theme_constant_override("separation", 6)
+	pop.add_child(v)
+	var t := Label.new()
+	t.text = "选底稿：点任意手绘变体 → 以它为底稿给「%s」画新变体（尺寸不符自动缩放到目标画布）" % str(target.get("label", "?"))
+	v.add_child(t)
+	var search := LineEdit.new()
+	search.placeholder_text = "🔍 过滤地形（名称 / id）"
+	search.clear_button_enabled = true
+	v.add_child(search)
+	var sc := ScrollContainer.new()
+	sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	var list := VBoxContainer.new()
+	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sc.add_child(list)
+	v.add_child(sc)
+	var refill := func():
+		for c in list.get_children():
+			c.queue_free()
+		var q := search.text.strip_edges().to_lower()
+		for e in TerrainDB.palette():
+			var art := TerrainDB.art_of(e)
+			if art.is_empty():
+				continue   # 只列有手绘的（程序兜底没有底稿可言）
+			var hay := ("%s %s %s" % [str(e.get("label", "")), str(e.get("terrain", "")), str(e.get("variant", ""))]).to_lower()
+			if q != "" and hay.find(q) < 0:
+				continue
+			var row := HBoxContainer.new()
+			var lb := Label.new()
+			lb.text = str(e.get("label", "?"))
+			lb.custom_minimum_size = Vector2(150, 0)
+			lb.clip_text = true
+			row.add_child(lb)
+			var flow := HFlowContainer.new()
+			flow.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			for i in art.size():
+				var p := str(art[i])
+				var b := Button.new()
+				b.custom_minimum_size = Vector2(TILE, TILE)
+				b.focus_mode = Control.FOCUS_NONE
+				b.tooltip_text = "%s · 变体 %d" % [str(e.get("label", "?")), i]
+				var tr := TextureRect.new()
+				tr.texture = TextureCache.get_tex_file(p)
+				tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+				tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+				tr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+				tr.set_anchors_preset(Control.PRESET_FULL_RECT)
+				tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+				b.add_child(tr)
+				var src_label := str(e.get("label", "?"))
+				b.pressed.connect(func():
+					var tex := TextureCache.get_tex_file(p)
+					if tex == null:
+						_set_msg("底稿读取失败：%s" % p, false); return
+					pop.queue_free()
+					_open_draw(target, -1, tex.get_image())
+					_set_msg("以「%s」变体 #%d 为底稿新建（保存为「%s」的新变体）" % [src_label, i, str(target.get("label", "?"))], true))
+				flow.add_child(b)
+			row.add_child(flow)
+			list.add_child(row)
+	refill.call()
+	search.text_changed.connect(func(_t2): refill.call())
+	var cancel := Button.new()
+	cancel.text = "取消"
+	cancel.pressed.connect(func(): pop.queue_free())
+	v.add_child(cancel)
+	pop.popup_centered(Vector2i(740, 600))
+
+func _rename_entry() -> void:
+	var e = _entry_by_key(_sel_key)
+	if e == null:
+		return
+	EditorUI.text_prompt(self, "条目改名", str(e.get("label", "")), func(nm: String):
+		if nm == "":
+			return
+		TerrainDB.set_label({"terrain": e.get("terrain"), "variant": e.get("variant")}, nm)
+		if not TerrainDB.save():
+			_set_msg("改名写盘失败", false); return
+		_rebuild()
+		_set_msg("已改名 →「%s」" % nm, true))
+
+func _move_entry_category(cat: String) -> void:
+	var e = _entry_by_key(_sel_key)
+	if e == null:
+		return
+	TerrainDB.set_category({"terrain": e.get("terrain"), "variant": e.get("variant")}, cat)
+	if not TerrainDB.save():
+		_set_msg("移分类写盘失败", false); return
+	_fold_cat[cat] = false
+	_rebuild()
+	_set_msg("「%s」→ 分类「%s」" % [str(e.get("label", "?")), cat], true)
+
+func _delete_entry_sel() -> void:
+	var e = _entry_by_key(_sel_key)
+	if e == null:
+		return
+	EditorUI.confirm(self, "彻底删除条目「%s」？\n从 terrains.json 整条移除（已画 PNG 保留在 icons/Tiles/ 不删；地图上画过该地形的格会失效显示品红）。" % str(e.get("label", "?")),
+		"删除", func():
+			var backup: Dictionary = e
+			TerrainDB.delete_entry({"terrain": e.get("terrain"), "variant": e.get("variant")})
+			if not TerrainDB.save():
+				TerrainDB.add_entry(backup)   # 写盘失败→回滚内存表
+				_set_msg("删除写盘失败", false); return
+			_sel_key = ""
+			_sel_idx = 0
+			_rebuild()
+			_set_msg("已删除条目「%s」（PNG 未删）" % str(e.get("label", "?")), true),
+		Callable(), "删除条目")
 
 # —— 工具 ——
 func _entry_key(entry) -> String:

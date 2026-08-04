@@ -9,7 +9,11 @@
     "水",
     "放置物",
     "旧的内容",
-    "怪的东西"
+    "怪的东西",
+    "定居点",
+    "战斗·底地形",
+    "战斗·放置物",
+    "newtype"
   ],
   "format_version": 2,
   "terrains": [
@@ -67,7 +71,7 @@
       "art": [
         "res://icons/Tiles/forest_forest/0.png"
       ],
-      "category": "放置物",
+      "category": "草原",
       "color": "#2D5016",
       "decor": "tree",
       "effects": [
@@ -489,11 +493,12 @@
       "art": [
         "res://icons/Tiles/fh/academy_classical_era.png"
       ],
-      "category": "放置物",
+      "category": "定居点",
       "color": "#8d6c36",
       "decor": "none",
       "effects": [],
       "id": "fh_academy_classical_era",
+      "is_object": true,
       "label": "学院-经典",
       "move": {
         "cost": 1,
@@ -575,7 +580,7 @@
       "art": [
         "res://icons/Tiles/fh/ancient_ruins.png"
       ],
-      "category": "放置物",
+      "category": "定居点",
       "color": "#95805b",
       "decor": "none",
       "effects": [],
@@ -597,7 +602,7 @@
       "art": [
         "res://icons/Tiles/fh/ancient_ruins2.png"
       ],
-      "category": "放置物",
+      "category": "定居点",
       "color": "#729b7c",
       "decor": "none",
       "effects": [],
@@ -784,7 +789,7 @@
       "art": [
         "res://icons/Tiles/fh/campus_medieval_era.png"
       ],
-      "category": "放置物",
+      "category": "定居点",
       "color": "#4d4768",
       "decor": "none",
       "effects": [],
@@ -864,7 +869,7 @@
       "art": [
         "res://icons/Tiles/fh/citadel_snow.png"
       ],
-      "category": "放置物",
+      "category": "定居点",
       "color": "#b9ad9e",
       "decor": "none",
       "effects": [],
@@ -884,7 +889,7 @@
       "art": [
         "res://icons/Tiles/fh/citadel.png"
       ],
-      "category": "放置物",
+      "category": "定居点",
       "color": "#ac7a3e",
       "decor": "none",
       "effects": [],
@@ -904,7 +909,7 @@
       "art": [
         "res://icons/Tiles/fh/citrus_plantation.png"
       ],
-      "category": "放置物",
+      "category": "定居点",
       "color": "#8c6f2c",
       "decor": "none",
       "effects": [],
@@ -944,7 +949,7 @@
       "art": [
         "res://icons/Tiles/fh/city_center_classical_era.png"
       ],
-      "category": "放置物",
+      "category": "定居点",
       "color": "#6d511c",
       "decor": "none",
       "effects": [],
@@ -966,7 +971,7 @@
       "art": [
         "res://icons/Tiles/fh/city_center_medieval_era.png"
       ],
-      "category": "放置物",
+      "category": "定居点",
       "color": "#6c6391",
       "decor": "none",
       "effects": [],
@@ -1010,7 +1015,7 @@
       "art": [
         "res://icons/Tiles/fh/city_ruins.png"
       ],
-      "category": "放置物",
+      "category": "定居点",
       "color": "#656565",
       "decor": "none",
       "effects": [],
@@ -1240,7 +1245,7 @@
       "art": [
         "res://icons/Tiles/fh/encampment.png"
       ],
-      "category": "放置物",
+      "category": "定居点",
       "color": "#826024",
       "decor": "none",
       "effects": [],
@@ -1262,7 +1267,7 @@
       "art": [
         "res://icons/Tiles/fh/entertainment_complex.png"
       ],
-      "category": "放置物",
+      "category": "定居点",
       "color": "#785735",
       "decor": "none",
       "effects": [],
@@ -1327,6 +1332,7 @@
       "decor": "none",
       "effects": [],
       "id": "fh_fish",
+      "is_object": true,
       "label": "Fish",
       "move": {
         "cost": 1,
@@ -1362,11 +1368,12 @@
       "art": [
         "res://icons/Tiles/fh/flood_plains.png"
       ],
-      "category": "放置物",
+      "category": "草原",
       "color": "#61b422",
       "decor": "none",
       "effects": [],
       "id": "fh_flood_plains",
+      "is_object": true,
       "label": "Flood plains",
       "move": {
         "cost": 1,
@@ -1387,6 +1394,7 @@
       "decor": "none",
       "effects": [],
       "id": "fh_floodplains",
+      "is_object": true,
       "label": "FloodPlains",
       "move": {
         "cost": 1,
@@ -1407,6 +1415,7 @@
       "decor": "none",
       "effects": [],
       "id": "fh_forest",
+      "is_object": true,
       "label": "Forest",
       "move": {
         "cost": 1,
@@ -1930,6 +1939,7 @@
       "decor": "none",
       "effects": [],
       "id": "fh_jungle",
+      "is_object": true,
       "label": "Jungle",
       "move": {
         "cost": 1,
@@ -2046,11 +2056,12 @@
       "art": [
         "res://icons/Tiles/fh/oasis.png"
       ],
-      "category": "放置物",
+      "category": "草原",
       "color": "#51a532",
       "decor": "none",
       "effects": [],
       "id": "fh_oasis",
+      "is_object": true,
       "label": "Oasis",
       "move": {
         "cost": 1,
@@ -2173,6 +2184,7 @@
       "decor": "none",
       "effects": [],
       "id": "fh_plainsforest",
+      "is_object": true,
       "label": "PlainsForest",
       "move": {
         "cost": 1,
@@ -2652,6 +2664,10 @@
         "res://icons/Tiles/randr/road_0.png"
       ],
       "art_anchor": 31,
+      "art_px": [
+        32,
+        48
+      ],
       "color": "#8a8478",
       "decor": "none",
       "effects": [],
@@ -2673,6 +2689,10 @@
         "res://icons/Tiles/randr/road_1.png"
       ],
       "art_anchor": 31,
+      "art_px": [
+        32,
+        48
+      ],
       "color": "#8a8478",
       "decor": "none",
       "effects": [],
@@ -2694,6 +2714,10 @@
         "res://icons/Tiles/randr/road_2.png"
       ],
       "art_anchor": 31,
+      "art_px": [
+        32,
+        48
+      ],
       "color": "#8a8478",
       "decor": "none",
       "effects": [],
@@ -2715,6 +2739,10 @@
         "res://icons/Tiles/randr/road_3.png"
       ],
       "art_anchor": 31,
+      "art_px": [
+        32,
+        48
+      ],
       "color": "#8a8478",
       "decor": "none",
       "effects": [],
@@ -2736,6 +2764,10 @@
         "res://icons/Tiles/randr/road_4.png"
       ],
       "art_anchor": 31,
+      "art_px": [
+        32,
+        48
+      ],
       "color": "#8a8478",
       "decor": "none",
       "effects": [],
@@ -2757,6 +2789,10 @@
         "res://icons/Tiles/randr/road_5.png"
       ],
       "art_anchor": 31,
+      "art_px": [
+        32,
+        48
+      ],
       "color": "#8a8478",
       "decor": "none",
       "effects": [],
@@ -2778,6 +2814,10 @@
         "res://icons/Tiles/randr/road_6.png"
       ],
       "art_anchor": 31,
+      "art_px": [
+        32,
+        48
+      ],
       "color": "#8a8478",
       "decor": "none",
       "effects": [],
@@ -2799,6 +2839,10 @@
         "res://icons/Tiles/randr/road_7.png"
       ],
       "art_anchor": 31,
+      "art_px": [
+        32,
+        48
+      ],
       "color": "#8a8478",
       "decor": "none",
       "effects": [],
@@ -2820,6 +2864,10 @@
         "res://icons/Tiles/randr/road_8.png"
       ],
       "art_anchor": 31,
+      "art_px": [
+        32,
+        48
+      ],
       "color": "#8a8478",
       "decor": "none",
       "effects": [],
@@ -2841,6 +2889,10 @@
         "res://icons/Tiles/randr/road_9.png"
       ],
       "art_anchor": 31,
+      "art_px": [
+        32,
+        48
+      ],
       "color": "#8a8478",
       "decor": "none",
       "effects": [],
@@ -2862,6 +2914,10 @@
         "res://icons/Tiles/randr/road_10.png"
       ],
       "art_anchor": 31,
+      "art_px": [
+        32,
+        48
+      ],
       "color": "#8a8478",
       "decor": "none",
       "effects": [],
@@ -2883,6 +2939,10 @@
         "res://icons/Tiles/randr/river_0.png"
       ],
       "art_anchor": 31,
+      "art_px": [
+        32,
+        48
+      ],
       "color": "#3a6ea5",
       "decor": "none",
       "effects": [],
@@ -2904,6 +2964,10 @@
         "res://icons/Tiles/randr/river_1.png"
       ],
       "art_anchor": 31,
+      "art_px": [
+        32,
+        48
+      ],
       "color": "#3a6ea5",
       "decor": "none",
       "effects": [],
@@ -2925,6 +2989,10 @@
         "res://icons/Tiles/randr/river_2.png"
       ],
       "art_anchor": 31,
+      "art_px": [
+        32,
+        48
+      ],
       "color": "#3a6ea5",
       "decor": "none",
       "effects": [],
@@ -2946,6 +3014,10 @@
         "res://icons/Tiles/randr/river_3.png"
       ],
       "art_anchor": 31,
+      "art_px": [
+        32,
+        48
+      ],
       "color": "#3a6ea5",
       "decor": "none",
       "effects": [],
@@ -2967,6 +3039,10 @@
         "res://icons/Tiles/randr/river_4.png"
       ],
       "art_anchor": 31,
+      "art_px": [
+        32,
+        48
+      ],
       "color": "#3a6ea5",
       "decor": "none",
       "effects": [],
@@ -2988,6 +3064,10 @@
         "res://icons/Tiles/randr/river_5.png"
       ],
       "art_anchor": 31,
+      "art_px": [
+        32,
+        48
+      ],
       "color": "#3a6ea5",
       "decor": "none",
       "effects": [],
@@ -3009,6 +3089,10 @@
         "res://icons/Tiles/randr/river_6.png"
       ],
       "art_anchor": 31,
+      "art_px": [
+        32,
+        48
+      ],
       "color": "#3a6ea5",
       "decor": "none",
       "effects": [],
@@ -3030,6 +3114,10 @@
         "res://icons/Tiles/randr/river_7.png"
       ],
       "art_anchor": 31,
+      "art_px": [
+        32,
+        48
+      ],
       "color": "#3a6ea5",
       "decor": "none",
       "effects": [],
@@ -3051,6 +3139,10 @@
         "res://icons/Tiles/randr/river_8.png"
       ],
       "art_anchor": 31,
+      "art_px": [
+        32,
+        48
+      ],
       "color": "#3a6ea5",
       "decor": "none",
       "effects": [],
@@ -3072,6 +3164,10 @@
         "res://icons/Tiles/randr/river_9.png"
       ],
       "art_anchor": 31,
+      "art_px": [
+        32,
+        48
+      ],
       "color": "#3a6ea5",
       "decor": "none",
       "effects": [],
@@ -3093,6 +3189,10 @@
         "res://icons/Tiles/randr/river_10.png"
       ],
       "art_anchor": 31,
+      "art_px": [
+        32,
+        48
+      ],
       "color": "#3a6ea5",
       "decor": "none",
       "effects": [],
@@ -3107,6 +3207,284 @@
       "tags": [],
       "terrain": "randr",
       "variant": "river_10"
+    },
+    {
+      "accent": "#7fbe57",
+      "art": [],
+      "art_anchor": 54,
+      "art_px": [
+        96,
+        96
+      ],
+      "category": "战斗·底地形",
+      "color": "#5f9e3c",
+      "decor": "none",
+      "effects": [],
+      "id": "bt_grass",
+      "label": "草地·战",
+      "move": {
+        "cost": 1,
+        "passable_by": "all"
+      },
+      "scope": "battle",
+      "tags": [
+        "ground",
+        "open"
+      ],
+      "terrain": "bt",
+      "variant": "grass"
+    },
+    {
+      "accent": "#a98a63",
+      "art": [],
+      "art_anchor": 54,
+      "art_px": [
+        96,
+        96
+      ],
+      "category": "战斗·底地形",
+      "color": "#8a6f4d",
+      "decor": "none",
+      "effects": [],
+      "id": "bt_dirt",
+      "label": "泥土·战",
+      "move": {
+        "cost": 1,
+        "passable_by": "all"
+      },
+      "scope": "battle",
+      "tags": [
+        "ground",
+        "open",
+        "barren"
+      ],
+      "terrain": "bt",
+      "variant": "dirt"
+    },
+    {
+      "accent": "#c4b968",
+      "art": [],
+      "art_anchor": 54,
+      "art_px": [
+        96,
+        96
+      ],
+      "category": "战斗·底地形",
+      "color": "#a89a4e",
+      "decor": "none",
+      "effects": [],
+      "id": "bt_drygrass",
+      "label": "旱草·战",
+      "move": {
+        "cost": 1,
+        "passable_by": "all"
+      },
+      "scope": "battle",
+      "tags": [
+        "ground",
+        "open"
+      ],
+      "terrain": "bt",
+      "variant": "drygrass"
+    },
+    {
+      "accent": "#eef4f6",
+      "art": [],
+      "art_anchor": 54,
+      "art_px": [
+        96,
+        96
+      ],
+      "category": "战斗·底地形",
+      "color": "#cfd8dc",
+      "decor": "none",
+      "effects": [],
+      "id": "bt_snow",
+      "label": "雪地·战",
+      "move": {
+        "cost": 1,
+        "passable_by": "all"
+      },
+      "scope": "battle",
+      "tags": [
+        "ground",
+        "open",
+        "cold"
+      ],
+      "terrain": "bt",
+      "variant": "snow"
+    },
+    {
+      "accent": "#93a08c",
+      "art": [],
+      "art_anchor": 54,
+      "art_px": [
+        96,
+        96
+      ],
+      "category": "战斗·底地形",
+      "color": "#6f7a6a",
+      "decor": "none",
+      "effects": [],
+      "id": "bt_graveyard",
+      "label": "墓园·战",
+      "move": {
+        "cost": 1,
+        "passable_by": "all"
+      },
+      "scope": "battle",
+      "tags": [
+        "ground"
+      ],
+      "terrain": "bt",
+      "variant": "graveyard"
+    },
+    {
+      "accent": "#4a8038",
+      "art": [],
+      "art_anchor": 54,
+      "art_px": [
+        96,
+        96
+      ],
+      "category": "战斗·放置物",
+      "color": "#2f5c26",
+      "decor": "none",
+      "effects": [],
+      "id": "bt_forest",
+      "is_object": true,
+      "label": "森林·战",
+      "move": {
+        "cost": 2,
+        "passable_by": "all",
+        "tag_cost": {
+          "flying": 1
+        }
+      },
+      "scope": "battle",
+      "tags": [
+        "ground",
+        "cover",
+        "flammable",
+        "blocks_sight"
+      ],
+      "terrain": "bt",
+      "variant": "forest"
+    },
+    {
+      "accent": "#9a887a",
+      "art": [],
+      "art_anchor": 54,
+      "art_px": [
+        96,
+        96
+      ],
+      "category": "战斗·放置物",
+      "color": "#7a6a5c",
+      "decor": "none",
+      "effects": [],
+      "id": "bt_cliff",
+      "is_object": true,
+      "label": "悬崖·战",
+      "move": {
+        "cost": 1,
+        "passable_by": [
+          "flying"
+        ]
+      },
+      "scope": "battle",
+      "tags": [
+        "wall",
+        "blocks_sight"
+      ],
+      "terrain": "bt",
+      "variant": "cliff"
+    },
+    {
+      "accent": "#7fb4d9",
+      "art": [],
+      "art_anchor": 54,
+      "art_px": [
+        96,
+        96
+      ],
+      "category": "战斗·放置物",
+      "color": "#4a7fae",
+      "decor": "none",
+      "effects": [],
+      "id": "bt_stream",
+      "is_object": true,
+      "label": "溪流·战",
+      "move": {
+        "cost": 2,
+        "passable_by": "all",
+        "tag_cost": {
+          "aquatic": 1,
+          "flying": 1
+        }
+      },
+      "scope": "battle",
+      "tags": [
+        "water",
+        "shallow"
+      ],
+      "terrain": "bt",
+      "variant": "stream"
+    },
+    {
+      "accent": "#b3a78e",
+      "art": [],
+      "art_anchor": 54,
+      "art_px": [
+        96,
+        96
+      ],
+      "category": "战斗·放置物",
+      "color": "#9a8f7a",
+      "decor": "none",
+      "effects": [],
+      "id": "bt_road",
+      "is_object": true,
+      "label": "道路·战",
+      "move": {
+        "cost": 1,
+        "passable_by": "all"
+      },
+      "scope": "battle",
+      "tags": [
+        "ground",
+        "open",
+        "road"
+      ],
+      "terrain": "bt",
+      "variant": "road"
+    },
+    {
+      "accent": "#a08a68",
+      "art": [],
+      "art_anchor": 54,
+      "art_px": [
+        96,
+        96
+      ],
+      "category": "战斗·放置物",
+      "color": "#7d6b52",
+      "decor": "none",
+      "effects": [],
+      "id": "bt_prop",
+      "is_object": true,
+      "label": "掩体·战",
+      "move": {
+        "cost": 1,
+        "passable_by": "all"
+      },
+      "scope": "battle",
+      "tags": [
+        "ground",
+        "cover"
+      ],
+      "terrain": "bt",
+      "variant": "prop"
     }
   ]
 }

@@ -108,6 +108,32 @@ static func tile_hex_contains(x: int, y: int) -> bool:
 	var s := tile_px_size()
 	return _in_hex(float(x) - float(s.x - 1) * 0.5, float(y) - float(s.y - 1) * 0.5, float(s.x) * 0.5)
 
+# —— 任意画布规格的 hex 几何（2026-07-20 战斗自绘 96×96；per-entry art_px）——
+# 旧规格 32×28＝六边形**居中**（既有判定逐像素不动，已画瓦片零漂移）；
+# 其余规格＝平顶六边形满宽、**底对齐**（顶部留白＝画布高−六边形高——96×96 → ~12px 界外物件空间，
+# 与 PHBT 参考包同一摆位）。几何中心行＝art_anchor 推荐值（96×96 → 54）。
+
+# 画布内六边形几何中心（像素坐标系，中点取 (n-1)/2 半像素制）
+static func hex_center_px(w: int, h: int) -> Vector2:
+	if w == TILE_W and h == TILE_H:
+		return Vector2(float(w - 1) * 0.5, float(h - 1) * 0.5)
+	var hex_h := SQRT3 * float(w) * 0.5
+	return Vector2(float(w - 1) * 0.5, float(h - 1) - (hex_h - 1.0) * 0.5)
+
+# 像素 (x,y) 是否在 w×h 画布的六边形内（工坊遮罩/轮廓/存盘清界外 共用判定）。
+# 非旧规格外扩 0.75px（HEX_PAD）：数学六边形（√3 比例）比无缝拼贴所需"瘦"约 1px——
+# 96 宽下 83.1 行 vs 实拼需 84 行（PHBT 实测边缘画满 12..95 行）；不外扩则拼贴格间漏黑缝。
+# 旧规格 32×28 不外扩（既有判定/已画瓦片逐像素不动）。
+const HEX_PAD := 0.75
+static func hex_contains_px(x: int, y: int, w: int, h: int) -> bool:
+	var c := hex_center_px(w, h)
+	var pad := 0.0 if (w == TILE_W and h == TILE_H) else HEX_PAD
+	return _in_hex(float(x) - c.x, float(y) - c.y, float(w) * 0.5 + pad)
+
+# 该画布规格的推荐锚行（＝几何中心行，四舍五入；新建条目写 art_anchor 用）
+static func hex_anchor_row(w: int, h: int) -> int:
+	return int(round(hex_center_px(w, h).y))
+
 # 按 seed 从变体数组确定性选一张路径（空→""）。纯函数、可测。
 static func pick_art(art: Array, seed: int) -> String:
 	return "" if art.is_empty() else str(art[absi(seed) % art.size()])

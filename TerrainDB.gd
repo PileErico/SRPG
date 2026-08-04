@@ -93,6 +93,15 @@ static func art_anchor_of(entry) -> float:
 		return -1.0
 	return float(entry.get("art_anchor", -1.0))
 
+# 该条目的手绘画布规格 art_px=[w,h]（2026-07-20 战斗自绘线：battle 词表 96×96）；
+# 缺省＝旧规格 32×28（与 HexTileRender.TILE_W/H 同值——不 preload 免循环引用）。工坊画布/遮罩/导入按此取。
+static func art_px_of(entry) -> Vector2i:
+	if typeof(entry) == TYPE_DICTIONARY and typeof(entry.get("art_px")) == TYPE_ARRAY:
+		var a: Array = entry["art_px"]
+		if a.size() >= 2:
+			return Vector2i(maxi(1, int(a[0])), maxi(1, int(a[1])))
+	return Vector2i(32, 28)
+
 static func label_of(tile) -> String:
 	var e = entry_for(tile)
 	return str(e.label) if e != null else "未知"
@@ -117,17 +126,23 @@ static func passability_text(mv) -> String:
 
 # 特殊效果文案：列出 entry.effects 的 name：desc；无则「无」
 static func effects_text(entry) -> String:
-	if entry == null:
-		return "无"
-	var effs = entry.get("effects", [])
+	return _effects_text_list(entry.get("effects", []) if entry != null else [])
+
+# tile 级特殊效果文案（放置物压过+同类取高后的生效集——悬停显示所见即所得）
+static func effects_text_at(tile) -> String:
+	return _effects_text_list(applied_effects(tile))
+
+static func _effects_text_list(effs) -> String:
 	if typeof(effs) != TYPE_ARRAY or effs.is_empty():
 		return "无"
 	var parts := []
 	for ef in effs:
+		if typeof(ef) != TYPE_DICTIONARY:
+			continue
 		var nm := str(ef.get("name", ""))
 		var d := str(ef.get("desc", ""))
 		parts.append("%s：%s" % [nm, d] if (nm != "" and d != "") else nm + d)
-	return "；".join(parts)
+	return "；".join(parts) if not parts.is_empty() else "无"
 
 # 占据者视角「当前生效」的地块效果（整条 effect 字典：name/desc/grant）：逐条评估 when、只回条件通过者。
 # **惰性读取用**（战斗即时调用，不材质化成持久 buff——见 docs/模块_战斗_设计.md「森林掩蔽」🔒）。
@@ -195,15 +210,100 @@ static func in_scope(entry, map_type: String) -> bool:
 	var s := str(entry.get("scope", "both"))
 	return s == "both" or s == map_type
 
-# tile 的有效 move 块：图级覆盖（overrides["terrain/variant"].move 整块替换）?? 全局表兜底。
-# 覆盖键格式/合并规则的单一实现——战斗（Sandbox._effective_move）与大地图（Overworld）共用，防两端解释分叉。
+# —— 放置物压过底地形 🔒（2026-07-19 用户令）：格上有放置物＝战斗属性按放置物条目计算 ——
+# tags/move＝整块覆盖（道路铺森林＝开阔道路）；effects＝放置物效果集为准、与底地形「同类」
+# （grant 的 layer/stat/kind/nature 全同）者取幅度高者（森林+15 底×要塞+20 放置物→按 20，整条随强者），
+# 底地形独有效果不生效；无放置物＝底地形，零回归。放置物与地形共用同一数据模板（terrains.json 条目）。
+
+# tile 的生效条目（tags/label 等条目级读取）：放置物可解析→放置物条目；否则底地形条目。
+static func applied_entry(tile):
+	if typeof(tile) == TYPE_DICTIONARY and typeof(tile.get("object")) == TYPE_DICTIONARY:
+		var oe = entry_for(tile["object"])
+		if oe != null:
+			return oe
+	return entry_for(tile)
+
+# tile 的生效键载体（图级 move 覆盖等按生效条目的 terrain/variant 取键）。
+static func applied_tile(tile):
+	if typeof(tile) == TYPE_DICTIONARY and typeof(tile.get("object")) == TYPE_DICTIONARY \
+			and entry_for(tile["object"]) != null:
+		return tile["object"]
+	return tile
+
+# tile 的生效效果集（未过 when；「同类取高」的单一实现——取整条：强者的 name/desc/when 一并生效）。
+static func applied_effects(tile) -> Array:
+	var be = entry_for(tile)
+	var base_effs = be.get("effects", []) if be != null else []
+	if typeof(base_effs) != TYPE_ARRAY:
+		base_effs = []
+	var oe = null
+	if typeof(tile) == TYPE_DICTIONARY and typeof(tile.get("object")) == TYPE_DICTIONARY:
+		oe = entry_for(tile["object"])
+	if oe == null:
+		return base_effs
+	var obj_effs = oe.get("effects", [])
+	if typeof(obj_effs) != TYPE_ARRAY:
+		obj_effs = []
+	var out := []
+	for ef in obj_effs:
+		if typeof(ef) != TYPE_DICTIONARY:
+			continue
+		var pick: Dictionary = ef
+		for bf in base_effs:
+			if typeof(bf) != TYPE_DICTIONARY:
+				continue
+			if not _same_grant_kind(ef.get("grant", {}), bf.get("grant", {})):
+				continue
+			if _grant_magnitude(bf.get("grant", {})) > _grant_magnitude(ef.get("grant", {})):
+				pick = bf
+			break
+		out.append(pick)
+	return out
+
+# 两条 grant 是否「同类」（同类才取高；任一维不同＝不同类→放置物压过去）
+static func _same_grant_kind(a, b) -> bool:
+	if typeof(a) != TYPE_DICTIONARY or typeof(b) != TYPE_DICTIONARY:
+		return false
+	return str(a.get("layer", "效能")) == str(b.get("layer", "效能")) \
+		and str(a.get("stat", "")) == str(b.get("stat", "")) \
+		and str(a.get("kind", "")) == str(b.get("kind", "")) \
+		and str(a.get("nature", "buff")) == str(b.get("nature", "buff"))
+
+# grant 幅度（同类比大小用）：tick 层比 amount、效能层比 percent（绝对值）
+static func _grant_magnitude(g) -> float:
+	if typeof(g) != TYPE_DICTIONARY:
+		return 0.0
+	if str(g.get("layer", "效能")) == "tick":
+		return absf(float(g.get("amount", 0.0)))
+	return absf(float(g.get("percent", 0.0)))
+
+# 占据者视角生效效果（tile 级：放置物压过+同类取高 → when 过滤）。战斗效果消费入口。
+static func active_effects_at(tile, occupant_tags: Array) -> Array:
+	var out := []
+	for ef in applied_effects(tile):
+		if typeof(ef) == TYPE_DICTIONARY and _when_passes(ef.get("when", {}), occupant_tags):
+			out.append(ef)
+	return out
+
+# active_effects_at 的 grant 投影（效能桶消费用）。
+static func active_grants_at(tile, occupant_tags: Array) -> Array:
+	var out := []
+	for ef in active_effects_at(tile, occupant_tags):
+		var g = ef.get("grant", null)
+		if typeof(g) == TYPE_DICTIONARY:
+			out.append(g)
+	return out
+
+# tile 的有效 move 块：放置物压过底地形 🔒 → 图级覆盖（overrides["terrain/variant"].move 整块替换，
+# 键按生效条目取）?? 全局表兜底。覆盖键格式/合并规则的单一实现——战斗与大地图共用，防两端解释分叉。
 static func effective_move(tile, overrides: Dictionary = {}) -> Dictionary:
-	if typeof(tile) == TYPE_DICTIONARY and not overrides.is_empty():
-		var key := "%s/%s" % [str(tile.get("terrain", "")), str(tile.get("variant", ""))]
+	var at = applied_tile(tile)
+	if typeof(at) == TYPE_DICTIONARY and not overrides.is_empty():
+		var key := "%s/%s" % [str(at.get("terrain", "")), str(at.get("variant", ""))]
 		var ov = overrides.get(key)
 		if typeof(ov) == TYPE_DICTIONARY and typeof(ov.get("move")) == TYPE_DICTIONARY:
 			return ov["move"]
-	var e = entry_for(tile)
+	var e = entry_for(at)
 	return e.get("move", {}) if e != null else {}
 
 # move 块 → 对带 tags 单位的通行成本；-1＝不可通行（战斗寻路与大地图移动共用的单一实现）。
@@ -285,6 +385,36 @@ static func set_category(tile, cat: String) -> bool:
 		d.erase("category")
 	else:
 		d["category"] = cat
+	return true
+
+# 条目在其分类内上/下移一位（delta=-1/+1）＝与同分类最近邻条目**交换** _palette 位置——
+# 其他分类夹在中间的条目不动；到头/找不到邻居 → false。调用方随后 save() 落盘。
+static func move_entry(tile, delta: int) -> bool:
+	var e = entry_for(tile)
+	if typeof(e) != TYPE_DICTIONARY or (delta != 1 and delta != -1):
+		return false
+	var cat := category_of(e)
+	var i := _palette.find(e)
+	var j := i + delta
+	while j >= 0 and j < _palette.size():
+		if category_of(_palette[j]) == cat:
+			var tmp = _palette[i]
+			_palette[i] = _palette[j]
+			_palette[j] = tmp
+			return true
+		j += delta
+	return false
+
+# 新建一条地形条目（工坊「＋新建地块」写口）：缺 terrain/variant 或键已存在 → false；
+# 成功＝追加 live 表末尾（调用方随后 save() 落盘；数据细调走编辑器地形数据面板）。
+static func add_entry(entry: Dictionary) -> bool:
+	_ensure()
+	var t := str(entry.get("terrain", ""))
+	var v := str(entry.get("variant", ""))
+	if t == "" or v == "" or _by_key.has(_key(t, v)):
+		return false
+	_palette.append(entry)
+	_by_key[_key(t, v)] = entry
 	return true
 
 # 彻底删除一条地形（从 _palette + _by_key 同步移除）

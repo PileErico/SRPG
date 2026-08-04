@@ -27,6 +27,31 @@ func _initialize() -> void:
 	ck(not HexTileRender.tile_hex_contains(31, 0), "hex 外：右上角")
 	ck(not HexTileRender.tile_hex_contains(0, 27), "hex 外：左下角")
 
+	# ---------- A2) 双规格 hex 几何（2026-07-20 战斗自绘 96×96；per-entry art_px）----------
+	# 旧规格 32×28：hex_contains_px 与既有居中判定逐像素等价（已画瓦片零漂移铁律）
+	var mismatch := 0
+	for y in 28:
+		for x in 32:
+			if HexTileRender.tile_hex_contains(x, y) != HexTileRender.hex_contains_px(x, y, 32, 28):
+				mismatch += 1
+	ck(mismatch == 0, "旧规格 32×28：新旧判定逐像素等价（不等像素 %d）" % mismatch)
+	# 96×96：底对齐+顶部留白（PHBT 摆位实测：hex y≈12..95、几何中心行 54）
+	ck(HexTileRender.hex_anchor_row(96, 96) == 54, "96×96 锚行＝54")
+	ck(not HexTileRender.hex_contains_px(48, 0, 96, 96) and not HexTileRender.hex_contains_px(48, 11, 96, 96),
+		"96×96：顶部 12px 留白在六边形外")
+	ck(HexTileRender.hex_contains_px(0, 54, 96, 96) and HexTileRender.hex_contains_px(95, 54, 96, 96),
+		"96×96：锚行满宽（左右顶点行）")
+	ck(HexTileRender.hex_contains_px(48, 94, 96, 96), "96×96：底缘在六边形内")
+	ck(not HexTileRender.hex_contains_px(0, 90, 96, 96), "96×96：左下角在六边形外")
+	# art_px_of：缺省旧规格 / bt 词表 96×96 / randr 放置物 32×48
+	ck(TerrainDB.art_px_of({"label": "x"}) == Vector2i(32, 28), "art_px 缺省＝32×28")
+	ck(TerrainDB.art_px_of({"art_px": [96, 96]}) == Vector2i(96, 96), "art_px 显式读取")
+	var bt = TerrainDB.entry_for({"terrain": "bt", "variant": "grass"})
+	ck(bt != null and TerrainDB.art_px_of(bt) == Vector2i(96, 96) and int(TerrainDB.art_anchor_of(bt)) == 54 \
+		and str(bt.get("scope", "")) == "battle", "战斗词表 bt_grass：96×96/锚行54/scope battle")
+	var rr = TerrainDB.entry_for({"terrain": "randr", "variant": "road_0"})
+	ck(rr != null and TerrainDB.art_px_of(rr) == Vector2i(32, 48), "randr 放置物画布规格 32×48（工坊可编）")
+
 	# ---------- B) pick_art（确定性选变体 / 空→"" / 负 seed 取绝对值）----------
 	ck(HexTileRender.pick_art([], 5) == "", "pick_art 空→空串")
 	var arr := ["a.png", "b.png", "c.png"]
