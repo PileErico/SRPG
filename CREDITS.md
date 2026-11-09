@@ -13,3 +13,10 @@
 - **署名要求**：可自由使用（含商用），但**须注明出处**。发布时须在游戏内可见处署名，例如：
   「Hex terrain tiles by the Unciv community (github.com/yairm210/Unciv-Tilesets), CC BY 4.0. Modified (resized/re-registered).」
 - **改动说明（CC BY 要求标注修改）**：按本工程瓦片规范重新登记，部分做过尺寸/裁剪调整。
+
+## 林地哨站自然模型 / Outpost nature models — Kenney Nature Kit
+
+- **素材**：独立 `samples/forest_3d/` 样板中的树木、岩石、地表植物与树桩等，选集存于 `samples/forest_3d/assets/nature/`。
+- **作者 / 来源**：Kenney — https://kenney.nl/assets/nature-kit 。
+- **许可**：Creative Commons Zero 1.0（CC0），可用于个人、教育和商业项目，署名非强制；原许可保留于该目录 `License.txt`，来源与选集清单见 `SOURCE.txt`。
+- **处理**：原始 GLB 保留，运行时统一尺寸、摆放原点及材质配色。建筑部件与地面为样板程序生成。

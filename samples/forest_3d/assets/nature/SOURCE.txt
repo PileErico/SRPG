@@ -1,0 +1,24 @@
+Kenney Nature Kit (2.1) -- selected original GLB models
+
+Author / distributor: Kenney (https://kenney.nl)
+Source page: https://kenney.nl/assets/nature-kit
+Downloaded from the source page on 2026-11-09.
+License: Creative Commons Zero (CC0 1.0).
+Original package license is preserved verbatim in License.txt.
+
+This folder contains 10 selected, unmodified GLB files from Models/GLTF format/.
+The models use embedded geometry and material colors, without external textures.
+NatureAssets.gd supplies runtime size / origin normalization and a muted palette.
+Those sample-specific appearance changes do not modify the original files.
+
+Selected models:
+tree_oak.glb
+tree_detailed.glb
+tree_pineDefaultA.glb
+stone_tallE.glb
+stone_smallFlatA.glb
+plant_bushDetailed.glb
+grass.glb
+stump_roundDetailed.glb
+log_stack.glb
+flower_yellowA.glb
